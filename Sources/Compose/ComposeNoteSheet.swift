@@ -1,0 +1,1677 @@
+import AVFoundation
+import NostrSDK
+import PhotosUI
+import SwiftUI
+import UIKit
+import UniformTypeIdentifiers
+
+@MainActor
+final class ComposeNoteViewModel: ObservableObject {
+    @Published var text: String = ""
+    @Published private(set) var isPublishing = false
+    @Published var feedbackMessage: String?
+    @Published var feedbackIsError = false
+
+    private let publishingService: ComposeNotePublishService
+
+    init(publishingService: ComposeNotePublishService = ComposeNotePublishService()) {
+        self.publishingService = publishingService
+    }
+
+    var trimmedText: String {
+        text.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    var characterCount: Int {
+        trimmedText.count
+    }
+
+    func publish(
+        currentNsec: String?,
+        writeRelayURLs: [URL],
+        additionalTags: [[String]] = []
+    ) async -> Bool {
+        guard !isPublishing else { return false }
+
+        isPublishing = true
+        feedbackMessage = nil
+        feedbackIsError = false
+
+        defer {
+            isPublishing = false
+        }
+
+        do {
+            let successfulRelayCount = try await publishingService.publishNote(
+                content: text,
+                currentNsec: currentNsec,
+                writeRelayURLs: writeRelayURLs,
+                additionalTags: additionalTags
+            )
+
+            text = ""
+            feedbackMessage = "Posted to \(successfulRelayCount) relay\(successfulRelayCount == 1 ? "" : "s")."
+            feedbackIsError = false
+            return true
+        } catch {
+            feedbackMessage = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+            feedbackIsError = true
+            return false
+        }
+    }
+}
+
+private struct ComposeMediaAttachment: Identifiable, Hashable {
+    let id = UUID()
+    let url: URL
+    let imetaTag: [String]
+    let mimeType: String
+
+    var isImage: Bool {
+        let normalized = mimeType.lowercased()
+        if normalized.hasPrefix("image/") {
+            return true
+        }
+        return [".jpg", ".jpeg", ".png", ".webp", ".gif", ".heic", ".bmp", ".svg"]
+            .contains { url.path.lowercased().hasSuffix($0) }
+    }
+
+    var isVideo: Bool {
+        let normalized = mimeType.lowercased()
+        if normalized.hasPrefix("video/") {
+            return true
+        }
+        return [".mp4", ".mov", ".m4v", ".webm", ".mkv"]
+            .contains { url.path.lowercased().hasSuffix($0) }
+    }
+
+    var isAudio: Bool {
+        let normalized = mimeType.lowercased()
+        if normalized.hasPrefix("audio/") {
+            return true
+        }
+        return [".mp3", ".m4a", ".aac", ".wav", ".ogg"]
+            .contains { url.path.lowercased().hasSuffix($0) }
+    }
+}
+
+private struct CameraCapturePermissionSnapshot: Equatable {
+    let cameraStatus: AVAuthorizationStatus
+    let microphoneStatus: AVAuthorizationStatus
+
+    static func current() -> CameraCapturePermissionSnapshot {
+        CameraCapturePermissionSnapshot(
+            cameraStatus: AVCaptureDevice.authorizationStatus(for: .video),
+            microphoneStatus: AVCaptureDevice.authorizationStatus(for: .audio)
+        )
+    }
+
+    var cameraRequiresPrompt: Bool {
+        cameraStatus == .notDetermined
+    }
+
+    var microphoneRequiresPrompt: Bool {
+        microphoneStatus == .notDetermined
+    }
+
+    var isCameraBlocked: Bool {
+        cameraStatus == .denied || cameraStatus == .restricted
+    }
+
+    var isMicrophoneBlocked: Bool {
+        microphoneStatus == .denied || microphoneStatus == .restricted
+    }
+}
+
+private enum CapturedCameraMedia {
+    case image(data: Data, mimeType: String, fileExtension: String)
+    case video(fileURL: URL, mimeType: String, fileExtension: String)
+}
+
+struct ComposeFloatingActionButton: View {
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: "plus")
+                .font(.system(size: 18, weight: .semibold))
+                .foregroundStyle(.white)
+                .frame(width: 56, height: 56)
+                .background(Color.accentColor, in: Circle())
+                .shadow(color: .black.opacity(0.18), radius: 10, x: 0, y: 5)
+                .overlay {
+                    Circle()
+                        .strokeBorder(.white.opacity(0.18), lineWidth: 1)
+                }
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Compose note")
+    }
+}
+
+struct ComposeNoteSheet: View {
+    @Environment(\.dismiss) private var dismiss
+    @Environment(\.colorScheme) private var colorScheme
+    @EnvironmentObject private var toastCenter: AppToastCenter
+    @FocusState private var isEditorFocused: Bool
+    @StateObject private var viewModel = ComposeNoteViewModel()
+    @StateObject private var speechTranscriber = ComposeSpeechTranscriber()
+    @State private var selectedMediaItems: [PhotosPickerItem] = []
+    @State private var mediaAttachments: [ComposeMediaAttachment] = []
+    @State private var capturePermissions = CameraCapturePermissionSnapshot.current()
+    @State private var isShowingCapturePermissionSheet = false
+    @State private var isShowingCameraCapture = false
+    @State private var isRequestingCaptureAccess = false
+    @State private var isUploadingMedia = false
+    @State private var profileDisplayName = "Account"
+    @State private var profileHandle = "@account"
+    @State private var profileAvatarURL: URL?
+    @State private var profileFallbackSymbol = "A"
+    @State private var quotedDisplayName: String?
+    @State private var quotedHandle: String?
+    @State private var quotedAvatarURL: URL?
+    @State private var hasAppliedInitialDraft = false
+
+    private let mediaUploadService = MediaUploadService.shared
+    private let profileService = NostrFeedService()
+
+    let currentAccountPubkey: String?
+    let currentNsec: String?
+    let writeRelayURLs: [URL]
+    var initialText: String = ""
+    var initialAdditionalTags: [[String]] = []
+    var quotedEvent: NostrEvent? = nil
+    var quotedDisplayNameHint: String? = nil
+    var quotedHandleHint: String? = nil
+    var quotedAvatarURLHint: URL? = nil
+    var onPublished: (() -> Void)? = nil
+
+    var body: some View {
+        NavigationStack {
+            Group {
+                if isQuoteComposer {
+                    quoteComposerContainer
+                } else {
+                    standardComposerLayout
+                }
+            }
+            .background(isQuoteComposer ? Color(.systemBackground) : Color(.systemGroupedBackground))
+            .navigationTitle(isQuoteComposer ? "" : "Compose note")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                if !isQuoteComposer {
+                    ToolbarItem(placement: .cancellationAction) {
+                        Button("Cancel") {
+                            dismiss()
+                        }
+                    }
+
+                    ToolbarItem(placement: .confirmationAction) {
+                        Button {
+                            Task {
+                                await publish()
+                            }
+                        } label: {
+                            if viewModel.isPublishing {
+                                ProgressView()
+                                    .controlSize(.small)
+                            } else {
+                                Text("Post")
+                            }
+                        }
+                        .disabled(!canPublish)
+                    }
+                }
+            }
+            .toolbar(isQuoteComposer ? .hidden : .visible, for: .navigationBar)
+        }
+        .presentationDetents([.large])
+        .presentationDragIndicator(.visible)
+        .task {
+            applyInitialDraftIfNeeded()
+            isEditorFocused = true
+            await refreshComposeAccountSummary()
+            await refreshQuotedAuthorSummaryIfNeeded()
+        }
+        .onChange(of: selectedMediaItems) { _, newValue in
+            guard !newValue.isEmpty else { return }
+            let items = newValue
+            selectedMediaItems = []
+            Task {
+                await handleMediaSelection(items)
+            }
+        }
+        .onChange(of: currentAccountPubkey) { _, _ in
+            Task {
+                await refreshComposeAccountSummary()
+            }
+        }
+        .safeAreaInset(edge: .bottom) {
+            if isQuoteComposer {
+                quoteBottomBar
+            }
+        }
+        .sheet(isPresented: $isShowingCapturePermissionSheet) {
+            CameraCapturePermissionSheet(
+                permissions: capturePermissions,
+                isRequestingAccess: isRequestingCaptureAccess,
+                onContinue: {
+                    Task {
+                        await requestCameraCaptureAccess()
+                    }
+                },
+                onOpenSettings: openSystemSettings,
+                onCancel: {
+                    isShowingCapturePermissionSheet = false
+                }
+            )
+            .presentationDetents([.height(365)])
+            .presentationDragIndicator(.visible)
+        }
+        .fullScreenCover(isPresented: $isShowingCameraCapture) {
+            CameraCaptureView(
+                onCapture: { capturedMedia in
+                    isShowingCameraCapture = false
+                    Task {
+                        await handleCapturedCameraMedia(capturedMedia)
+                    }
+                },
+                onCancel: {
+                    isShowingCameraCapture = false
+                }
+            )
+            .ignoresSafeArea()
+        }
+    }
+
+    private var quoteComposerContainer: some View {
+        VStack(spacing: 0) {
+            quoteTopBar
+
+            Divider()
+                .opacity(0.7)
+
+            quoteComposerLayout
+        }
+    }
+
+    private var quoteTopBar: some View {
+        ZStack {
+            Text("New thread")
+                .font(.headline.weight(.semibold))
+                .foregroundStyle(.primary)
+
+            HStack {
+                Button("Cancel") {
+                    dismiss()
+                }
+                .font(.body)
+                .buttonStyle(.plain)
+
+                Spacer()
+            }
+        }
+        .padding(.horizontal, 16)
+        .padding(.top, 14)
+        .padding(.bottom, 12)
+        .background(Color(.systemBackground))
+    }
+
+    private var isQuoteComposer: Bool {
+        quotedEvent != nil
+    }
+
+    private var standardComposerLayout: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 16) {
+                accountSummary
+                composeCard
+                statusSection
+            }
+            .padding(16)
+        }
+    }
+
+    private var quoteComposerLayout: some View {
+        ScrollView {
+            HStack(alignment: .top, spacing: 12) {
+                quoteLeadingLane
+                quoteMainComposer
+            }
+            .padding(.horizontal, 16)
+            .padding(.top, 16)
+            .padding(.bottom, 18)
+        }
+    }
+
+    private var quoteLeadingLane: some View {
+        VStack(spacing: 8) {
+            composeAvatar(size: 40)
+
+            Rectangle()
+                .fill(Color(.separator).opacity(0.35))
+                .frame(width: 2)
+                .frame(height: 280)
+        }
+        .frame(width: 40)
+    }
+
+    private var quoteMainComposer: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .firstTextBaseline, spacing: 6) {
+                Text(topicIdentity)
+                    .font(.headline.weight(.semibold))
+                    .lineLimit(1)
+
+                Image(systemName: "chevron.right")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+
+                Text("Add a topic")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+
+                Spacer(minLength: 0)
+            }
+
+            ZStack(alignment: .topLeading) {
+                if viewModel.text.isEmpty {
+                    Text("Share your thoughts...")
+                        .font(.body)
+                        .foregroundStyle(.secondary)
+                        .padding(.top, 8)
+                        .padding(.horizontal, 4)
+                }
+
+                TextEditor(text: $viewModel.text)
+                    .focused($isEditorFocused)
+                    .font(.body)
+                    .frame(minHeight: 74)
+                    .scrollContentBackground(.hidden)
+            }
+
+            quoteActionRow
+
+            if !mediaAttachments.isEmpty {
+                mediaAttachmentPreviewList
+            }
+
+            quotePreviewCard
+
+            statusSection
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private var quoteActionRow: some View {
+        HStack(spacing: 16) {
+            PhotosPicker(
+                selection: $selectedMediaItems,
+                selectionBehavior: .ordered,
+                matching: .any(of: [.images, .videos])
+            ) {
+                Group {
+                    if isUploadingMedia {
+                        ProgressView()
+                            .controlSize(.small)
+                    } else {
+                        Image(systemName: "photo")
+                            .font(.system(size: 19, weight: .medium))
+                    }
+                }
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(.secondary)
+            .disabled(isUploadingMedia || viewModel.isPublishing)
+
+            cameraAttachmentButton(symbolFont: .system(size: 19, weight: .medium))
+
+            Button {
+                // GIF picker is intentionally disabled for this iteration.
+            } label: {
+                Text("GIF")
+                    .font(.footnote.weight(.semibold))
+                    .padding(.horizontal, 9)
+                    .padding(.vertical, 5)
+                    .background(Color(.tertiarySystemFill))
+                    .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(.secondary)
+            .disabled(true)
+
+            Button {
+                // Topic and advanced thread options are pending.
+            } label: {
+                Image(systemName: "list.bullet.rectangle.portrait")
+                    .font(.system(size: 19, weight: .medium))
+                    .foregroundStyle(.secondary)
+            }
+            .buttonStyle(.plain)
+            .disabled(true)
+
+            Button {
+                // More thread settings are pending.
+            } label: {
+                Image(systemName: "ellipsis.circle")
+                    .font(.system(size: 19, weight: .medium))
+                    .foregroundStyle(.secondary)
+            }
+            .buttonStyle(.plain)
+            .disabled(true)
+
+            Spacer(minLength: 0)
+        }
+    }
+
+    private var quoteBottomBar: some View {
+        let postBackground = colorScheme == .dark ? Color.white : Color.black
+        let postForeground = colorScheme == .dark ? Color.black : Color.white
+
+        return HStack(spacing: 12) {
+            HStack(spacing: 8) {
+                Image(systemName: "plus.rectangle.on.folder")
+                    .font(.subheadline.weight(.medium))
+                Text("Reply options")
+                    .font(.subheadline.weight(.semibold))
+                    .lineLimit(1)
+            }
+            .foregroundStyle(.secondary)
+
+            Spacer(minLength: 0)
+
+            Button {
+                Task {
+                    await publish()
+                }
+            } label: {
+                Group {
+                    if viewModel.isPublishing {
+                        ProgressView()
+                            .controlSize(.small)
+                            .tint(postForeground)
+                    } else {
+                        Text("Post")
+                    }
+                }
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(postForeground)
+                .padding(.horizontal, 20)
+                .padding(.vertical, 10)
+                .background(postBackground, in: Capsule())
+            }
+            .buttonStyle(.plain)
+            .disabled(!canPublish)
+            .opacity(canPublish ? 1 : 0.45)
+        }
+        .padding(.horizontal, 16)
+        .padding(.top, 8)
+        .padding(.bottom, 12)
+        .background(Color(.systemBackground))
+    }
+
+    private var accountSummary: some View {
+        HStack(spacing: 12) {
+            composeAvatar(size: 44)
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(profileDisplayName)
+                    .font(.headline)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+
+                Text(profileHandle)
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+            }
+
+            Spacer(minLength: 0)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(16)
+        .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+    }
+
+    private var composeCard: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            ZStack(alignment: .topLeading) {
+                if viewModel.text.isEmpty {
+                    Text("What do you want to share?")
+                        .foregroundStyle(.secondary)
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 16)
+                }
+
+                TextEditor(text: $viewModel.text)
+                    .focused($isEditorFocused)
+                    .frame(minHeight: 180)
+                    .scrollContentBackground(.hidden)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 8)
+            }
+            .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+
+            if !mediaAttachments.isEmpty {
+                mediaAttachmentPreviewList
+            }
+
+            HStack {
+                PhotosPicker(
+                    selection: $selectedMediaItems,
+                    selectionBehavior: .ordered,
+                    matching: .any(of: [.images, .videos])
+                ) {
+                    Group {
+                        if isUploadingMedia {
+                            ProgressView()
+                                .controlSize(.small)
+                        } else {
+                            Image(systemName: "photo")
+                                .font(.system(size: 18, weight: .medium))
+                        }
+                    }
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(.secondary)
+                .disabled(isUploadingMedia || viewModel.isPublishing)
+
+                cameraAttachmentButton(symbolFont: .system(size: 18, weight: .medium))
+
+                Button {
+                    // GIF picker is intentionally disabled for this iteration.
+                } label: {
+                    Text("GIF")
+                        .font(.footnote.weight(.semibold))
+                        .padding(.horizontal, 9)
+                        .padding(.vertical, 5)
+                        .background(Color(.tertiarySystemFill))
+                        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(.secondary)
+                .disabled(true)
+
+                Button {
+                    Task {
+                        await handleSpeechToggle()
+                    }
+                } label: {
+                    Group {
+                        if speechTranscriber.isRecording {
+                            Image(systemName: "stop.fill")
+                                .font(.system(size: 15, weight: .semibold))
+                        } else if speechTranscriber.isTranscribing {
+                            ProgressView()
+                                .controlSize(.small)
+                        } else {
+                            Image(systemName: "waveform")
+                                .font(.system(size: 17, weight: .medium))
+                        }
+                    }
+                    .foregroundStyle(speechTranscriber.isRecording ? Color.white : Color.secondary)
+                    .frame(width: 32, height: 32)
+                    .background(
+                        speechTranscriber.isRecording ? Color.accentColor : Color(.tertiarySystemFill),
+                        in: Circle()
+                    )
+                }
+                .buttonStyle(.plain)
+                .disabled(viewModel.isPublishing || isUploadingMedia)
+
+                if speechTranscriber.isRecording {
+                    Text(formatVoiceDuration(milliseconds: speechTranscriber.elapsedMs))
+                        .font(.footnote.monospacedDigit())
+                        .foregroundStyle(.secondary)
+                }
+
+                Spacer()
+
+                Text("\(viewModel.characterCount) characters")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+
+                if currentNsec == nil {
+                    Label("nsec required", systemImage: "lock.fill")
+                        .font(.footnote.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                } else if writeRelayURLs.isEmpty {
+                    Label("No write relays", systemImage: "wifi.slash")
+                        .font(.footnote.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                }
+            }
+        }
+    }
+
+    private var statusSection: some View {
+        Group {
+            if viewModel.isPublishing {
+                HStack(spacing: 10) {
+                    ProgressView()
+                        .controlSize(.small)
+                    Text("Publishing to \(writeRelayURLs.count) relay\(writeRelayURLs.count == 1 ? "" : "s")...")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                }
+                .padding(.horizontal, 2)
+            } else if let feedbackMessage = viewModel.feedbackMessage, !feedbackMessage.isEmpty {
+                HStack(alignment: .top, spacing: 10) {
+                    Image(systemName: viewModel.feedbackIsError ? "exclamationmark.triangle.fill" : "checkmark.circle.fill")
+                        .foregroundStyle(viewModel.feedbackIsError ? .red : .green)
+
+                    Text(feedbackMessage)
+                        .font(.footnote)
+                        .foregroundStyle(viewModel.feedbackIsError ? .red : .secondary)
+
+                    Spacer()
+                }
+                .padding(12)
+                .background(
+                    (viewModel.feedbackIsError ? Color.red.opacity(0.08) : Color.green.opacity(0.08)),
+                    in: RoundedRectangle(cornerRadius: 16, style: .continuous)
+                )
+            } else if speechTranscriber.isTranscribing {
+                infoBanner(
+                    systemImage: "waveform.badge.magnifyingglass",
+                    text: "Transcribing speech..."
+                )
+            } else if currentNsec == nil {
+                infoBanner(
+                    systemImage: "lock.fill",
+                    text: "This account can read feeds, but it needs an nsec to publish notes."
+                )
+            } else if writeRelayURLs.isEmpty {
+                infoBanner(
+                    systemImage: "wifi.slash",
+                    text: "Add at least one write relay to publish notes."
+                )
+            }
+        }
+    }
+
+    private var canPublish: Bool {
+        (!viewModel.trimmedText.isEmpty || !mediaAttachments.isEmpty || quotedEvent != nil)
+        && currentNsec != nil
+        && !writeRelayURLs.isEmpty
+        && !speechTranscriber.isRecording
+        && !speechTranscriber.isTranscribing
+        && !viewModel.isPublishing
+    }
+
+    private var topicIdentity: String {
+        let normalizedHandle = normalizedHandleValue(profileHandle)
+        if !normalizedHandle.isEmpty {
+            return normalizedHandle
+        }
+        return profileDisplayName
+    }
+
+    private func composeAvatar(size: CGFloat) -> some View {
+        Group {
+            if let profileAvatarURL {
+                AsyncImage(url: profileAvatarURL) { phase in
+                    switch phase {
+                    case .success(let image):
+                        image
+                            .resizable()
+                            .scaledToFill()
+                    default:
+                        composeAvatarFallback
+                    }
+                }
+            } else {
+                composeAvatarFallback
+            }
+        }
+        .frame(width: size, height: size)
+        .clipShape(Circle())
+    }
+
+    private var composeAvatarFallback: some View {
+        ZStack {
+            Circle().fill(Color(.tertiarySystemFill))
+            Text(String(profileFallbackSymbol.prefix(1)).uppercased())
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    private var quotedAvatarFallback: some View {
+        ZStack {
+            Circle().fill(Color(.tertiarySystemFill))
+            Text(String(quotedDisplayNameResolved.prefix(1)).uppercased())
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    private var quotedDisplayNameResolved: String {
+        if let quotedDisplayName {
+            let trimmed = quotedDisplayName.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !trimmed.isEmpty {
+                return trimmed
+            }
+        }
+        if let event = renderedQuotedEvent {
+            return String(event.pubkey.prefix(8))
+        }
+        return "Quoted note"
+    }
+
+    private var quotedHandleResolved: String {
+        if let quotedHandle {
+            let trimmed = quotedHandle.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !trimmed.isEmpty {
+                return trimmed.hasPrefix("@") ? trimmed : "@\(trimmed)"
+            }
+        }
+        if let event = renderedQuotedEvent {
+            return "@\(String(event.pubkey.prefix(8)).lowercased())"
+        }
+        return "@unknown"
+    }
+
+    private var renderedQuotedEvent: NostrEvent? {
+        guard let quotedEvent else { return nil }
+        return Self.renderEventForQuotePreview(quotedEvent)
+    }
+
+    private var quotedPreviewText: String {
+        guard let event = renderedQuotedEvent else { return "" }
+
+        let tokens = NoteContentParser.tokenize(event: event)
+        var fragments: [String] = []
+        for token in tokens {
+            switch token.type {
+            case .text:
+                let trimmed = token.value.trimmingCharacters(in: .whitespacesAndNewlines)
+                if !trimmed.isEmpty {
+                    fragments.append(trimmed)
+                }
+            default:
+                continue
+            }
+        }
+
+        let combined = fragments.joined(separator: " ")
+            .replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        if !combined.isEmpty {
+            return String(combined.prefix(220))
+        }
+
+        let fallback = event.content.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !fallback.isEmpty {
+            return String(fallback.prefix(220))
+        }
+        return "Quoted note"
+    }
+
+    private var quotedPreviewImageURLs: [URL] {
+        guard let event = renderedQuotedEvent else { return [] }
+
+        let tokens = NoteContentParser.tokenize(event: event)
+        var urls: [URL] = []
+        var seen = Set<String>()
+        for token in tokens where token.type == .image {
+            guard let url = URL(string: token.value), url.scheme != nil else { continue }
+            let normalized = url.absoluteString.lowercased()
+            guard seen.insert(normalized).inserted else { continue }
+            urls.append(url)
+            if urls.count == 2 {
+                break
+            }
+        }
+        return urls
+    }
+
+    private var hasQuotedVideo: Bool {
+        guard let event = renderedQuotedEvent else { return false }
+        return NoteContentParser
+            .tokenize(event: event)
+            .contains(where: { $0.type == .video })
+    }
+
+    private var hasQuotedAudio: Bool {
+        guard let event = renderedQuotedEvent else { return false }
+        return NoteContentParser
+            .tokenize(event: event)
+            .contains(where: { $0.type == .audio })
+    }
+
+    private var quotePreviewCard: some View {
+        Group {
+            if let event = renderedQuotedEvent {
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack(spacing: 8) {
+                        Group {
+                            if let quotedAvatarURL {
+                                AsyncImage(url: quotedAvatarURL) { phase in
+                                    switch phase {
+                                    case .success(let image):
+                                        image
+                                            .resizable()
+                                            .scaledToFill()
+                                    default:
+                                        quotedAvatarFallback
+                                    }
+                                }
+                            } else {
+                                quotedAvatarFallback
+                            }
+                        }
+                        .frame(width: 22, height: 22)
+                        .clipShape(Circle())
+
+                        Text(quotedDisplayNameResolved)
+                            .font(.subheadline.weight(.semibold))
+                            .lineLimit(1)
+
+                        Text(RelativeTimestampFormatter.shortString(from: event.createdAtDate))
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+
+                        Spacer(minLength: 0)
+                    }
+
+                    Text(quotedPreviewText)
+                        .font(.body)
+                        .foregroundStyle(.primary)
+                        .lineLimit(4)
+                        .multilineTextAlignment(.leading)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+
+                    if !quotedPreviewImageURLs.isEmpty {
+                        HStack(spacing: 8) {
+                            ForEach(Array(quotedPreviewImageURLs.enumerated()), id: \.offset) { _, url in
+                                AsyncImage(url: url) { phase in
+                                    switch phase {
+                                    case .success(let image):
+                                        image
+                                            .resizable()
+                                            .scaledToFill()
+                                    case .failure:
+                                        Color(.tertiarySystemFill)
+                                            .overlay {
+                                                Image(systemName: "photo")
+                                                    .foregroundStyle(.secondary)
+                                            }
+                                    case .empty:
+                                        ProgressView()
+                                            .frame(maxWidth: .infinity, maxHeight: .infinity)
+                                            .background(Color(.tertiarySystemFill))
+                                    @unknown default:
+                                        Color(.tertiarySystemFill)
+                                    }
+                                }
+                                .frame(height: 170)
+                                .frame(maxWidth: .infinity)
+                                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                            }
+                        }
+                    } else if hasQuotedVideo || hasQuotedAudio {
+                        HStack(spacing: 8) {
+                            Image(systemName: hasQuotedVideo ? "video" : "waveform")
+                            Text(hasQuotedVideo ? "Quoted post includes video" : "Quoted post includes audio")
+                                .lineLimit(1)
+                            Spacer(minLength: 0)
+                        }
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 8)
+                        .background(
+                            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                                .fill(Color(.tertiarySystemFill))
+                        )
+                    }
+                }
+                .padding(10)
+                .background(
+                    RoundedRectangle(cornerRadius: 16, style: .continuous)
+                        .fill(Color(.secondarySystemBackground))
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 16, style: .continuous)
+                        .stroke(Color(.separator).opacity(0.3), lineWidth: 0.8)
+                )
+            }
+        }
+    }
+
+    private var mediaAttachmentPreviewList: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 10) {
+                ForEach(mediaAttachments) { attachment in
+                    ZStack(alignment: .topTrailing) {
+                        CompactMediaAttachmentPreview(
+                            url: attachment.url,
+                            mimeType: attachment.mimeType,
+                            colorScheme: colorScheme
+                        )
+
+                        Button {
+                            removeMediaAttachment(attachment)
+                        } label: {
+                            Image(systemName: "xmark.circle.fill")
+                                .font(.title3)
+                                .foregroundStyle(.secondary)
+                                .padding(6)
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel("Remove attachment")
+                    }
+                }
+            }
+            .padding(.horizontal, 1)
+            .padding(.vertical, 1)
+        }
+    }
+
+    private func cameraAttachmentButton(symbolFont: Font) -> some View {
+        Button {
+            handleCameraButtonTap()
+        } label: {
+            Image(systemName: "camera")
+                .font(symbolFont)
+        }
+        .buttonStyle(.plain)
+        .foregroundStyle(.secondary)
+        .disabled(isUploadingMedia || viewModel.isPublishing || isRequestingCaptureAccess)
+        .accessibilityLabel("Capture photo or video")
+    }
+
+    private func infoBanner(systemImage: String, text: String) -> some View {
+        HStack(alignment: .top, spacing: 10) {
+            Image(systemName: systemImage)
+                .foregroundStyle(.secondary)
+
+            Text(text)
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+
+            Spacer()
+        }
+        .padding(12)
+        .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+    }
+
+    private func refreshComposeAccountSummary() async {
+        guard let currentAccountPubkey else {
+            profileDisplayName = "Account"
+            profileHandle = "@account"
+            profileAvatarURL = nil
+            profileFallbackSymbol = "A"
+            return
+        }
+
+        let normalizedPubkey = currentAccountPubkey.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !normalizedPubkey.isEmpty else { return }
+
+        let fallbackIdentifier = shortNostrIdentifier(normalizedPubkey)
+        profileDisplayName = fallbackIdentifier
+        profileHandle = "@\(fallbackIdentifier.lowercased())"
+        profileAvatarURL = nil
+        profileFallbackSymbol = String(fallbackIdentifier.prefix(1)).uppercased()
+
+        if let cachedProfile = await profileService.cachedProfile(pubkey: normalizedPubkey) {
+            applyComposeProfile(cachedProfile, pubkey: normalizedPubkey)
+        }
+
+        let readRelayURLs = RelaySettingsStore.shared.readRelayURLs
+        let fallbackRelayURLs = RelaySettingsStore.defaultReadRelayURLs.compactMap(URL.init(string:))
+        let relayTargets = readRelayURLs.isEmpty ? fallbackRelayURLs : readRelayURLs
+        guard !relayTargets.isEmpty else { return }
+
+        if let fetchedProfile = await profileService.fetchProfile(relayURLs: relayTargets, pubkey: normalizedPubkey) {
+            applyComposeProfile(fetchedProfile, pubkey: normalizedPubkey)
+        }
+    }
+
+    private func applyComposeProfile(_ profile: NostrProfile, pubkey: String) {
+        if let displayName = profile.displayName?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !displayName.isEmpty {
+            profileDisplayName = displayName
+        } else if let name = profile.name?.trimmingCharacters(in: .whitespacesAndNewlines), !name.isEmpty {
+            profileDisplayName = name
+        } else {
+            profileDisplayName = String(pubkey.prefix(8))
+        }
+
+        let handleSeed = (profile.name ?? profile.displayName ?? String(pubkey.prefix(8)))
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .replacingOccurrences(of: " ", with: "")
+            .lowercased()
+        profileHandle = handleSeed.isEmpty ? "@\(String(pubkey.prefix(8)).lowercased())" : "@\(handleSeed)"
+        profileFallbackSymbol = String(profileDisplayName.prefix(1)).uppercased()
+
+        if let picture = profile.picture?.trimmingCharacters(in: .whitespacesAndNewlines),
+           let url = URL(string: picture),
+           url.scheme != nil {
+            profileAvatarURL = url
+        } else {
+            profileAvatarURL = nil
+        }
+    }
+
+    private func refreshQuotedAuthorSummaryIfNeeded() async {
+        guard let quotedEvent else { return }
+
+        if let quotedDisplayNameHint {
+            let trimmed = quotedDisplayNameHint.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !trimmed.isEmpty {
+                quotedDisplayName = trimmed
+            }
+        }
+
+        if let quotedHandleHint {
+            let trimmed = quotedHandleHint.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !trimmed.isEmpty {
+                quotedHandle = trimmed.hasPrefix("@") ? trimmed : "@\(trimmed)"
+            }
+        }
+
+        if let quotedAvatarURLHint {
+            quotedAvatarURL = quotedAvatarURLHint
+        }
+
+        let normalizedPubkey = quotedEvent.pubkey.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !normalizedPubkey.isEmpty else { return }
+
+        if let cachedProfile = await profileService.cachedProfile(pubkey: normalizedPubkey) {
+            applyQuotedProfile(cachedProfile, pubkey: normalizedPubkey)
+        }
+
+        let readRelayURLs = RelaySettingsStore.shared.readRelayURLs
+        let fallbackRelayURLs = RelaySettingsStore.defaultReadRelayURLs.compactMap(URL.init(string:))
+        let relayTargets = readRelayURLs.isEmpty ? fallbackRelayURLs : readRelayURLs
+        guard !relayTargets.isEmpty else { return }
+
+        if let fetchedProfile = await profileService.fetchProfile(relayURLs: relayTargets, pubkey: normalizedPubkey) {
+            applyQuotedProfile(fetchedProfile, pubkey: normalizedPubkey)
+        } else {
+            if quotedDisplayName == nil {
+                quotedDisplayName = String(normalizedPubkey.prefix(8))
+            }
+            if quotedHandle == nil {
+                quotedHandle = "@\(String(normalizedPubkey.prefix(8)).lowercased())"
+            }
+        }
+    }
+
+    private func applyQuotedProfile(_ profile: NostrProfile, pubkey: String) {
+        if let displayName = profile.displayName?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !displayName.isEmpty {
+            quotedDisplayName = displayName
+        } else if let name = profile.name?.trimmingCharacters(in: .whitespacesAndNewlines), !name.isEmpty {
+            quotedDisplayName = name
+        } else if quotedDisplayName == nil {
+            quotedDisplayName = String(pubkey.prefix(8))
+        }
+
+        let handleSeed = (profile.name ?? profile.displayName ?? String(pubkey.prefix(8)))
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .replacingOccurrences(of: " ", with: "")
+            .lowercased()
+        if !handleSeed.isEmpty {
+            quotedHandle = "@\(handleSeed)"
+        } else if quotedHandle == nil {
+            quotedHandle = "@\(String(pubkey.prefix(8)).lowercased())"
+        }
+
+        if let picture = profile.picture?.trimmingCharacters(in: .whitespacesAndNewlines),
+           let url = URL(string: picture),
+           url.scheme != nil {
+            quotedAvatarURL = url
+        }
+    }
+
+    private func handleCameraButtonTap() {
+        guard UIImagePickerController.isSourceTypeAvailable(.camera) else {
+            viewModel.feedbackMessage = "This device doesn't have an available camera right now."
+            viewModel.feedbackIsError = true
+            return
+        }
+
+        let permissions = CameraCapturePermissionSnapshot.current()
+        capturePermissions = permissions
+
+        if permissions.isCameraBlocked {
+            isShowingCapturePermissionSheet = true
+            return
+        }
+
+        if permissions.cameraRequiresPrompt || permissions.microphoneRequiresPrompt {
+            isShowingCapturePermissionSheet = true
+            return
+        }
+
+        presentCameraCapture(using: permissions)
+    }
+
+    private func requestCameraCaptureAccess() async {
+        guard !isRequestingCaptureAccess else { return }
+        isRequestingCaptureAccess = true
+        defer { isRequestingCaptureAccess = false }
+
+        var permissions = CameraCapturePermissionSnapshot.current()
+
+        if permissions.cameraRequiresPrompt {
+            _ = await requestCaptureAccess(for: .video)
+            permissions = CameraCapturePermissionSnapshot.current()
+        }
+
+        guard !permissions.isCameraBlocked else {
+            capturePermissions = permissions
+            return
+        }
+
+        if permissions.microphoneRequiresPrompt {
+            _ = await requestCaptureAccess(for: .audio)
+            permissions = CameraCapturePermissionSnapshot.current()
+        }
+
+        capturePermissions = permissions
+        isShowingCapturePermissionSheet = false
+        presentCameraCapture(using: permissions)
+    }
+
+    private func requestCaptureAccess(for mediaType: AVMediaType) async -> Bool {
+        await withCheckedContinuation { continuation in
+            AVCaptureDevice.requestAccess(for: mediaType) { granted in
+                continuation.resume(returning: granted)
+            }
+        }
+    }
+
+    private func presentCameraCapture(using permissions: CameraCapturePermissionSnapshot) {
+        capturePermissions = permissions
+
+        if permissions.isMicrophoneBlocked {
+            viewModel.feedbackMessage = "Microphone access is off. You can still take photos, but video capture with sound may be limited until you enable it in app settings."
+            viewModel.feedbackIsError = false
+        } else {
+            viewModel.feedbackMessage = nil
+            viewModel.feedbackIsError = false
+        }
+
+        isShowingCameraCapture = true
+    }
+
+    private func handleCapturedCameraMedia(_ capturedMedia: CapturedCameraMedia) async {
+        guard !isUploadingMedia else { return }
+        viewModel.feedbackMessage = nil
+        viewModel.feedbackIsError = false
+
+        guard let normalizedNsec = currentNsec?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !normalizedNsec.isEmpty else {
+            viewModel.feedbackMessage = "Sign in with a private key to upload media."
+            viewModel.feedbackIsError = true
+            return
+        }
+
+        isUploadingMedia = true
+        defer {
+            isUploadingMedia = false
+        }
+
+        do {
+            let attachment = try await uploadCapturedMediaAttachment(capturedMedia, normalizedNsec: normalizedNsec)
+            if !mediaAttachments.contains(where: { $0.url == attachment.url }) {
+                mediaAttachments.append(attachment)
+                removeUploadedMediaURLIfPresent(attachment.url)
+            }
+            isEditorFocused = true
+        } catch {
+            viewModel.feedbackMessage = (error as? LocalizedError)?.errorDescription ?? "Couldn't upload media right now."
+            viewModel.feedbackIsError = true
+        }
+    }
+
+    private func handleMediaSelection(_ items: [PhotosPickerItem]) async {
+        guard !isUploadingMedia else { return }
+        viewModel.feedbackMessage = nil
+        viewModel.feedbackIsError = false
+
+        guard let normalizedNsec = currentNsec?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !normalizedNsec.isEmpty else {
+            viewModel.feedbackMessage = "Sign in with a private key to upload media."
+            viewModel.feedbackIsError = true
+            return
+        }
+
+        isUploadingMedia = true
+        defer {
+            isUploadingMedia = false
+        }
+
+        var failedUploads = 0
+        var firstError: Error?
+
+        for item in items {
+            do {
+                let attachment = try await uploadMediaAttachment(from: item, normalizedNsec: normalizedNsec)
+
+                if !mediaAttachments.contains(where: { $0.url == attachment.url }) {
+                    mediaAttachments.append(attachment)
+                    removeUploadedMediaURLIfPresent(attachment.url)
+                }
+            } catch {
+                failedUploads += 1
+                if firstError == nil {
+                    firstError = error
+                }
+            }
+        }
+
+        if failedUploads > 0 {
+            let successfulUploads = items.count - failedUploads
+            let detailedMessage = (firstError as? LocalizedError)?.errorDescription ?? firstError?.localizedDescription
+            if successfulUploads > 0 {
+                if let detailedMessage, !detailedMessage.isEmpty {
+                    viewModel.feedbackMessage = "Uploaded \(successfulUploads) attachment\(successfulUploads == 1 ? "" : "s"), but \(failedUploads) failed: \(detailedMessage)"
+                } else {
+                    viewModel.feedbackMessage = "Uploaded \(successfulUploads) attachment\(successfulUploads == 1 ? "" : "s"), but \(failedUploads) failed."
+                }
+            } else {
+                viewModel.feedbackMessage = detailedMessage ?? "Couldn't upload media right now."
+            }
+            viewModel.feedbackIsError = true
+        }
+
+        if failedUploads < items.count {
+            isEditorFocused = true
+        }
+    }
+
+    private func uploadMediaAttachment(from item: PhotosPickerItem, normalizedNsec: String) async throws -> ComposeMediaAttachment {
+        guard let data = try await item.loadTransferable(type: Data.self), !data.isEmpty else {
+            throw MediaUploadError.missingFileData
+        }
+
+        let contentType = item.supportedContentTypes.first ?? .jpeg
+        let mimeType = contentType.preferredMIMEType ?? "image/jpeg"
+        let fileExtension = contentType.preferredFilenameExtension ?? defaultFileExtension(for: mimeType)
+        let filename = "note-\(UUID().uuidString).\(fileExtension)"
+
+        let result = try await mediaUploadService.uploadMedia(
+            data: data,
+            mimeType: mimeType,
+            filename: filename,
+            nsec: normalizedNsec,
+            provider: AppSettingsStore.shared.mediaUploadProvider
+        )
+
+        return ComposeMediaAttachment(
+            url: result.url,
+            imetaTag: result.imetaTag,
+            mimeType: mimeType
+        )
+    }
+
+    private func uploadCapturedMediaAttachment(
+        _ capturedMedia: CapturedCameraMedia,
+        normalizedNsec: String
+    ) async throws -> ComposeMediaAttachment {
+        let data: Data
+        let mimeType: String
+        let fileExtension: String
+
+        switch capturedMedia {
+        case .image(let imageData, let capturedMimeType, let capturedFileExtension):
+            data = imageData
+            mimeType = capturedMimeType
+            fileExtension = capturedFileExtension
+
+        case .video(let fileURL, let capturedMimeType, let capturedFileExtension):
+            data = try Data(contentsOf: fileURL)
+            mimeType = capturedMimeType
+            fileExtension = capturedFileExtension
+        }
+
+        let filename = "note-\(UUID().uuidString).\(fileExtension)"
+        let result = try await mediaUploadService.uploadMedia(
+            data: data,
+            mimeType: mimeType,
+            filename: filename,
+            nsec: normalizedNsec,
+            provider: AppSettingsStore.shared.mediaUploadProvider
+        )
+
+        return ComposeMediaAttachment(
+            url: result.url,
+            imetaTag: result.imetaTag,
+            mimeType: mimeType
+        )
+    }
+
+    private func removeMediaAttachment(_ attachment: ComposeMediaAttachment) {
+        mediaAttachments.removeAll { $0.id == attachment.id }
+    }
+
+    private func removeUploadedMediaURLIfPresent(_ url: URL) {
+        let urlString = url.absoluteString
+        guard viewModel.text.contains(urlString) else { return }
+
+        viewModel.text = viewModel.text
+            .replacingOccurrences(of: "\n\(urlString)", with: "")
+            .replacingOccurrences(of: urlString, with: "")
+            .replacingOccurrences(of: "\n{3,}", with: "\n\n", options: .regularExpression)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private func handleSpeechToggle() async {
+        let errorMessage = await speechTranscriber.toggleRecording { transcript in
+            appendSpeechToDraft(transcript)
+        }
+
+        if let errorMessage {
+            viewModel.feedbackMessage = errorMessage
+            viewModel.feedbackIsError = true
+        }
+    }
+
+    private func appendSpeechToDraft(_ transcript: String) {
+        let normalized = transcript
+            .replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !normalized.isEmpty else { return }
+
+        if viewModel.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            viewModel.text = normalized
+        } else {
+            let needsSeparator = !(viewModel.text.hasSuffix(" ") || viewModel.text.hasSuffix("\n"))
+            viewModel.text += needsSeparator ? " \(normalized)" : normalized
+        }
+        isEditorFocused = true
+    }
+
+    private func formatVoiceDuration(milliseconds: Int) -> String {
+        let safeMilliseconds = max(milliseconds, 0)
+        let totalSeconds = safeMilliseconds / 1_000
+        let minutes = totalSeconds / 60
+        let seconds = totalSeconds % 60
+        return String(format: "%02d:%02d", minutes, seconds)
+    }
+
+    private func defaultFileExtension(for mimeType: String) -> String {
+        let normalized = mimeType.lowercased()
+        if normalized.contains("jpeg") || normalized.contains("jpg") {
+            return "jpg"
+        }
+        if normalized.contains("png") {
+            return "png"
+        }
+        if normalized.contains("heic") {
+            return "heic"
+        }
+        if normalized.contains("gif") {
+            return "gif"
+        }
+        if normalized.contains("webp") {
+            return "webp"
+        }
+        if normalized.contains("quicktime") || normalized.contains("mov") {
+            return "mov"
+        }
+        if normalized.contains("mp4") {
+            return "mp4"
+        }
+        if normalized.contains("mpeg") || normalized.contains("mp3") {
+            return "mp3"
+        }
+        if normalized.contains("m4a") {
+            return "m4a"
+        }
+        return "bin"
+    }
+
+    private func openSystemSettings() {
+        guard let settingsURL = URL(string: UIApplication.openSettingsURLString) else { return }
+        UIApplication.shared.open(settingsURL)
+    }
+
+    private func publish() async {
+        guard canPublish else {
+            viewModel.feedbackMessage = currentNsec == nil
+                ? "This account needs an nsec to publish notes."
+                : writeRelayURLs.isEmpty
+                    ? "No write relays are configured."
+                    : "Write a note or attach media before posting."
+            viewModel.feedbackIsError = true
+            return
+        }
+
+        let publishTags = mediaAttachments.map(\.imetaTag) + initialAdditionalTags
+        let didPublish = await viewModel.publish(
+            currentNsec: currentNsec,
+            writeRelayURLs: writeRelayURLs,
+            additionalTags: publishTags
+        )
+
+        guard didPublish else { return }
+
+        mediaAttachments.removeAll()
+        onPublished?()
+        toastCenter.show("Note posted")
+        dismiss()
+    }
+
+    private func applyInitialDraftIfNeeded() {
+        guard !hasAppliedInitialDraft else { return }
+        hasAppliedInitialDraft = true
+
+        guard viewModel.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+        guard !initialText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+        viewModel.text = initialText
+    }
+
+    private func normalizedHandleValue(_ value: String) -> String {
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return "" }
+        if trimmed.hasPrefix("@") {
+            return String(trimmed.dropFirst())
+        }
+        return trimmed
+    }
+
+    private static func renderEventForQuotePreview(_ event: NostrEvent) -> NostrEvent {
+        guard event.kind == 6 || event.kind == 16 else { return event }
+        guard let embedded = decodeEmbeddedEvent(from: event.content) else { return event }
+        guard embedded.kind != 6 && embedded.kind != 16 else { return event }
+        return embedded
+    }
+
+    private static func decodeEmbeddedEvent(from content: String) -> NostrEvent? {
+        let trimmed = content.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed.hasPrefix("{"), trimmed.hasSuffix("}") else { return nil }
+        guard let data = trimmed.data(using: .utf8),
+              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            return nil
+        }
+
+        guard let id = object["id"] as? String,
+              let pubkey = object["pubkey"] as? String,
+              let createdAt = object["created_at"] as? Int,
+              let kind = object["kind"] as? Int,
+              let content = object["content"] as? String,
+              let sig = object["sig"] as? String else {
+            return nil
+        }
+
+        let rawTags = object["tags"] as? [[Any]] ?? []
+        let tags = rawTags.map { tag in
+            tag.map { element in
+                if let string = element as? String {
+                    return string
+                }
+                return String(describing: element)
+            }
+        }
+
+        return NostrEvent(
+            id: id,
+            pubkey: pubkey,
+            createdAt: createdAt,
+            kind: kind,
+            tags: tags,
+            content: content,
+            sig: sig
+        )
+    }
+}
+
+private struct CameraCapturePermissionSheet: View {
+    let permissions: CameraCapturePermissionSnapshot
+    let isRequestingAccess: Bool
+    let onContinue: () -> Void
+    let onOpenSettings: () -> Void
+    let onCancel: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            VStack(alignment: .leading, spacing: 10) {
+                Image(systemName: permissions.isCameraBlocked ? "camera.fill.badge.ellipsis" : "camera.badge.ellipsis")
+                    .font(.system(size: 28, weight: .semibold))
+                    .foregroundStyle(Color.accentColor)
+
+                Text(title)
+                    .font(.title3.weight(.semibold))
+
+                Text(message)
+                    .font(.body)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            Spacer(minLength: 0)
+
+            VStack(spacing: 10) {
+                if permissions.isCameraBlocked {
+                    Button {
+                        onOpenSettings()
+                    } label: {
+                        Text("Open Settings")
+                            .font(.headline.weight(.semibold))
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 14)
+                    }
+                    .buttonStyle(.borderedProminent)
+                } else {
+                    Button {
+                        onContinue()
+                    } label: {
+                        Group {
+                            if isRequestingAccess {
+                                ProgressView()
+                                    .controlSize(.small)
+                            } else {
+                                Text("Continue")
+                                    .font(.headline.weight(.semibold))
+                            }
+                        }
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 14)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .disabled(isRequestingAccess)
+                }
+
+                Button("Not now") {
+                    onCancel()
+                }
+                .buttonStyle(.plain)
+                .font(.body.weight(.medium))
+                .foregroundStyle(.secondary)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 8)
+            }
+        }
+        .padding(20)
+    }
+
+    private var title: String {
+        if permissions.isCameraBlocked {
+            return "Turn on camera access"
+        }
+        return "Camera and microphone access"
+    }
+
+    private var message: String {
+        if permissions.isCameraBlocked {
+            return "To capture photos or videos for your note, \(AppBrand.displayName) needs camera access. Microphone access is used for video capture with sound. You can change this any time later in app settings."
+        }
+        return "To capture photos or videos for your note, \(AppBrand.displayName) needs access to your camera and microphone. You can change this any time later in app settings."
+    }
+}
+
+private struct CameraCaptureView: UIViewControllerRepresentable {
+    let onCapture: (CapturedCameraMedia) -> Void
+    let onCancel: () -> Void
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(parent: self)
+    }
+
+    func makeUIViewController(context: Context) -> UIImagePickerController {
+        let picker = UIImagePickerController()
+        picker.sourceType = .camera
+        picker.delegate = context.coordinator
+        picker.mediaTypes = supportedMediaTypes
+        picker.videoQuality = .typeMedium
+        picker.allowsEditing = false
+        return picker
+    }
+
+    func updateUIViewController(_ uiViewController: UIImagePickerController, context: Context) {}
+
+    private var supportedMediaTypes: [String] {
+        let available = Set(UIImagePickerController.availableMediaTypes(for: .camera) ?? [])
+        let preferred = [UTType.image.identifier, UTType.movie.identifier]
+        let filtered = preferred.filter { available.contains($0) }
+        return filtered.isEmpty ? [UTType.image.identifier] : filtered
+    }
+
+    final class Coordinator: NSObject, UINavigationControllerDelegate, UIImagePickerControllerDelegate {
+        private let parent: CameraCaptureView
+
+        init(parent: CameraCaptureView) {
+            self.parent = parent
+        }
+
+        func imagePickerControllerDidCancel(_ picker: UIImagePickerController) {
+            parent.onCancel()
+        }
+
+        func imagePickerController(
+            _ picker: UIImagePickerController,
+            didFinishPickingMediaWithInfo info: [UIImagePickerController.InfoKey: Any]
+        ) {
+            guard let mediaType = info[.mediaType] as? String else {
+                parent.onCancel()
+                return
+            }
+
+            if mediaType == UTType.movie.identifier,
+               let mediaURL = info[.mediaURL] as? URL {
+                let fileExtension = mediaURL.pathExtension.isEmpty ? "mov" : mediaURL.pathExtension.lowercased()
+                let mimeType = UTType(filenameExtension: fileExtension)?.preferredMIMEType ?? "video/quicktime"
+                parent.onCapture(.video(fileURL: mediaURL, mimeType: mimeType, fileExtension: fileExtension))
+                return
+            }
+
+            if let image = (info[.editedImage] ?? info[.originalImage]) as? UIImage,
+               let imageData = image.jpegData(compressionQuality: 0.92) {
+                parent.onCapture(.image(data: imageData, mimeType: "image/jpeg", fileExtension: "jpg"))
+                return
+            }
+
+            parent.onCancel()
+        }
+    }
+}

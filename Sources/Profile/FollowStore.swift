@@ -1,0 +1,496 @@
+import Foundation
+import NostrSDK
+
+@MainActor
+final class FollowStore: ObservableObject {
+    static let shared = FollowStore()
+
+    @Published private(set) var followedPubkeys: Set<String>
+    @Published private(set) var lastPublishError: String?
+
+    private let defaults: UserDefaults
+    private let authStore: AuthStore
+    private let feedService: NostrFeedService
+    private let relayClient: NostrRelayClient
+    private let keyPrefix = "flow.followedPubkeys"
+    private let legacyKeyPrefix = "x21.followedPubkeys"
+    private let legacyKey = "x21.followedPubkeys"
+
+    private struct Session: Equatable {
+        let accountPubkey: String
+        let nsec: String?
+        let readRelayURLs: [URL]
+        let writeRelayURLs: [URL]
+    }
+
+    private var session: Session?
+    private var syncTask: Task<Void, Never>?
+    private var publishTask: Task<Void, Never>?
+    private var prewarmTask: Task<Void, Never>?
+    private var latestFollowListSnapshot: FollowListSnapshot?
+    private var hasInFlightFollowPublish = false
+
+    init(
+        defaults: UserDefaults = .standard,
+        authStore: AuthStore = .shared,
+        feedService: NostrFeedService = NostrFeedService(),
+        relayClient: NostrRelayClient = NostrRelayClient()
+    ) {
+        self.defaults = defaults
+        self.authStore = authStore
+        self.feedService = feedService
+        self.relayClient = relayClient
+        self.followedPubkeys = []
+    }
+
+    deinit {
+        syncTask?.cancel()
+        publishTask?.cancel()
+        prewarmTask?.cancel()
+    }
+
+    func configure(accountPubkey: String?, nsec: String?, relayURL: URL) {
+        let sharedReadRelays = RelaySettingsStore.shared.readRelayURLs
+        let sharedWriteRelays = RelaySettingsStore.shared.writeRelayURLs
+        let fallbackTargets = [relayURL]
+
+        configure(
+            accountPubkey: accountPubkey,
+            nsec: nsec,
+            readRelayURLs: sharedReadRelays.isEmpty ? fallbackTargets : sharedReadRelays,
+            writeRelayURLs: sharedWriteRelays.isEmpty ? fallbackTargets : sharedWriteRelays
+        )
+    }
+
+    func configure(accountPubkey: String?, nsec: String?, readRelayURLs: [URL], writeRelayURLs: [URL]) {
+        let normalizedAccount = normalizePubkey(accountPubkey)
+        let normalizedNsec = normalizeNsec(nsec)
+        let normalizedReadRelays = normalizedRelayURLs(readRelayURLs)
+        let normalizedWriteRelays = normalizedRelayURLs(writeRelayURLs)
+
+        let effectiveReadRelays = normalizedReadRelays.isEmpty ? normalizedWriteRelays : normalizedReadRelays
+        let effectiveWriteRelays = normalizedWriteRelays.isEmpty ? effectiveReadRelays : normalizedWriteRelays
+
+        let nextSession: Session?
+        if normalizedAccount.isEmpty || effectiveReadRelays.isEmpty || effectiveWriteRelays.isEmpty {
+            nextSession = nil
+        } else {
+            nextSession = Session(
+                accountPubkey: normalizedAccount,
+                nsec: normalizedNsec,
+                readRelayURLs: effectiveReadRelays,
+                writeRelayURLs: effectiveWriteRelays
+            )
+        }
+
+        guard nextSession != session else { return }
+
+        session = nextSession
+        latestFollowListSnapshot = nil
+        lastPublishError = nil
+        hasInFlightFollowPublish = false
+
+        syncTask?.cancel()
+        publishTask?.cancel()
+        prewarmTask?.cancel()
+
+        guard let session = nextSession else {
+            followedPubkeys = []
+            Task {
+                await ProfileCache.shared.setPriorityPubkeys([])
+            }
+            return
+        }
+
+        let allowLegacyGlobalMigration = authStore.load().accounts.count <= 1
+        followedPubkeys = loadPersistedFollowings(
+            for: session.accountPubkey,
+            allowLegacyGlobalMigration: allowLegacyGlobalMigration
+        )
+        scheduleProfileCacheUpdate(for: session, snapshot: nil)
+
+        syncTask = Task { [weak self] in
+            await self?.syncFromRelay(for: session)
+        }
+    }
+
+    func isFollowing(_ pubkey: String) -> Bool {
+        followedPubkeys.contains(normalizePubkey(pubkey))
+    }
+
+    func toggleFollow(_ pubkey: String) {
+        let normalizedTarget = normalizePubkey(pubkey)
+        guard !normalizedTarget.isEmpty else { return }
+        let shouldFollow = !followedPubkeys.contains(normalizedTarget)
+        setFollowing([normalizedTarget], shouldFollow: shouldFollow)
+    }
+
+    func follow(_ pubkey: String) {
+        setFollowing([pubkey], shouldFollow: true)
+    }
+
+    func unfollow(_ pubkey: String) {
+        setFollowing([pubkey], shouldFollow: false)
+    }
+
+    func follow(pubkeys: [String]) {
+        setFollowing(pubkeys, shouldFollow: true)
+    }
+
+    func unfollow(pubkeys: [String]) {
+        setFollowing(pubkeys, shouldFollow: false)
+    }
+
+    private func setFollowing(_ pubkeys: [String], shouldFollow: Bool) {
+        guard let session else { return }
+        guard session.nsec != nil else {
+            lastPublishError = "Sign in with a private key to follow accounts."
+            return
+        }
+
+        let normalizedTargets = normalizedUniquePubkeys(pubkeys)
+            .filter { $0 != session.accountPubkey }
+        guard !normalizedTargets.isEmpty else { return }
+
+        let previous = followedPubkeys
+        var updated = previous
+        for target in normalizedTargets {
+            if shouldFollow {
+                updated.insert(target)
+            } else {
+                updated.remove(target)
+            }
+        }
+
+        guard updated != previous else { return }
+
+        followedPubkeys = updated
+        persistCurrentFollowings()
+        lastPublishError = nil
+        scheduleProfileCacheUpdate(for: session, snapshot: latestFollowListSnapshot)
+
+        publishTask?.cancel()
+        hasInFlightFollowPublish = true
+        publishTask = Task { [weak self] in
+            await self?.publishFollowList(
+                for: session,
+                targetPubkeys: normalizedTargets,
+                shouldFollow: shouldFollow,
+                rollbackFollowings: previous
+            )
+        }
+    }
+
+    func refreshFromRelay() {
+        guard let session else { return }
+        syncTask?.cancel()
+        syncTask = Task { [weak self] in
+            await self?.syncFromRelay(for: session)
+        }
+    }
+
+    private func syncFromRelay(for session: Session) async {
+        do {
+            let relayTargets = followListRelayTargets(for: session)
+            guard !relayTargets.isEmpty else { return }
+
+            let snapshot = try await feedService.fetchFollowListSnapshot(
+                relayURLs: relayTargets,
+                pubkey: session.accountPubkey
+            )
+
+            guard !Task.isCancelled else { return }
+            guard self.session == session else { return }
+
+            // Preserve optimistic follow toggles while a publish is in-flight.
+            // Relay sync can be stale for a short window and would otherwise make
+            // the follow button bounce back to "Follow".
+            if hasInFlightFollowPublish {
+                latestFollowListSnapshot = snapshot
+                scheduleProfileCacheUpdate(for: session, snapshot: snapshot)
+                return
+            }
+
+            latestFollowListSnapshot = snapshot
+            followedPubkeys = Set(snapshot?.followedPubkeys ?? [])
+            persistCurrentFollowings()
+            scheduleProfileCacheUpdate(for: session, snapshot: snapshot)
+        } catch {
+            // Keep the locally persisted cache when relay sync fails.
+        }
+    }
+
+    private func publishFollowList(
+        for session: Session,
+        targetPubkeys: [String],
+        shouldFollow: Bool,
+        rollbackFollowings: Set<String>
+    ) async {
+        defer {
+            if self.session == session {
+                hasInFlightFollowPublish = false
+            }
+        }
+
+        guard let nsec = session.nsec else { return }
+        guard let keypair = Keypair(nsec: nsec.lowercased()) else {
+            guard self.session == session else { return }
+            followedPubkeys = rollbackFollowings
+            persistCurrentFollowings()
+            lastPublishError = "Couldn't sign follow update. Please sign in again."
+            return
+        }
+
+        do {
+            let relayTargets = followListRelayTargets(for: session)
+            let relaySnapshot = try? await feedService.fetchFollowListSnapshot(
+                relayURLs: relayTargets,
+                pubkey: session.accountPubkey
+            )
+            guard !Task.isCancelled else { return }
+
+            let baseSnapshot = relaySnapshot ?? latestFollowListSnapshot
+            let mergedRawTags = mergedFollowListTags(
+                baseTags: baseSnapshot?.tags ?? [],
+                targetPubkeys: targetPubkeys,
+                shouldFollow: shouldFollow
+            )
+            let mergedContent = baseSnapshot?.content ?? ""
+
+            let sdkTags = mergedRawTags.compactMap(decodeSDKTag(from:))
+            let event = try NostrSDK.NostrEvent.Builder<NostrSDK.NostrEvent>(kind: .followList)
+                .content(mergedContent)
+                .appendTags(contentsOf: sdkTags)
+                .build(signedBy: keypair)
+
+            let eventData = try JSONEncoder().encode(event)
+            guard let eventObject = try JSONSerialization.jsonObject(with: eventData) as? [String: Any] else {
+                throw RelayClientError.publishRejected("Malformed follow event")
+            }
+
+            var successfulPublishes = 0
+            var firstPublishError: Error?
+
+            for relayURL in session.writeRelayURLs {
+                do {
+                    try await relayClient.publishEvent(
+                        relayURL: relayURL,
+                        eventObject: eventObject,
+                        eventID: event.id
+                    )
+                    successfulPublishes += 1
+                } catch {
+                    if firstPublishError == nil {
+                        firstPublishError = error
+                    }
+                }
+            }
+
+            if successfulPublishes == 0 {
+                throw firstPublishError ?? RelayClientError.publishRejected("Couldn't publish follow event")
+            }
+
+            guard !Task.isCancelled else { return }
+            guard self.session == session else { return }
+
+            let mergedSnapshot = FollowListSnapshot(content: mergedContent, tags: mergedRawTags)
+            latestFollowListSnapshot = mergedSnapshot
+            followedPubkeys = Set(mergedSnapshot.followedPubkeys)
+            persistCurrentFollowings()
+            lastPublishError = nil
+            scheduleProfileCacheUpdate(for: session, snapshot: mergedSnapshot)
+        } catch {
+            guard !Task.isCancelled else { return }
+            guard self.session == session else { return }
+
+            followedPubkeys = rollbackFollowings
+            persistCurrentFollowings()
+            lastPublishError = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+            scheduleProfileCacheUpdate(for: session, snapshot: latestFollowListSnapshot)
+        }
+    }
+
+    private func scheduleProfileCacheUpdate(for session: Session, snapshot: FollowListSnapshot?) {
+        let followed = Array(followedPubkeys)
+        let relayURLs = session.readRelayURLs.isEmpty ? session.writeRelayURLs : session.readRelayURLs
+        let snapshotHints = snapshot?.relayHintsByPubkey ?? latestFollowListSnapshot?.relayHintsByPubkey ?? [:]
+
+        prewarmTask?.cancel()
+        prewarmTask = Task { [weak self] in
+            await ProfileCache.shared.setPriorityPubkeys(Set(followed))
+            guard !Task.isCancelled else { return }
+            guard let self else { return }
+            guard !followed.isEmpty else { return }
+
+            let cachedSnapshot = await self.feedService.cachedFollowListSnapshot(pubkey: session.accountPubkey)
+            guard !Task.isCancelled else { return }
+
+            let mergedHints = mergeRelayHints(
+                primary: snapshotHints,
+                secondary: cachedSnapshot?.relayHintsByPubkey ?? [:]
+            )
+
+            await self.feedService.prewarmProfiles(
+                relayURLs: relayURLs,
+                pubkeys: followed,
+                relayHintsByPubkey: mergedHints
+            )
+        }
+    }
+
+    private func mergeRelayHints(
+        primary: [String: [URL]],
+        secondary: [String: [URL]]
+    ) -> [String: [URL]] {
+        guard !secondary.isEmpty else { return primary }
+
+        var merged = primary
+        for (pubkey, relayURLs) in secondary {
+            var seen = Set<String>()
+            var ordered: [URL] = []
+
+            for relayURL in (merged[pubkey] ?? []) + relayURLs {
+                let normalized = relayURL.absoluteString.lowercased()
+                guard seen.insert(normalized).inserted else { continue }
+                ordered.append(relayURL)
+            }
+
+            merged[pubkey] = ordered
+        }
+
+        return merged
+    }
+
+    private func mergedFollowListTags(
+        baseTags: [[String]],
+        targetPubkeys: [String],
+        shouldFollow: Bool
+    ) -> [[String]] {
+        let normalizedTargets = normalizedUniquePubkeys(targetPubkeys)
+        guard !normalizedTargets.isEmpty else { return baseTags }
+
+        var mergedTags: [[String]] = []
+        var seenTargets = Set<String>()
+
+        for tag in baseTags {
+            guard let tagName = tag.first?.lowercased(), tagName == "p" else {
+                mergedTags.append(tag)
+                continue
+            }
+
+            let value = tag.count > 1 ? normalizePubkey(tag[1]) : ""
+            guard normalizedTargets.contains(value) else {
+                mergedTags.append(tag)
+                continue
+            }
+
+            seenTargets.insert(value)
+            if shouldFollow {
+                mergedTags.append(tag)
+            }
+        }
+
+        if shouldFollow {
+            for target in normalizedTargets where !seenTargets.contains(target) {
+                mergedTags.append(["p", target])
+            }
+        }
+
+        return mergedTags
+    }
+
+    private func followListRelayTargets(for session: Session) -> [URL] {
+        normalizedRelayURLs(session.readRelayURLs + session.writeRelayURLs)
+    }
+
+    private func decodeSDKTag(from raw: [String]) -> NostrSDK.Tag? {
+        guard raw.count >= 2 else { return nil }
+        guard let data = try? JSONSerialization.data(withJSONObject: raw),
+              let tag = try? JSONDecoder().decode(NostrSDK.Tag.self, from: data) else {
+            return nil
+        }
+        return tag
+    }
+
+    private func loadPersistedFollowings(
+        for accountPubkey: String,
+        allowLegacyGlobalMigration: Bool
+    ) -> Set<String> {
+        let accountKey = defaultsKey(for: accountPubkey)
+
+        if let saved = defaults.stringArray(forKey: accountKey) {
+            return Set(saved.map(normalizePubkey).filter { !$0.isEmpty })
+        }
+
+        let legacyAccountKey = legacyDefaultsKey(for: accountPubkey)
+        if let legacySaved = defaults.stringArray(forKey: legacyAccountKey), !legacySaved.isEmpty {
+            let migrated = Set(legacySaved.map(normalizePubkey).filter { !$0.isEmpty })
+            defaults.set(Array(migrated).sorted(), forKey: accountKey)
+            return migrated
+        }
+
+        // One-time migration from older global cache key.
+        if allowLegacyGlobalMigration,
+           let legacySaved = defaults.stringArray(forKey: legacyKey),
+           !legacySaved.isEmpty {
+            let migrated = Set(legacySaved.map(normalizePubkey).filter { !$0.isEmpty })
+            defaults.set(Array(migrated).sorted(), forKey: accountKey)
+            defaults.removeObject(forKey: legacyKey)
+            return migrated
+        }
+
+        return []
+    }
+
+    private func persistCurrentFollowings() {
+        guard let accountPubkey = session?.accountPubkey else { return }
+        defaults.set(Array(followedPubkeys), forKey: defaultsKey(for: accountPubkey))
+    }
+
+    private func defaultsKey(for accountPubkey: String) -> String {
+        "\(keyPrefix).\(accountPubkey)"
+    }
+
+    private func legacyDefaultsKey(for accountPubkey: String) -> String {
+        "\(legacyKeyPrefix).\(accountPubkey)"
+    }
+
+    private func normalizePubkey(_ value: String?) -> String {
+        (value ?? "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+    }
+
+    private func normalizedUniquePubkeys(_ pubkeys: [String]) -> [String] {
+        var seen = Set<String>()
+        var ordered: [String] = []
+
+        for pubkey in pubkeys {
+            let normalized = normalizePubkey(pubkey)
+            guard !normalized.isEmpty, seen.insert(normalized).inserted else { continue }
+            ordered.append(normalized)
+        }
+
+        return ordered
+    }
+
+    private func normalizeNsec(_ value: String?) -> String? {
+        guard let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines), !trimmed.isEmpty else {
+            return nil
+        }
+        return trimmed
+    }
+
+    private func normalizedRelayURLs(_ relayURLs: [URL]) -> [URL] {
+        var seen = Set<String>()
+        var ordered: [URL] = []
+
+        for relayURL in relayURLs {
+            let normalized = relayURL.absoluteString.lowercased()
+            guard seen.insert(normalized).inserted else { continue }
+            ordered.append(relayURL)
+        }
+
+        return ordered
+    }
+}

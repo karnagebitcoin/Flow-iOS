@@ -1,0 +1,35 @@
+name: Flow
+options:
+  minimumXcodeGenVersion: 2.45.0
+packages:
+  NostrSDK:
+    url: https://github.com/nostr-sdk/nostr-sdk-ios.git
+    revision: e5855cbd3bdabf44075fd2abdf76f63bac4cbd5f
+targets:
+  Flow:
+    type: application
+    platform: iOS
+    deploymentTarget: "17.0"
+    sources:
+      - Sources
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: social.x21.ios
+        PRODUCT_NAME: Flow
+        INFOPLIST_KEY_CFBundleDisplayName: Flow
+        INFOPLIST_FILE: Sources/Resources/Info.plist
+        SWIFT_VERSION: 5.0
+        CURRENT_PROJECT_VERSION: 1
+        MARKETING_VERSION: 0.1.0
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
+        CODE_SIGN_STYLE: Automatic
+    dependencies:
+      - package: NostrSDK
+schemes:
+  Flow:
+    build:
+      targets:
+        Flow: all
+    run:
+      config: Debug

@@ -1,0 +1,341 @@
+import Foundation
+
+enum ActivityFilter: String, CaseIterable, Identifiable, Sendable {
+    case all
+    case mentions
+    case reactions
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .all:
+            return "All"
+        case .mentions:
+            return "Mentions"
+        case .reactions:
+            return "Reactions"
+        }
+    }
+
+    var eventKinds: [Int] {
+        switch self {
+        case .all:
+            return [1, 7, 1111, 1244]
+        case .mentions:
+            return [1, 1111, 1244]
+        case .reactions:
+            return [7]
+        }
+    }
+}
+
+struct ActivityActor: Hashable, Sendable {
+    let pubkey: String
+    let profile: NostrProfile?
+
+    var displayName: String {
+        if let displayName = profile?.displayName?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !displayName.isEmpty {
+            return displayName
+        }
+        if let name = profile?.name?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !name.isEmpty {
+            return name
+        }
+        return shortNostrIdentifier(pubkey)
+    }
+
+    var handle: String {
+        if let name = profile?.name?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !name.isEmpty {
+            let normalized = name.replacingOccurrences(of: " ", with: "")
+            return "@\(normalized.lowercased())"
+        }
+        if let displayName = profile?.displayName?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !displayName.isEmpty {
+            let normalized = displayName.replacingOccurrences(of: " ", with: "")
+            return "@\(normalized.lowercased())"
+        }
+        return "@\(shortNostrIdentifier(pubkey).lowercased())"
+    }
+
+    var avatarURL: URL? {
+        guard let picture = profile?.picture,
+              let url = URL(string: picture) else {
+            return nil
+        }
+        return url
+    }
+}
+
+struct ActivityReaction: Hashable, Sendable {
+    let content: String
+    let shortcode: String?
+    let customEmojiImageURL: URL?
+
+    var displayValue: String {
+        if let shortcode {
+            return ":\(shortcode):"
+        }
+        return content
+    }
+
+    var isCustomEmoji: Bool {
+        customEmojiImageURL != nil
+    }
+}
+
+enum ActivityAction: Hashable, Sendable {
+    case mention(kind: Int)
+    case reaction(ActivityReaction)
+
+    var category: ActivityFilter {
+        switch self {
+        case .mention:
+            return .mentions
+        case .reaction:
+            return .reactions
+        }
+    }
+
+    var title: String {
+        switch self {
+        case .mention:
+            return "Mention"
+        case .reaction:
+            return "Reaction"
+        }
+    }
+
+    var sourceKind: Int? {
+        switch self {
+        case .mention(let kind):
+            return kind
+        case .reaction:
+            return nil
+        }
+    }
+
+    var reaction: ActivityReaction? {
+        if case .reaction(let reaction) = self {
+            return reaction
+        }
+        return nil
+    }
+}
+
+struct ActivityAddress: Hashable, Sendable {
+    let kind: Int
+    let pubkey: String
+    let identifier: String
+}
+
+enum ActivityTargetReference: Hashable, Sendable {
+    case eventID(String)
+    case address(ActivityAddress)
+
+    var eventID: String? {
+        if case .eventID(let value) = self {
+            return value
+        }
+        return nil
+    }
+
+    var address: ActivityAddress? {
+        if case .address(let value) = self {
+            return value
+        }
+        return nil
+    }
+
+    init?(tag: [String]) {
+        guard let name = tag.first?.lowercased(), tag.count > 1 else {
+            return nil
+        }
+
+        let rawValue = tag[1].trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !rawValue.isEmpty else { return nil }
+
+        switch name {
+        case "e":
+            self = .eventID(rawValue.lowercased())
+
+        case "a":
+            let pieces = rawValue.split(separator: ":", maxSplits: 2, omittingEmptySubsequences: false)
+            guard pieces.count == 3, let kind = Int(pieces[0]) else {
+                return nil
+            }
+
+            let pubkey = String(pieces[1]).trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+            let identifier = String(pieces[2]).trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !pubkey.isEmpty, !identifier.isEmpty else { return nil }
+
+            self = .address(ActivityAddress(kind: kind, pubkey: pubkey, identifier: identifier))
+
+        default:
+            return nil
+        }
+    }
+}
+
+struct ActivityTargetNote: Hashable, Sendable {
+    let reference: ActivityTargetReference?
+    let event: NostrEvent?
+    let snippet: String
+
+    var eventID: String? {
+        event?.id ?? reference?.eventID
+    }
+
+    var address: ActivityAddress? {
+        reference?.address
+    }
+
+    var createdAt: Int? {
+        event?.createdAt
+    }
+}
+
+struct ActivityRow: Identifiable, Hashable, Sendable {
+    let event: NostrEvent
+    let actor: ActivityActor
+    let action: ActivityAction
+    let target: ActivityTargetNote
+
+    var id: String {
+        event.id
+    }
+
+    var createdAt: Int {
+        event.createdAt
+    }
+
+    var createdAtDate: Date {
+        event.createdAtDate
+    }
+
+    var actorPubkey: String {
+        actor.pubkey
+    }
+
+    var actorProfile: NostrProfile? {
+        actor.profile
+    }
+
+    var targetSnippet: String {
+        target.snippet
+    }
+}
+
+extension NostrEvent {
+    var activityAction: ActivityAction? {
+        switch kind {
+        case 7:
+            return .reaction(activityReaction)
+        case 1, 1111, 1244:
+            return .mention(kind: kind)
+        default:
+            return nil
+        }
+    }
+
+    var activityTargetReference: ActivityTargetReference? {
+        var fallback: ActivityTargetReference?
+
+        for tag in tags {
+            guard let name = tag.first?.lowercased(), name == "e" || name == "a" else {
+                continue
+            }
+
+            guard let reference = ActivityTargetReference(tag: tag) else {
+                continue
+            }
+
+            let marker = tag.count > 3
+                ? tag[3].trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+                : ""
+
+            if marker == "mention" {
+                continue
+            }
+
+            if marker == "reply" {
+                return reference
+            }
+
+            if fallback == nil || marker.isEmpty {
+                fallback = reference
+            }
+        }
+
+        return fallback
+    }
+
+    var activityReaction: ActivityReaction {
+        let trimmedContent = content.trimmingCharacters(in: .whitespacesAndNewlines)
+        let reactionContent = trimmedContent.isEmpty ? "+" : trimmedContent
+        let shortcode = normalizedEmojiShortcode(from: reactionContent)
+        let emojiURLs = activityEmojiURLs(from: tags)
+        let emojiURL = shortcode.flatMap {
+            emojiURLs[$0] ?? emojiURLs[$0.lowercased()]
+        }
+
+        return ActivityReaction(
+            content: reactionContent,
+            shortcode: shortcode,
+            customEmojiImageURL: emojiURL
+        )
+    }
+
+    func activitySnippet(maxLength: Int = 160) -> String {
+        makeActivitySnippet(from: content, maxLength: maxLength)
+    }
+}
+
+private func makeActivitySnippet(from content: String, maxLength: Int) -> String {
+    let normalized = content
+        .replacingOccurrences(of: "\r\n", with: "\n")
+        .replacingOccurrences(of: "\r", with: "\n")
+        .replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
+        .trimmingCharacters(in: .whitespacesAndNewlines)
+
+    guard !normalized.isEmpty else { return "" }
+    guard normalized.count > maxLength else { return normalized }
+
+    let endIndex = normalized.index(normalized.startIndex, offsetBy: maxLength)
+    return String(normalized[..<endIndex]).trimmingCharacters(in: .whitespacesAndNewlines) + "..."
+}
+
+private func activityEmojiURLs(from tags: [[String]]) -> [String: URL] {
+    var result: [String: URL] = [:]
+
+    for tag in tags {
+        guard tag.count >= 3 else { continue }
+        guard tag.first?.lowercased() == "emoji" else { continue }
+
+        guard let shortcode = normalizedEmojiShortcode(from: tag[1]) else { continue }
+        let urlString = tag[2].trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !urlString.isEmpty, let url = URL(string: urlString), url.scheme != nil else {
+            continue
+        }
+
+        result[shortcode] = url
+        result[shortcode.lowercased()] = url
+    }
+
+    return result
+}
+
+private func normalizedEmojiShortcode(from value: String) -> String? {
+    let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !trimmed.isEmpty else { return nil }
+
+    if trimmed.hasPrefix(":"), trimmed.hasSuffix(":"), trimmed.count >= 3 {
+        let inner = trimmed.dropFirst().dropLast()
+        let shortcode = String(inner).trimmingCharacters(in: .whitespacesAndNewlines)
+        return shortcode.isEmpty ? nil : shortcode
+    }
+
+    return trimmed
+}
