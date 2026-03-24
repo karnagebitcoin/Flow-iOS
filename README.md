@@ -9,7 +9,7 @@ Flow is an iOS Nostr client focused on fast feeds, profiles, threads, onboarding
 
 ## Getting Started
 
-1. Open `/Users/k/code/x21-ios/Flow.xcodeproj` in Xcode.
+1. Open `Flow.xcodeproj` in Xcode.
 2. Build and run the `Flow` scheme.
 
 ## License
