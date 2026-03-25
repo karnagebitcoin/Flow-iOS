@@ -5,6 +5,15 @@ import NostrSDK
 final class SearchViewModel: ObservableObject {
     private struct MentionMetadataDecoder: MetadataCoding {}
 
+    private struct VisibleItemsCacheKey: Equatable {
+        let trendingRevision: Int
+        let searchedRevision: Int
+        let isSearching: Bool
+        let hideNSFW: Bool
+        let filterRevision: Int
+        let mutedConversationRevision: Int
+    }
+
     struct ProfileMatch: Identifiable, Hashable {
         let pubkey: String
         let profile: NostrProfile?
@@ -42,7 +51,8 @@ final class SearchViewModel: ObservableObject {
         _ service: NostrFeedService,
         _ relayURLs: [URL],
         _ limit: Int,
-        _ until: Int?
+        _ until: Int?,
+        _ moderationSnapshot: MuteFilterSnapshot?
     ) async throws -> [FeedItem]
 
     private struct FeedFetchResult {
@@ -60,8 +70,18 @@ final class SearchViewModel: ObservableObject {
     }
 
     @Published var searchText = ""
-    @Published private(set) var trendingNotes: [FeedItem] = []
-    @Published private(set) var searchedNotes: [FeedItem] = []
+    @Published private(set) var trendingNotes: [FeedItem] = [] {
+        didSet {
+            trendingNotesRevision &+= 1
+            clearVisibleItemsCache()
+        }
+    }
+    @Published private(set) var searchedNotes: [FeedItem] = [] {
+        didSet {
+            searchedNotesRevision &+= 1
+            clearVisibleItemsCache()
+        }
+    }
     @Published private(set) var profileMatches: [ProfileMatch] = []
     @Published private(set) var isLoading = false
     @Published private(set) var isLoadingMore = false
@@ -71,9 +91,19 @@ final class SearchViewModel: ObservableObject {
     private let trendingNotesLoader: TrendingNotesLoader
     private let pageSize: Int
 
-    private var mutedConversationIDs = Set<String>()
+    private var mutedConversationIDs = Set<String>() {
+        didSet {
+            mutedConversationRevision &+= 1
+            clearVisibleItemsCache()
+        }
+    }
     private var searchTask: Task<Void, Never>?
     private var latestSearchRequestID = UUID()
+    private var trendingNotesRevision = 0
+    private var searchedNotesRevision = 0
+    private var mutedConversationRevision = 0
+    private var visibleItemsCacheKey: VisibleItemsCacheKey?
+    private var visibleItemsCache: [FeedItem] = []
 
     private(set) var readRelayURLs: [URL]
     private(set) var relayURL: URL
@@ -117,8 +147,28 @@ final class SearchViewModel: ObservableObject {
     }
 
     var visibleItems: [FeedItem] {
+        let key = VisibleItemsCacheKey(
+            trendingRevision: trendingNotesRevision,
+            searchedRevision: searchedNotesRevision,
+            isSearching: isSearching,
+            hideNSFW: AppSettingsStore.shared.hideNSFWContent,
+            filterRevision: MuteStore.shared.filterRevision,
+            mutedConversationRevision: mutedConversationRevision
+        )
+
+        if visibleItemsCacheKey == key {
+            return visibleItemsCache
+        }
+
         let source = isSearching ? searchedNotes : trendingNotes
-        return filteredItems(source)
+        let filtered = filteredItems(source)
+        visibleItemsCacheKey = key
+        visibleItemsCache = filtered
+        return filtered
+    }
+
+    private var muteFilterSnapshot: MuteFilterSnapshot {
+        MuteStore.shared.filterSnapshot
     }
 
     var isSearching: Bool {
@@ -220,7 +270,8 @@ final class SearchViewModel: ObservableObject {
                 service,
                 requestRelayURLs,
                 pageSize,
-                nil
+                nil,
+                muteFilterSnapshot
             )
 
             guard requestRelayURLs == readRelayURLs else { return }
@@ -383,7 +434,8 @@ final class SearchViewModel: ObservableObject {
                 limit: pageSize,
                 hydrationMode: .cachedProfilesOnly,
                 fetchTimeout: Self.noteSearchFetchTimeout,
-                relayFetchMode: Self.noteSearchRelayFetchMode
+                relayFetchMode: Self.noteSearchRelayFetchMode,
+                moderationSnapshot: muteFilterSnapshot
             )
             return FeedFetchResult(items: items, failed: false)
         } catch {
@@ -403,7 +455,8 @@ final class SearchViewModel: ObservableObject {
                 until: nil,
                 hydrationMode: .cachedProfilesOnly,
                 fetchTimeout: Self.noteSearchFetchTimeout,
-                relayFetchMode: Self.noteSearchRelayFetchMode
+                relayFetchMode: Self.noteSearchRelayFetchMode,
+                moderationSnapshot: muteFilterSnapshot
             )
             return FeedFetchResult(items: items, failed: false)
         } catch {
@@ -438,7 +491,8 @@ final class SearchViewModel: ObservableObject {
                 until: nil,
                 hydrationMode: .cachedProfilesOnly,
                 fetchTimeout: Self.noteSearchFetchTimeout,
-                relayFetchMode: Self.noteSearchRelayFetchMode
+                relayFetchMode: Self.noteSearchRelayFetchMode,
+                moderationSnapshot: muteFilterSnapshot
             )
             return FeedFetchResult(items: items, failed: false)
         } catch {
@@ -457,7 +511,8 @@ final class SearchViewModel: ObservableObject {
                 until: nil,
                 hydrationMode: .cachedProfilesOnly,
                 fetchTimeout: Self.noteSearchFetchTimeout,
-                relayFetchMode: Self.noteSearchRelayFetchMode
+                relayFetchMode: Self.noteSearchRelayFetchMode,
+                moderationSnapshot: muteFilterSnapshot
             )
             return FeedFetchResult(items: items, failed: false)
         } catch {
@@ -482,7 +537,7 @@ final class SearchViewModel: ObservableObject {
             if mutedConversationIDs.contains(item.displayEvent.conversationID) {
                 return false
             }
-            if item.moderationEvents.contains(where: { MuteStore.shared.shouldHide($0) }) {
+            if MuteStore.shared.shouldHideAny(item.moderationEvents) {
                 return false
             }
             if hideNSFW && item.moderationEvents.contains(where: { $0.containsNSFWHashtag }) {
@@ -490,6 +545,23 @@ final class SearchViewModel: ObservableObject {
             }
             return true
         }
+    }
+
+    private func pruneMutedItems(
+        _ items: [FeedItem],
+        snapshot: MuteFilterSnapshot? = nil
+    ) -> [FeedItem] {
+        let snapshot = snapshot ?? muteFilterSnapshot
+        guard snapshot.hasAnyRules else { return items }
+
+        return items.filter { item in
+            !snapshot.shouldHideAny(in: item.moderationEvents)
+        }
+    }
+
+    private func clearVisibleItemsCache() {
+        visibleItemsCacheKey = nil
+        visibleItemsCache = []
     }
 
     private func deduplicateAndSort(_ groups: [[FeedItem]]) -> [FeedItem] {
@@ -501,12 +573,12 @@ final class SearchViewModel: ObservableObject {
             }
         }
 
-        return byID.values.sorted {
+        return pruneMutedItems(byID.values.sorted {
             if $0.event.createdAt == $1.event.createdAt {
                 return $0.id > $1.id
             }
             return $0.event.createdAt > $1.event.createdAt
-        }
+        })
     }
 
     private func deduplicateProfiles(_ profiles: [ProfileSearchResult]) -> [ProfileSearchResult] {
@@ -604,11 +676,15 @@ final class SearchViewModel: ObservableObject {
         service: NostrFeedService,
         relayURLs: [URL],
         limit: Int,
-        until: Int?
+        until: Int?,
+        moderationSnapshot: MuteFilterSnapshot?
     ) async throws -> [FeedItem] {
         _ = relayURLs
         _ = until
-        return try await service.fetchTrendingNotes(limit: min(limit, 100))
+        return try await service.fetchTrendingNotes(
+            limit: min(limit, 100),
+            moderationSnapshot: moderationSnapshot
+        )
     }
 
     private static func normalizedRelayURLs(_ relayURLs: [URL]) -> [URL] {

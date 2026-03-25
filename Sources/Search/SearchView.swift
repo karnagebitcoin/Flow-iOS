@@ -8,7 +8,6 @@ struct SearchView: View {
     @EnvironmentObject private var relaySettings: RelaySettingsStore
     @ObservedObject private var reactionStats = NoteReactionStatsService.shared
     @ObservedObject private var followStore = FollowStore.shared
-    @ObservedObject private var muteStore = MuteStore.shared
 
     @StateObject private var viewModel: SearchViewModel
 
@@ -27,7 +26,8 @@ struct SearchView: View {
     }
 
     var body: some View {
-        let visibleReplyCounts = ReplyCountEstimator.counts(for: viewModel.visibleItems)
+        let visibleItems = viewModel.visibleItems
+        let visibleReplyCounts = ReplyCountEstimator.counts(for: visibleItems)
 
         NavigationStack {
             List {
@@ -66,7 +66,7 @@ struct SearchView: View {
                             .textCase(nil)
                     }
 
-                    if viewModel.visibleItems.isEmpty {
+                    if visibleItems.isEmpty {
                         emptyState
                             .listRowInsets(
                                 EdgeInsets(
@@ -79,7 +79,7 @@ struct SearchView: View {
                             .listRowSeparator(.hidden)
                             .listRowBackground(Color.clear)
                     } else {
-                        ForEach(viewModel.visibleItems) { item in
+                        ForEach(visibleItems) { item in
                             FeedRowView(
                                 item: item,
                                 reactionCount: reactionStats.reactionCount(for: item.displayEventID),
@@ -135,7 +135,7 @@ struct SearchView: View {
                             }
                         }
                     }
-                } else if viewModel.visibleItems.isEmpty {
+                } else if visibleItems.isEmpty {
                     emptyState
                         .listRowInsets(
                             EdgeInsets(
@@ -148,7 +148,7 @@ struct SearchView: View {
                         .listRowSeparator(.hidden)
                         .listRowBackground(Color.clear)
                 } else {
-                    ForEach(viewModel.visibleItems) { item in
+                    ForEach(visibleItems) { item in
                         FeedRowView(
                             item: item,
                             reactionCount: reactionStats.reactionCount(for: item.displayEventID),
@@ -224,7 +224,7 @@ struct SearchView: View {
                     .listRowBackground(Color.clear)
                 }
 
-                if !viewModel.visibleItems.isEmpty || viewModel.isLoadingMore {
+                if !visibleItems.isEmpty || viewModel.isLoadingMore {
                     Color.clear
                         .frame(height: Self.bottomScrollClearance)
                         .listRowInsets(EdgeInsets())
@@ -241,7 +241,7 @@ struct SearchView: View {
                 configureStores()
                 viewModel.updateReadRelayURLs(effectiveReadRelayURLs)
                 await viewModel.refresh()
-                muteStore.refreshFromRelay()
+                MuteStore.shared.refreshFromRelay()
             }
             .task {
                 configureStores()
@@ -460,7 +460,7 @@ struct SearchView: View {
             readRelayURLs: effectiveReadRelayURLs,
             writeRelayURLs: effectiveWriteRelayURLs
         )
-        muteStore.configure(
+        MuteStore.shared.configure(
             accountPubkey: auth.currentAccount?.pubkey,
             nsec: auth.currentNsec,
             readRelayURLs: effectiveReadRelayURLs,

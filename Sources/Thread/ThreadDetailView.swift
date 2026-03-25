@@ -13,7 +13,6 @@ struct ThreadDetailView: View {
     @StateObject private var viewModel: ThreadDetailViewModel
     @ObservedObject private var reactionStats = NoteReactionStatsService.shared
     @ObservedObject private var followStore = FollowStore.shared
-    @ObservedObject private var muteStore = MuteStore.shared
 
     @State private var selectedThreadItem: FeedItem?
     @State private var selectedHashtagRoute: HashtagRoute?
@@ -80,6 +79,9 @@ struct ThreadDetailView: View {
     }
 
     var body: some View {
+        let threadReplies = filteredReplies
+        let replyCountsByTarget = ReplyCountEstimator.counts(for: threadReplies)
+
         ScrollViewReader { scrollProxy in
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 0) {
@@ -295,7 +297,7 @@ struct ThreadDetailView: View {
                     event: viewModel.rootItem.displayEvent,
                     mediaLayout: .feed,
                     reactionCount: appSettings.reactionsVisibleInFeeds ? rootReactionCount : 0,
-                    commentCount: appSettings.reactionsVisibleInFeeds ? filteredReplies.count : 0,
+                    commentCount: appSettings.reactionsVisibleInFeeds ? threadReplies.count : 0,
                     onHashtagTap: { hashtag in
                         openHashtagFeed(hashtag: hashtag)
                     },
@@ -317,7 +319,6 @@ struct ThreadDetailView: View {
                             await handleRootReactionTap()
                         }
                     }
-                    .disabled(isRootReactionPublishing)
 
                     Button {
                         Task { @MainActor in
@@ -326,8 +327,8 @@ struct ThreadDetailView: View {
                     } label: {
                         HStack(spacing: 4) {
                             Image(systemName: "bubble.right")
-                            if !filteredReplies.isEmpty {
-                                Text("\(filteredReplies.count)")
+                            if !threadReplies.isEmpty {
+                                Text("\(threadReplies.count)")
                                     .font(.footnote)
                             }
                         }
@@ -474,8 +475,8 @@ struct ThreadDetailView: View {
                 Text("Replies")
                     .font(.headline)
 
-                if !filteredReplies.isEmpty {
-                    Text("\(filteredReplies.count)")
+                if !threadReplies.isEmpty {
+                    Text("\(threadReplies.count)")
                         .font(.caption.weight(.semibold))
                         .foregroundStyle(.secondary)
                         .padding(.horizontal, 8)
@@ -496,14 +497,14 @@ struct ThreadDetailView: View {
             .padding(.top, 12)
             .padding(.bottom, 6)
 
-            if viewModel.isLoading && filteredReplies.isEmpty {
+            if viewModel.isLoading && threadReplies.isEmpty {
                 HStack {
                     Spacer()
                     ProgressView()
                     Spacer()
                 }
                 .padding(.vertical, 16)
-            } else if filteredReplies.isEmpty {
+            } else if threadReplies.isEmpty {
                 VStack(spacing: 6) {
                     Text("No replies yet")
                         .font(.headline)
@@ -515,7 +516,7 @@ struct ThreadDetailView: View {
                 .padding(.horizontal, 16)
                 .padding(.vertical, 18)
             } else {
-                ForEach(filteredReplies) { reply in
+                ForEach(threadReplies) { reply in
                     FeedRowView(
                         item: reply,
                         reactionCount: reactionStats.reactionCount(for: reply.displayEventID),
@@ -771,10 +772,6 @@ struct ThreadDetailView: View {
             for: viewModel.rootItem.displayEventID,
             currentPubkey: auth.currentAccount?.pubkey
         )
-    }
-
-    private var isRootReactionPublishing: Bool {
-        reactionStats.isPublishingReaction(for: viewModel.rootItem.displayEventID)
     }
 
     private var isRootOwnedByCurrentAccount: Bool {
@@ -1035,7 +1032,7 @@ struct ThreadDetailView: View {
 
     private var filteredReplies: [FeedItem] {
         viewModel.replies.filter { item in
-            if item.moderationEvents.contains(where: { MuteStore.shared.shouldHide($0) }) {
+            if MuteStore.shared.shouldHideAny(item.moderationEvents) {
                 return false
             }
             if hideNSFWEnabled && item.moderationEvents.contains(where: { $0.containsNSFWHashtag }) {
@@ -1043,10 +1040,6 @@ struct ThreadDetailView: View {
             }
             return true
         }
-    }
-
-    private var replyCountsByTarget: [String: Int] {
-        ReplyCountEstimator.counts(for: filteredReplies)
     }
 
     private var nsfwHiddenCard: some View {
@@ -1262,7 +1255,7 @@ struct ThreadDetailView: View {
             mimeType: mimeType,
             filename: filename,
             nsec: normalizedNsec,
-            provider: appSettings.mediaUploadProvider
+            provider: .blossom
         )
 
         return ReplyComposerAttachment(

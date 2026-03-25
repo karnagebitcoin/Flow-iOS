@@ -1,6 +1,107 @@
 import Foundation
 import NostrSDK
 
+struct MuteFilterSnapshot: Sendable, Equatable {
+    let mutedPubkeys: Set<String>
+    let exactMutedWords: Set<String>
+    let phraseMutedWords: [String]
+
+    var hasAnyRules: Bool {
+        !mutedPubkeys.isEmpty || !exactMutedWords.isEmpty || !phraseMutedWords.isEmpty
+    }
+
+    func shouldHide(_ event: NostrEvent) -> Bool {
+        if mutedPubkeys.contains(normalizePubkey(event.pubkey)) {
+            return true
+        }
+
+        return containsMutedWord(in: event)
+    }
+
+    func shouldHideAny(in events: [NostrEvent]) -> Bool {
+        for event in events where shouldHide(event) {
+            return true
+        }
+        return false
+    }
+
+    private func containsMutedWord(in event: NostrEvent) -> Bool {
+        guard !exactMutedWords.isEmpty || !phraseMutedWords.isEmpty else {
+            return false
+        }
+
+        let tagContent = event.tags
+            .flatMap { tag -> [String] in
+                guard let name = tag.first?.lowercased(), tag.count > 1 else {
+                    return []
+                }
+
+                let value = tag[1]
+
+                switch name {
+                case "t":
+                    let normalized = normalizedMutedWord(value) ?? value
+                    return [normalized, "#\(normalized)"]
+                case "subject", "title", "summary":
+                    return [value]
+                default:
+                    return []
+                }
+            }
+            .joined(separator: " ")
+
+        let combinedContent: String
+        if tagContent.isEmpty {
+            combinedContent = event.content
+        } else if event.content.isEmpty {
+            combinedContent = tagContent
+        } else {
+            combinedContent = "\(event.content) \(tagContent)"
+        }
+
+        return containsMutedWord(inNormalizedText: normalizedMutedWord(combinedContent))
+    }
+
+    private func containsMutedWord(inNormalizedText normalizedText: String?) -> Bool {
+        guard let normalizedText, !normalizedText.isEmpty else {
+            return false
+        }
+
+        if !exactMutedWords.isEmpty {
+            let tokens = Set(
+                normalizedText.split(whereSeparator: { !$0.isLetter && !$0.isNumber })
+                    .map(String.init)
+            )
+
+            if !tokens.isDisjoint(with: exactMutedWords) {
+                return true
+            }
+        }
+
+        for phrase in phraseMutedWords where normalizedText.contains(phrase) {
+            return true
+        }
+
+        return false
+    }
+
+    private func normalizePubkey(_ value: String) -> String {
+        value
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+    }
+
+    private func normalizedMutedWord(_ value: String?) -> String? {
+        guard let value else { return nil }
+        let trimmed = value
+            .replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .folding(options: [.caseInsensitive, .diacriticInsensitive], locale: .current)
+            .lowercased()
+        return trimmed.isEmpty ? nil : trimmed
+    }
+}
+
 struct MutedKeywordListState: Identifiable, Hashable, Sendable {
     let id: String
     let title: String
@@ -18,10 +119,13 @@ struct MutedKeywordListState: Identifiable, Hashable, Sendable {
 @MainActor
 final class MuteStore: ObservableObject, NIP44v2Encrypting {
     static let shared = MuteStore()
+    private static let muteDecisionCacheLimit = 4000
+    private static let normalizedEventTextCacheLimit = 4000
 
     @Published private(set) var mutedPubkeys: Set<String>
     @Published private(set) var activeMutedWords: [String]
     @Published private(set) var mutedKeywordLists: [MutedKeywordListState]
+    @Published private(set) var filterRevision = 0
     @Published private(set) var lastPublishError: String?
     @Published private(set) var isPublishing = false
 
@@ -135,6 +239,10 @@ final class MuteStore: ObservableObject, NIP44v2Encrypting {
     private var publishTask: Task<Void, Never>?
     private var latestMuteListSnapshot: MuteListSnapshot?
     private var latestPrivateTags: [NostrSDK.Tag] = []
+    private var exactMutedWords = Set<String>()
+    private var phraseMutedWords: [String] = []
+    private var muteDecisionCache: [String: Bool] = [:]
+    private var normalizedEventTextCache: [String: String] = [:]
     init(
         defaults: UserDefaults = .standard,
         feedService: ProfileEventService = ProfileEventService(),
@@ -192,6 +300,8 @@ final class MuteStore: ObservableObject, NIP44v2Encrypting {
         session = nextSession
         latestMuteListSnapshot = nil
         latestPrivateTags = []
+        clearMuteCaches()
+        clearDerivedEventCaches()
         lastPublishError = nil
         isPublishing = false
 
@@ -202,12 +312,14 @@ final class MuteStore: ObservableObject, NIP44v2Encrypting {
             mutedPubkeys = []
             activeMutedWords = []
             mutedKeywordLists = Self.defaultMutedKeywordLists()
+            rebuildMutedWordMatchers()
             return
         }
 
         mutedPubkeys = loadPersistedMutes(for: session.accountPubkey)
         activeMutedWords = []
         mutedKeywordLists = Self.defaultMutedKeywordLists()
+        rebuildMutedWordMatchers()
 
         syncTask = Task { [weak self] in
             await self?.syncFromRelay(for: session)
@@ -219,11 +331,43 @@ final class MuteStore: ObservableObject, NIP44v2Encrypting {
     }
 
     func shouldHide(_ event: NostrEvent) -> Bool {
-        isMuted(event.pubkey) || containsMutedWord(in: event.content)
+        if isMuted(event.pubkey) {
+            return true
+        }
+
+        if let cached = muteDecisionCache[event.id] {
+            return cached
+        }
+
+        let decision = containsMutedWord(in: event)
+        if muteDecisionCache.count >= Self.muteDecisionCacheLimit {
+            muteDecisionCache.removeAll(keepingCapacity: true)
+        }
+        muteDecisionCache[event.id] = decision
+        return decision
     }
 
     func containsMutedWord(in content: String) -> Bool {
+        guard !activeMutedWords.isEmpty else {
+            return false
+        }
+
+        return containsMutedWord(inNormalizedText: normalizedMutedWord(content))
+    }
+
+    func shouldHideAny(_ events: [NostrEvent]) -> Bool {
+        for event in events where shouldHide(event) {
+            return true
+        }
         return false
+    }
+
+    var filterSnapshot: MuteFilterSnapshot {
+        MuteFilterSnapshot(
+            mutedPubkeys: mutedPubkeys,
+            exactMutedWords: exactMutedWords,
+            phraseMutedWords: phraseMutedWords
+        )
     }
 
     func toggleMute(_ pubkey: String) {
@@ -244,6 +388,7 @@ final class MuteStore: ObservableObject, NIP44v2Encrypting {
         } else {
             mutedPubkeys.remove(normalizedTarget)
         }
+        invalidateFilterCaches()
         persistCurrentMutes()
         lastPublishError = nil
         isPublishing = true
@@ -254,6 +399,7 @@ final class MuteStore: ObservableObject, NIP44v2Encrypting {
                 for: session,
                 rollback: {
                     self?.mutedPubkeys = previousPubkeys
+                    self?.invalidateFilterCaches()
                     self?.persistCurrentMutes()
                 },
                 mutate: { state in
@@ -305,6 +451,7 @@ final class MuteStore: ObservableObject, NIP44v2Encrypting {
                     self?.latestPrivateTags = previousPrivateTags
                     self?.activeMutedWords = previousMutedWords
                     self?.mutedKeywordLists = previousKeywordLists
+                    self?.rebuildMutedWordMatchers()
                 },
                 mutate: { state in
                     let updated = self?.rebuildWordTags(
@@ -329,25 +476,29 @@ final class MuteStore: ObservableObject, NIP44v2Encrypting {
             return
         }
         guard let normalizedWord = normalizedMutedWord(word), !normalizedWord.isEmpty else { return }
-        guard listID != Self.otherKeywordListID else { return }
 
         let previousPrivateTags = latestPrivateTags
         let previousMutedWords = activeMutedWords
         let previousKeywordLists = mutedKeywordLists
 
-        let localPrivateTags = rebuildWordTags(
-            in: markingKeywordConfigurationConfirmed(
-                in: upsertingAddedWord(
-                    normalizedWord,
-                    in: removingKeywordRemovalTag(
+        let localPrivateTags: [NostrSDK.Tag]
+        if listID == Self.otherKeywordListID {
+            localPrivateTags = upsertingPrivateWordTag(normalizedWord, in: latestPrivateTags)
+        } else {
+            localPrivateTags = rebuildWordTags(
+                in: markingKeywordConfigurationConfirmed(
+                    in: upsertingAddedWord(
                         normalizedWord,
-                        from: latestPrivateTags,
+                        in: removingKeywordRemovalTag(
+                            normalizedWord,
+                            from: latestPrivateTags,
+                            listID: listID
+                        ),
                         listID: listID
-                    ),
-                    listID: listID
+                    )
                 )
             )
-        )
+        }
         applyPrivateTagsLocally(localPrivateTags)
 
         lastPublishError = nil
@@ -361,21 +512,27 @@ final class MuteStore: ObservableObject, NIP44v2Encrypting {
                     self?.latestPrivateTags = previousPrivateTags
                     self?.activeMutedWords = previousMutedWords
                     self?.mutedKeywordLists = previousKeywordLists
+                    self?.rebuildMutedWordMatchers()
                 },
                 mutate: { state in
-                    let updated = self?.rebuildWordTags(
-                        in: self?.markingKeywordConfigurationConfirmed(
-                            in: self?.upsertingAddedWord(
-                                normalizedWord,
-                                in: self?.removingKeywordRemovalTag(
+                    let updated: [NostrSDK.Tag]
+                    if listID == Self.otherKeywordListID {
+                        updated = self?.upsertingPrivateWordTag(normalizedWord, in: state.privateTags) ?? state.privateTags
+                    } else {
+                        updated = self?.rebuildWordTags(
+                            in: self?.markingKeywordConfigurationConfirmed(
+                                in: self?.upsertingAddedWord(
                                     normalizedWord,
-                                    from: state.privateTags,
+                                    in: self?.removingKeywordRemovalTag(
+                                        normalizedWord,
+                                        from: state.privateTags,
+                                        listID: listID
+                                    ) ?? state.privateTags,
                                     listID: listID
-                                ) ?? state.privateTags,
-                                listID: listID
+                                ) ?? state.privateTags
                             ) ?? state.privateTags
                         ) ?? state.privateTags
-                    ) ?? state.privateTags
+                    }
                     return (publicTags: state.publicTags, privateTags: updated)
                 }
             )
@@ -424,6 +581,7 @@ final class MuteStore: ObservableObject, NIP44v2Encrypting {
                     self?.latestPrivateTags = previousPrivateTags
                     self?.activeMutedWords = previousMutedWords
                     self?.mutedKeywordLists = previousKeywordLists
+                    self?.rebuildMutedWordMatchers()
                 },
                 mutate: { state in
                     let updated: [NostrSDK.Tag]
@@ -692,6 +850,7 @@ final class MuteStore: ObservableObject, NIP44v2Encrypting {
         mutedPubkeys = state.mutedPubkeys
         activeMutedWords = state.activeMutedWords
         mutedKeywordLists = state.mutedKeywordLists
+        rebuildMutedWordMatchers()
         persistCurrentMutes()
     }
 
@@ -699,6 +858,7 @@ final class MuteStore: ObservableObject, NIP44v2Encrypting {
         latestPrivateTags = privateTags
         activeMutedWords = activeMutedWords(from: privateTags)
         mutedKeywordLists = keywordLists(from: privateTags)
+        rebuildMutedWordMatchers()
     }
 
     private func activeMutedWords(from privateTags: [NostrSDK.Tag]) -> [String] {
@@ -752,19 +912,17 @@ final class MuteStore: ObservableObject, NIP44v2Encrypting {
         }
 
         let otherWords = activeMutedWords(from: privateTags).filter { !assignedWords.contains($0) }
-        if !otherWords.isEmpty {
-            visibleLists.append(
-                MutedKeywordListState(
-                    id: Self.otherKeywordListID,
-                    title: "Other",
-                    subtitle: "Private muted words from older settings or other clients",
-                    isEnabled: true,
-                    words: otherWords,
-                    allowsToggle: false,
-                    allowsAddingWords: false
-                )
+        visibleLists.append(
+            MutedKeywordListState(
+                id: Self.otherKeywordListID,
+                title: "Custom",
+                subtitle: "Your private muted words, phrases, and hashtags",
+                isEnabled: true,
+                words: otherWords,
+                allowsToggle: false,
+                allowsAddingWords: true
             )
-        }
+        )
 
         return visibleLists
     }
@@ -935,6 +1093,21 @@ final class MuteStore: ObservableObject, NIP44v2Encrypting {
         }
     }
 
+    private func upsertingPrivateWordTag(_ word: String, in privateTags: [NostrSDK.Tag]) -> [NostrSDK.Tag] {
+        guard !containsPrivateWordTag(word, in: privateTags),
+              let tag = decodeSDKTag(from: ["word", word]) else {
+            return privateTags
+        }
+        return privateTags + [tag]
+    }
+
+    private func containsPrivateWordTag(_ word: String, in privateTags: [NostrSDK.Tag]) -> Bool {
+        privateTags.contains {
+            $0.name.lowercased() == "word" &&
+                normalizedMutedWord($0.value) == word
+        }
+    }
+
     private func tagExists(
         name: String,
         value: String,
@@ -1017,16 +1190,6 @@ final class MuteStore: ObservableObject, NIP44v2Encrypting {
         return trimmed.isEmpty ? nil : trimmed
     }
 
-    private func matchesMutedWord(_ word: String, in normalizedContent: String) -> Bool {
-        if word.range(of: #"^[a-z0-9]+$"#, options: .regularExpression) != nil {
-            let escaped = NSRegularExpression.escapedPattern(for: word)
-            let pattern = "\\b\(escaped)\\b"
-            return normalizedContent.range(of: pattern, options: .regularExpression) != nil
-        }
-
-        return normalizedContent.contains(word)
-    }
-
     private func normalizedRelayURLs(_ relayURLs: [URL]) -> [URL] {
         var seen = Set<String>()
         var ordered: [URL] = []
@@ -1041,7 +1204,7 @@ final class MuteStore: ObservableObject, NIP44v2Encrypting {
     }
 
     private static func defaultMutedKeywordLists() -> [MutedKeywordListState] {
-        keywordListPresets.map {
+        let presetLists = keywordListPresets.map {
             MutedKeywordListState(
                 id: $0.id,
                 title: $0.title,
@@ -1052,5 +1215,123 @@ final class MuteStore: ObservableObject, NIP44v2Encrypting {
                 allowsAddingWords: true
             )
         }
+
+        return presetLists + [
+            MutedKeywordListState(
+                id: otherKeywordListID,
+                title: "Custom",
+                subtitle: "Your private muted words, phrases, and hashtags",
+                isEnabled: true,
+                words: [],
+                allowsToggle: false,
+                allowsAddingWords: true
+            )
+        ]
+    }
+
+    private func containsMutedWord(in event: NostrEvent) -> Bool {
+        guard !activeMutedWords.isEmpty else {
+            return false
+        }
+
+        return containsMutedWord(inNormalizedText: normalizedSearchableText(for: event))
+    }
+
+    private func containsMutedWord(inNormalizedText normalizedText: String?) -> Bool {
+        guard !activeMutedWords.isEmpty,
+              let normalizedText,
+              !normalizedText.isEmpty else {
+            return false
+        }
+
+        if !exactMutedWords.isEmpty {
+            let tokens = Set(
+                normalizedText.split(whereSeparator: { !$0.isLetter && !$0.isNumber })
+                    .map(String.init)
+            )
+
+            if !tokens.isDisjoint(with: exactMutedWords) {
+                return true
+            }
+        }
+
+        for phrase in phraseMutedWords where normalizedText.contains(phrase) {
+            return true
+        }
+
+        return false
+    }
+
+    private func rebuildMutedWordMatchers() {
+        invalidateFilterCaches()
+
+        var nextExactMutedWords = Set<String>()
+        var nextPhraseMutedWords: [String] = []
+
+        for word in activeMutedWords {
+            if word.range(of: #"^[a-z0-9]+$"#, options: .regularExpression) != nil {
+                nextExactMutedWords.insert(word)
+            } else {
+                nextPhraseMutedWords.append(word)
+            }
+        }
+
+        exactMutedWords = nextExactMutedWords
+        phraseMutedWords = nextPhraseMutedWords
+    }
+
+    private func clearMuteCaches() {
+        muteDecisionCache.removeAll(keepingCapacity: true)
+    }
+
+    private func clearDerivedEventCaches() {
+        normalizedEventTextCache.removeAll(keepingCapacity: true)
+    }
+
+    private func invalidateFilterCaches() {
+        clearMuteCaches()
+        filterRevision &+= 1
+    }
+
+    private func normalizedSearchableText(for event: NostrEvent) -> String? {
+        if let cached = normalizedEventTextCache[event.id] {
+            return cached.isEmpty ? nil : cached
+        }
+
+        let tagContent = event.tags
+            .flatMap { tag -> [String] in
+                guard let name = tag.first?.lowercased(), tag.count > 1 else {
+                    return []
+                }
+
+                let value = tag[1]
+
+                switch name {
+                case "t":
+                    let normalized = normalizedMutedWord(value) ?? value
+                    return [normalized, "#\(normalized)"]
+                case "subject", "title", "summary":
+                    return [value]
+                default:
+                    return []
+                }
+            }
+            .joined(separator: " ")
+
+        let combinedContent: String
+        if tagContent.isEmpty {
+            combinedContent = event.content
+        } else if event.content.isEmpty {
+            combinedContent = tagContent
+        } else {
+            combinedContent = "\(event.content) \(tagContent)"
+        }
+
+        let normalized = normalizedMutedWord(combinedContent) ?? ""
+        if normalizedEventTextCache.count >= Self.normalizedEventTextCacheLimit {
+            normalizedEventTextCache.removeAll(keepingCapacity: true)
+        }
+        normalizedEventTextCache[event.id] = normalized
+        return normalized.isEmpty ? nil : normalized
     }
 }

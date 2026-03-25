@@ -40,6 +40,10 @@ final class ThreadDetailViewModel: ObservableObject {
         return "Replies (\(replies.count))"
     }
 
+    private var muteFilterSnapshot: MuteFilterSnapshot {
+        MuteStore.shared.filterSnapshot
+    }
+
     func loadIfNeeded() async {
         guard !hasLoadedInitialState else { return }
         hasLoadedInitialState = true
@@ -58,13 +62,14 @@ final class ThreadDetailViewModel: ObservableObject {
         }
 
         do {
-            replies = try await service.fetchThreadReplies(
+            replies = pruneMutedItems(try await service.fetchThreadReplies(
                 relayURLs: readRelayURLs,
                 rootEventID: rootItem.displayEventID,
                 hydrationMode: .cachedProfilesOnly,
                 fetchTimeout: Self.fastThreadFetchTimeout,
-                relayFetchMode: Self.fastThreadRelayFetchMode
-            )
+                relayFetchMode: Self.fastThreadRelayFetchMode,
+                moderationSnapshot: muteFilterSnapshot
+            ))
             scheduleItemHydration(for: replies)
         } catch {
             if replies.isEmpty {
@@ -76,6 +81,7 @@ final class ThreadDetailViewModel: ObservableObject {
     }
 
     func appendLocalReply(_ item: FeedItem) {
+        guard !pruneMutedItems([item]).isEmpty else { return }
         guard item.event.id.lowercased() != rootItem.displayEventID.lowercased() else { return }
         guard !replies.contains(where: { $0.id.lowercased() == item.id.lowercased() }) else { return }
         replies.append(item)
@@ -94,7 +100,8 @@ final class ThreadDetailViewModel: ObservableObject {
             let hydrated = await self.service.buildFeedItems(
                 relayURLs: relayTargets,
                 events: events,
-                hydrationMode: .full
+                hydrationMode: .full,
+                moderationSnapshot: self.muteFilterSnapshot
             )
             guard !Task.isCancelled else { return }
             guard !hydrated.isEmpty else { return }
@@ -110,7 +117,19 @@ final class ThreadDetailViewModel: ObservableObject {
         for item in itemsToMerge {
             byID[item.id.lowercased()] = item
         }
-        replies = Self.sortedReplies(Array(byID.values))
+        replies = pruneMutedItems(Self.sortedReplies(Array(byID.values)))
+    }
+
+    private func pruneMutedItems(
+        _ sourceItems: [FeedItem],
+        snapshot: MuteFilterSnapshot? = nil
+    ) -> [FeedItem] {
+        let snapshot = snapshot ?? muteFilterSnapshot
+        guard snapshot.hasAnyRules else { return sourceItems }
+
+        return sourceItems.filter { item in
+            !snapshot.shouldHideAny(in: item.moderationEvents)
+        }
     }
 
     private static func sortedReplies(_ items: [FeedItem]) -> [FeedItem] {

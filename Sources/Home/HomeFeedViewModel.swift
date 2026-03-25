@@ -117,20 +117,42 @@ final class HomeFeedViewModel: ObservableObject {
         let hadMoreAvailable: Bool
     }
 
+    private struct VisibleItemsCacheKey: Equatable {
+        let itemsRevision: Int
+        let mode: FeedMode
+        let showKinds: [Int]
+        let mediaOnly: Bool
+        let hideNSFW: Bool
+        let filterRevision: Int
+        let mutedConversationRevision: Int
+        let ignoreMediaOnly: Bool
+    }
+
     private struct LiveSubscriptionTarget: Sendable {
         let relayURL: URL
         let filter: NostrFilter
         let signature: String
     }
 
-    @Published private(set) var items: [FeedItem] = []
+    @Published private(set) var items: [FeedItem] = [] {
+        didSet {
+            itemsRevision &+= 1
+            clearVisibleItemsCache()
+        }
+    }
     @Published private(set) var bufferedNewItems: [FeedItem] = []
-    @Published var mode: FeedMode = .posts
+    @Published var mode: FeedMode = .posts {
+        didSet { clearVisibleItemsCache() }
+    }
     @Published private(set) var isLoading = false
     @Published private(set) var isLoadingMore = false
     @Published private(set) var isBootstrappingFeed = false
-    @Published private(set) var showKinds: [Int]
-    @Published private(set) var mediaOnly: Bool
+    @Published private(set) var showKinds: [Int] {
+        didSet { clearVisibleItemsCache() }
+    }
+    @Published private(set) var mediaOnly: Bool {
+        didSet { clearVisibleItemsCache() }
+    }
     @Published var feedSource: HomePrimaryFeedSource = .network
     @Published private(set) var interestHashtags: [String] = []
     @Published private(set) var favoriteHashtags: [String] = []
@@ -167,7 +189,16 @@ final class HomeFeedViewModel: ObservableObject {
     private var knownEventIDs = Set<String>()
     private var followingPubkeys: [String] = []
     private var currentUserPubkey: String?
-    private var mutedConversationIDs = Set<String>()
+    private var mutedConversationIDs = Set<String>() {
+        didSet {
+            mutedConversationRevision &+= 1
+            clearVisibleItemsCache()
+        }
+    }
+    private var itemsRevision = 0
+    private var mutedConversationRevision = 0
+    private var visibleItemsCacheKey: VisibleItemsCacheKey?
+    private var visibleItemsCache: [FeedItem] = []
 
     private var liveSubscriptionKinds: [Int] = []
     private var liveSubscriptionSource: HomePrimaryFeedSource?
@@ -221,7 +252,11 @@ final class HomeFeedViewModel: ObservableObject {
     }
 
     var visibleItems: [FeedItem] {
-        filterVisibleItems(items)
+        filteredMainItems()
+    }
+
+    private var muteFilterSnapshot: MuteFilterSnapshot {
+        MuteStore.shared.filterSnapshot
     }
 
     var visibleBufferedNewItemsCount: Int {
@@ -237,7 +272,7 @@ final class HomeFeedViewModel: ObservableObject {
     }
 
     var mediaOnlyFilteredOutAll: Bool {
-        mediaOnly && visibleItems.isEmpty && !filterVisibleItems(items, ignoreMediaOnly: true).isEmpty
+        mediaOnly && visibleItems.isEmpty && !filteredMainItems(ignoreMediaOnly: true).isEmpty
     }
 
     var isShowingLoadingPlaceholder: Bool {
@@ -533,7 +568,8 @@ final class HomeFeedViewModel: ObservableObject {
                     until: nil,
                     hydrationMode: requestHydrationMode,
                     fetchTimeout: requestFetchTimeout,
-                    relayFetchMode: requestRelayFetchMode
+                    relayFetchMode: requestRelayFetchMode,
+                    moderationSnapshot: muteFilterSnapshot
                 )
 
             case .interests:
@@ -543,7 +579,8 @@ final class HomeFeedViewModel: ObservableObject {
                     until: nil,
                     hydrationMode: requestHydrationMode,
                     fetchTimeout: requestFetchTimeout,
-                    relayFetchMode: requestRelayFetchMode
+                    relayFetchMode: requestRelayFetchMode,
+                    moderationSnapshot: muteFilterSnapshot
                 )
                 fetched = interestPage.items
                 hasReachedEnd = !interestPage.hadMoreAvailable
@@ -555,7 +592,8 @@ final class HomeFeedViewModel: ObservableObject {
                     until: nil,
                     hydrationMode: requestHydrationMode,
                     fetchTimeout: requestFetchTimeout,
-                    relayFetchMode: requestRelayFetchMode
+                    relayFetchMode: requestRelayFetchMode,
+                    moderationSnapshot: muteFilterSnapshot
                 )
                 fetched = newsPage.items
                 hasReachedEnd = !newsPage.hadMoreAvailable
@@ -574,7 +612,8 @@ final class HomeFeedViewModel: ObservableObject {
                     until: nil,
                     hydrationMode: requestHydrationMode,
                     fetchTimeout: requestFetchTimeout,
-                    relayFetchMode: requestRelayFetchMode
+                    relayFetchMode: requestRelayFetchMode,
+                    moderationSnapshot: muteFilterSnapshot
                 )
                 fetched = customPage.items
                 hasReachedEnd = !customPage.hadMoreAvailable
@@ -589,7 +628,8 @@ final class HomeFeedViewModel: ObservableObject {
                     until: nil,
                     hydrationMode: requestHydrationMode,
                     fetchTimeout: requestFetchTimeout,
-                    relayFetchMode: requestRelayFetchMode
+                    relayFetchMode: requestRelayFetchMode,
+                    moderationSnapshot: muteFilterSnapshot
                 )
 
             case .following:
@@ -636,7 +676,8 @@ final class HomeFeedViewModel: ObservableObject {
                     until: nil,
                     hydrationMode: requestHydrationMode,
                     fetchTimeout: requestFetchTimeout,
-                    relayFetchMode: requestRelayFetchMode
+                    relayFetchMode: requestRelayFetchMode,
+                    moderationSnapshot: muteFilterSnapshot
                 )
             }
 
@@ -655,14 +696,14 @@ final class HomeFeedViewModel: ObservableObject {
 
             guard latestRefreshRequestID == refreshRequestID else { return }
 
-            let mergedItems = startedWithEmptyItems
+            let mergedItems = pruneMutedItems(startedWithEmptyItems
                 ? mergeItemArrays(primary: bufferedNewItems, secondary: fetched)
-                : fetched
+                : fetched)
 
             items = mergedItems
             bufferedNewItems = []
             knownEventIDs = Set(mergedItems.map(\.id))
-            oldestCreatedAt = mergedItems.last?.event.createdAt
+            oldestCreatedAt = mergedItems.last?.event.createdAt ?? fetched.last?.event.createdAt
             if !usesCompositePagination(requestSource) {
                 hasReachedEnd = fetched.count < pageSize
             }
@@ -724,7 +765,8 @@ final class HomeFeedViewModel: ObservableObject {
                     until: until,
                     hydrationMode: requestHydrationMode,
                     fetchTimeout: requestFetchTimeout,
-                    relayFetchMode: requestRelayFetchMode
+                    relayFetchMode: requestRelayFetchMode,
+                    moderationSnapshot: muteFilterSnapshot
                 )
 
             case .interests:
@@ -733,7 +775,8 @@ final class HomeFeedViewModel: ObservableObject {
                     until: until,
                     hydrationMode: requestHydrationMode,
                     fetchTimeout: requestFetchTimeout,
-                    relayFetchMode: requestRelayFetchMode
+                    relayFetchMode: requestRelayFetchMode,
+                    moderationSnapshot: muteFilterSnapshot
                 )
                 fetched = interestPage.items
                 hasReachedEnd = !interestPage.hadMoreAvailable
@@ -744,7 +787,8 @@ final class HomeFeedViewModel: ObservableObject {
                     until: until,
                     hydrationMode: requestHydrationMode,
                     fetchTimeout: requestFetchTimeout,
-                    relayFetchMode: requestRelayFetchMode
+                    relayFetchMode: requestRelayFetchMode,
+                    moderationSnapshot: muteFilterSnapshot
                 )
                 fetched = newsPage.items
                 hasReachedEnd = !newsPage.hadMoreAvailable
@@ -761,7 +805,8 @@ final class HomeFeedViewModel: ObservableObject {
                     until: until,
                     hydrationMode: requestHydrationMode,
                     fetchTimeout: requestFetchTimeout,
-                    relayFetchMode: requestRelayFetchMode
+                    relayFetchMode: requestRelayFetchMode,
+                    moderationSnapshot: muteFilterSnapshot
                 )
                 fetched = customPage.items
                 hasReachedEnd = !customPage.hadMoreAvailable
@@ -775,7 +820,8 @@ final class HomeFeedViewModel: ObservableObject {
                     until: until,
                     hydrationMode: requestHydrationMode,
                     fetchTimeout: requestFetchTimeout,
-                    relayFetchMode: requestRelayFetchMode
+                    relayFetchMode: requestRelayFetchMode,
+                    moderationSnapshot: muteFilterSnapshot
                 )
 
             case .following:
@@ -792,7 +838,8 @@ final class HomeFeedViewModel: ObservableObject {
                     until: until,
                     hydrationMode: requestHydrationMode,
                     fetchTimeout: requestFetchTimeout,
-                    relayFetchMode: requestRelayFetchMode
+                    relayFetchMode: requestRelayFetchMode,
+                    moderationSnapshot: muteFilterSnapshot
                 )
             }
 
@@ -967,7 +1014,11 @@ final class HomeFeedViewModel: ObservableObject {
         guard feedKinds(for: feedSource).contains(event.kind) else { return }
         guard !knownEventIDs.contains(event.id) else { return }
 
-        let hydrated = await service.buildFeedItems(relayURLs: hydrationRelayURLs(for: feedSource), events: [event])
+        let hydrated = await service.buildFeedItems(
+            relayURLs: hydrationRelayURLs(for: feedSource),
+            events: [event],
+            moderationSnapshot: muteFilterSnapshot
+        )
         guard let item = hydrated.first else { return }
         guard !knownEventIDs.contains(item.id) else { return }
 
@@ -979,7 +1030,7 @@ final class HomeFeedViewModel: ObservableObject {
     }
 
     private func mergeKeepingNewest(itemsToMerge: [FeedItem]) {
-        items = mergeItemArrays(primary: itemsToMerge, secondary: items)
+        items = pruneMutedItems(mergeItemArrays(primary: itemsToMerge, secondary: items))
 
         let currentlyVisibleIDs = Set(items.map(\.id))
         bufferedNewItems.removeAll { currentlyVisibleIDs.contains($0.id) }
@@ -1136,7 +1187,7 @@ final class HomeFeedViewModel: ObservableObject {
                 return false
             }
 
-            if item.moderationEvents.contains(where: { MuteStore.shared.shouldHide($0) }) {
+            if MuteStore.shared.shouldHideAny(item.moderationEvents) {
                 return false
             }
 
@@ -1163,6 +1214,45 @@ final class HomeFeedViewModel: ObservableObject {
         }
     }
 
+    private func pruneMutedItems(
+        _ source: [FeedItem],
+        snapshot: MuteFilterSnapshot? = nil
+    ) -> [FeedItem] {
+        let snapshot = snapshot ?? muteFilterSnapshot
+        guard snapshot.hasAnyRules else { return source }
+
+        return source.filter { item in
+            !snapshot.shouldHideAny(in: item.moderationEvents)
+        }
+    }
+
+    private func filteredMainItems(ignoreMediaOnly: Bool = false) -> [FeedItem] {
+        let key = VisibleItemsCacheKey(
+            itemsRevision: itemsRevision,
+            mode: mode,
+            showKinds: showKinds,
+            mediaOnly: mediaOnly,
+            hideNSFW: AppSettingsStore.shared.hideNSFWContent,
+            filterRevision: MuteStore.shared.filterRevision,
+            mutedConversationRevision: mutedConversationRevision,
+            ignoreMediaOnly: ignoreMediaOnly
+        )
+
+        if visibleItemsCacheKey == key {
+            return visibleItemsCache
+        }
+
+        let filtered = filterVisibleItems(items, ignoreMediaOnly: ignoreMediaOnly)
+        visibleItemsCacheKey = key
+        visibleItemsCache = filtered
+        return filtered
+    }
+
+    private func clearVisibleItemsCache() {
+        visibleItemsCacheKey = nil
+        visibleItemsCache = []
+    }
+
     private func loadRecentFeedSnapshot() async -> Bool {
         guard let cachedEvents = await recentFeedStore.getRecentFeed(key: recentFeedKey),
               !cachedEvents.isEmpty else {
@@ -1172,14 +1262,16 @@ final class HomeFeedViewModel: ObservableObject {
         let hydrated = await service.buildFeedItems(
             relayURLs: hydrationRelayURLs(for: feedSource),
             events: cachedEvents.sorted(by: { $0.createdAt > $1.createdAt }),
-            hydrationMode: .cachedProfilesOnly
+            hydrationMode: .cachedProfilesOnly,
+            moderationSnapshot: muteFilterSnapshot
         )
-        guard !hydrated.isEmpty else { return false }
+        let prunedHydrated = pruneMutedItems(hydrated)
+        guard !prunedHydrated.isEmpty else { return false }
 
-        items = hydrated
+        items = prunedHydrated
         bufferedNewItems = []
-        knownEventIDs = Set(hydrated.map(\.id))
-        oldestCreatedAt = hydrated.last?.event.createdAt
+        knownEventIDs = Set(prunedHydrated.map(\.id))
+        oldestCreatedAt = prunedHydrated.last?.event.createdAt
         hasReachedEnd = false
         return true
     }
@@ -1364,7 +1456,8 @@ final class HomeFeedViewModel: ObservableObject {
         until: Int?,
         hydrationMode: FeedItemHydrationMode = .full,
         fetchTimeout: TimeInterval = 12,
-        relayFetchMode: RelayFetchMode = .allRelays
+        relayFetchMode: RelayFetchMode = .allRelays,
+        moderationSnapshot: MuteFilterSnapshot? = nil
     ) async throws -> NewsFeedPageResult {
         let hashtags = configuredInterestHashtags()
         guard !hashtags.isEmpty else {
@@ -1381,7 +1474,8 @@ final class HomeFeedViewModel: ObservableObject {
             until: until,
             hydrationMode: hydrationMode,
             fetchTimeout: fetchTimeout,
-            relayFetchMode: relayFetchMode
+            relayFetchMode: relayFetchMode,
+            moderationSnapshot: moderationSnapshot
         )
         return NewsFeedPageResult(
             items: fetched,
@@ -1394,7 +1488,8 @@ final class HomeFeedViewModel: ObservableObject {
         until: Int?,
         hydrationMode: FeedItemHydrationMode = .full,
         fetchTimeout: TimeInterval = 12,
-        relayFetchMode: RelayFetchMode = .allRelays
+        relayFetchMode: RelayFetchMode = .allRelays,
+        moderationSnapshot: MuteFilterSnapshot? = nil
     ) async throws -> NewsFeedPageResult {
         let newsRelayURLs = relayURLs(for: .news)
         let hydrationRelayURLs = hydrationRelayURLs(for: .news)
@@ -1409,7 +1504,8 @@ final class HomeFeedViewModel: ObservableObject {
             until: until,
             hydrationMode: hydrationMode,
             fetchTimeout: fetchTimeout,
-            relayFetchMode: relayFetchMode
+            relayFetchMode: relayFetchMode,
+            moderationSnapshot: moderationSnapshot
         )
         async let authorItemsTask = authors.isEmpty
             ? [FeedItem]()
@@ -1421,7 +1517,8 @@ final class HomeFeedViewModel: ObservableObject {
                 until: until,
                 hydrationMode: hydrationMode,
                 fetchTimeout: fetchTimeout,
-                relayFetchMode: relayFetchMode
+                relayFetchMode: relayFetchMode,
+                moderationSnapshot: moderationSnapshot
             )
 
         let relayItems = try await relayItemsTask
@@ -1442,7 +1539,8 @@ final class HomeFeedViewModel: ObservableObject {
                             until: until,
                             hydrationMode: hydrationMode,
                             fetchTimeout: fetchTimeout,
-                            relayFetchMode: relayFetchMode
+                            relayFetchMode: relayFetchMode,
+                            moderationSnapshot: moderationSnapshot
                         )
                     }
                 }
@@ -1474,7 +1572,8 @@ final class HomeFeedViewModel: ObservableObject {
         let hydrated = await service.buildFeedItems(
             relayURLs: hydrationRelayURLs,
             events: limitedEvents,
-            hydrationMode: hydrationMode
+            hydrationMode: hydrationMode,
+            moderationSnapshot: moderationSnapshot
         )
 
         let hadMoreAvailable =
@@ -1496,7 +1595,8 @@ final class HomeFeedViewModel: ObservableObject {
         until: Int?,
         hydrationMode: FeedItemHydrationMode = .full,
         fetchTimeout: TimeInterval = 12,
-        relayFetchMode: RelayFetchMode = .allRelays
+        relayFetchMode: RelayFetchMode = .allRelays,
+        moderationSnapshot: MuteFilterSnapshot? = nil
     ) async throws -> NewsFeedPageResult {
         guard limit > 0 else {
             return NewsFeedPageResult(items: [], hadMoreAvailable: false)
@@ -1524,7 +1624,8 @@ final class HomeFeedViewModel: ObservableObject {
                 until: until,
                 hydrationMode: hydrationMode,
                 fetchTimeout: fetchTimeout,
-                relayFetchMode: relayFetchMode
+                relayFetchMode: relayFetchMode,
+                moderationSnapshot: moderationSnapshot
             )
 
         let authorItems = try await authorItemsTask
@@ -1544,7 +1645,8 @@ final class HomeFeedViewModel: ObservableObject {
                             until: until,
                             hydrationMode: hydrationMode,
                             fetchTimeout: fetchTimeout,
-                            relayFetchMode: relayFetchMode
+                            relayFetchMode: relayFetchMode,
+                            moderationSnapshot: moderationSnapshot
                         )
                     }
                 }
@@ -1572,7 +1674,8 @@ final class HomeFeedViewModel: ObservableObject {
                             until: until,
                             hydrationMode: hydrationMode,
                             fetchTimeout: fetchTimeout,
-                            relayFetchMode: relayFetchMode
+                            relayFetchMode: relayFetchMode,
+                            moderationSnapshot: moderationSnapshot
                         )
                     }
                 }
@@ -1619,7 +1722,8 @@ final class HomeFeedViewModel: ObservableObject {
             let hydrated = await self.service.buildFeedItems(
                 relayURLs: relayTargets,
                 events: events,
-                hydrationMode: .full
+                hydrationMode: .full,
+                moderationSnapshot: self.muteFilterSnapshot
             )
             guard !Task.isCancelled else { return }
             guard !hydrated.isEmpty else { return }
@@ -1629,7 +1733,9 @@ final class HomeFeedViewModel: ObservableObject {
                     return
                 }
 
-                self.items = self.mergeItemArrays(primary: hydrated, secondary: self.items)
+                self.items = self.pruneMutedItems(
+                    self.mergeItemArrays(primary: hydrated, secondary: self.items)
+                )
                 self.knownEventIDs = Set(self.items.map(\.id))
                 self.knownEventIDs.formUnion(self.bufferedNewItems.map(\.id))
 

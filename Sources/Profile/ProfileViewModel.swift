@@ -3,12 +3,26 @@ import NostrSDK
 
 @MainActor
 final class ProfileViewModel: ObservableObject {
+    private struct VisibleItemsCacheKey: Equatable {
+        let itemsRevision: Int
+        let mode: FeedMode
+        let hideNSFW: Bool
+        let filterRevision: Int
+    }
+
     @Published private(set) var profile: NostrProfile?
     @Published private(set) var metadataSnapshot: ProfileMetadataSnapshot?
     @Published private(set) var followingCount: Int = 0
     @Published private(set) var followsCurrentUser = false
-    @Published private(set) var items: [FeedItem] = []
-    @Published var mode: FeedMode = .posts
+    @Published private(set) var items: [FeedItem] = [] {
+        didSet {
+            itemsRevision &+= 1
+            clearVisibleItemsCache()
+        }
+    }
+    @Published var mode: FeedMode = .posts {
+        didSet { clearVisibleItemsCache() }
+    }
     @Published private(set) var isLoading = false
     @Published private(set) var hasCompletedInitialLoad = false
     @Published private(set) var isLoadingMore = false
@@ -33,6 +47,9 @@ final class ProfileViewModel: ObservableObject {
     private var hasReachedEnd = false
     private var hasLoadedInitialState = false
     private var itemHydrationTask: Task<Void, Never>?
+    private var itemsRevision = 0
+    private var visibleItemsCacheKey: VisibleItemsCacheKey?
+    private var visibleItemsCache: [FeedItem] = []
 
     init(
         pubkey: String,
@@ -74,21 +91,25 @@ final class ProfileViewModel: ObservableObject {
     }
 
     var visibleItems: [FeedItem] {
-        let hideNSFW = AppSettingsStore.shared.hideNSFWContent
-        return items.filter { item in
-            if item.moderationEvents.contains(where: { MuteStore.shared.shouldHide($0) }) {
-                return false
-            }
-            if hideNSFW && item.moderationEvents.contains(where: { $0.containsNSFWHashtag }) {
-                return false
-            }
-            switch mode {
-            case .posts:
-                return !item.event.isReplyNote
-            case .postsAndReplies:
-                return item.event.isReplyNote
-            }
+        let key = VisibleItemsCacheKey(
+            itemsRevision: itemsRevision,
+            mode: mode,
+            hideNSFW: AppSettingsStore.shared.hideNSFWContent,
+            filterRevision: MuteStore.shared.filterRevision
+        )
+
+        if visibleItemsCacheKey == key {
+            return visibleItemsCache
         }
+
+        let filtered = filteredItems(items, for: mode)
+        visibleItemsCacheKey = key
+        visibleItemsCache = filtered
+        return filtered
+    }
+
+    private var muteFilterSnapshot: MuteFilterSnapshot {
+        MuteStore.shared.filterSnapshot
     }
 
     var displayName: String {
@@ -206,22 +227,21 @@ final class ProfileViewModel: ObservableObject {
         var fetchedItems: [FeedItem] = []
         var feedError: Error?
         do {
-            fetchedItems = try await service.fetchAuthorFeed(
-                relayURLs: readRelayURLs,
-                authorPubkey: pubkey,
-                kinds: requestKinds,
-                limit: pageSize,
+            let feedWindow = try await fetchModeAwareAuthorFeed(
                 until: nil,
+                minimumVisibleCount: pageSize,
                 hydrationMode: requestHydrationMode,
                 fetchTimeout: requestFetchTimeout,
-                relayFetchMode: requestRelayFetchMode
+                relayFetchMode: requestRelayFetchMode,
+                moderationSnapshot: muteFilterSnapshot
             )
+            fetchedItems = feedWindow.items
             guard !Task.isCancelled else { return }
 
-            items = fetchedItems
-            oldestCreatedAt = fetchedItems.last?.event.createdAt
-            hasReachedEnd = fetchedItems.count < pageSize
-            scheduleItemHydration(for: fetchedItems)
+            items = pruneMutedItems(fetchedItems)
+            oldestCreatedAt = feedWindow.oldestCreatedAt
+            hasReachedEnd = feedWindow.hasReachedEnd
+            scheduleItemHydration(for: items)
         } catch {
             feedError = error
         }
@@ -267,29 +287,43 @@ final class ProfileViewModel: ObservableObject {
         }
 
         do {
-            let fetched = try await service.fetchAuthorFeed(
-                relayURLs: readRelayURLs,
-                authorPubkey: pubkey,
-                kinds: requestKinds,
-                limit: pageSize,
+            let minimumVisibleCount = mode == .postsAndReplies
+                ? min(max(pageSize / 2, 10), pageSize)
+                : 1
+            let feedWindow = try await fetchModeAwareAuthorFeed(
                 until: until,
+                minimumVisibleCount: minimumVisibleCount,
                 hydrationMode: requestHydrationMode,
                 fetchTimeout: requestFetchTimeout,
-                relayFetchMode: requestRelayFetchMode
+                relayFetchMode: requestRelayFetchMode,
+                moderationSnapshot: muteFilterSnapshot
             )
 
-            if fetched.isEmpty {
+            if feedWindow.items.isEmpty {
                 hasReachedEnd = true
                 return
             }
 
-            oldestCreatedAt = fetched.last?.event.createdAt
-            hasReachedEnd = fetched.count < pageSize
-            mergeKeepingNewest(itemsToMerge: fetched)
+            oldestCreatedAt = feedWindow.oldestCreatedAt
+            hasReachedEnd = feedWindow.hasReachedEnd
+            mergeKeepingNewest(itemsToMerge: feedWindow.items)
             scheduleItemHydration(for: items)
         } catch {
-            errorMessage = "Couldn't load more posts."
+            errorMessage = mode == .postsAndReplies
+                ? "Couldn't load more replies."
+                : "Couldn't load more posts."
         }
+    }
+
+    func prepareForSelectedModeIfNeeded() async {
+        guard hasCompletedInitialLoad else { return }
+        guard mode == .postsAndReplies else { return }
+        guard !hasReachedEnd else { return }
+
+        let minimumVisibleReplies = min(max(pageSize / 3, 8), pageSize)
+        guard filteredItems(items, for: .postsAndReplies).count < minimumVisibleReplies else { return }
+
+        await refresh()
     }
 
     func refreshFollowRelationship(currentAccountPubkey: String?) async {
@@ -529,7 +563,124 @@ final class ProfileViewModel: ObservableObject {
         for item in itemsToMerge {
             byID[item.id] = item
         }
-        items = byID.values.sorted {
+        items = pruneMutedItems(byID.values.sorted {
+            if $0.event.createdAt == $1.event.createdAt {
+                return $0.id > $1.id
+            }
+            return $0.event.createdAt > $1.event.createdAt
+        })
+    }
+
+    private func filteredItems(_ sourceItems: [FeedItem], for mode: FeedMode) -> [FeedItem] {
+        let hideNSFW = AppSettingsStore.shared.hideNSFWContent
+        return sourceItems.filter { item in
+            if MuteStore.shared.shouldHideAny(item.moderationEvents) {
+                return false
+            }
+            if hideNSFW && item.moderationEvents.contains(where: { $0.containsNSFWHashtag }) {
+                return false
+            }
+
+            switch mode {
+            case .posts:
+                return !item.displayEvent.isReplyNote
+            case .postsAndReplies:
+                return item.displayEvent.isReplyNote
+            }
+        }
+    }
+
+    private func pruneMutedItems(
+        _ sourceItems: [FeedItem],
+        snapshot: MuteFilterSnapshot? = nil
+    ) -> [FeedItem] {
+        let snapshot = snapshot ?? muteFilterSnapshot
+        guard snapshot.hasAnyRules else { return sourceItems }
+
+        return sourceItems.filter { item in
+            !snapshot.shouldHideAny(in: item.moderationEvents)
+        }
+    }
+
+    private func clearVisibleItemsCache() {
+        visibleItemsCacheKey = nil
+        visibleItemsCache = []
+    }
+
+    private struct FeedWindow {
+        let items: [FeedItem]
+        let oldestCreatedAt: Int?
+        let hasReachedEnd: Bool
+    }
+
+    private func fetchModeAwareAuthorFeed(
+        until: Int?,
+        minimumVisibleCount: Int,
+        hydrationMode: FeedItemHydrationMode,
+        fetchTimeout: TimeInterval,
+        relayFetchMode: RelayFetchMode,
+        moderationSnapshot: MuteFilterSnapshot? = nil
+    ) async throws -> FeedWindow {
+        let targetMode = mode
+        let batchSize = targetMode == .postsAndReplies ? max(pageSize, 100) : pageSize
+        let maxBatches = targetMode == .postsAndReplies ? 4 : 1
+
+        var aggregated: [FeedItem] = []
+        var nextUntil = until
+        var oldestFetchedCreatedAt: Int?
+        var hasReachedEnd = false
+
+        for _ in 0..<maxBatches {
+            let fetched = try await service.fetchAuthorFeed(
+                relayURLs: readRelayURLs,
+                authorPubkey: pubkey,
+                kinds: requestKinds,
+                limit: batchSize,
+                until: nextUntil,
+                hydrationMode: hydrationMode,
+                fetchTimeout: fetchTimeout,
+                relayFetchMode: relayFetchMode,
+                moderationSnapshot: moderationSnapshot
+            )
+
+            if fetched.isEmpty {
+                hasReachedEnd = true
+                break
+            }
+
+            oldestFetchedCreatedAt = fetched.last?.event.createdAt
+            hasReachedEnd = fetched.count < batchSize
+            aggregated = mergedItemsKeepingNewest(existing: aggregated, incoming: fetched)
+
+            if filteredItems(aggregated, for: targetMode).count >= minimumVisibleCount {
+                break
+            }
+
+            guard !hasReachedEnd, let oldestFetchedCreatedAt else {
+                break
+            }
+
+            let candidateUntil = max(oldestFetchedCreatedAt - 1, 0)
+            guard candidateUntil > 0 else {
+                hasReachedEnd = true
+                break
+            }
+            nextUntil = candidateUntil
+        }
+
+        return FeedWindow(
+            items: aggregated,
+            oldestCreatedAt: oldestFetchedCreatedAt,
+            hasReachedEnd: hasReachedEnd
+        )
+    }
+
+    private func mergedItemsKeepingNewest(existing: [FeedItem], incoming: [FeedItem]) -> [FeedItem] {
+        var byID = Dictionary(uniqueKeysWithValues: existing.map { ($0.id, $0) })
+        for item in incoming {
+            byID[item.id] = item
+        }
+        return byID.values.sorted {
             if $0.event.createdAt == $1.event.createdAt {
                 return $0.id > $1.id
             }
@@ -549,7 +700,8 @@ final class ProfileViewModel: ObservableObject {
             let hydrated = await self.service.buildFeedItems(
                 relayURLs: relayTargets,
                 events: events,
-                hydrationMode: .full
+                hydrationMode: .full,
+                moderationSnapshot: self.muteFilterSnapshot
             )
             guard !Task.isCancelled else { return }
             guard !hydrated.isEmpty else { return }
@@ -632,16 +784,13 @@ actor ProfileMediaUploadService {
         filename: String,
         nsec: String
     ) async throws -> URL {
-        let provider = await MainActor.run {
-            AppSettingsStore.shared.mediaUploadProvider
-        }
         do {
             let result = try await mediaUploadService.uploadMedia(
                 data: data,
                 mimeType: mimeType,
                 filename: filename,
                 nsec: nsec,
-                provider: provider
+                provider: .blossom
             )
             return result.url
         } catch let uploadError as MediaUploadError {

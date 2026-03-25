@@ -9,7 +9,6 @@ struct HashtagFeedView: View {
     @StateObject private var viewModel: HashtagFeedViewModel
     @ObservedObject private var reactionStats = NoteReactionStatsService.shared
     @ObservedObject private var followStore = FollowStore.shared
-    @ObservedObject private var muteStore = MuteStore.shared
     @ObservedObject private var hashtagFavoritesStore = HashtagFavoritesStore.shared
     @State private var selectedThreadItem: FeedItem?
     @State private var selectedHashtagRoute: HashtagRoute?
@@ -33,7 +32,8 @@ struct HashtagFeedView: View {
     }
 
     var body: some View {
-        let visibleReplyCounts = ReplyCountEstimator.counts(for: viewModel.visibleItems)
+        let visibleItems = viewModel.visibleItems
+        let visibleReplyCounts = ReplyCountEstimator.counts(for: visibleItems)
 
         List {
             Section {
@@ -50,7 +50,7 @@ struct HashtagFeedView: View {
             .listRowSeparator(.hidden)
             .listRowBackground(Color.clear)
 
-            if viewModel.isLoading && viewModel.visibleItems.isEmpty {
+            if viewModel.isLoading && visibleItems.isEmpty {
                 ForEach(0..<6, id: \.self) { _ in
                     loadingRow
                         .listRowInsets(
@@ -63,7 +63,7 @@ struct HashtagFeedView: View {
                         )
                         .listRowSeparator(.hidden)
                 }
-            } else if viewModel.visibleItems.isEmpty {
+            } else if visibleItems.isEmpty {
                 VStack(spacing: 8) {
                     if let errorMessage = viewModel.errorMessage {
                         Text(errorMessage)
@@ -89,7 +89,7 @@ struct HashtagFeedView: View {
                 )
                 .listRowSeparator(.hidden)
             } else {
-                ForEach(viewModel.visibleItems) { item in
+                ForEach(visibleItems) { item in
                     FeedRowView(
                         item: item,
                         reactionCount: reactionStats.reactionCount(for: item.displayEventID),
@@ -161,7 +161,7 @@ struct HashtagFeedView: View {
                 .listRowSeparator(.hidden)
             }
 
-            if !viewModel.visibleItems.isEmpty || viewModel.isLoadingMore {
+            if !visibleItems.isEmpty || viewModel.isLoadingMore {
                 Color.clear
                     .frame(height: Self.bottomScrollClearance)
                     .listRowInsets(EdgeInsets())

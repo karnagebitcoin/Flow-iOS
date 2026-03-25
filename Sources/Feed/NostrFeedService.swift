@@ -378,12 +378,14 @@ struct NostrFeedService: Sendable {
         until: Int?,
         hydrationMode: FeedItemHydrationMode = .full,
         fetchTimeout: TimeInterval = 12,
-        relayFetchMode: RelayFetchMode = .allRelays
+        relayFetchMode: RelayFetchMode = .allRelays,
+        moderationSnapshot: MuteFilterSnapshot? = nil
     ) async throws -> [FeedItem] {
         guard limit > 0 else { return [] }
+        let fetchLimit = expandedTimelineLimit(for: limit, moderationSnapshot: moderationSnapshot)
         let filter = NostrFilter(
             kinds: kinds,
-            limit: limit,
+            limit: fetchLimit,
             until: until
         )
 
@@ -396,15 +398,17 @@ struct NostrFeedService: Sendable {
             relayFetchMode: relayFetchMode
         )
             .filter { kindsSet.contains($0.kind) }
+        let visibleEvents = filterVisibleEvents(fetchedEvents, moderationSnapshot: moderationSnapshot)
         let timelineEvents = Array(
-            deduplicateEvents(fetchedEvents)
+            deduplicateEvents(visibleEvents)
                 .sorted(by: { $0.createdAt > $1.createdAt })
                 .prefix(limit)
         )
         return await buildFeedItems(
             relayURLs: relayURLs,
             events: timelineEvents,
-            hydrationMode: hydrationMode
+            hydrationMode: hydrationMode,
+            moderationSnapshot: moderationSnapshot
         )
     }
 
@@ -432,7 +436,8 @@ struct NostrFeedService: Sendable {
         until: Int?,
         hydrationMode: FeedItemHydrationMode = .full,
         fetchTimeout: TimeInterval = 12,
-        relayFetchMode: RelayFetchMode = .allRelays
+        relayFetchMode: RelayFetchMode = .allRelays,
+        moderationSnapshot: MuteFilterSnapshot? = nil
     ) async throws -> [FeedItem] {
         guard limit > 0 else { return [] }
         let normalizedAuthors = Array(
@@ -446,7 +451,10 @@ struct NostrFeedService: Sendable {
 
         let kindsSet = Set(kinds)
         let authorBatches = normalizedAuthors.chunked(into: 250)
-        let perBatchLimit = min(max(limit, 50), 120)
+        let perBatchLimit = min(
+            expandedTimelineLimit(for: max(limit, 50), moderationSnapshot: moderationSnapshot),
+            240
+        )
 
         let fetchedEvents = try await withThrowingTaskGroup(of: [NostrEvent].self) { group in
             for batch in authorBatches {
@@ -474,15 +482,17 @@ struct NostrFeedService: Sendable {
             return merged
         }
         .filter { kindsSet.contains($0.kind) }
+        let visibleEvents = filterVisibleEvents(fetchedEvents, moderationSnapshot: moderationSnapshot)
         let timelineEvents = Array(
-            deduplicateEvents(fetchedEvents)
+            deduplicateEvents(visibleEvents)
                 .sorted(by: { $0.createdAt > $1.createdAt })
                 .prefix(limit)
         )
         return await buildFeedItems(
             relayURLs: relayURLs,
             events: timelineEvents,
-            hydrationMode: hydrationMode
+            hydrationMode: hydrationMode,
+            moderationSnapshot: moderationSnapshot
         )
     }
 
@@ -586,13 +596,15 @@ struct NostrFeedService: Sendable {
         until: Int?,
         hydrationMode: FeedItemHydrationMode = .full,
         fetchTimeout: TimeInterval = 12,
-        relayFetchMode: RelayFetchMode = .allRelays
+        relayFetchMode: RelayFetchMode = .allRelays,
+        moderationSnapshot: MuteFilterSnapshot? = nil
     ) async throws -> [FeedItem] {
         guard limit > 0 else { return [] }
+        let fetchLimit = expandedTimelineLimit(for: limit, moderationSnapshot: moderationSnapshot)
         let filter = NostrFilter(
             authors: [authorPubkey],
             kinds: kinds,
-            limit: limit,
+            limit: fetchLimit,
             until: until
         )
 
@@ -605,15 +617,17 @@ struct NostrFeedService: Sendable {
             relayFetchMode: relayFetchMode
         )
             .filter { kindsSet.contains($0.kind) }
+        let visibleEvents = filterVisibleEvents(fetchedEvents, moderationSnapshot: moderationSnapshot)
         let timelineEvents = Array(
-            deduplicateEvents(fetchedEvents)
+            deduplicateEvents(visibleEvents)
                 .sorted(by: { $0.createdAt > $1.createdAt })
                 .prefix(limit)
         )
         return await buildFeedItems(
             relayURLs: relayURLs,
             events: timelineEvents,
-            hydrationMode: hydrationMode
+            hydrationMode: hydrationMode,
+            moderationSnapshot: moderationSnapshot
         )
     }
 
@@ -625,19 +639,31 @@ struct NostrFeedService: Sendable {
         until: Int? = nil,
         hydrationMode: FeedItemHydrationMode = .full,
         fetchTimeout: TimeInterval = 12,
-        relayFetchMode: RelayFetchMode = .allRelays
+        relayFetchMode: RelayFetchMode = .allRelays,
+        moderationSnapshot: MuteFilterSnapshot? = nil
     ) async throws -> [FeedItem] {
         guard limit > 0 else { return [] }
         let normalizedQuery = query.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !normalizedQuery.isEmpty else { return [] }
         let shouldVerifyResults = shouldLocallyVerifyNIP50Results(for: normalizedQuery)
         let searchTerms = shouldVerifyResults ? normalizedSearchTerms(from: normalizedQuery) : []
+        let primarySearchLimit = expandedTimelineLimit(
+            for: max(limit * 2, 120),
+            moderationSnapshot: moderationSnapshot
+        )
+        let fallbackSearchLimit = min(
+            expandedTimelineLimit(
+                for: min(max(limit * 8, 220), 600),
+                moderationSnapshot: moderationSnapshot
+            ),
+            600
+        )
 
         let kindsSet = Set(kinds)
         let searchFilter = NostrFilter(
             kinds: kinds,
             search: normalizedQuery,
-            limit: max(limit * 2, 120),
+            limit: primarySearchLimit,
             until: until
         )
 
@@ -660,6 +686,7 @@ struct NostrFeedService: Sendable {
                 guard shouldVerifyResults else { return true }
                 return eventMatchesSearchTerms(event, terms: searchTerms)
             }
+            fetchedEvents = filterVisibleEvents(fetchedEvents, moderationSnapshot: moderationSnapshot)
         } catch {
             firstError = error
         }
@@ -667,7 +694,7 @@ struct NostrFeedService: Sendable {
         if fetchedEvents.isEmpty {
             let fallbackFilter = NostrFilter(
                 kinds: kinds,
-                limit: min(max(limit * 8, 220), 600),
+                limit: fallbackSearchLimit,
                 until: until
             )
 
@@ -686,6 +713,7 @@ struct NostrFeedService: Sendable {
                     guard shouldVerifyResults else { return true }
                     return eventMatchesSearchTerms(event, terms: searchTerms)
                 }
+                fetchedEvents = filterVisibleEvents(fetchedEvents, moderationSnapshot: moderationSnapshot)
             } catch {
                 if firstError == nil {
                     firstError = error
@@ -710,7 +738,8 @@ struct NostrFeedService: Sendable {
         return await buildFeedItems(
             relayURLs: relayURLs,
             events: timelineEvents,
-            hydrationMode: hydrationMode
+            hydrationMode: hydrationMode,
+            moderationSnapshot: moderationSnapshot
         )
     }
 
@@ -805,12 +834,19 @@ struct NostrFeedService: Sendable {
         return matches
     }
 
-    func fetchTrendingNotes(limit: Int = 100) async throws -> [FeedItem] {
+    func fetchTrendingNotes(
+        limit: Int = 100,
+        moderationSnapshot: MuteFilterSnapshot? = nil
+    ) async throws -> [FeedItem] {
         guard limit > 0 else { return [] }
         let cappedLimit = min(limit, 100)
+        let fetchLimit = min(
+            expandedTimelineLimit(for: cappedLimit, moderationSnapshot: moderationSnapshot),
+            240
+        )
         let filter = NostrFilter(
             kinds: [1],
-            limit: cappedLimit
+            limit: fetchLimit
         )
 
         let fetchedEvents = try await fetchTimelineEvents(
@@ -818,8 +854,9 @@ struct NostrFeedService: Sendable {
             filter: filter
         )
         .filter { $0.kind == 1 }
+        let visibleEvents = filterVisibleEvents(fetchedEvents, moderationSnapshot: moderationSnapshot)
         let timelineEvents = Array(
-            deduplicateEvents(fetchedEvents)
+            deduplicateEvents(visibleEvents)
                 .sorted(by: { lhs, rhs in
                     if lhs.createdAt == rhs.createdAt {
                         return lhs.id > rhs.id
@@ -831,7 +868,8 @@ struct NostrFeedService: Sendable {
 
         return await buildAuthorOnlyFeedItems(
             relayURLs: [Self.trendingRelayURL],
-            events: timelineEvents
+            events: timelineEvents,
+            moderationSnapshot: moderationSnapshot
         )
     }
 
@@ -954,11 +992,13 @@ struct NostrFeedService: Sendable {
         until: Int?,
         hydrationMode: FeedItemHydrationMode = .full,
         fetchTimeout: TimeInterval = 12,
-        relayFetchMode: RelayFetchMode = .allRelays
+        relayFetchMode: RelayFetchMode = .allRelays,
+        moderationSnapshot: MuteFilterSnapshot? = nil
     ) async throws -> [FeedItem] {
         guard limit > 0 else {
             return []
         }
+        let fetchLimit = expandedTimelineLimit(for: limit, moderationSnapshot: moderationSnapshot)
 
         let normalizedHashtag = hashtag
             .trimmingCharacters(in: .whitespacesAndNewlines)
@@ -971,7 +1011,7 @@ struct NostrFeedService: Sendable {
         
         let filter = NostrFilter(
             kinds: kinds,
-            limit: limit,
+            limit: fetchLimit,
             until: until,
             tagFilters: ["t": [normalizedHashtag]]
         )
@@ -985,15 +1025,17 @@ struct NostrFeedService: Sendable {
             relayFetchMode: relayFetchMode
         )
             .filter { kindsSet.contains($0.kind) }
+        let visibleEvents = filterVisibleEvents(fetchedEvents, moderationSnapshot: moderationSnapshot)
         let timelineEvents = Array(
-            deduplicateEvents(fetchedEvents)
+            deduplicateEvents(visibleEvents)
                 .sorted(by: { $0.createdAt > $1.createdAt })
                 .prefix(limit)
         )
         return await buildFeedItems(
             relayURLs: relayURLs,
             events: timelineEvents,
-            hydrationMode: hydrationMode
+            hydrationMode: hydrationMode,
+            moderationSnapshot: moderationSnapshot
         )
     }
 
@@ -1005,9 +1047,11 @@ struct NostrFeedService: Sendable {
         until: Int?,
         hydrationMode: FeedItemHydrationMode = .full,
         fetchTimeout: TimeInterval = 12,
-        relayFetchMode: RelayFetchMode = .allRelays
+        relayFetchMode: RelayFetchMode = .allRelays,
+        moderationSnapshot: MuteFilterSnapshot? = nil
     ) async throws -> [FeedItem] {
         guard limit > 0 else { return [] }
+        let fetchLimit = expandedTimelineLimit(for: limit, moderationSnapshot: moderationSnapshot)
 
         let normalizedHashtags = Array(
             Set(
@@ -1024,7 +1068,7 @@ struct NostrFeedService: Sendable {
 
         let filter = NostrFilter(
             kinds: kinds,
-            limit: limit,
+            limit: fetchLimit,
             until: until,
             tagFilters: ["t": normalizedHashtags]
         )
@@ -1047,9 +1091,10 @@ struct NostrFeedService: Sendable {
             )
             return !eventHashtags.isDisjoint(with: normalizedHashtags)
         }
+        let visibleEvents = filterVisibleEvents(fetchedEvents, moderationSnapshot: moderationSnapshot)
 
         let timelineEvents = Array(
-            deduplicateEvents(fetchedEvents)
+            deduplicateEvents(visibleEvents)
                 .sorted(by: { lhs, rhs in
                     if lhs.createdAt == rhs.createdAt {
                         return lhs.id > rhs.id
@@ -1061,7 +1106,8 @@ struct NostrFeedService: Sendable {
         return await buildFeedItems(
             relayURLs: relayURLs,
             events: timelineEvents,
-            hydrationMode: hydrationMode
+            hydrationMode: hydrationMode,
+            moderationSnapshot: moderationSnapshot
         )
     }
 
@@ -1079,11 +1125,13 @@ struct NostrFeedService: Sendable {
         limit: Int = 150,
         hydrationMode: FeedItemHydrationMode = .full,
         fetchTimeout: TimeInterval = 12,
-        relayFetchMode: RelayFetchMode = .allRelays
+        relayFetchMode: RelayFetchMode = .allRelays,
+        moderationSnapshot: MuteFilterSnapshot? = nil
     ) async throws -> [FeedItem] {
+        let fetchLimit = expandedTimelineLimit(for: limit, moderationSnapshot: moderationSnapshot)
         let directFilter = NostrFilter(
             kinds: [1, 1111, 1244],
-            limit: limit,
+            limit: fetchLimit,
             tagFilters: ["e": [rootEventID]]
         )
 
@@ -1101,7 +1149,7 @@ struct NostrFeedService: Sendable {
         if !directReplyIDs.isEmpty {
             let nestedFilter = NostrFilter(
                 kinds: [1, 1111, 1244],
-                limit: limit,
+                limit: fetchLimit,
                 tagFilters: ["e": Array(directReplyIDs.prefix(60))]
             )
             let nestedReplies = (try? await fetchTimelineEvents(
@@ -1119,11 +1167,15 @@ struct NostrFeedService: Sendable {
             allReplies.append(contentsOf: relevantNested)
         }
 
-        let uniqueEvents = deduplicateEvents(allReplies.sorted(by: { $0.createdAt < $1.createdAt }))
+        let uniqueEvents = deduplicateEvents(
+            filterVisibleEvents(allReplies, moderationSnapshot: moderationSnapshot)
+                .sorted(by: { $0.createdAt < $1.createdAt })
+        )
         return await buildFeedItems(
             relayURLs: relayURLs,
             events: uniqueEvents,
-            hydrationMode: hydrationMode
+            hydrationMode: hydrationMode,
+            moderationSnapshot: moderationSnapshot
         )
     }
 
@@ -1272,20 +1324,34 @@ struct NostrFeedService: Sendable {
         return profilesByPubkey
     }
 
-    func buildFeedItems(relayURL: URL, events: [NostrEvent]) async -> [FeedItem] {
-        await buildFeedItems(relayURLs: [relayURL], events: events)
+    func buildFeedItems(
+        relayURL: URL,
+        events: [NostrEvent],
+        moderationSnapshot: MuteFilterSnapshot? = nil
+    ) async -> [FeedItem] {
+        await buildFeedItems(
+            relayURLs: [relayURL],
+            events: events,
+            moderationSnapshot: moderationSnapshot
+        )
     }
 
     func buildFeedItems(
         relayURLs: [URL],
         events: [NostrEvent],
-        hydrationMode: FeedItemHydrationMode = .full
+        hydrationMode: FeedItemHydrationMode = .full,
+        moderationSnapshot: MuteFilterSnapshot? = nil
     ) async -> [FeedItem] {
-        let uniqueEvents = deduplicateEvents(events)
+        let uniqueEvents = deduplicateEvents(
+            filterVisibleEvents(events, moderationSnapshot: moderationSnapshot)
+        )
 
         switch hydrationMode {
         case .cachedProfilesOnly:
-            return await buildCachedFeedItems(events: uniqueEvents)
+            return await buildCachedFeedItems(
+                events: uniqueEvents,
+                moderationSnapshot: moderationSnapshot
+            )
         case .full:
             break
         }
@@ -1295,6 +1361,11 @@ struct NostrFeedService: Sendable {
 
         let profilesByPubkey = await actorProfilesTask
         let displayEventsBySourceID = await displayEventsTask
+        async let replyTargetEventsTask = resolveReplyTargetEvents(
+            for: uniqueEvents,
+            displayEventsBySourceID: displayEventsBySourceID,
+            relayURLs: relayURLs
+        )
         let displayPubkeys = Array(
             Set(
                 displayEventsBySourceID.values
@@ -1309,21 +1380,48 @@ struct NostrFeedService: Sendable {
             displayProfilesByPubkey.merge(fetchedDisplayProfiles, uniquingKeysWith: { existing, _ in existing })
         }
 
-        return uniqueEvents.map { event in
+        let replyTargetEventsBySourceID = await replyTargetEventsTask
+        let replyTargetPubkeys = Array(
+            Set(
+                replyTargetEventsBySourceID.values
+                    .map { normalizePubkey($0.pubkey) }
+                    .filter { !$0.isEmpty }
+            )
+        )
+        var replyTargetProfilesByPubkey = displayProfilesByPubkey
+        if !replyTargetPubkeys.isEmpty {
+            let fetchedReplyTargetProfiles = await fetchProfiles(relayURLs: relayURLs, pubkeys: replyTargetPubkeys)
+            replyTargetProfilesByPubkey.merge(
+                fetchedReplyTargetProfiles,
+                uniquingKeysWith: { existing, _ in existing }
+            )
+        }
+
+        let items = uniqueEvents.map { event in
             let normalizedPubkey = normalizePubkey(event.pubkey)
             let displayEvent = displayEventsBySourceID[event.id.lowercased()]
             let displayProfile = displayEvent.flatMap { displayProfilesByPubkey[normalizePubkey($0.pubkey)] }
+            let replyTargetEvent = replyTargetEventsBySourceID[event.id.lowercased()]
+            let replyTargetProfile = replyTargetEvent.flatMap {
+                replyTargetProfilesByPubkey[normalizePubkey($0.pubkey)]
+            }
 
             return FeedItem(
                 event: event,
                 profile: profilesByPubkey[normalizedPubkey],
                 displayEventOverride: displayEvent,
-                displayProfileOverride: displayProfile
+                displayProfileOverride: displayProfile,
+                replyTargetEvent: replyTargetEvent,
+                replyTargetProfile: replyTargetProfile
             )
         }
+        return filterVisibleFeedItems(items, moderationSnapshot: moderationSnapshot)
     }
 
-    private func buildCachedFeedItems(events: [NostrEvent]) async -> [FeedItem] {
+    private func buildCachedFeedItems(
+        events: [NostrEvent],
+        moderationSnapshot: MuteFilterSnapshot? = nil
+    ) async -> [FeedItem] {
         let actorPubkeys = Array(
             Set(
                 events
@@ -1347,28 +1445,82 @@ struct NostrFeedService: Sendable {
             )
         )
         let displayProfilesByPubkey = await profileCache.cachedProfiles(pubkeys: displayPubkeys)
+        let replyTargetEventsBySourceID = resolveCachedReplyTargetEvents(
+            for: events,
+            displayEventsBySourceID: displayEventsBySourceID
+        )
+        let replyTargetPubkeys = Array(
+            Set(
+                replyTargetEventsBySourceID.values
+                    .map { normalizePubkey($0.pubkey) }
+                    .filter { !$0.isEmpty }
+            )
+        )
+        let replyTargetProfilesByPubkey = await profileCache.cachedProfiles(pubkeys: replyTargetPubkeys)
 
-        return events.map { event in
+        let items = events.map { event in
             let normalizedPubkey = normalizePubkey(event.pubkey)
             let displayEvent = displayEventsBySourceID[event.id.lowercased()]
             let displayProfile = displayEvent.flatMap { displayProfilesByPubkey[normalizePubkey($0.pubkey)] }
+            let replyTargetEvent = replyTargetEventsBySourceID[event.id.lowercased()]
+            let replyTargetProfile = replyTargetEvent.flatMap {
+                replyTargetProfilesByPubkey[normalizePubkey($0.pubkey)]
+            }
 
             return FeedItem(
                 event: event,
                 profile: actorProfilesByPubkey[normalizedPubkey],
                 displayEventOverride: displayEvent,
-                displayProfileOverride: displayProfile
+                displayProfileOverride: displayProfile,
+                replyTargetEvent: replyTargetEvent,
+                replyTargetProfile: replyTargetProfile
             )
         }
+        return filterVisibleFeedItems(items, moderationSnapshot: moderationSnapshot)
     }
 
-    private func buildAuthorOnlyFeedItems(relayURLs: [URL], events: [NostrEvent]) async -> [FeedItem] {
-        let uniqueEvents = deduplicateEvents(events)
+    private func buildAuthorOnlyFeedItems(
+        relayURLs: [URL],
+        events: [NostrEvent],
+        moderationSnapshot: MuteFilterSnapshot? = nil
+    ) async -> [FeedItem] {
+        let uniqueEvents = deduplicateEvents(
+            filterVisibleEvents(events, moderationSnapshot: moderationSnapshot)
+        )
         let profilesByPubkey = await hydrateActorProfiles(for: uniqueEvents, relayURLs: relayURLs)
-        return uniqueEvents.map { event in
+        let items = uniqueEvents.map { event in
             let normalizedPubkey = normalizePubkey(event.pubkey)
             return FeedItem(event: event, profile: profilesByPubkey[normalizedPubkey])
         }
+        return filterVisibleFeedItems(items, moderationSnapshot: moderationSnapshot)
+    }
+
+    private func expandedTimelineLimit(
+        for limit: Int,
+        moderationSnapshot: MuteFilterSnapshot?
+    ) -> Int {
+        guard moderationSnapshot?.hasAnyRules == true else { return limit }
+        return min(max(limit * 4, limit), 240)
+    }
+
+    private func filterVisibleEvents(
+        _ events: [NostrEvent],
+        moderationSnapshot: MuteFilterSnapshot?
+    ) -> [NostrEvent] {
+        guard let moderationSnapshot, moderationSnapshot.hasAnyRules else {
+            return events
+        }
+        return events.filter { !moderationSnapshot.shouldHide($0) }
+    }
+
+    private func filterVisibleFeedItems(
+        _ items: [FeedItem],
+        moderationSnapshot: MuteFilterSnapshot?
+    ) -> [FeedItem] {
+        guard let moderationSnapshot, moderationSnapshot.hasAnyRules else {
+            return items
+        }
+        return items.filter { !moderationSnapshot.shouldHideAny(in: $0.moderationEvents) }
     }
 
     private func hydrateActorProfiles(
@@ -1442,6 +1594,84 @@ struct NostrFeedService: Sendable {
         }
 
         return displayEventsBySourceID
+    }
+
+    private func resolveCachedReplyTargetEvents(
+        for events: [NostrEvent],
+        displayEventsBySourceID: [String: NostrEvent]
+    ) -> [String: NostrEvent] {
+        let availableEvents = deduplicateEvents(events + Array(displayEventsBySourceID.values))
+        let availableEventsByID = Dictionary(
+            uniqueKeysWithValues: availableEvents.map { ($0.id.lowercased(), $0) }
+        )
+
+        var resolvedBySourceID: [String: NostrEvent] = [:]
+        for event in events {
+            let sourceID = event.id.lowercased()
+            let replySourceEvent = displayEventsBySourceID[sourceID] ?? event
+            guard replySourceEvent.isReplyNote else { continue }
+            guard let targetID = normalizedEventID(replySourceEvent.directReplyEventReferenceID) else { continue }
+            guard let targetEvent = availableEventsByID[targetID] else { continue }
+            resolvedBySourceID[sourceID] = targetEvent.resolvedRepostContentEvent ?? targetEvent
+        }
+
+        return resolvedBySourceID
+    }
+
+    private func resolveReplyTargetEvents(
+        for events: [NostrEvent],
+        displayEventsBySourceID: [String: NostrEvent],
+        relayURLs: [URL]
+    ) async -> [String: NostrEvent] {
+        let availableEvents = deduplicateEvents(events + Array(displayEventsBySourceID.values))
+        let availableEventsByID = Dictionary(
+            uniqueKeysWithValues: availableEvents.map { ($0.id.lowercased(), $0) }
+        )
+
+        var resolvedBySourceID: [String: NostrEvent] = [:]
+        var missingSourceToTargetIDs: [String: String] = [:]
+        var missingTargetIDs = Set<String>()
+
+        for event in events {
+            let sourceID = event.id.lowercased()
+            let replySourceEvent = displayEventsBySourceID[sourceID] ?? event
+            guard replySourceEvent.isReplyNote else { continue }
+            guard let targetID = normalizedEventID(replySourceEvent.directReplyEventReferenceID) else { continue }
+
+            if let localTarget = availableEventsByID[targetID] {
+                resolvedBySourceID[sourceID] = localTarget.resolvedRepostContentEvent ?? localTarget
+                continue
+            }
+
+            missingSourceToTargetIDs[sourceID] = targetID
+            missingTargetIDs.insert(targetID)
+        }
+
+        guard !missingTargetIDs.isEmpty else { return resolvedBySourceID }
+
+        let idsFilter = NostrFilter(
+            ids: Array(missingTargetIDs),
+            limit: max(missingTargetIDs.count * 2, missingTargetIDs.count)
+        )
+
+        guard let fetched = try? await fetchTimelineEvents(
+            relayURLs: relayURLs,
+            filter: idsFilter,
+            useCache: false
+        ) else {
+            return resolvedBySourceID
+        }
+
+        let fetchedByID = Dictionary(
+            uniqueKeysWithValues: deduplicateEvents(fetched).map { ($0.id.lowercased(), $0) }
+        )
+
+        for (sourceID, targetID) in missingSourceToTargetIDs {
+            guard let targetEvent = fetchedByID[targetID] else { continue }
+            resolvedBySourceID[sourceID] = targetEvent.resolvedRepostContentEvent ?? targetEvent
+        }
+
+        return resolvedBySourceID
     }
 
     private func resolveActivityTargetEvents(
@@ -1575,6 +1805,13 @@ struct NostrFeedService: Sendable {
         case .reaction(let reaction):
             return reaction.displayValue
         }
+    }
+
+    private func normalizedEventID(_ value: String?) -> String? {
+        let normalized = (value ?? "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+        return normalized.isEmpty ? nil : normalized
     }
 
     private func normalizedSearchTerms(from query: String) -> [String] {

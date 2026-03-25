@@ -11,7 +11,6 @@ struct HomeFeedView: View {
     @ObservedObject var viewModel: HomeFeedViewModel
     @ObservedObject private var reactionStats = NoteReactionStatsService.shared
     @ObservedObject private var followStore = FollowStore.shared
-    @ObservedObject private var muteStore = MuteStore.shared
     @ObservedObject private var interestFeedStore = InterestFeedStore.shared
     @ObservedObject private var hashtagFavoritesStore = HashtagFavoritesStore.shared
 
@@ -20,7 +19,6 @@ struct HomeFeedView: View {
     @State private var isShowingSideMenu = false
     @State private var isShowingFeedSourcePicker = false
     @State private var isShowingFilterSheet = false
-    @State private var isShowingRelaySettings = false
     @State private var isShowingSettings = false
     @State private var isTopNavigationVisible = true
 
@@ -32,7 +30,8 @@ struct HomeFeedView: View {
     @State private var shouldAutoFocusReplyInThread = false
 
     var body: some View {
-        let visibleReplyCounts = ReplyCountEstimator.counts(for: viewModel.visibleItems)
+        let visibleItems = viewModel.visibleItems
+        let visibleReplyCounts = ReplyCountEstimator.counts(for: visibleItems)
 
         NavigationStack {
             ZStack(alignment: .leading) {
@@ -84,7 +83,7 @@ struct HomeFeedView: View {
                                         )
                                         .listRowSeparator(.hidden)
                                 }
-                            } else if viewModel.visibleItems.isEmpty {
+                            } else if visibleItems.isEmpty {
                                 if viewModel.shouldShowFilteredOutState {
                                     filteredOutState
                                         .listRowInsets(
@@ -109,7 +108,7 @@ struct HomeFeedView: View {
                                         .listRowSeparator(.hidden)
                                 }
                             } else {
-                                ForEach(viewModel.visibleItems) { item in
+                                ForEach(visibleItems) { item in
                                     FeedRowView(
                                         item: item,
                                         reactionCount: reactionStats.reactionCount(for: item.displayEventID),
@@ -184,7 +183,7 @@ struct HomeFeedView: View {
                                 .listRowSeparator(.hidden)
                             }
 
-                            if !viewModel.visibleItems.isEmpty || viewModel.isLoadingMore {
+                            if !visibleItems.isEmpty || viewModel.isLoadingMore {
                                 Color.clear
                                     .frame(height: Self.bottomScrollClearance)
                                     .listRowInsets(EdgeInsets())
@@ -234,7 +233,7 @@ struct HomeFeedView: View {
                                 readRelayURLs: effectiveReadRelayURLs,
                                 writeRelayURLs: effectiveWriteRelayURLs
                             )
-                            muteStore.configure(
+                            MuteStore.shared.configure(
                                 accountPubkey: auth.currentAccount?.pubkey,
                                 nsec: auth.currentNsec,
                                 readRelayURLs: effectiveReadRelayURLs,
@@ -266,12 +265,9 @@ struct HomeFeedView: View {
             .sheet(isPresented: $isShowingFilterSheet) {
                 filterSheet
             }
-            .sheet(isPresented: $isShowingRelaySettings) {
-                RelaySettingsView()
-                    .environmentObject(relaySettings)
-            }
             .sheet(isPresented: $isShowingSettings) {
                 SettingsView()
+                    .environmentObject(relaySettings)
             }
             .navigationDestination(item: $selectedThreadItem) { item in
                 ThreadDetailView(
@@ -315,7 +311,7 @@ struct HomeFeedView: View {
                     readRelayURLs: effectiveReadRelayURLs,
                     writeRelayURLs: effectiveWriteRelayURLs
                 )
-                muteStore.configure(
+                MuteStore.shared.configure(
                     accountPubkey: newValue,
                     nsec: auth.currentNsec,
                     readRelayURLs: effectiveReadRelayURLs,
@@ -335,7 +331,7 @@ struct HomeFeedView: View {
                     readRelayURLs: effectiveReadRelayURLs,
                     writeRelayURLs: effectiveWriteRelayURLs
                 )
-                muteStore.configure(
+                MuteStore.shared.configure(
                     accountPubkey: auth.currentAccount?.pubkey,
                     nsec: newValue,
                     readRelayURLs: effectiveReadRelayURLs,
@@ -350,7 +346,7 @@ struct HomeFeedView: View {
                     readRelayURLs: effectiveReadRelayURLs,
                     writeRelayURLs: effectiveWriteRelayURLs
                 )
-                muteStore.configure(
+                MuteStore.shared.configure(
                     accountPubkey: auth.currentAccount?.pubkey,
                     nsec: auth.currentNsec,
                     readRelayURLs: effectiveReadRelayURLs,
@@ -364,7 +360,7 @@ struct HomeFeedView: View {
                     readRelayURLs: effectiveReadRelayURLs,
                     writeRelayURLs: effectiveWriteRelayURLs
                 )
-                muteStore.configure(
+                MuteStore.shared.configure(
                     accountPubkey: auth.currentAccount?.pubkey,
                     nsec: auth.currentNsec,
                     readRelayURLs: effectiveReadRelayURLs,
@@ -379,7 +375,7 @@ struct HomeFeedView: View {
                     readRelayURLs: effectiveReadRelayURLs,
                     writeRelayURLs: effectiveWriteRelayURLs
                 )
-                muteStore.configure(
+                MuteStore.shared.configure(
                     accountPubkey: auth.currentAccount?.pubkey,
                     nsec: auth.currentNsec,
                     readRelayURLs: effectiveReadRelayURLs,
@@ -502,9 +498,9 @@ struct HomeFeedView: View {
                         }
                         closeSideMenu()
                     },
-                    onManageRelays: {
+                    onOpenScannedProfile: { pubkey in
                         closeSideMenu()
-                        isShowingRelaySettings = true
+                        openProfile(pubkey: pubkey)
                     },
                     onManageSettings: {
                         closeSideMenu()
@@ -580,9 +576,6 @@ struct HomeFeedView: View {
 
     private var kindsFilterSection: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("Kinds")
-                .font(.headline)
-
             LazyVGrid(columns: filterGridColumns, spacing: 10) {
                 ForEach(viewModel.kindFilterOptions) { option in
                     FilterKindTileView(
@@ -599,7 +592,7 @@ struct HomeFeedView: View {
             Button {
                 viewModel.selectAllKinds()
             } label: {
-                Label("Select all kinds", systemImage: "line.3.horizontal.decrease.circle")
+                Label("Select All", systemImage: "line.3.horizontal.decrease.circle")
                     .font(.footnote.weight(.medium))
             }
             .buttonStyle(.bordered)
@@ -622,7 +615,7 @@ struct HomeFeedView: View {
                     Spacer()
                     if mediaOnlyEnabled {
                         Image(systemName: "checkmark.circle.fill")
-                            .foregroundColor(.accentColor)
+                            .foregroundStyle(appSettings.primaryColor)
                     }
                 }
                 .foregroundStyle(.primary)
@@ -633,7 +626,7 @@ struct HomeFeedView: View {
                     RoundedRectangle(cornerRadius: 12, style: .continuous)
                         .fill(
                             mediaOnlyEnabled
-                                ? Color.accentColor.opacity(0.14)
+                                ? appSettings.primaryColor.opacity(0.14)
                                 : Color(.secondarySystemBackground)
                         )
                 )
@@ -969,7 +962,7 @@ struct HomeFeedView: View {
                             if viewModel.feedSource == source {
                                 Image(systemName: "checkmark")
                                     .font(.body.weight(.semibold))
-                                    .foregroundColor(.accentColor)
+                                    .foregroundStyle(appSettings.primaryColor)
                             }
                         }
                         .contentShape(Rectangle())
@@ -1023,6 +1016,8 @@ private actor CachedAvatarImageLoader {
 }
 
 private struct FilterKindTileView: View {
+    @EnvironmentObject private var appSettings: AppSettingsStore
+
     let title: String
     let iconName: String
     let isSelected: Bool
@@ -1034,11 +1029,11 @@ private struct FilterKindTileView: View {
                 HStack(spacing: 8) {
                     Image(systemName: iconName)
                         .font(.subheadline.weight(.semibold))
-                        .foregroundColor(isSelected ? .accentColor : .secondary)
+                        .foregroundStyle(isSelected ? appSettings.primaryColor : .secondary)
                     Spacer()
                     if isSelected {
                         Image(systemName: "checkmark.circle.fill")
-                            .foregroundColor(.accentColor)
+                            .foregroundStyle(appSettings.primaryColor)
                     }
                 }
 
@@ -1054,7 +1049,7 @@ private struct FilterKindTileView: View {
                 RoundedRectangle(cornerRadius: 14, style: .continuous)
                     .fill(
                         isSelected
-                            ? Color.accentColor.opacity(0.14)
+                            ? appSettings.primaryColor.opacity(0.14)
                             : Color(.secondarySystemBackground)
                     )
             )
@@ -1062,7 +1057,7 @@ private struct FilterKindTileView: View {
                 RoundedRectangle(cornerRadius: 14, style: .continuous)
                     .stroke(
                         isSelected
-                            ? Color.accentColor.opacity(0.75)
+                            ? appSettings.primaryColor.opacity(0.75)
                             : Color(.separator).opacity(0.35),
                         lineWidth: 1
                     )
