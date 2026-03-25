@@ -134,6 +134,18 @@ struct NostrEvent: Codable, Hashable, Sendable {
         return nil
     }
 
+    var directReplyEventReferenceID: String? {
+        for tag in tags.reversed() {
+            guard let name = tag.first?.lowercased(), name == "e" else { continue }
+            guard tag.count > 1, !tag[1].isEmpty else { continue }
+            let marker = tag.count > 3 ? tag[3].lowercased() : ""
+            if marker == "reply" {
+                return tag[1]
+            }
+        }
+        return lastEventReferenceID
+    }
+
     var conversationID: String {
         if let root = rootEventReferenceID?.lowercased(), !root.isEmpty {
             return root
@@ -158,6 +170,31 @@ struct NostrEvent: Codable, Hashable, Sendable {
     func references(eventID: String) -> Bool {
         let target = eventID.lowercased()
         return eventReferenceIDs.contains { $0.lowercased() == target }
+    }
+
+    func previewSnippet(maxLength: Int = 80) -> String {
+        let normalized = content
+            .replacingOccurrences(of: "\r\n", with: "\n")
+            .replacingOccurrences(of: "\r", with: "\n")
+            .replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+
+        if !normalized.isEmpty {
+            guard normalized.count > maxLength else { return normalized }
+            let endIndex = normalized.index(normalized.startIndex, offsetBy: maxLength)
+            return String(normalized[..<endIndex]).trimmingCharacters(in: .whitespacesAndNewlines) + "..."
+        }
+
+        if hasMedia {
+            return "media post"
+        }
+
+        switch kind {
+        case 1111, 1244:
+            return "voice note"
+        default:
+            return "note"
+        }
     }
 
     var hasMedia: Bool {
@@ -399,17 +436,23 @@ struct FeedItem: Identifiable, Hashable, Sendable {
     let profile: NostrProfile?
     let displayEventOverride: NostrEvent?
     let displayProfileOverride: NostrProfile?
+    let replyTargetEvent: NostrEvent?
+    let replyTargetProfile: NostrProfile?
 
     init(
         event: NostrEvent,
         profile: NostrProfile?,
         displayEventOverride: NostrEvent? = nil,
-        displayProfileOverride: NostrProfile? = nil
+        displayProfileOverride: NostrProfile? = nil,
+        replyTargetEvent: NostrEvent? = nil,
+        replyTargetProfile: NostrProfile? = nil
     ) {
         self.event = event
         self.profile = profile
         self.displayEventOverride = displayEventOverride
         self.displayProfileOverride = displayProfileOverride
+        self.replyTargetEvent = replyTargetEvent
+        self.replyTargetProfile = replyTargetProfile
     }
 
     var id: String {
@@ -461,6 +504,16 @@ struct FeedItem: Identifiable, Hashable, Sendable {
     var threadNavigationItem: FeedItem {
         guard let displayEventOverride else { return self }
         return FeedItem(event: displayEventOverride, profile: displayProfile)
+    }
+
+    var replyTargetSnippet: String? {
+        guard let replyTargetEvent else { return nil }
+        return replyTargetEvent.previewSnippet(maxLength: 72)
+    }
+
+    var replyTargetFeedItem: FeedItem? {
+        guard let replyTargetEvent else { return nil }
+        return FeedItem(event: replyTargetEvent, profile: replyTargetProfile)
     }
 
     var displayName: String {

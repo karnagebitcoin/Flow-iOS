@@ -99,8 +99,8 @@ struct ReactionButton: View {
                 FloatingReactionHeartView(heart: heart, tint: activeColor)
             }
         }
-        .frame(width: 78, height: 92)
-        .offset(y: -12)
+        .frame(width: 104, height: 132)
+        .offset(y: -22)
         .allowsHitTesting(false)
     }
 
@@ -165,14 +165,14 @@ struct ReactionButton: View {
         guard isPressing, longHoldActivated else { return }
 
         let heart = ReactionFloatingHeart(
-            xDrift: CGFloat.random(in: -18...18),
-            yTravel: CGFloat.random(in: 26...62),
-            rotation: Double.random(in: -18...18),
-            startScale: CGFloat.random(in: 0.7...0.95),
-            endScale: CGFloat.random(in: 1.05...1.35),
-            size: CGFloat.random(in: 8...13),
-            duration: Double.random(in: 0.95...1.45),
-            opacity: Double.random(in: 0.55...0.92)
+            xDrift: CGFloat.random(in: -30...30),
+            yTravel: CGFloat.random(in: 42...88),
+            rotation: Double.random(in: -28...28),
+            startScale: CGFloat.random(in: 0.8...1.05),
+            endScale: CGFloat.random(in: 1.18...1.58),
+            size: CGFloat.random(in: 11...17),
+            duration: Double.random(in: 1.05...1.6),
+            opacity: Double.random(in: 0.58...0.95)
         )
         floatingHearts.append(heart)
 
@@ -193,7 +193,6 @@ struct ReactionButton: View {
         holdActivationTask = nil
         floatingHeartTask?.cancel()
         floatingHeartTask = nil
-        floatingHearts.removeAll()
     }
 }
 

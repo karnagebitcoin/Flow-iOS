@@ -9,8 +9,12 @@ struct ProfileQRCodeSheet: View {
 
     let npub: String
     let displayName: String
-    let handle: String
+    let handle: String?
     let avatarURL: URL?
+    var onOpenProfile: ((String) -> Void)? = nil
+
+    @State private var isShowingScanner = false
+    @State private var pendingScannedProfilePubkey: String?
 
     private var qrPayload: String {
         "nostr:\(npub)"
@@ -60,6 +64,22 @@ struct ProfileQRCodeSheet: View {
         }
         .presentationDetents([.large])
         .presentationDragIndicator(.visible)
+        .fullScreenCover(isPresented: $isShowingScanner) {
+            ProfileQRScannerFlowView(
+                onOpenProfile: { pubkey in
+                    pendingScannedProfilePubkey = pubkey
+                    isShowingScanner = false
+                }
+            )
+        }
+        .onChange(of: isShowingScanner) { _, isShowing in
+            guard !isShowing, let pubkey = pendingScannedProfilePubkey else { return }
+            pendingScannedProfilePubkey = nil
+            dismiss()
+            DispatchQueue.main.async {
+                onOpenProfile?(pubkey)
+            }
+        }
     }
 
     private var profileHeader: some View {
@@ -70,10 +90,12 @@ struct ProfileQRCodeSheet: View {
                 Text(displayName)
                     .font(.headline.weight(.semibold))
                     .lineLimit(1)
-                Text(handle)
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
+                if let handle = trimmedNonEmpty(handle) {
+                    Text(handle)
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
             }
 
             Spacer(minLength: 0)
@@ -151,12 +173,43 @@ struct ProfileQRCodeSheet: View {
     }
 
     private var actionRow: some View {
-        HStack(spacing: 10) {
+        VStack(spacing: 10) {
+            HStack(spacing: 10) {
+                Button {
+                    UIPasteboard.general.string = npub
+                    toastCenter.show("Copied ID")
+                } label: {
+                    Label("Copy ID", systemImage: "doc.on.doc")
+                        .font(.subheadline.weight(.semibold))
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 10)
+                        .foregroundStyle(.primary)
+                        .background(
+                            Capsule()
+                                .fill(Color(.secondarySystemBackground))
+                        )
+                        .overlay(
+                            Capsule()
+                                .stroke(Color(.separator).opacity(0.35), lineWidth: 0.8)
+                        )
+                }
+                .buttonStyle(.plain)
+
+                ShareLink(item: qrPayload) {
+                    Label("Share", systemImage: "square.and.arrow.up")
+                        .font(.subheadline.weight(.semibold))
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 10)
+                        .foregroundStyle(.white)
+                        .background(Capsule().fill(Color.accentColor))
+                }
+                .buttonStyle(.plain)
+            }
+
             Button {
-                UIPasteboard.general.string = npub
-                toastCenter.show("Copied ID")
+                isShowingScanner = true
             } label: {
-                Label("Copy ID", systemImage: "doc.on.doc")
+                Label("Scan Code", systemImage: "qrcode.viewfinder")
                     .font(.subheadline.weight(.semibold))
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 10)
@@ -171,22 +224,20 @@ struct ProfileQRCodeSheet: View {
                     )
             }
             .buttonStyle(.plain)
-
-            ShareLink(item: qrPayload) {
-                Label("Share", systemImage: "square.and.arrow.up")
-                    .font(.subheadline.weight(.semibold))
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 10)
-                    .foregroundStyle(.white)
-                    .background(Capsule().fill(Color.accentColor))
-            }
-            .buttonStyle(.plain)
         }
     }
 
     private var shortNpub: String {
         guard npub.count > 28 else { return npub }
         return "\(npub.prefix(14))...\(npub.suffix(10))"
+    }
+
+    private func trimmedNonEmpty(_ value: String?) -> String? {
+        guard let value = value?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !value.isEmpty else {
+            return nil
+        }
+        return value
     }
 }
 

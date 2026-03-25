@@ -135,6 +135,24 @@ actor NostrRelayClient {
         throw RelayClientError.publishTimedOut
     }
 
+    func publishEvent(
+        relayURL: URL,
+        eventData: Data,
+        eventID: String,
+        timeout: TimeInterval = 10
+    ) async throws {
+        guard let eventObject = try JSONSerialization.jsonObject(with: eventData) as? [String: Any] else {
+            throw RelayClientError.publishRejected("Malformed event payload")
+        }
+
+        try await publishEvent(
+            relayURL: relayURL,
+            eventObject: eventObject,
+            eventID: eventID,
+            timeout: timeout
+        )
+    }
+
     func fetchEvents(
         relayURLString: String,
         filter: NostrFilter,

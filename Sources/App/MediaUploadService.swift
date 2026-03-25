@@ -66,9 +66,9 @@ actor MediaUploadService {
     private let blossomServerListKind = 10_063
     private let blossomServerListCacheTTL: TimeInterval = 60 * 10
     private let blossomServerCandidates: [URL] = [
-        URL(string: "https://blossom.band/")!,
         URL(string: "https://blossom.primal.net/")!,
-        URL(string: "https://nostr.media/")!
+        URL(string: "https://blossom.band/")!,
+        URL(string: "https://blossom.nostr.build/")!
     ]
 
     private var nip96UploadURLByService: [String: URL] = [:]

@@ -4,10 +4,12 @@ struct HomeSlideoutMenuView: View {
     @EnvironmentObject private var auth: AuthManager
     @EnvironmentObject private var relaySettings: RelaySettingsStore
     @State private var accountHeaderName: String?
+    @State private var accountHeaderHandle: String?
     @State private var accountHeaderAvatarURL: URL?
+    @State private var isShowingProfileQR = false
 
     let onViewProfile: () -> Void
-    let onManageRelays: () -> Void
+    let onOpenScannedProfile: (String) -> Void
     let onManageSettings: () -> Void
     let onManageAccounts: () -> Void
     let onLogout: () -> Void
@@ -53,12 +55,6 @@ struct HomeSlideoutMenuView: View {
                     )
 
                     menuButton(
-                        title: "Network",
-                        icon: "dot.radiowaves.left.and.right",
-                        action: onManageRelays
-                    )
-
-                    menuButton(
                         title: "Settings",
                         icon: "gearshape",
                         action: onManageSettings
@@ -85,6 +81,19 @@ struct HomeSlideoutMenuView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .background(Color(.systemBackground))
+        .sheet(isPresented: $isShowingProfileQR) {
+            if let currentAccount = auth.currentAccount {
+                ProfileQRCodeSheet(
+                    npub: currentAccount.npub,
+                    displayName: resolvedAccountName(for: currentAccount),
+                    handle: resolvedAccountHandle,
+                    avatarURL: accountHeaderAvatarURL,
+                    onOpenProfile: { pubkey in
+                        onOpenScannedProfile(pubkey)
+                    }
+                )
+            }
+        }
         .task(id: accountHeaderLookupID) {
             await refreshAccountHeaderName()
         }
@@ -115,6 +124,20 @@ struct HomeSlideoutMenuView: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
+
+            Spacer(minLength: 0)
+
+            Button {
+                isShowingProfileQR = true
+            } label: {
+                Image(systemName: "qrcode")
+                    .font(.system(size: 17, weight: .semibold))
+                    .foregroundStyle(.primary)
+                    .frame(width: 36, height: 36)
+                    .background(Color(.secondarySystemBackground), in: Circle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Show profile QR")
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }
@@ -207,14 +230,20 @@ struct HomeSlideoutMenuView: View {
     private func refreshAccountHeaderName() async {
         guard let account = auth.currentAccount else {
             accountHeaderName = nil
+            accountHeaderHandle = nil
             accountHeaderAvatarURL = nil
             return
         }
+
+        accountHeaderName = nil
+        accountHeaderHandle = nil
+        accountHeaderAvatarURL = nil
 
         let normalizedPubkey = account.pubkey.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         let cacheResult = await ProfileCache.shared.resolve(pubkeys: [account.pubkey, normalizedPubkey])
         if let cachedProfile = cacheResult.hits[account.pubkey] ?? cacheResult.hits[normalizedPubkey] {
             accountHeaderName = preferredDisplayName(from: cachedProfile)
+            accountHeaderHandle = preferredHandle(from: cachedProfile)
             accountHeaderAvatarURL = preferredAvatarURL(from: cachedProfile)
         }
 
@@ -226,6 +255,7 @@ struct HomeSlideoutMenuView: View {
         let fetchedProfile = await NostrFeedService().fetchProfile(relayURLs: readRelayURLs, pubkey: normalizedPubkey)
         if let fetchedProfile {
             accountHeaderName = preferredDisplayName(from: fetchedProfile)
+            accountHeaderHandle = preferredHandle(from: fetchedProfile)
             accountHeaderAvatarURL = preferredAvatarURL(from: fetchedProfile)
         }
     }
@@ -244,6 +274,28 @@ struct HomeSlideoutMenuView: View {
             return nil
         }
         return url
+    }
+
+    private func preferredHandle(from profile: NostrProfile) -> String? {
+        if let name = trimmedNonEmpty(profile.name) {
+            return "@\(normalizedHandleComponent(from: name))"
+        }
+        if let displayName = trimmedNonEmpty(profile.displayName) {
+            return "@\(normalizedHandleComponent(from: displayName))"
+        }
+        return nil
+    }
+
+    private var resolvedAccountHandle: String? {
+        trimmedNonEmpty(accountHeaderHandle)
+    }
+
+    private func normalizedHandleComponent(from value: String) -> String {
+        let compact = value
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .replacingOccurrences(of: " ", with: "")
+            .lowercased()
+        return compact.isEmpty ? "user" : compact
     }
 
     private func trimmedNonEmpty(_ value: String?) -> String? {

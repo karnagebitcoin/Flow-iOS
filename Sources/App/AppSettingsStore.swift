@@ -28,6 +28,21 @@ enum AppThemeOption: String, CaseIterable, Codable, Identifiable, Hashable, Send
         }
     }
 
+    var iconName: String {
+        switch self {
+        case .system:
+            return "circle.lefthalf.filled"
+        case .black:
+            return "moon.fill"
+        case .white:
+            return "sun.max.fill"
+        case .dark:
+            return "sparkles"
+        case .light:
+            return "sun.haze.fill"
+        }
+    }
+
     var subtitle: String {
         switch self {
         case .system:
@@ -212,6 +227,9 @@ final class AppSettingsStore: ObservableObject {
     static let shared = AppSettingsStore()
     nonisolated static let slowModeRelayURL = URL(string: "wss://relay.damus.io/")!
     nonisolated static let defaultNewsRelayURLs = [URL(string: "wss://news.utxo.one")!]
+    nonisolated static var defaultPrimaryColor: Color {
+        Color(red: 0.67, green: 0.61, blue: 0.27)
+    }
     nonisolated static let legacyStorageKey = "x21.app.settings"
     nonisolated static let legacyScopedStorageKeyPrefix = "x21.app.settings.v2"
     nonisolated static let storageKeyPrefix = "flow.app.settings.v2"
@@ -321,7 +339,7 @@ final class AppSettingsStore: ObservableObject {
         var color: Color {
             guard !archivedData.isEmpty,
                   let uiColor = try? NSKeyedUnarchiver.unarchivedObject(ofClass: UIColor.self, from: archivedData) else {
-                return .accentColor
+                return AppSettingsStore.defaultPrimaryColor
             }
             return Color(uiColor)
         }
@@ -344,13 +362,14 @@ final class AppSettingsStore: ObservableObject {
                allowLegacyGlobalMigration: allowLegacyGlobalMigration
            ) {
             persistedSettings = migratedSettings
-        } else {
+        } else if let initialAccountStorageID {
             persistedSettings = Self.loadPersistedSettings(
                 defaults: defaults,
                 accountStorageID: initialAccountStorageID,
-                allowLegacyFallback: initialAccountStorageID == nil
-                    && defaults.string(forKey: Self.legacyMigrationAccountKey) == nil
+                allowLegacyFallback: false
             )
+        } else {
+            persistedSettings = PersistedSettings()
         }
     }
 
@@ -365,12 +384,16 @@ final class AppSettingsStore: ObservableObject {
 
         currentAccountStorageID = normalizedAccountStorageID
 
-        if let normalizedAccountStorageID,
-           let migratedSettings = Self.migrateLegacySettingsIfNeeded(
-               defaults: defaults,
-               accountStorageID: normalizedAccountStorageID,
-               allowLegacyGlobalMigration: allowLegacyGlobalMigration
-           ) {
+        guard let normalizedAccountStorageID else {
+            persistedSettings = PersistedSettings()
+            return
+        }
+
+        if let migratedSettings = Self.migrateLegacySettingsIfNeeded(
+            defaults: defaults,
+            accountStorageID: normalizedAccountStorageID,
+            allowLegacyGlobalMigration: allowLegacyGlobalMigration
+        ) {
             persistedSettings = migratedSettings
             return
         }
@@ -378,13 +401,12 @@ final class AppSettingsStore: ObservableObject {
         persistedSettings = Self.loadPersistedSettings(
             defaults: defaults,
             accountStorageID: normalizedAccountStorageID,
-            allowLegacyFallback: normalizedAccountStorageID == nil
-                && defaults.string(forKey: Self.legacyMigrationAccountKey) == nil
+            allowLegacyFallback: false
         )
     }
 
     var primaryColor: Color {
-        get { persistedSettings.primaryColor?.color ?? .accentColor }
+        get { persistedSettings.primaryColor?.color ?? Self.defaultPrimaryColor }
         set {
             persistedSettings.primaryColor = StoredColor(color: newValue)
             persist()
@@ -693,6 +715,7 @@ final class AppSettingsStore: ObservableObject {
     }
 
     private func persist() {
+        guard currentAccountStorageID != nil else { return }
         guard let data = try? JSONEncoder().encode(persistedSettings) else { return }
         defaults.set(data, forKey: Self.storageKey(for: currentAccountStorageID))
     }

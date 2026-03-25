@@ -43,7 +43,8 @@ struct ProfileView: View {
     }
 
     var body: some View {
-        let visibleReplyCounts = ReplyCountEstimator.counts(for: viewModel.visibleItems)
+        let visibleItems = viewModel.visibleItems
+        let visibleReplyCounts = ReplyCountEstimator.counts(for: visibleItems)
 
         List {
             Section {
@@ -71,7 +72,7 @@ struct ProfileView: View {
             .listRowSeparator(.hidden)
             .listRowBackground(Color.clear)
 
-            if viewModel.isLoading && viewModel.visibleItems.isEmpty {
+            if viewModel.isLoading && visibleItems.isEmpty {
                 ForEach(0..<6, id: \.self) { _ in
                     loadingRow
                         .listRowInsets(
@@ -84,7 +85,7 @@ struct ProfileView: View {
                         )
                         .listRowSeparator(.hidden)
                 }
-            } else if viewModel.visibleItems.isEmpty {
+            } else if visibleItems.isEmpty {
                 VStack(spacing: 8) {
                     if let errorMessage = viewModel.errorMessage {
                         Text(errorMessage)
@@ -109,7 +110,7 @@ struct ProfileView: View {
                 )
                 .listRowSeparator(.hidden)
             } else {
-                ForEach(viewModel.visibleItems) { item in
+                ForEach(visibleItems) { item in
                     FeedRowView(
                         item: item,
                         reactionCount: reactionStats.reactionCount(for: item.displayEventID),
@@ -181,7 +182,7 @@ struct ProfileView: View {
                 .listRowSeparator(.hidden)
             }
 
-            if !viewModel.visibleItems.isEmpty || viewModel.isLoadingMore {
+            if !visibleItems.isEmpty || viewModel.isLoadingMore {
                 Color.clear
                     .frame(height: Self.bottomScrollClearance)
                     .listRowInsets(EdgeInsets())
@@ -259,7 +260,10 @@ struct ProfileView: View {
                 npub: viewModel.npub,
                 displayName: viewModel.displayName,
                 handle: viewModel.handle,
-                avatarURL: viewModel.avatarURL
+                avatarURL: viewModel.avatarURL,
+                onOpenProfile: { pubkey in
+                    openProfile(pubkey: pubkey)
+                }
             )
         }
         .fullScreenCover(isPresented: $isShowingAvatarViewer) {
@@ -290,6 +294,11 @@ struct ProfileView: View {
             Task {
                 await viewModel.refresh()
                 await viewModel.refreshFollowRelationship(currentAccountPubkey: auth.currentAccount?.pubkey)
+            }
+        }
+        .onChange(of: viewModel.mode) { _, _ in
+            Task {
+                await viewModel.prepareForSelectedModeIfNeeded()
             }
         }
     }
@@ -374,26 +383,21 @@ struct ProfileView: View {
                 )
             }
 
-            VStack(alignment: .leading, spacing: 10) {
-                if let nip05 = viewModel.nip05, !nip05.isEmpty {
-                    infoRow(text: nip05, systemImage: "checkmark.seal")
-                }
-                if let websiteURL = viewModel.websiteURL {
-                    Link(destination: websiteURL) {
-                        infoRow(text: websiteDisplayText(for: websiteURL), systemImage: "link")
+            if hasVisibleInfoRows {
+                VStack(alignment: .leading, spacing: 10) {
+                    if let nip05 = viewModel.nip05, !nip05.isEmpty {
+                        infoRow(text: nip05, systemImage: "checkmark.seal")
                     }
-                    .buttonStyle(.plain)
+                    if let websiteURL = viewModel.websiteURL {
+                        Link(destination: websiteURL) {
+                            infoRow(text: websiteDisplayText(for: websiteURL), systemImage: "link")
+                        }
+                        .buttonStyle(.plain)
+                    }
+                    if let lightning = viewModel.lightningAddress, !lightning.isEmpty {
+                        infoRow(text: lightning, systemImage: "bolt.fill")
+                    }
                 }
-                if let lightning = viewModel.lightningAddress, !lightning.isEmpty {
-                    infoRow(text: lightning, systemImage: "bolt.fill")
-                }
-
-                Button {
-                    copyNpubToPasteboard()
-                } label: {
-                    infoRow(text: shortNpub, systemImage: "number")
-                }
-                .buttonStyle(.plain)
             }
 
             actionRow
@@ -621,17 +625,17 @@ struct ProfileView: View {
                 Button {
                     isShowingProfileEditor = true
                 } label: {
-                    Label("Edit Profile", systemImage: "square.and.pencil")
+                    profileMenuLabel("Edit Profile", systemImage: "square.and.pencil")
                 }
             }
             Button {
                 copyNpubToPasteboard()
             } label: {
-                Label("Copy ID", systemImage: "doc.on.doc")
+                profileMenuLabel("Copy ID", systemImage: "doc.on.doc")
             }
             if let websiteURL = viewModel.websiteURL {
                 Link(destination: websiteURL) {
-                    Label("Open Website", systemImage: "safari")
+                    profileMenuLabel("Open Website", systemImage: "safari")
                 }
             }
         } label: {
@@ -643,6 +647,16 @@ struct ProfileView: View {
         }
         .buttonStyle(.plain)
         .accessibilityLabel("Profile options")
+    }
+
+    private func profileMenuLabel(_ title: String, systemImage: String) -> some View {
+        Label {
+            Text(title)
+                .foregroundStyle(.primary)
+        } icon: {
+            Image(systemName: systemImage)
+                .foregroundStyle(appSettings.primaryColor)
+        }
     }
 
     private var loadingRow: some View {
@@ -862,10 +876,17 @@ struct ProfileView: View {
         return url.absoluteString
     }
 
-    private var shortNpub: String {
-        let value = viewModel.npub
-        guard value.count > 26 else { return value }
-        return "\(value.prefix(12))...\(value.suffix(8))"
+    private var hasVisibleInfoRows: Bool {
+        if let nip05 = viewModel.nip05, !nip05.isEmpty {
+            return true
+        }
+        if viewModel.websiteURL != nil {
+            return true
+        }
+        if let lightning = viewModel.lightningAddress, !lightning.isEmpty {
+            return true
+        }
+        return false
     }
 
     private var displayedFollowingCount: Int {

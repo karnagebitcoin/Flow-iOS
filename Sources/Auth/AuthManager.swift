@@ -41,7 +41,17 @@ final class AuthManager: ObservableObject {
 
     var currentNsec: String? {
         guard let currentAccountID else { return nil }
-        return storedAccounts.first(where: { $0.id == currentAccountID })?.nsec
+        return store.privateKey(for: currentAccountID)
+            ?? storedAccounts.first(where: { $0.id == currentAccountID })?.nsec
+    }
+
+    var currentPrivateKeyMetadata: AuthPrivateKeyMetadata? {
+        guard let currentAccountID else { return nil }
+        return store.privateKeyMetadata(for: currentAccountID)
+    }
+
+    func privateKeyMetadata(for account: AuthAccount) -> AuthPrivateKeyMetadata? {
+        store.privateKeyMetadata(for: account.id)
     }
 
     @discardableResult
@@ -54,9 +64,13 @@ final class AuthManager: ObservableObject {
             pubkey: keypair.publicKey.hex,
             npub: keypair.publicKey.npub,
             signerType: .nsec,
-            nsec: keypair.privateKey.nsec
+            privateKeyBackupEnabled: true
         )
-        upsertAndActivate(stored)
+        try upsertAndActivate(
+            stored,
+            privateKey: keypair.privateKey.nsec,
+            backupPrivateKeyToICloud: true
+        )
 
         return GeneratedNostrAccount(
             pubkey: keypair.publicKey.hex,
@@ -66,7 +80,10 @@ final class AuthManager: ObservableObject {
     }
 
     @discardableResult
-    func loginWithNsecOrHex(_ credential: String) throws -> AuthAccount {
+    func loginWithNsecOrHex(
+        _ credential: String,
+        backupPrivateKeyToICloud: Bool? = nil
+    ) throws -> AuthAccount {
         let normalized = credential.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !normalized.isEmpty else {
             throw AuthManagerError.invalidNsecOrHex
@@ -89,9 +106,13 @@ final class AuthManager: ObservableObject {
             pubkey: keypair.publicKey.hex,
             npub: keypair.publicKey.npub,
             signerType: .nsec,
-            nsec: keypair.privateKey.nsec
+            privateKeyBackupEnabled: backupPrivateKeyToICloud ?? false
         )
-        return upsertAndActivate(stored)
+        return try upsertAndActivate(
+            stored,
+            privateKey: keypair.privateKey.nsec,
+            backupPrivateKeyToICloud: backupPrivateKeyToICloud
+        )
     }
 
     @discardableResult
@@ -105,9 +126,9 @@ final class AuthManager: ObservableObject {
             pubkey: publicKey.hex,
             npub: publicKey.npub,
             signerType: .npub,
-            nsec: nil
+            privateKeyBackupEnabled: false
         )
-        return upsertAndActivate(stored)
+        return try upsertAndActivate(stored)
     }
 
     func switchAccount(to account: AuthAccount?) {
@@ -129,6 +150,7 @@ final class AuthManager: ObservableObject {
 
     func removeAccount(_ account: AuthAccount) {
         storedAccounts.removeAll { $0.id == account.id }
+        store.removePrivateKey(for: account.id)
 
         if currentAccountID == account.id {
             currentAccountID = storedAccounts.first?.id
@@ -136,17 +158,75 @@ final class AuthManager: ObservableObject {
         persistAndPublish()
     }
 
-    @discardableResult
-    private func upsertAndActivate(_ account: StoredAuthAccount) -> AuthAccount {
-        if let existingIndex = storedAccounts.firstIndex(where: { $0.id == account.id }) {
-            storedAccounts[existingIndex] = account
-        } else {
-            storedAccounts.append(account)
+    func setPrivateKeyBackupEnabled(_ enabled: Bool, for account: AuthAccount) throws {
+        guard account.signerType == .nsec else { return }
+        guard let index = storedAccounts.firstIndex(where: { $0.id == account.id }) else { return }
+
+        let privateKey = store.privateKey(for: account.id) ?? storedAccounts[index].nsec
+        guard let privateKey else {
+            throw AuthPrivateKeyStoreError.missingPrivateKey
         }
 
-        currentAccountID = account.id
+        try store.savePrivateKey(privateKey, for: account.id, backupToICloud: enabled)
+        storedAccounts[index] = StoredAuthAccount(
+            pubkey: storedAccounts[index].pubkey,
+            npub: storedAccounts[index].npub,
+            signerType: storedAccounts[index].signerType,
+            nsec: nil,
+            privateKeyBackupEnabled: enabled
+        )
         persistAndPublish()
-        return AuthAccount(pubkey: account.pubkey, npub: account.npub, signerType: account.signerType)
+    }
+
+    @discardableResult
+    private func upsertAndActivate(
+        _ account: StoredAuthAccount,
+        privateKey: String? = nil,
+        backupPrivateKeyToICloud: Bool? = nil
+    ) throws -> AuthAccount {
+        let existingIndex = storedAccounts.firstIndex(where: { $0.id == account.id })
+        let resolvedBackupSetting: Bool
+        if account.signerType == .nsec {
+            if let backupPrivateKeyToICloud {
+                resolvedBackupSetting = backupPrivateKeyToICloud
+            } else if let existingIndex {
+                resolvedBackupSetting = storedAccounts[existingIndex].privateKeyBackupEnabled
+            } else {
+                resolvedBackupSetting = false
+            }
+        } else {
+            resolvedBackupSetting = false
+        }
+
+        if account.signerType == .nsec, let privateKey {
+            try store.savePrivateKey(
+                privateKey,
+                for: account.id,
+                backupToICloud: resolvedBackupSetting
+            )
+        }
+
+        let persistedAccount = StoredAuthAccount(
+            pubkey: account.pubkey,
+            npub: account.npub,
+            signerType: account.signerType,
+            privateKeyBackupEnabled: resolvedBackupSetting
+        )
+
+        if let existingIndex {
+            storedAccounts[existingIndex] = persistedAccount
+        } else {
+            storedAccounts.append(persistedAccount)
+        }
+
+        currentAccountID = persistedAccount.id
+        persistAndPublish()
+        return AuthAccount(
+            pubkey: persistedAccount.pubkey,
+            npub: persistedAccount.npub,
+            signerType: persistedAccount.signerType,
+            privateKeyBackupEnabled: persistedAccount.privateKeyBackupEnabled
+        )
     }
 
     private func persistAndPublish() {
@@ -156,7 +236,12 @@ final class AuthManager: ObservableObject {
 
     private func syncPublishedState() {
         accounts = storedAccounts.map {
-            AuthAccount(pubkey: $0.pubkey, npub: $0.npub, signerType: $0.signerType)
+            AuthAccount(
+                pubkey: $0.pubkey,
+                npub: $0.npub,
+                signerType: $0.signerType,
+                privateKeyBackupEnabled: $0.privateKeyBackupEnabled
+            )
         }
         currentAccount = accounts.first(where: { $0.id == currentAccountID })
     }

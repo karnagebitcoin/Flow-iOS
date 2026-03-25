@@ -1304,7 +1304,7 @@ struct ComposeNoteSheet: View {
             mimeType: mimeType,
             filename: filename,
             nsec: normalizedNsec,
-            provider: AppSettingsStore.shared.mediaUploadProvider
+            provider: .blossom
         )
 
         return ComposeMediaAttachment(
@@ -1340,7 +1340,7 @@ struct ComposeNoteSheet: View {
             mimeType: mimeType,
             filename: filename,
             nsec: normalizedNsec,
-            provider: AppSettingsStore.shared.mediaUploadProvider
+            provider: .blossom
         )
 
         return ComposeMediaAttachment(

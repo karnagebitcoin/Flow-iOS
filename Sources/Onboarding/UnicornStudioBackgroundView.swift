@@ -1,0 +1,301 @@
+import SwiftUI
+import WebKit
+
+struct UnicornStudioBackgroundView: View {
+    enum Source: Equatable {
+        case projectID(String)
+        case bundledJSON(String)
+    }
+
+    let source: Source
+    var opacity: Double = 1
+
+    var body: some View {
+        GeometryReader { proxy in
+            let renderSize = CGSize(
+                width: max(proxy.size.width.rounded(.up), 1),
+                height: max(proxy.size.height.rounded(.up), 1)
+            )
+
+            UnicornStudioWebView(
+                source: source,
+                renderSize: renderSize
+            )
+            .frame(width: proxy.size.width, height: proxy.size.height)
+            .opacity(opacity)
+            .clipped()
+        }
+        .allowsHitTesting(false)
+        .accessibilityHidden(true)
+    }
+}
+
+private struct UnicornStudioWebView: UIViewRepresentable {
+    let source: UnicornStudioBackgroundView.Source
+    let renderSize: CGSize
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator()
+    }
+
+    func makeUIView(context: Context) -> WKWebView {
+        let configuration = WKWebViewConfiguration()
+        configuration.allowsInlineMediaPlayback = true
+        configuration.mediaTypesRequiringUserActionForPlayback = []
+        configuration.defaultWebpagePreferences.allowsContentJavaScript = true
+
+        let webView = WKWebView(frame: .zero, configuration: configuration)
+        webView.isOpaque = true
+        webView.backgroundColor = .black
+        webView.scrollView.backgroundColor = .black
+        webView.scrollView.isScrollEnabled = false
+        webView.scrollView.bounces = false
+        webView.scrollView.contentInsetAdjustmentBehavior = .never
+        webView.isUserInteractionEnabled = false
+        webView.allowsLinkPreview = false
+        webView.navigationDelegate = context.coordinator
+
+        return webView
+    }
+
+    func updateUIView(_ webView: WKWebView, context: Context) {
+        let html = UnicornStudioEmbedHTML.document(
+            source: source,
+            renderSize: renderSize
+        )
+
+        guard context.coordinator.lastHTML != html else {
+            context.coordinator.applySize(renderSize, to: webView)
+            return
+        }
+
+        context.coordinator.lastHTML = html
+        context.coordinator.lastAppliedSize = renderSize
+        webView.loadHTMLString(html, baseURL: nil)
+    }
+
+    final class Coordinator: NSObject, WKNavigationDelegate {
+        var lastHTML: String?
+        var lastAppliedSize: CGSize = .zero
+
+        func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+            applySize(lastAppliedSize, to: webView)
+        }
+
+        func applySize(_ size: CGSize, to webView: WKWebView) {
+            guard size.width > 1, size.height > 1 else { return }
+
+            let width = Int(size.width.rounded(.up))
+            let height = Int(size.height.rounded(.up))
+            let js = """
+            if (window.__flowApplySize) {
+              window.__flowApplySize(\(width), \(height));
+            }
+            """
+
+            webView.evaluateJavaScript(js, completionHandler: nil)
+            lastAppliedSize = size
+        }
+    }
+}
+
+private enum UnicornStudioEmbedHTML {
+    static func document(
+        source: UnicornStudioBackgroundView.Source,
+        renderSize: CGSize
+    ) -> String {
+        let sceneBootScript: String
+        let initialWidth = Int(renderSize.width.rounded(.up))
+        let initialHeight = Int(renderSize.height.rounded(.up))
+
+        switch source {
+        case .projectID(let projectID):
+            sceneBootScript = """
+              const startScene = function() {
+                applySize(\(initialWidth), \(initialHeight));
+                if (!window.UnicornStudio?.init) { return; }
+                window.UnicornStudio.init();
+                requestAnimationFrame(function() {
+                  applySize(\(initialWidth), \(initialHeight));
+                });
+              };
+            """
+
+            return baseDocument(
+                sceneMarkup: #"<div id="scene" data-us-project="\#(projectID)"></div>"#,
+                sceneBootScript: sceneBootScript,
+                initialWidth: initialWidth,
+                initialHeight: initialHeight
+            )
+        case .bundledJSON(let resourceName):
+            guard let sceneJSONString = bundledJSONString(named: resourceName),
+                  let encodedJSONString = encodedJavaScriptString(sceneJSONString) else {
+                return baseDocument(
+                    sceneMarkup: #"<div id="scene"></div>"#,
+                    sceneBootScript: "const startScene = function() {};",
+                    initialWidth: initialWidth,
+                    initialHeight: initialHeight
+                )
+            }
+
+            sceneBootScript = """
+              const sceneJSONString = \(encodedJSONString);
+              const sceneBlob = new Blob([sceneJSONString], { type: "application/json" });
+              const sceneURL = URL.createObjectURL(sceneBlob);
+              const startScene = function() {
+                applySize(\(initialWidth), \(initialHeight));
+                if (!window.UnicornStudio?.addScene) { return; }
+                window.UnicornStudio.addScene({
+                  elementId: "scene",
+                  filePath: sceneURL,
+                  scale: 1,
+                  dpi: 1.5,
+                  fps: 60,
+                  lazyLoad: false,
+                  production: false,
+                  altText: "Flow background animation",
+                  ariaLabel: "Flow background animation"
+                });
+                requestAnimationFrame(function() {
+                  applySize(\(initialWidth), \(initialHeight));
+                });
+              };
+            """
+
+            return baseDocument(
+                sceneMarkup: #"<div id="scene"></div>"#,
+                sceneBootScript: sceneBootScript,
+                initialWidth: initialWidth,
+                initialHeight: initialHeight
+            )
+        }
+    }
+
+    private static func baseDocument(
+        sceneMarkup: String,
+        sceneBootScript: String,
+        initialWidth: Int,
+        initialHeight: Int
+    ) -> String {
+        return """
+        <!doctype html>
+        <html>
+        <head>
+          <meta charset="utf-8">
+          <meta
+            name="viewport"
+            content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover"
+          >
+          <style>
+            :root {
+              --scene-width: \(initialWidth)px;
+              --scene-height: \(initialHeight)px;
+            }
+
+            html, body {
+              margin: 0;
+              width: var(--scene-width);
+              height: var(--scene-height);
+              overflow: hidden;
+              background: #000;
+            }
+
+            body {
+              background: #000 !important;
+              position: fixed;
+              inset: 0;
+            }
+
+            #scene {
+              position: fixed;
+              inset: 0;
+              width: var(--scene-width);
+              height: var(--scene-height);
+              pointer-events: none;
+              background: #000;
+              overflow: hidden;
+            }
+
+            canvas {
+              background: #000 !important;
+            }
+          </style>
+        </head>
+        <body>
+          \(sceneMarkup)
+          <script type="text/javascript">
+            !function(){
+              function applySize(width, height) {
+                var scene = document.getElementById("scene");
+                var widthPx = width + "px";
+                var heightPx = height + "px";
+
+                document.documentElement.style.setProperty("--scene-width", widthPx);
+                document.documentElement.style.setProperty("--scene-height", heightPx);
+                document.documentElement.style.width = widthPx;
+                document.documentElement.style.height = heightPx;
+                document.body.style.width = widthPx;
+                document.body.style.height = heightPx;
+
+                if (scene) {
+                  scene.style.width = widthPx;
+                  scene.style.height = heightPx;
+                }
+
+                requestAnimationFrame(function() {
+                  window.dispatchEvent(new Event("resize"));
+                });
+              }
+
+              window.__flowApplySize = applySize;
+              applySize(\(initialWidth), \(initialHeight));
+
+              \(sceneBootScript)
+
+              var u = window.UnicornStudio;
+              function boot() {
+                startScene();
+              }
+
+              if (u && u.init) {
+                if (document.readyState === "loading") {
+                  document.addEventListener("DOMContentLoaded", boot);
+                } else {
+                  boot();
+                }
+              } else {
+                window.UnicornStudio = { isInitialized: false };
+                var i = document.createElement("script");
+                i.src = "https://cdn.jsdelivr.net/gh/hiunicornstudio/unicornstudio.js@v2.1.5/dist/unicornStudio.umd.js";
+                i.onload = function() {
+                  u = window.UnicornStudio;
+                  if (document.readyState === "loading") {
+                    document.addEventListener("DOMContentLoaded", boot);
+                  } else {
+                    boot();
+                  }
+                };
+                (document.head || document.body).appendChild(i);
+              }
+            }();
+          </script>
+        </body>
+        </html>
+        """
+    }
+
+    private static func bundledJSONString(named resourceName: String) -> String? {
+        guard let resourceURL = Bundle.main.url(forResource: resourceName, withExtension: nil) else {
+            return nil
+        }
+        return try? String(contentsOf: resourceURL, encoding: .utf8)
+    }
+
+    private static func encodedJavaScriptString(_ value: String) -> String? {
+        guard let data = try? JSONEncoder().encode(value),
+              let encoded = String(data: data, encoding: .utf8) else {
+            return nil
+        }
+        return encoded
+    }
+}

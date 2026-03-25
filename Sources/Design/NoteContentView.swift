@@ -1155,15 +1155,7 @@ private struct NoteImageFullscreenViewer: View {
                         Text("Done")
                             .font(.subheadline.weight(.semibold))
                             .foregroundStyle(doneButtonForegroundColor)
-                            .padding(.horizontal, 18)
-                            .padding(.vertical, 10)
-                            .background(.ultraThinMaterial, in: Capsule())
-                            .overlay {
-                                Capsule()
-                                    .stroke(doneButtonBorderColor, lineWidth: 0.6)
-                            }
                     }
-                    .buttonStyle(.plain)
                 }
             }
             .toolbarBackground(.visible, for: .navigationBar)
@@ -1222,7 +1214,6 @@ private struct NoteImageFullscreenViewer: View {
                     await handleReactionTap()
                 }
             }
-            .disabled(isReactionPublishing)
 
             Button {
                 // Thread-comment shortcut can be wired from parent context in a later pass.
@@ -1278,10 +1269,6 @@ private struct NoteImageFullscreenViewer: View {
         )
     }
 
-    private var isReactionPublishing: Bool {
-        reactionStats.isPublishingReaction(for: sourceEvent.id)
-    }
-
     private var effectiveReadRelayURLs: [URL] {
         appSettings.effectiveReadRelayURLs(from: relaySettings.readRelayURLs)
     }
@@ -1307,10 +1294,6 @@ private struct NoteImageFullscreenViewer: View {
 
     private var doneButtonForegroundColor: Color {
         colorScheme == .dark ? .white : .black
-    }
-
-    private var doneButtonBorderColor: Color {
-        Color.primary.opacity(colorScheme == .dark ? 0.16 : 0.08)
     }
 
     @ViewBuilder

@@ -46,6 +46,11 @@ struct FeedRowView: View {
                     .padding(.leading, 56)
             }
 
+            if item.displayEvent.isReplyNote, let snippet = item.replyTargetSnippet {
+                replyContextRow(snippet: snippet)
+                    .padding(.leading, 56)
+            }
+
             HStack(alignment: .top, spacing: 12) {
                 profileAvatar
 
@@ -108,7 +113,6 @@ struct FeedRowView: View {
                                     await handleReactionTap()
                                 }
                             }
-                            .disabled(isReactionPublishing)
 
                             Button {
                                 if let onReplyTap {
@@ -223,10 +227,6 @@ struct FeedRowView: View {
         )
     }
 
-    private var isReactionPublishing: Bool {
-        reactionStats.isPublishingReaction(for: item.displayEventID)
-    }
-
     private var followBadgeIconName: String? {
         guard !isAuthoredByCurrentAccount, let avatarMenuActions else { return nil }
         let normalized = avatarMenuActions.followLabel
@@ -317,6 +317,39 @@ struct FeedRowView: View {
         }
         .buttonStyle(.plain)
         .disabled(onRepostActorTap == nil)
+    }
+
+    @ViewBuilder
+    private func replyContextRow(snippet: String) -> some View {
+        let content = HStack(spacing: 6) {
+            Image(systemName: "arrow.turn.up.left")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
+
+            (
+                Text("Replying to ")
+                    .foregroundStyle(.secondary)
+                +
+                Text(snippet)
+                    .foregroundStyle(.secondary)
+            )
+            .font(.caption)
+            .lineLimit(1)
+
+            Spacer(minLength: 0)
+        }
+
+        if let parentItem = item.replyTargetFeedItem,
+           let onReferencedEventTap {
+            Button {
+                onReferencedEventTap(parentItem.threadNavigationItem)
+            } label: {
+                content
+            }
+            .buttonStyle(.plain)
+        } else {
+            content
+        }
     }
 
     private var noteOptionsButton: some View {

@@ -4,6 +4,7 @@ import SwiftUI
 struct SettingsView: View {
     @Environment(\.dismiss) private var dismiss
     @EnvironmentObject private var appSettings: AppSettingsStore
+    @EnvironmentObject private var relaySettings: RelaySettingsStore
 
     var body: some View {
         NavigationStack {
@@ -17,12 +18,23 @@ struct SettingsView: View {
                         SettingsGeneralView()
                     }
 
+                    SettingsNavigationRow(
+                        title: "Connection",
+                        subtitle: connectionSummaryText,
+                        systemImage: "dot.radiowaves.left.and.right"
+                    ) {
+                        RelaySettingsView()
+                    }
+
                     SettingsNavigationRow(title: "Feeds", systemImage: "newspaper") {
                         SettingsFeedsView()
                     }
 
-                    SettingsNavigationRow(title: "Media Upload", systemImage: "photo.badge.plus") {
-                        SettingsMediaUploadView()
+                    SettingsNavigationRow(
+                        title: "Muted Content",
+                        systemImage: "speaker.slash"
+                    ) {
+                        SettingsMutedContentView()
                     }
 
                     SettingsNavigationRow(title: "Notifications", systemImage: "bell.badge") {
@@ -48,17 +60,29 @@ struct SettingsView: View {
             }
         }
     }
+
+    private var connectionSummaryText: String {
+        let count = Set(relaySettings.readRelays + relaySettings.writeRelays).count
+        return "Connected to \(count) \(count == 1 ? "source" : "sources")"
+    }
 }
 
 private struct SettingsNavigationRow<Destination: View>: View {
     @EnvironmentObject private var appSettings: AppSettingsStore
 
     let title: String
+    let subtitle: String?
     let systemImage: String
     let destination: Destination
 
-    init(title: String, systemImage: String, @ViewBuilder destination: () -> Destination) {
+    init(
+        title: String,
+        subtitle: String? = nil,
+        systemImage: String,
+        @ViewBuilder destination: () -> Destination
+    ) {
         self.title = title
+        self.subtitle = subtitle
         self.systemImage = systemImage
         self.destination = destination()
     }
@@ -73,8 +97,16 @@ private struct SettingsNavigationRow<Destination: View>: View {
                     .foregroundStyle(appSettings.primaryColor)
                     .frame(width: 28, height: 28)
 
-                Text(title)
-                    .foregroundStyle(.primary)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(title)
+                        .foregroundStyle(.primary)
+
+                    if let subtitle, !subtitle.isEmpty {
+                        Text(subtitle)
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                    }
+                }
 
                 Spacer(minLength: 8)
             }
@@ -113,8 +145,17 @@ private struct SettingsAppearanceView: View {
                         .font(.footnote.weight(.semibold))
                         .foregroundStyle(.secondary)
 
-                    ForEach(AppThemeOption.allCases) { option in
-                        themeOptionRow(for: option)
+                    LazyVGrid(
+                        columns: [
+                            GridItem(.flexible(), spacing: 10),
+                            GridItem(.flexible(), spacing: 10),
+                            GridItem(.flexible(), spacing: 10)
+                        ],
+                        spacing: 10
+                    ) {
+                        ForEach(AppThemeOption.allCases) { option in
+                            themeOptionCard(for: option)
+                        }
                     }
                 }
                 .padding(.vertical, 2)
@@ -204,35 +245,107 @@ private struct SettingsAppearanceView: View {
         .padding(.vertical, 2)
     }
 
-    private func themeOptionRow(for option: AppThemeOption) -> some View {
-        Button {
+    private func themeOptionCard(for option: AppThemeOption) -> some View {
+        let isSelected = appSettings.theme == option
+
+        return Button {
             guard option.isEnabled else { return }
             appSettings.theme = option
         } label: {
-            HStack(alignment: .top, spacing: 12) {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(option.title)
-                        .font(.body.weight(.medium))
-                    Text(option.subtitle)
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
+            VStack(alignment: .leading, spacing: 10) {
+                ZStack(alignment: .topTrailing) {
+                    RoundedRectangle(cornerRadius: 16, style: .continuous)
+                        .fill(themePreviewFill(for: option))
+                        .frame(height: 60)
+                        .overlay {
+                            Image(systemName: option.iconName)
+                                .font(.system(size: 20, weight: .semibold))
+                                .foregroundStyle(themePreviewForeground(for: option))
+                        }
+
+                    if isSelected {
+                        Image(systemName: "checkmark.circle.fill")
+                            .font(.system(size: 18, weight: .semibold))
+                            .foregroundStyle(appSettings.primaryColor)
+                            .padding(8)
+                    } else if !option.isEnabled {
+                        Text("Soon")
+                            .font(.caption2.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 4)
+                            .background(Color(.systemBackground).opacity(0.82), in: Capsule(style: .continuous))
+                            .padding(8)
+                    }
                 }
 
-                Spacer(minLength: 8)
-
-                if appSettings.theme == option {
-                    Image(systemName: "checkmark")
-                        .font(.footnote.weight(.semibold))
-                        .foregroundStyle(.tint)
-                        .padding(.top, 3)
-                }
+                Text(option.title)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(option.isEnabled ? .primary : .secondary)
+                    .lineLimit(1)
             }
+            .padding(10)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .contentShape(Rectangle())
+            .background(
+                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    .fill(Color(.secondarySystemBackground))
+            )
+            .overlay {
+                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    .stroke(
+                        isSelected ? appSettings.primaryColor : Color(.separator).opacity(0.18),
+                        lineWidth: isSelected ? 1.5 : 1
+                    )
+            }
+            .opacity(option.isEnabled ? 1 : 0.72)
+            .contentShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
         }
         .buttonStyle(.plain)
-        .foregroundStyle(option.isEnabled ? .primary : .secondary)
         .disabled(!option.isEnabled)
+    }
+
+    private func themePreviewFill(for option: AppThemeOption) -> LinearGradient {
+        switch option {
+        case .system:
+            return LinearGradient(
+                colors: [Color(.systemGray6), Color(.systemGray4)],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
+        case .black:
+            return LinearGradient(
+                colors: [Color(red: 0.08, green: 0.08, blue: 0.10), Color.black],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
+        case .white:
+            return LinearGradient(
+                colors: [Color.white, Color(.systemGray6)],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
+        case .dark:
+            return LinearGradient(
+                colors: [Color(red: 0.19, green: 0.16, blue: 0.28), Color(red: 0.09, green: 0.08, blue: 0.14)],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
+        case .light:
+            return LinearGradient(
+                colors: [Color(red: 0.99, green: 0.95, blue: 0.86), Color(red: 0.94, green: 0.98, blue: 1.0)],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
+        }
+    }
+
+    private func themePreviewForeground(for option: AppThemeOption) -> Color {
+        switch option {
+        case .white, .light, .system:
+            return Color(.label).opacity(0.75)
+        case .black, .dark:
+            return .white.opacity(0.85)
+        }
     }
 
     private static var previewEvent: NostrEvent {
@@ -1647,49 +1760,36 @@ private struct NewsAuthorAvatarView: View {
     }
 }
 
-private struct SettingsMutedKeywordsView: View {
+private enum MutedContentTab: String, CaseIterable, Identifiable {
+    case words = "Words"
+    case users = "Users"
+
+    var id: String { rawValue }
+}
+
+private struct SettingsMutedContentView: View {
     @EnvironmentObject private var auth: AuthManager
     @EnvironmentObject private var relaySettings: RelaySettingsStore
     @ObservedObject private var muteStore = MuteStore.shared
+    @State private var selectedTab: MutedContentTab = .words
+    @State private var mutedUserProfiles: [String: NostrProfile] = [:]
+    @State private var isLoadingMutedUsers = false
 
     var body: some View {
         Form {
             Section {
-                Label("These keyword lists are private and encrypted in your mute list event.", systemImage: "lock.shield")
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-                    .padding(.vertical, 4)
-            }
-
-            Section("Lists") {
-                ForEach(muteStore.mutedKeywordLists) { list in
-                    NavigationLink {
-                        SettingsMutedKeywordListDetailView(listID: list.id)
-                    } label: {
-                        VStack(alignment: .leading, spacing: 4) {
-                            HStack(spacing: 10) {
-                                Text(list.title)
-                                    .font(.body.weight(.medium))
-
-                                Spacer(minLength: 8)
-
-                                Text(list.isEnabled ? "On" : "Off")
-                                    .font(.caption.weight(.semibold))
-                                    .foregroundStyle(list.isEnabled ? .secondary : .tertiary)
-                            }
-
-                            Text("\(list.wordCount) word\(list.wordCount == 1 ? "" : "s")")
-                                .font(.footnote)
-                                .foregroundStyle(.secondary)
-
-                            Text(list.subtitle)
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                                .fixedSize(horizontal: false, vertical: true)
-                        }
-                        .padding(.vertical, 2)
+                Picker("Muted Content", selection: $selectedTab) {
+                    ForEach(MutedContentTab.allCases) { tab in
+                        Text(tab.rawValue).tag(tab)
                     }
                 }
+                .pickerStyle(.segmented)
+            }
+
+            if selectedTab == .words {
+                mutedWordsSections
+            } else {
+                mutedUsersSections
             }
 
             if let error = muteStore.lastPublishError, !error.isEmpty {
@@ -1700,7 +1800,7 @@ private struct SettingsMutedKeywordsView: View {
                 }
             }
         }
-        .navigationTitle("Muted Keywords")
+        .navigationTitle("Muted Content")
         .navigationBarTitleDisplayMode(.large)
         .task {
             muteStore.configure(
@@ -1711,6 +1811,255 @@ private struct SettingsMutedKeywordsView: View {
             )
             muteStore.refreshFromRelay()
         }
+        .task(id: mutedUsersFetchKey) {
+            guard selectedTab == .users else { return }
+            await loadMutedUserProfiles()
+        }
+        .onChange(of: selectedTab) { _, newValue in
+            guard newValue == .users else { return }
+            Task {
+                await loadMutedUserProfiles()
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var mutedWordsSections: some View {
+        Section {
+            ForEach(orderedKeywordLists) { list in
+                NavigationLink {
+                    SettingsMutedKeywordListDetailView(listID: list.id)
+                } label: {
+                    VStack(alignment: .leading, spacing: 4) {
+                        HStack(spacing: 10) {
+                            Text(list.title)
+                                .font(.body.weight(.medium))
+
+                            Spacer(minLength: 8)
+
+                            if list.allowsToggle {
+                                Text(list.isEnabled ? "On" : "Off")
+                                    .font(.caption.weight(.semibold))
+                                    .foregroundStyle(list.isEnabled ? .secondary : .tertiary)
+                            } else {
+                                Text("Private")
+                                    .font(.caption.weight(.semibold))
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+
+                        Text("\(list.wordCount) term\(list.wordCount == 1 ? "" : "s")")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+
+                        Text(list.subtitle)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    .padding(.vertical, 2)
+                }
+            }
+        } header: {
+            Text("Lists")
+        } footer: {
+            Text("Add any word, phrase, or hashtag to hide matching notes instantly across your feeds.")
+        }
+    }
+
+    @ViewBuilder
+    private var mutedUsersSections: some View {
+        if orderedMutedPubkeys.isEmpty {
+            Section {
+                Text("No muted people yet.")
+                    .foregroundStyle(.secondary)
+            } header: {
+                Text("Muted Users")
+            } footer: {
+                Text("Mute people from a note menu or profile, and they’ll appear here.")
+            }
+        } else {
+            Section {
+                if isLoadingMutedUsers && mutedUserProfiles.isEmpty {
+                    ProgressView("Loading muted users...")
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+
+                ForEach(orderedMutedPubkeys, id: \.self) { pubkey in
+                    NavigationLink {
+                        ProfileView(
+                            pubkey: pubkey,
+                            relayURL: effectivePrimaryRelayURL,
+                            readRelayURLs: effectiveReadRelayURLs,
+                            writeRelayURLs: effectiveWriteRelayURLs
+                        )
+                    } label: {
+                        MutedUserRow(
+                            pubkey: pubkey,
+                            profile: mutedUserProfiles[pubkey]
+                        )
+                    }
+                    .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+                        Button {
+                            muteStore.toggleMute(pubkey)
+                        } label: {
+                            Label("Unmute", systemImage: "speaker.wave.2")
+                        }
+                        .tint(.secondary)
+                    }
+                }
+            } header: {
+                Text("Muted Users")
+            } footer: {
+                Text("Muted people are hidden immediately. Unmute from here at any time.")
+            }
+        }
+    }
+
+    private var orderedKeywordLists: [MutedKeywordListState] {
+        muteStore.mutedKeywordLists.sorted { lhs, rhs in
+            if lhs.id == "other" { return true }
+            if rhs.id == "other" { return false }
+            return lhs.title.localizedCaseInsensitiveCompare(rhs.title) == .orderedAscending
+        }
+    }
+
+    private var orderedMutedPubkeys: [String] {
+        muteStore.mutedPubkeys.sorted()
+    }
+
+    private var effectiveReadRelayURLs: [URL] {
+        let urls = relaySettings.readRelayURLs.isEmpty ? relaySettings.writeRelayURLs : relaySettings.readRelayURLs
+        return urls.isEmpty ? [AppSettingsStore.slowModeRelayURL] : urls
+    }
+
+    private var effectiveWriteRelayURLs: [URL] {
+        let urls = relaySettings.writeRelayURLs.isEmpty ? effectiveReadRelayURLs : relaySettings.writeRelayURLs
+        return urls.isEmpty ? [AppSettingsStore.slowModeRelayURL] : urls
+    }
+
+    private var effectivePrimaryRelayURL: URL {
+        effectiveReadRelayURLs.first ?? AppSettingsStore.slowModeRelayURL
+    }
+
+    private var mutedUsersFetchKey: String {
+        let pubkeyKey = orderedMutedPubkeys.joined(separator: "|")
+        let relayKey = effectiveReadRelayURLs.map(\.absoluteString).joined(separator: "|")
+        return "\(selectedTab.rawValue)|\(pubkeyKey)|\(relayKey)"
+    }
+
+    @MainActor
+    private func loadMutedUserProfiles() async {
+        let pubkeys = orderedMutedPubkeys
+        guard !pubkeys.isEmpty else {
+            mutedUserProfiles = [:]
+            isLoadingMutedUsers = false
+            return
+        }
+
+        isLoadingMutedUsers = true
+        let profiles = await NostrFeedService().fetchProfiles(
+            relayURLs: effectiveReadRelayURLs,
+            pubkeys: pubkeys
+        )
+        guard !Task.isCancelled else { return }
+        mutedUserProfiles = profiles
+        isLoadingMutedUsers = false
+    }
+}
+
+private struct MutedUserRow: View {
+    let pubkey: String
+    let profile: NostrProfile?
+
+    var body: some View {
+        HStack(spacing: 12) {
+            mutedUserAvatar
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(displayName)
+                    .font(.body.weight(.medium))
+                    .foregroundStyle(.primary)
+
+                Text(handle)
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+
+                if let nip05, !nip05.isEmpty {
+                    Text(nip05)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+        }
+        .padding(.vertical, 2)
+    }
+
+    private var mutedUserAvatar: some View {
+        Group {
+            if let avatarURL {
+                AsyncImage(url: avatarURL) { phase in
+                    switch phase {
+                    case .success(let image):
+                        image
+                            .resizable()
+                            .scaledToFill()
+                    default:
+                        fallbackAvatar
+                    }
+                }
+            } else {
+                fallbackAvatar
+            }
+        }
+        .frame(width: 42, height: 42)
+        .clipShape(Circle())
+    }
+
+    private var fallbackAvatar: some View {
+        Circle()
+            .fill(Color(.tertiarySystemFill))
+            .overlay {
+                Text(String(displayName.prefix(1)).uppercased())
+                    .font(.footnote.weight(.semibold))
+                    .foregroundStyle(.secondary)
+            }
+    }
+
+    private var displayName: String {
+        let trimmedDisplayName = profile?.displayName?.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let trimmedDisplayName, !trimmedDisplayName.isEmpty {
+            return trimmedDisplayName
+        }
+
+        let trimmedName = profile?.name?.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let trimmedName, !trimmedName.isEmpty {
+            return trimmedName
+        }
+
+        return shortNostrIdentifier(pubkey)
+    }
+
+    private var handle: String {
+        let trimmedName = profile?.name?.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let trimmedName, !trimmedName.isEmpty {
+            return "@\(trimmedName.lowercased())"
+        }
+
+        return "@\(shortNostrIdentifier(pubkey).lowercased())"
+    }
+
+    private var nip05: String? {
+        let trimmed = profile?.nip05?.trimmingCharacters(in: .whitespacesAndNewlines)
+        return (trimmed?.isEmpty == false) ? trimmed : nil
+    }
+
+    private var avatarURL: URL? {
+        guard let rawValue = profile?.picture?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !rawValue.isEmpty else {
+            return nil
+        }
+        return URL(string: rawValue)
     }
 }
 
@@ -1732,13 +2081,13 @@ private struct SettingsMutedKeywordListDetailView: View {
                 }
 
                 if list.allowsAddingWords {
-                    Section("Add Word") {
-                        TextField("Add muted word", text: $draftWord)
+                    Section("Add Term") {
+                        TextField("Add word, phrase, or hashtag", text: $draftWord)
                             .textInputAutocapitalization(.never)
                             .autocorrectionDisabled()
                             .onSubmit(addDraftWord)
 
-                        Button("Add Word") {
+                        Button("Add Term") {
                             addDraftWord()
                         }
                         .disabled(normalizedDraftWord.isEmpty)
@@ -1747,7 +2096,7 @@ private struct SettingsMutedKeywordListDetailView: View {
 
                 Section {
                     if list.words.isEmpty {
-                        Text("No words in this list.")
+                        Text("No terms in this list.")
                             .foregroundStyle(.secondary)
                     } else {
                         ForEach(list.words, id: \.self) { word in
@@ -1762,6 +2111,16 @@ private struct SettingsMutedKeywordListDetailView: View {
                                         .font(.caption2.weight(.semibold))
                                         .foregroundStyle(.secondary)
                                 }
+
+                                Button {
+                                    muteStore.removeWord(word, from: list.id)
+                                } label: {
+                                    Image(systemName: "minus.circle.fill")
+                                        .font(.body.weight(.semibold))
+                                        .foregroundStyle(.secondary)
+                                }
+                                .buttonStyle(.plain)
+                                .accessibilityLabel("Remove \(word)")
                             }
                             .swipeActions(edge: .trailing, allowsFullSwipe: true) {
                                 Button(role: .destructive) {
@@ -1773,11 +2132,11 @@ private struct SettingsMutedKeywordListDetailView: View {
                         }
                     }
                 } header: {
-                    Text("Words")
+                    Text("Muted Terms")
                 } footer: {
                     Text(list.allowsAddingWords
-                         ? "Removing a word updates your private encrypted mute list."
-                         : "These are private muted words already stored on your account.")
+                         ? "Removing a term updates your private encrypted mute list immediately."
+                         : "These are private muted terms already stored on your account.")
                 }
             }
 
@@ -1789,7 +2148,7 @@ private struct SettingsMutedKeywordListDetailView: View {
                 }
             }
         }
-        .navigationTitle(currentList?.title ?? "Muted Keywords")
+        .navigationTitle(currentList?.title ?? "Muted Terms")
         .navigationBarTitleDisplayMode(.inline)
     }
 
@@ -1819,29 +2178,6 @@ private struct SettingsMutedKeywordListDetailView: View {
         guard !trimmed.isEmpty else { return }
         muteStore.addWord(trimmed, to: listID)
         draftWord = ""
-    }
-}
-
-private struct SettingsMediaUploadView: View {
-    @EnvironmentObject private var appSettings: AppSettingsStore
-
-    var body: some View {
-        Form {
-            Section("Media Upload") {
-                Picker("Media Server", selection: $appSettings.mediaUploadProvider) {
-                    ForEach(MediaUploadProvider.allCases) { option in
-                        Text(option.title).tag(option)
-                    }
-                }
-                .pickerStyle(.segmented)
-
-                Text("Used for note attachments and profile image uploads.")
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-            }
-        }
-        .navigationTitle("Media Upload")
-        .navigationBarTitleDisplayMode(.large)
     }
 }
 

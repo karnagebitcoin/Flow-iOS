@@ -6,43 +6,26 @@ import UIKit
 
 @MainActor
 struct SignupOnboardingView: View {
+    private static let onboardingProfilePublishTimeout: TimeInterval = 3.5
+
     private enum Step: Int, CaseIterable {
-        case profile
+        case name
+        case image
+        case about
         case interests
         case notifications
-
-        var title: String {
-            switch self {
-            case .profile:
-                return "Your profile"
-            case .interests:
-                return "Pick your interests"
-            case .notifications:
-                return "Notifications"
-            }
-        }
-
-        var subtitle: String {
-            switch self {
-            case .profile:
-                return "Set up the basics. You can change all of this later."
-            case .interests:
-                return "We’ll turn these into an Interests feed you can edit anytime in Feeds."
-            case .notifications:
-                return "Turn on notifications after your feed is ready, or skip and change it later."
-            }
-        }
     }
 
     @EnvironmentObject private var auth: AuthManager
     @EnvironmentObject private var relaySettings: RelaySettingsStore
     @EnvironmentObject private var appSettings: AppSettingsStore
+    @Environment(\.colorScheme) private var colorScheme
 
     let canSwitchToSignIn: Bool
     let onSwitchToSignIn: () -> Void
     let onComplete: () -> Void
 
-    @State private var step: Step = .profile
+    @State private var step: Step = .name
     @State private var pendingAccount: GeneratedNostrAccount?
     @State private var displayName = ""
     @State private var handle = ""
@@ -92,6 +75,7 @@ struct SignupOnboardingView: View {
             }
         }
         .background(Color(.systemBackground))
+        .tint(onboardingInputTint)
         .alert("You're all set", isPresented: $showCompletionAlert) {
             Button("Got It") {
                 showConfetti = false
@@ -144,8 +128,12 @@ struct SignupOnboardingView: View {
             .padding(.vertical, 60)
         } else {
             switch step {
-            case .profile:
-                profileStep
+            case .name:
+                nameStep
+            case .image:
+                imageStep
+            case .about:
+                aboutStep
             case .interests:
                 interestsStep
             case .notifications:
@@ -154,44 +142,16 @@ struct SignupOnboardingView: View {
         }
     }
 
-    private var profileStep: some View {
+    private var nameStep: some View {
         VStack(alignment: .leading, spacing: 18) {
-            VStack(spacing: 12) {
-                PhotosPicker(selection: $selectedAvatarItem, matching: .images) {
-                    ZStack(alignment: .bottomTrailing) {
-                        avatarPreview
-
-                        ZStack {
-                            Circle()
-                                .fill(appSettings.primaryColor)
-                                .frame(width: 34, height: 34)
-
-                            if isLoadingAvatar {
-                                ProgressView()
-                                    .controlSize(.small)
-                                    .tint(.white)
-                            } else {
-                                Image(systemName: "arrow.up.circle.fill")
-                                    .font(.system(size: 16, weight: .semibold))
-                                    .foregroundStyle(.white)
-                            }
-                        }
-                        .shadow(color: .black.opacity(0.16), radius: 10, y: 4)
-                    }
-                }
-                .buttonStyle(.plain)
-                .disabled(isFinishing)
-
-                Text("Upload profile image")
-                    .font(.footnote.weight(.medium))
-                    .foregroundStyle(.secondary)
-            }
-            .frame(maxWidth: .infinity)
-            .padding(.top, 6)
+            stepIntro(
+                title: "What should we call you?",
+                subtitle: "We’ll use this on your profile. You can change it later."
+            )
 
             onboardingFieldCard {
                 VStack(alignment: .leading, spacing: 8) {
-                    fieldLabel("What should we call you?")
+                    fieldLabel("Name")
                     TextField("Enter your name", text: $displayName)
                         .textInputAutocapitalization(.words)
                         .autocorrectionDisabled()
@@ -213,6 +173,49 @@ struct SignupOnboardingView: View {
                     }
                 }
             }
+        }
+    }
+
+    private var imageStep: some View {
+        VStack {
+            Spacer(minLength: 24)
+
+            VStack(spacing: 26) {
+                stepIntro(
+                    title: "Welcome, \(welcomeName).",
+                    subtitle: "Add a profile photo now, or skip and do it later."
+                )
+
+                VStack(spacing: 12) {
+                    PhotosPicker(selection: $selectedAvatarItem, matching: .images) {
+                        SignupAvatarPickerLabel(
+                            previewImage: selectedAvatarPreviewImage,
+                            displayName: displayName,
+                            accentColor: onboardingSecondaryAccent,
+                            isLoadingAvatar: isLoadingAvatar
+                        )
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(isFinishing)
+
+                    Text("Upload profile image")
+                        .font(.footnote.weight(.medium))
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .frame(maxWidth: .infinity)
+
+            Spacer(minLength: 40)
+        }
+        .frame(maxWidth: .infinity, minHeight: 460)
+    }
+
+    private var aboutStep: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            stepIntro(
+                title: "A preview of you",
+                subtitle: "Write a short bio now, or skip and shape this later."
+            )
 
             onboardingFieldCard {
                 VStack(alignment: .leading, spacing: 10) {
@@ -230,20 +233,20 @@ struct SignupOnboardingView: View {
 
                         TextEditor(text: $about)
                     }
-                        .font(.body)
-                        .frame(minHeight: 124)
-                        .scrollContentBackground(.hidden)
+                    .font(.body)
+                    .frame(minHeight: 124)
+                    .scrollContentBackground(.hidden)
                 }
             }
-
         }
     }
 
     private var interestsStep: some View {
         VStack(alignment: .leading, spacing: 18) {
-            Text("Choose a few topics to shape your first feed.")
-                .font(.body)
-                .foregroundStyle(.secondary)
+            stepIntro(
+                title: "Pick your interests",
+                subtitle: "Choose a few topics to shape your first feed."
+            )
 
             LazyVGrid(
                 columns: [
@@ -261,16 +264,17 @@ struct SignupOnboardingView: View {
 
     private var notificationsStep: some View {
         VStack(alignment: .leading, spacing: 18) {
-            Text("Your Interests feed is ready. Turn on notifications now, or skip and change this later in Settings.")
-                .font(.body)
-                .foregroundStyle(.secondary)
+            stepIntro(
+                title: "Notifications",
+                subtitle: "Your Interests feed is ready. Turn on notifications now, or skip and change this later in Settings."
+            )
 
             onboardingFieldCard {
                 VStack(alignment: .leading, spacing: 14) {
                     HStack(alignment: .top, spacing: 12) {
                         Image(systemName: "bell.badge.fill")
                             .font(.system(size: 20, weight: .semibold))
-                            .foregroundStyle(appSettings.primaryColor)
+                            .foregroundStyle(onboardingSecondaryAccent)
                             .frame(width: 28)
 
                         VStack(alignment: .leading, spacing: 4) {
@@ -284,6 +288,7 @@ struct SignupOnboardingView: View {
                     }
 
                     Toggle("Enable Notifications", isOn: notificationsBinding)
+                        .tint(onboardingToggleTint)
 
                     Text(appSettings.notificationsStatusDescription)
                         .font(.footnote)
@@ -310,11 +315,11 @@ struct SignupOnboardingView: View {
                 }
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, 16)
-                .background(primaryButtonBackground, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+                .background(primaryButtonBackground, in: Capsule(style: .continuous))
                 .foregroundStyle(primaryButtonForeground)
                 .scaleEffect(isFinishing && animateFinishingButton ? 0.985 : 1)
                 .shadow(
-                    color: isFinishing ? appSettings.primaryColor.opacity(animateFinishingButton ? 0.32 : 0.14) : .clear,
+                    color: isFinishing ? Color.black.opacity(animateFinishingButton ? 0.18 : 0.10) : .clear,
                     radius: isFinishing ? 18 : 0,
                     y: isFinishing ? 8 : 0
                 )
@@ -323,15 +328,19 @@ struct SignupOnboardingView: View {
             .disabled(primaryActionDisabled)
 
             HStack {
-                if step != .profile {
+                if step != .name {
                     Button("Back") {
                         withAnimation(.easeInOut(duration: 0.18)) {
                             errorMessage = nil
                             switch step {
-                            case .profile:
+                            case .name:
                                 break
+                            case .image:
+                                step = .name
+                            case .about:
+                                step = .image
                             case .interests:
-                                step = .profile
+                                step = .about
                             case .notifications:
                                 step = .interests
                             }
@@ -342,42 +351,19 @@ struct SignupOnboardingView: View {
                 }
 
                 Spacer()
+
+                if canSkipCurrentStep {
+                    Button("Skip for now") {
+                        advanceFromOptionalStep()
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(.secondary)
+                }
             }
             .font(.footnote.weight(.medium))
             .padding(.horizontal, 4)
         }
         .padding(.bottom, 18)
-    }
-
-    private var avatarPreview: some View {
-        Group {
-            if let selectedAvatarPreviewImage {
-                Image(uiImage: selectedAvatarPreviewImage)
-                    .resizable()
-                    .scaledToFill()
-            } else {
-                ZStack {
-                    Circle()
-                        .fill(appSettings.primaryColor.opacity(0.14))
-
-                    if let initial = displayName.trimmingCharacters(in: .whitespacesAndNewlines).first {
-                        Text(String(initial).uppercased())
-                            .font(.system(size: 42, weight: .bold, design: .rounded))
-                            .foregroundStyle(appSettings.primaryColor)
-                    } else {
-                        Image(systemName: "person.fill")
-                            .font(.system(size: 34, weight: .semibold))
-                            .foregroundStyle(appSettings.primaryColor)
-                    }
-                }
-            }
-        }
-        .frame(width: 116, height: 116)
-        .clipShape(Circle())
-        .overlay {
-            Circle()
-                .stroke(Color(.separator).opacity(0.25), lineWidth: 1)
-        }
     }
 
     private func onboardingFieldCard<Content: View>(@ViewBuilder content: () -> Content) -> some View {
@@ -390,6 +376,19 @@ struct SignupOnboardingView: View {
         Text(title)
             .font(.footnote.weight(.semibold))
             .foregroundStyle(.secondary)
+    }
+
+    private func stepIntro(title: String, subtitle: String) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(title)
+                .font(.custom("SF Pro Display", size: 31).weight(.bold))
+                .foregroundStyle(.primary)
+
+            Text(subtitle)
+                .font(.body)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
     }
 
     private func interestChip(for topic: InterestTopic) -> some View {
@@ -405,11 +404,11 @@ struct SignupOnboardingView: View {
             HStack(spacing: 10) {
                 Image(systemName: topic.iconName)
                     .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(isSelected ? .white : appSettings.primaryColor)
+                    .foregroundStyle(isSelected ? onboardingChipSelectedForeground : onboardingSecondaryAccent)
 
                 Text(topic.title)
                     .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(isSelected ? .white : .primary)
+                    .foregroundStyle(isSelected ? onboardingChipSelectedForeground : .primary)
                     .lineLimit(1)
                     .minimumScaleFactor(0.9)
 
@@ -418,20 +417,20 @@ struct SignupOnboardingView: View {
                 if isSelected {
                     Image(systemName: "checkmark.circle.fill")
                         .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(.white.opacity(0.92))
+                        .foregroundStyle(onboardingChipSelectedForeground.opacity(0.92))
                 }
             }
-            .frame(maxWidth: .infinity, minHeight: 46, alignment: .leading)
+            .frame(maxWidth: .infinity, minHeight: 42, alignment: .leading)
             .padding(.horizontal, 14)
-            .padding(.vertical, 10)
+            .padding(.vertical, 7)
             .background(
                 Capsule(style: .continuous)
-                    .fill(isSelected ? appSettings.primaryColor : Color(.secondarySystemBackground))
+                    .fill(isSelected ? onboardingChipSelectedFill : Color(.secondarySystemBackground))
             )
             .overlay(
                 Capsule(style: .continuous)
                     .stroke(
-                        isSelected ? appSettings.primaryColor : Color(.separator).opacity(0.28),
+                        isSelected ? onboardingChipSelectedStroke : Color(.separator).opacity(0.28),
                         lineWidth: 1
                     )
             )
@@ -451,7 +450,11 @@ struct SignupOnboardingView: View {
 
     private var primaryButtonTitle: String {
         switch step {
-        case .profile:
+        case .name:
+            return "Continue"
+        case .image:
+            return "Continue"
+        case .about:
             return "Continue"
         case .interests:
             return "Continue"
@@ -466,8 +469,12 @@ struct SignupOnboardingView: View {
         }
 
         switch step {
-        case .profile:
+        case .name:
             return normalizedDisplayName.isEmpty || normalizedHandle.isEmpty
+        case .image:
+            return false
+        case .about:
+            return false
         case .interests:
             return selectedTopics.isEmpty
         case .notifications:
@@ -476,11 +483,43 @@ struct SignupOnboardingView: View {
     }
 
     private var primaryButtonBackground: Color {
-        primaryActionDisabled ? Color(.tertiarySystemFill) : appSettings.primaryColor
+        primaryActionDisabled ? Color(.tertiarySystemFill) : onboardingPrimaryButtonFill
     }
 
     private var primaryButtonForeground: Color {
-        primaryActionDisabled ? Color(.secondaryLabel) : .white
+        primaryActionDisabled ? Color(.secondaryLabel) : onboardingPrimaryButtonForeground
+    }
+
+    private var onboardingPrimaryButtonFill: Color {
+        Color.white.opacity(0.96)
+    }
+
+    private var onboardingPrimaryButtonForeground: Color {
+        Color(red: 0.06, green: 0.10, blue: 0.18)
+    }
+
+    private var onboardingSecondaryAccent: Color {
+        Color(.secondaryLabel)
+    }
+
+    private var onboardingToggleTint: Color {
+        Color(.systemGray3)
+    }
+
+    private var onboardingInputTint: Color {
+        colorScheme == .dark ? .white : onboardingPrimaryButtonForeground
+    }
+
+    private var onboardingChipSelectedFill: Color {
+        Color.white.opacity(0.96)
+    }
+
+    private var onboardingChipSelectedForeground: Color {
+        onboardingPrimaryButtonForeground
+    }
+
+    private var onboardingChipSelectedStroke: Color {
+        Color.white.opacity(0.32)
     }
 
     private var normalizedDisplayName: String {
@@ -498,11 +537,24 @@ struct SignupOnboardingView: View {
         )
     }
 
+    private var welcomeName: String {
+        normalizedDisplayName.isEmpty ? "there" : normalizedDisplayName
+    }
+
+    private var canSkipCurrentStep: Bool {
+        switch step {
+        case .image, .about:
+            return true
+        case .name, .interests, .notifications:
+            return false
+        }
+    }
+
     private func handlePrimaryAction() {
         errorMessage = nil
 
         switch step {
-        case .profile:
+        case .name:
             guard !normalizedDisplayName.isEmpty else {
                 errorMessage = "Enter your name to continue."
                 return
@@ -511,6 +563,16 @@ struct SignupOnboardingView: View {
                 errorMessage = "Pick a handle to continue."
                 return
             }
+            withAnimation(.easeInOut(duration: 0.18)) {
+                step = .image
+            }
+
+        case .image:
+            withAnimation(.easeInOut(duration: 0.18)) {
+                step = .about
+            }
+
+        case .about:
             withAnimation(.easeInOut(duration: 0.18)) {
                 step = .interests
             }
@@ -523,6 +585,22 @@ struct SignupOnboardingView: View {
         case .notifications:
             Task {
                 await finishSignup()
+            }
+        }
+    }
+
+    private func advanceFromOptionalStep() {
+        errorMessage = nil
+        withAnimation(.easeInOut(duration: 0.18)) {
+            switch step {
+            case .image:
+                step = .about
+            case .about:
+                step = .interests
+            case .notifications:
+                break
+            case .name, .interests:
+                break
             }
         }
     }
@@ -606,7 +684,12 @@ struct SignupOnboardingView: View {
                 forKey: HomeFeedViewModel.persistedFeedSourceKey(pubkey: pendingAccount.pubkey.lowercased())
             )
 
-            _ = try auth.loginWithNsecOrHex(pendingAccount.nsec)
+            let account = try auth.loginWithNsecOrHex(
+                pendingAccount.nsec,
+                backupPrivateKeyToICloud: true
+            )
+            appSettings.configure(accountPubkey: account.pubkey)
+            appSettings.primaryColor = AppSettingsStore.defaultPrimaryColor
 
             confettiBurstID += 1
             withAnimation(.easeInOut(duration: 0.2)) {
@@ -664,51 +747,33 @@ struct SignupOnboardingView: View {
             .build(signedBy: keypair)
 
         let eventData = try JSONEncoder().encode(event)
-        guard let eventObject = try JSONSerialization.jsonObject(with: eventData) as? [String: Any] else {
-            throw RelayClientError.publishRejected("Malformed profile metadata")
-        }
 
         let relayURLs = appSettings.effectiveWriteRelayURLs(
             from: relaySettings.writeRelayURLs,
             fallbackReadRelayURLs: relaySettings.readRelayURLs
         )
-        let publishResult = await withTaskGroup(
-            of: Error?.self,
-            returning: (successes: Int, firstError: Error?).self
-        ) { group in
-            for relayURL in relayURLs {
-                group.addTask { [relayClient] in
-                    do {
-                        try await relayClient.publishEvent(
-                            relayURL: relayURL,
-                            eventObject: eventObject,
-                            eventID: event.id
-                        )
-                        return nil
-                    } catch {
-                        return error
-                    }
+        let publishCoordinator = OnboardingProfilePublishCoordinator(
+            expectedRelayCount: relayURLs.count
+        )
+        for relayURL in relayURLs {
+            let publishEventData = eventData
+            let eventID = event.id
+            Task.detached(priority: .userInitiated) { [relayClient] in
+                do {
+                    try await relayClient.publishEvent(
+                        relayURL: relayURL,
+                        eventData: publishEventData,
+                        eventID: eventID,
+                        timeout: Self.onboardingProfilePublishTimeout
+                    )
+                    await publishCoordinator.recordSuccess(relayURL)
+                } catch {
+                    await publishCoordinator.recordFailure(error)
                 }
             }
-
-            var successes = 0
-            var firstError: Error?
-            for await error in group {
-                if let error {
-                    if firstError == nil {
-                        firstError = error
-                    }
-                } else {
-                    successes += 1
-                }
-            }
-
-            return (successes, firstError)
         }
 
-        if publishResult.successes == 0 {
-            throw publishResult.firstError ?? RelayClientError.publishRejected("Couldn’t publish your profile yet.")
-        }
+        _ = try await publishCoordinator.waitForFirstSuccess()
 
         if let profile = NostrProfile.decode(from: content) {
             await ProfileCache.shared.store(profiles: [account.pubkey.lowercased(): profile], missed: [])
@@ -803,6 +868,117 @@ private struct OnboardingConfettiOverlayView: View {
                     animate = true
                 }
             }
+        }
+    }
+}
+
+private actor OnboardingProfilePublishCoordinator {
+    private let expectedRelayCount: Int
+    private var completedFailureCount = 0
+    private var firstSuccessfulRelay: URL?
+    private var firstError: Error?
+    private var continuation: CheckedContinuation<URL, Error>?
+    private var isResolved = false
+
+    init(expectedRelayCount: Int) {
+        self.expectedRelayCount = expectedRelayCount
+    }
+
+    func waitForFirstSuccess() async throws -> URL {
+        if let firstSuccessfulRelay {
+            return firstSuccessfulRelay
+        }
+
+        if completedFailureCount >= expectedRelayCount {
+            throw firstError ?? RelayClientError.publishRejected("Couldn’t publish your profile yet.")
+        }
+
+        return try await withCheckedThrowingContinuation { continuation in
+            self.continuation = continuation
+        }
+    }
+
+    func recordSuccess(_ relayURL: URL) {
+        guard !isResolved else { return }
+        firstSuccessfulRelay = relayURL
+        isResolved = true
+        continuation?.resume(returning: relayURL)
+        continuation = nil
+    }
+
+    func recordFailure(_ error: Error) {
+        guard !isResolved else { return }
+        completedFailureCount += 1
+        if firstError == nil {
+            firstError = error
+        }
+
+        guard completedFailureCount >= expectedRelayCount else { return }
+        isResolved = true
+        continuation?.resume(
+            throwing: firstError ?? RelayClientError.publishRejected("Couldn’t publish your profile yet.")
+        )
+        continuation = nil
+    }
+}
+
+private struct SignupAvatarPickerLabel: View {
+    let previewImage: UIImage?
+    let displayName: String
+    let accentColor: Color
+    let isLoadingAvatar: Bool
+
+    var body: some View {
+        ZStack(alignment: .bottomTrailing) {
+            avatarPreview
+
+            ZStack {
+                Circle()
+                    .fill(accentColor)
+                    .frame(width: 34, height: 34)
+
+                if isLoadingAvatar {
+                    ProgressView()
+                        .controlSize(.small)
+                        .tint(.white)
+                } else {
+                    Image(systemName: "arrow.up.circle.fill")
+                        .font(.system(size: 16, weight: .semibold))
+                        .foregroundStyle(.white)
+                }
+            }
+            .shadow(color: .black.opacity(0.16), radius: 10, y: 4)
+        }
+    }
+
+    private var avatarPreview: some View {
+        Group {
+            if let previewImage {
+                Image(uiImage: previewImage)
+                    .resizable()
+                    .scaledToFill()
+            } else {
+                ZStack {
+                    Circle()
+                        .fill(accentColor.opacity(0.14))
+
+                    if let initial = displayName.trimmingCharacters(in: .whitespacesAndNewlines).first {
+                        Text(String(initial).uppercased())
+                            .font(.system(size: 42, weight: .bold, design: .rounded))
+                            .foregroundStyle(accentColor)
+                    } else {
+                        Image(systemName: "person.fill")
+                            .font(.system(size: 34, weight: .semibold))
+                            .foregroundStyle(accentColor)
+                    }
+                }
+            }
+        }
+        .frame(width: 116, height: 116)
+        .clipShape(Circle())
+        .overlay {
+            Circle()
+                .stroke(Color(.separator).opacity(0.25), lineWidth: 1)
         }
     }
 }

@@ -15,6 +15,7 @@ struct AuthSheetView: View {
     @EnvironmentObject private var relaySettings: RelaySettingsStore
     @Environment(\.dismiss) private var dismiss
 
+    private let initialTab: AuthSheetTab
     private let availableTabs: [AuthSheetTab]
     @State private var selectedTab: AuthSheetTab
     @State private var privateKeyInput = ""
@@ -27,6 +28,7 @@ struct AuthSheetView: View {
         availableTabs: [AuthSheetTab] = AuthSheetTab.allCases
     ) {
         let validTabs = availableTabs.isEmpty ? [.signIn] : availableTabs
+        self.initialTab = initialTab
         self.availableTabs = validTabs
         let resolvedInitialTab = validTabs.contains(initialTab) ? initialTab : validTabs[0]
         _selectedTab = State(initialValue: resolvedInitialTab)
@@ -69,6 +71,12 @@ struct AuthSheetView: View {
             }
             .navigationTitle(selectedTab == .signUp ? "Create Account" : "Account")
             .navigationBarTitleDisplayMode(.inline)
+            .onAppear {
+                let resolvedInitialTab = availableTabs.contains(initialTab) ? initialTab : availableTabs[0]
+                if selectedTab != resolvedInitialTab {
+                    selectedTab = resolvedInitialTab
+                }
+            }
             .task(id: accountsProfileLookupID) {
                 await refreshSavedAccountProfiles()
             }
@@ -82,6 +90,7 @@ struct AuthSheetView: View {
                     Button("Close") {
                         dismiss()
                     }
+                    .tint(.secondary)
                 }
             }
             .confirmationDialog(
@@ -118,20 +127,46 @@ struct AuthSheetView: View {
 
     private var signInSection: some View {
         Section {
-            SecureField("nsec1... or 64-char hex", text: $privateKeyInput)
-                .textInputAutocapitalization(.never)
-                .autocorrectionDisabled()
+            VStack(alignment: .leading, spacing: 14) {
+                Text("Sign in with your private key")
+                    .font(.footnote.weight(.semibold))
+                    .foregroundStyle(.secondary)
 
-            if let signInError {
-                Text(signInError)
-                    .font(.footnote)
-                    .foregroundStyle(.red)
-            }
+                SecureField("Private key", text: $privateKeyInput)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 16)
+                    .background(
+                        RoundedRectangle(cornerRadius: 18, style: .continuous)
+                            .fill(Color(.secondarySystemBackground))
+                    )
+                    .overlay {
+                        RoundedRectangle(cornerRadius: 18, style: .continuous)
+                            .stroke(Color(.separator).opacity(0.42), lineWidth: 1.15)
+                    }
 
-            Button("Sign In") {
-                handleSignIn()
+                if let signInError {
+                    Text(signInError)
+                        .font(.footnote)
+                        .foregroundStyle(.red)
+                }
+
+                Button {
+                    handleSignIn()
+                } label: {
+                    Text("Sign In")
+                        .font(.headline.weight(.semibold))
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 17)
+                        .foregroundStyle(Color(red: 0.06, green: 0.10, blue: 0.18))
+                        .background(
+                            Capsule(style: .continuous)
+                                .fill(Color.white.opacity(0.96))
+                        )
+                }
+                .buttonStyle(.plain)
             }
-            .buttonStyle(.borderedProminent)
         } footer: {
             Text("Use private-key sign in to enable posting, reactions, and replies.")
         }
@@ -163,7 +198,7 @@ struct AuthSheetView: View {
                                             .foregroundStyle(.secondary)
                                             .lineLimit(1)
                                     }
-                                    Text(account.signerType == .nsec ? "Private key account" : "Read-only account")
+                                    Text(accountBackupLabel(for: account))
                                         .font(.caption2)
                                         .foregroundStyle(.secondary)
                                 }
@@ -284,6 +319,15 @@ struct AuthSheetView: View {
             return nil
         }
         return url
+    }
+
+    private func accountBackupLabel(for account: AuthAccount) -> String {
+        guard account.signerType == .nsec else {
+            return "Read-only account"
+        }
+        return account.privateKeyBackupEnabled
+            ? "Private key account • iCloud backup on"
+            : "Private key account • stored on this device"
     }
 
     private func normalized(_ value: String?) -> String? {

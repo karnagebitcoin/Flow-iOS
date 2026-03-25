@@ -23,7 +23,7 @@
 		<key>NSMicrophoneUsageDescription</key>
 		<string>Flow uses the microphone for voice-to-text and video capture while composing notes.</string>
 		<key>NSCameraUsageDescription</key>
-		<string>Flow uses the camera to capture photos and videos for your notes.</string>
+		<string>Flow uses the camera to scan profile QR codes and capture photos and videos for your notes.</string>
 		<key>NSSpeechRecognitionUsageDescription</key>
 		<string>Flow uses speech recognition to transcribe your voice into note text.</string>
 	<key>UIApplicationSceneManifest</key>

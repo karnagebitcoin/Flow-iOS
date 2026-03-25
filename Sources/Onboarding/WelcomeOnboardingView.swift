@@ -4,29 +4,48 @@ struct WelcomeOnboardingView: View {
     @EnvironmentObject private var auth: AuthManager
     @EnvironmentObject private var appSettings: AppSettingsStore
     @EnvironmentObject private var relaySettings: RelaySettingsStore
-    @State private var isShowingAuthSheet = false
-    @State private var authInitialTab: AuthSheetTab = .signUp
+    @State private var presentedAuthTab: AuthSheetTab?
+    @State private var hasAnimatedIn = false
 
     var body: some View {
         ZStack {
-            FlowPaintMotionBackground()
+            Color.black
                 .ignoresSafeArea()
+
+            UnicornStudioBackgroundView(
+                source: .bundledJSON("welcome_onboarding_unicorn.json"),
+                opacity: 1
+            )
+            .ignoresSafeArea()
+
+            LinearGradient(
+                colors: [
+                    Color.black.opacity(0.12),
+                    Color.black.opacity(0.20),
+                    Color.black.opacity(0.28)
+                ],
+                startPoint: .top,
+                endPoint: .bottom
+            )
+            .ignoresSafeArea()
 
             VStack(spacing: 0) {
                 Spacer(minLength: 56)
 
                 VStack(spacing: 14) {
                     Text("Flow")
-                        .font(.system(size: 64, weight: .bold, design: .rounded))
+                        .font(.custom("SF Pro Display", size: 56).weight(.bold))
                         .foregroundStyle(.white.opacity(0.97))
-                        .kerning(-1.4)
+                        .kerning(-1.1)
 
-                    Text("Build a feed that feels like yours.")
-                        .font(.title3.weight(.medium))
+                    Text("Social, with more control.")
+                        .font(.custom("SF Pro Display", size: 24).weight(.medium))
                         .foregroundStyle(.white.opacity(0.78))
                         .multilineTextAlignment(.center)
                 }
                 .padding(.horizontal, 32)
+                .opacity(hasAnimatedIn ? 1 : 0)
+                .offset(y: hasAnimatedIn ? 0 : 22)
 
                 Spacer(minLength: 0)
 
@@ -34,7 +53,7 @@ struct WelcomeOnboardingView: View {
                     Button {
                         openAuth(tab: .signUp)
                     } label: {
-                        Text("Create Account")
+                        Text("Get Started")
                             .font(.headline.weight(.semibold))
                             .frame(maxWidth: .infinity)
                             .padding(.vertical, 17)
@@ -46,11 +65,13 @@ struct WelcomeOnboardingView: View {
                             .shadow(color: Color.black.opacity(0.14), radius: 18, y: 10)
                     }
                     .buttonStyle(.plain)
+                    .opacity(hasAnimatedIn ? 1 : 0)
+                    .offset(y: hasAnimatedIn ? 0 : 28)
 
                     Button {
                         openAuth(tab: .signIn)
                     } label: {
-                        Text("I Already Have an Account")
+                        Text("I Already Have a Key")
                             .font(.headline.weight(.semibold))
                             .frame(maxWidth: .infinity)
                             .padding(.vertical, 17)
@@ -65,6 +86,8 @@ struct WelcomeOnboardingView: View {
                             }
                     }
                     .buttonStyle(.plain)
+                    .opacity(hasAnimatedIn ? 1 : 0)
+                    .offset(y: hasAnimatedIn ? 0 : 34)
                 }
                 .padding(.horizontal, 24)
                 .frame(maxWidth: 520)
@@ -72,11 +95,19 @@ struct WelcomeOnboardingView: View {
             }
             .padding(.vertical, 32)
         }
-        .fullScreenCover(isPresented: $isShowingAuthSheet) {
+        .task {
+            guard !hasAnimatedIn else { return }
+            try? await Task.sleep(nanoseconds: 140_000_000)
+            withAnimation(.spring(response: 0.82, dampingFraction: 0.9)) {
+                hasAnimatedIn = true
+            }
+        }
+        .fullScreenCover(item: $presentedAuthTab) { selectedTab in
             AuthSheetView(
-                initialTab: authInitialTab,
+                initialTab: selectedTab,
                 availableTabs: [.signUp, .signIn]
             )
+            .id(selectedTab)
             .environmentObject(auth)
             .environmentObject(appSettings)
             .environmentObject(relaySettings)
@@ -84,8 +115,7 @@ struct WelcomeOnboardingView: View {
     }
 
     private func openAuth(tab: AuthSheetTab) {
-        authInitialTab = tab
-        isShowingAuthSheet = true
+        presentedAuthTab = tab
     }
 }
 
