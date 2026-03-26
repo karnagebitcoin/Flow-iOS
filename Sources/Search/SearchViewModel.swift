@@ -90,6 +90,7 @@ final class SearchViewModel: ObservableObject {
     private let service: NostrFeedService
     private let trendingNotesLoader: TrendingNotesLoader
     private let pageSize: Int
+    private let assetPrefetchItemCount = 18
 
     private var mutedConversationIDs = Set<String>() {
         didSet {
@@ -275,7 +276,9 @@ final class SearchViewModel: ObservableObject {
             )
 
             guard requestRelayURLs == readRelayURLs else { return }
-            trendingNotes = deduplicateAndSort([fetched])
+            let merged = deduplicateAndSort([fetched])
+            trendingNotes = merged
+            scheduleAssetPrefetch(for: merged)
         } catch {
             errorMessage = "Couldn't load trending notes. Pull to refresh and try again."
         }
@@ -337,7 +340,9 @@ final class SearchViewModel: ObservableObject {
             hashtagNotes.items,
             exactAuthorNotes.items
         ])
-        self.searchedNotes = Array(initialNotes.prefix(pageSize))
+        let initialPrefetchedNotes = Array(initialNotes.prefix(pageSize))
+        self.searchedNotes = initialPrefetchedNotes
+        scheduleAssetPrefetch(for: initialPrefetchedNotes)
 
         var profileMatches = await profileMatchesResult
         let exactProfile = await exactProfileResult
@@ -377,7 +382,9 @@ final class SearchViewModel: ObservableObject {
         self.profileMatches = mergedProfiles.map {
             ProfileMatch(pubkey: $0.pubkey, profile: $0.profile)
         }
-        self.searchedNotes = Array(mergedNotes.prefix(pageSize))
+        let mergedPrefetchedNotes = Array(mergedNotes.prefix(pageSize))
+        self.searchedNotes = mergedPrefetchedNotes
+        scheduleAssetPrefetch(for: mergedPrefetchedNotes)
 
         let hadNetworkFailures =
             keywordNotes.failed ||
@@ -556,6 +563,19 @@ final class SearchViewModel: ObservableObject {
 
         return items.filter { item in
             !snapshot.shouldHideAny(in: item.moderationEvents)
+        }
+    }
+
+    private func scheduleAssetPrefetch(for items: [FeedItem]) {
+        let urls = Array(
+            items
+                .prefix(assetPrefetchItemCount)
+                .flatMap(\.prefetchImageURLs)
+        )
+        guard !urls.isEmpty else { return }
+
+        Task(priority: .utility) {
+            await FlowImageCache.shared.prefetch(urls: urls)
         }
     }
 

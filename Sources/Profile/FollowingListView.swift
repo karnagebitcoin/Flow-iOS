@@ -284,7 +284,7 @@ private struct CompactProfileAvatar: View {
             if appSettings.textOnlyMode {
                 fallbackAvatar
             } else if let url {
-                AsyncImage(url: url) { phase in
+                CachedAsyncImage(url: url) { phase in
                     switch phase {
                     case .success(let image):
                         image
@@ -326,7 +326,7 @@ private struct DomainFavicon: View {
             if appSettings.textOnlyMode {
                 fallbackIcon
             } else if let faviconURL {
-                AsyncImage(url: faviconURL) { phase in
+                CachedAsyncImage(url: faviconURL) { phase in
                     switch phase {
                     case .success(let image):
                         image

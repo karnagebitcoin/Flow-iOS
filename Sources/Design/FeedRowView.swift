@@ -636,7 +636,7 @@ private extension View {
     }
 }
 
-private struct AvatarView: View {
+struct AvatarView: View {
     @EnvironmentObject private var appSettings: AppSettingsStore
     let url: URL?
     let fallback: String
@@ -647,7 +647,7 @@ private struct AvatarView: View {
             if appSettings.textOnlyMode {
                 fallbackAvatar
             } else if let url {
-                AsyncImage(url: url) { phase in
+                CachedAsyncImage(url: url) { phase in
                     switch phase {
                     case .success(let image):
                         image

@@ -11,18 +11,25 @@ actor RecentFeedStore {
 
     private let fileManager: FileManager
     private let directoryURL: URL
-    private let encoder = JSONEncoder()
     private let decoder = JSONDecoder()
-    private let maxSnapshots = 40
+    private let seenEventStore: SeenEventStore
 
-    init(fileManager: FileManager = .default) {
+    init(
+        fileManager: FileManager = .default,
+        seenEventStore: SeenEventStore = .shared
+    ) {
         self.fileManager = fileManager
+        self.seenEventStore = seenEventStore
         let root = fileManager.urls(for: .cachesDirectory, in: .userDomainMask).first
             ?? URL(fileURLWithPath: NSTemporaryDirectory())
         self.directoryURL = root.appendingPathComponent("x21-recent-feeds", isDirectory: true)
     }
 
     func getRecentFeed(key: String) async -> [NostrEvent]? {
+        if let cached = await seenEventStore.recentFeed(key: key), !cached.isEmpty {
+            return cached
+        }
+
         ensureDirectory()
         let url = fileURL(for: key)
 
@@ -35,21 +42,20 @@ actor RecentFeedStore {
             return nil
         }
 
+        if !payload.events.isEmpty {
+            await seenEventStore.storeRecentFeed(key: key, events: payload.events)
+        }
         return payload.events
     }
 
     func putRecentFeed(key: String, events: [NostrEvent]) async {
-        guard !events.isEmpty else { return }
+        await seenEventStore.storeRecentFeed(key: key, events: events)
+
         ensureDirectory()
-
-        let payload = Payload(storedAt: Date(), events: events)
-        guard let data = try? encoder.encode(payload) else {
-            return
+        let legacyURL = fileURL(for: key)
+        if fileManager.fileExists(atPath: legacyURL.path) {
+            try? fileManager.removeItem(at: legacyURL)
         }
-
-        let url = fileURL(for: key)
-        try? data.write(to: url, options: .atomic)
-        pruneIfNeeded()
     }
 
     private func ensureDirectory() {
@@ -67,29 +73,5 @@ actor RecentFeedStore {
         let digest = SHA256.hash(data: Data(key.utf8))
         let hashed = digest.map { String(format: "%02x", $0) }.joined()
         return directoryURL.appendingPathComponent("\(hashed).json", isDirectory: false)
-    }
-
-    private func pruneIfNeeded() {
-        guard let files = try? fileManager.contentsOfDirectory(
-            at: directoryURL,
-            includingPropertiesForKeys: [.contentModificationDateKey],
-            options: [.skipsHiddenFiles]
-        ) else {
-            return
-        }
-
-        if files.count <= maxSnapshots {
-            return
-        }
-
-        let sorted = files.sorted { lhs, rhs in
-            let lDate = (try? lhs.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast
-            let rDate = (try? rhs.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast
-            return lDate > rDate
-        }
-
-        for url in sorted.dropFirst(maxSnapshots) {
-            try? fileManager.removeItem(at: url)
-        }
     }
 }

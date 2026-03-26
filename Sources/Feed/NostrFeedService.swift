@@ -337,6 +337,7 @@ struct NostrFeedService: Sendable {
     private let profileCache: ProfileCache
     private let relayHintCache: ProfileRelayHintCache
     private let followListCache: FollowListSnapshotCache
+    private let seenEventStore: SeenEventStore
     private static let trendingRelayURL = URL(string: "wss://trending.relays.land")!
     private static let followListFreshCacheAge: TimeInterval = 60 * 5
     private static let metadataFallbackRelayURLs: [URL] = [
@@ -353,13 +354,15 @@ struct NostrFeedService: Sendable {
         timelineCache: TimelineEventCache = .shared,
         profileCache: ProfileCache = .shared,
         relayHintCache: ProfileRelayHintCache = .shared,
-        followListCache: FollowListSnapshotCache = .shared
+        followListCache: FollowListSnapshotCache = .shared,
+        seenEventStore: SeenEventStore = .shared
     ) {
         self.relayClient = relayClient
         self.timelineCache = timelineCache
         self.profileCache = profileCache
         self.relayHintCache = relayHintCache
         self.followListCache = followListCache
+        self.seenEventStore = seenEventStore
     }
 
     func fetchFeed(relayURL: URL, kinds: [Int], limit: Int, until: Int?) async throws -> [FeedItem] {
@@ -1431,12 +1434,7 @@ struct NostrFeedService: Sendable {
         )
         let actorProfilesByPubkey = await profileCache.cachedProfiles(pubkeys: actorPubkeys)
 
-        let displayEventsBySourceID = Dictionary(
-            uniqueKeysWithValues: events.compactMap { event -> (String, NostrEvent)? in
-                guard let displayEvent = event.resolvedRepostContentEvent else { return nil }
-                return (event.id.lowercased(), displayEvent)
-            }
-        )
+        let displayEventsBySourceID = await resolveCachedDisplayEvents(for: events)
         let displayPubkeys = Array(
             Set(
                 displayEventsBySourceID.values
@@ -1445,7 +1443,7 @@ struct NostrFeedService: Sendable {
             )
         )
         let displayProfilesByPubkey = await profileCache.cachedProfiles(pubkeys: displayPubkeys)
-        let replyTargetEventsBySourceID = resolveCachedReplyTargetEvents(
+        let replyTargetEventsBySourceID = await resolveCachedReplyTargetEvents(
             for: events,
             displayEventsBySourceID: displayEventsBySourceID
         )
@@ -1571,6 +1569,23 @@ struct NostrFeedService: Sendable {
 
         guard !missingTargetIDs.isEmpty else { return displayEventsBySourceID }
 
+        let cachedByID = await seenEventStore.events(ids: Array(missingTargetIDs))
+        if !cachedByID.isEmpty {
+            var remainingSourceToTargetIDs: [String: String] = [:]
+            for (sourceID, targetID) in missingSourceToTargetIDs {
+                if let targetEvent = cachedByID[targetID] {
+                    displayEventsBySourceID[sourceID] = targetEvent.resolvedRepostContentEvent ?? targetEvent
+                } else {
+                    remainingSourceToTargetIDs[sourceID] = targetID
+                }
+            }
+
+            missingSourceToTargetIDs = remainingSourceToTargetIDs
+            missingTargetIDs = Set(remainingSourceToTargetIDs.values)
+        }
+
+        guard !missingTargetIDs.isEmpty else { return displayEventsBySourceID }
+
         let idsFilter = NostrFilter(
             ids: Array(missingTargetIDs),
             limit: max(missingTargetIDs.count * 2, missingTargetIDs.count)
@@ -1596,22 +1611,75 @@ struct NostrFeedService: Sendable {
         return displayEventsBySourceID
     }
 
+    private func resolveCachedDisplayEvents(
+        for events: [NostrEvent]
+    ) async -> [String: NostrEvent] {
+        let eventsByID = Dictionary(uniqueKeysWithValues: events.map { ($0.id.lowercased(), $0) })
+        var displayEventsBySourceID: [String: NostrEvent] = [:]
+        var missingSourceToTargetIDs: [String: String] = [:]
+        var missingTargetIDs = Set<String>()
+
+        for event in events where event.isRepost {
+            let sourceID = event.id.lowercased()
+
+            if let embeddedEvent = event.resolvedRepostContentEvent {
+                displayEventsBySourceID[sourceID] = embeddedEvent
+                continue
+            }
+
+            guard let targetID = event.repostTargetEventID else { continue }
+            if let localTarget = eventsByID[targetID] {
+                displayEventsBySourceID[sourceID] = localTarget.resolvedRepostContentEvent ?? localTarget
+                continue
+            }
+
+            missingSourceToTargetIDs[sourceID] = targetID
+            missingTargetIDs.insert(targetID)
+        }
+
+        guard !missingTargetIDs.isEmpty else { return displayEventsBySourceID }
+
+        let cachedByID = await seenEventStore.events(ids: Array(missingTargetIDs))
+        for (sourceID, targetID) in missingSourceToTargetIDs {
+            guard let targetEvent = cachedByID[targetID] else { continue }
+            displayEventsBySourceID[sourceID] = targetEvent.resolvedRepostContentEvent ?? targetEvent
+        }
+
+        return displayEventsBySourceID
+    }
+
     private func resolveCachedReplyTargetEvents(
         for events: [NostrEvent],
         displayEventsBySourceID: [String: NostrEvent]
-    ) -> [String: NostrEvent] {
+    ) async -> [String: NostrEvent] {
         let availableEvents = deduplicateEvents(events + Array(displayEventsBySourceID.values))
         let availableEventsByID = Dictionary(
             uniqueKeysWithValues: availableEvents.map { ($0.id.lowercased(), $0) }
         )
 
         var resolvedBySourceID: [String: NostrEvent] = [:]
+        var missingSourceToTargetIDs: [String: String] = [:]
+        var missingTargetIDs = Set<String>()
+
         for event in events {
             let sourceID = event.id.lowercased()
             let replySourceEvent = displayEventsBySourceID[sourceID] ?? event
             guard replySourceEvent.isReplyNote else { continue }
             guard let targetID = normalizedEventID(replySourceEvent.directReplyEventReferenceID) else { continue }
-            guard let targetEvent = availableEventsByID[targetID] else { continue }
+
+            if let targetEvent = availableEventsByID[targetID] {
+                resolvedBySourceID[sourceID] = targetEvent.resolvedRepostContentEvent ?? targetEvent
+            } else {
+                missingSourceToTargetIDs[sourceID] = targetID
+                missingTargetIDs.insert(targetID)
+            }
+        }
+
+        guard !missingTargetIDs.isEmpty else { return resolvedBySourceID }
+
+        let cachedByID = await seenEventStore.events(ids: Array(missingTargetIDs))
+        for (sourceID, targetID) in missingSourceToTargetIDs {
+            guard let targetEvent = cachedByID[targetID] else { continue }
             resolvedBySourceID[sourceID] = targetEvent.resolvedRepostContentEvent ?? targetEvent
         }
 
@@ -1645,6 +1713,23 @@ struct NostrFeedService: Sendable {
 
             missingSourceToTargetIDs[sourceID] = targetID
             missingTargetIDs.insert(targetID)
+        }
+
+        guard !missingTargetIDs.isEmpty else { return resolvedBySourceID }
+
+        let cachedByID = await seenEventStore.events(ids: Array(missingTargetIDs))
+        if !cachedByID.isEmpty {
+            var remainingSourceToTargetIDs: [String: String] = [:]
+            for (sourceID, targetID) in missingSourceToTargetIDs {
+                if let targetEvent = cachedByID[targetID] {
+                    resolvedBySourceID[sourceID] = targetEvent.resolvedRepostContentEvent ?? targetEvent
+                } else {
+                    remainingSourceToTargetIDs[sourceID] = targetID
+                }
+            }
+
+            missingSourceToTargetIDs = remainingSourceToTargetIDs
+            missingTargetIDs = Set(remainingSourceToTargetIDs.values)
         }
 
         guard !missingTargetIDs.isEmpty else { return resolvedBySourceID }
@@ -1702,6 +1787,18 @@ struct NostrFeedService: Sendable {
 
             case .address(let address):
                 missingAddresses.insert(address)
+            }
+        }
+
+        if !missingEventIDs.isEmpty {
+            let cachedByID = await seenEventStore.events(ids: Array(missingEventIDs))
+            if !cachedByID.isEmpty {
+                for eventID in Array(missingEventIDs) {
+                    if let event = cachedByID[eventID] {
+                        resolved[.eventID(eventID)] = event
+                        missingEventIDs.remove(eventID)
+                    }
+                }
             }
         }
 
@@ -1941,14 +2038,20 @@ struct NostrFeedService: Sendable {
         timeout: TimeInterval = 12,
         useCache: Bool = true
     ) async throws -> [NostrEvent] {
+        let events: [NostrEvent]
         if !useCache {
-            return try await relayClient.fetchEvents(relayURL: relayURL, filter: filter, timeout: timeout)
+            events = try await relayClient.fetchEvents(relayURL: relayURL, filter: filter, timeout: timeout)
+        } else {
+            let cacheKey = generateTimelineKey(relayURL: relayURL, filter: filter)
+            events = try await timelineCache.events(for: cacheKey) {
+                try await relayClient.fetchEvents(relayURL: relayURL, filter: filter, timeout: timeout)
+            }
         }
 
-        let cacheKey = generateTimelineKey(relayURL: relayURL, filter: filter)
-        return try await timelineCache.events(for: cacheKey) {
-            try await relayClient.fetchEvents(relayURL: relayURL, filter: filter, timeout: timeout)
+        if !events.isEmpty {
+            await seenEventStore.store(events: events)
         }
+        return events
     }
 
     private func fetchTimelineEvents(

@@ -168,6 +168,7 @@ final class HomeFeedViewModel: ObservableObject {
     private let filterStore: HomeFeedFilterStore
 
     private let recentFeedMaxEvents = 120
+    private let assetPrefetchItemCount = 24
     private let feedSourceStorage = UserDefaults.standard
     private let feedSourceStoragePrefix = "homeFeedSourcePreference"
     private let mutedConversationStoragePrefix = "homeFeedMutedConversations"
@@ -707,6 +708,7 @@ final class HomeFeedViewModel: ObservableObject {
             if !usesCompositePagination(requestSource) {
                 hasReachedEnd = fetched.count < pageSize
             }
+            scheduleAssetPrefetch(for: mergedItems)
             startLiveUpdatesIfNeeded()
             await persistRecentFeedSnapshot(from: mergedItems)
             scheduleItemHydration(
@@ -1027,10 +1029,12 @@ final class HomeFeedViewModel: ObservableObject {
             primary: [item],
             secondary: bufferedNewItems
         )
+        scheduleAssetPrefetch(for: [item])
     }
 
     private func mergeKeepingNewest(itemsToMerge: [FeedItem]) {
         items = pruneMutedItems(mergeItemArrays(primary: itemsToMerge, secondary: items))
+        scheduleAssetPrefetch(for: items)
 
         let currentlyVisibleIDs = Set(items.map(\.id))
         bufferedNewItems.removeAll { currentlyVisibleIDs.contains($0.id) }
@@ -1273,6 +1277,7 @@ final class HomeFeedViewModel: ObservableObject {
         knownEventIDs = Set(prunedHydrated.map(\.id))
         oldestCreatedAt = prunedHydrated.last?.event.createdAt
         hasReachedEnd = false
+        scheduleAssetPrefetch(for: prunedHydrated)
         return true
     }
 
@@ -1736,6 +1741,7 @@ final class HomeFeedViewModel: ObservableObject {
                 self.items = self.pruneMutedItems(
                     self.mergeItemArrays(primary: hydrated, secondary: self.items)
                 )
+                self.scheduleAssetPrefetch(for: self.items)
                 self.knownEventIDs = Set(self.items.map(\.id))
                 self.knownEventIDs.formUnion(self.bufferedNewItems.map(\.id))
 
@@ -1744,6 +1750,19 @@ final class HomeFeedViewModel: ObservableObject {
                     await self.persistRecentFeedSnapshot(from: self.items)
                 }
             }
+        }
+    }
+
+    private func scheduleAssetPrefetch(for sourceItems: [FeedItem]) {
+        let urls = Array(
+            sourceItems
+                .prefix(assetPrefetchItemCount)
+                .flatMap(\.prefetchImageURLs)
+        )
+        guard !urls.isEmpty else { return }
+
+        Task(priority: .utility) {
+            await FlowImageCache.shared.prefetch(urls: urls)
         }
     }
 }

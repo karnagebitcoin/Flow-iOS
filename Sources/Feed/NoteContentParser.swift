@@ -229,6 +229,26 @@ enum NoteContentParser {
         return nil
     }
 
+    static func imageURLs(in event: NostrEvent) -> [URL] {
+        let tokens = tokenize(event: event)
+        var seen = Set<String>()
+        var ordered: [URL] = []
+
+        for token in tokens where token.type == .image {
+            guard let url = URL(string: token.value),
+                  let scheme = url.scheme?.lowercased(),
+                  scheme == "http" || scheme == "https" else {
+                continue
+            }
+
+            let normalized = url.absoluteString.lowercased()
+            guard seen.insert(normalized).inserted else { continue }
+            ordered.append(url)
+        }
+
+        return ordered
+    }
+
     private static func token(from candidate: Candidate) -> NoteContentToken? {
         switch candidate.type {
         case .nostrURI:

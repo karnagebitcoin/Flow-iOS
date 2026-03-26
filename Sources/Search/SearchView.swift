@@ -395,29 +395,7 @@ struct SearchView: View {
 
     private func profileResultRow(_ profile: SearchViewModel.ProfileMatch) -> some View {
         HStack(alignment: .center, spacing: 12) {
-            Group {
-                if appSettings.textOnlyMode {
-                    fallbackAvatar(for: profile.displayName)
-                } else if let avatarURL = profile.avatarURL {
-                    AsyncImage(url: avatarURL) { phase in
-                        switch phase {
-                        case .success(let image):
-                            image
-                                .resizable()
-                                .scaledToFill()
-                        default:
-                            fallbackAvatar(for: profile.displayName)
-                        }
-                    }
-                } else {
-                    fallbackAvatar(for: profile.displayName)
-                }
-            }
-            .frame(width: 36, height: 36)
-            .clipShape(Circle())
-            .overlay {
-                Circle().stroke(Color(.separator).opacity(0.35), lineWidth: 0.6)
-            }
+            AvatarView(url: profile.avatarURL, fallback: profile.displayName, size: 36)
 
             VStack(alignment: .leading, spacing: 2) {
                 Text(profile.displayName)

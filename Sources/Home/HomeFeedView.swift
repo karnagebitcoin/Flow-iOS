@@ -902,7 +902,7 @@ struct HomeFeedView: View {
         let previousURL = topNavAvatarURL
         topNavAvatarURL = url
 
-        if let image = await CachedAvatarImageLoader.shared.image(for: url) {
+        if let image = await FlowImageCache.shared.image(for: url) {
             guard topNavAvatarURL == url else { return }
             topNavAvatarImage = image
         } else if previousURL != url {
@@ -982,36 +982,6 @@ struct HomeFeedView: View {
         }
         .presentationDetents([.medium, .large])
         .presentationDragIndicator(.visible)
-    }
-}
-
-private actor CachedAvatarImageLoader {
-    static let shared = CachedAvatarImageLoader()
-
-    private let cache = NSCache<NSURL, UIImage>()
-
-    func image(for url: URL) async -> UIImage? {
-        let cacheKey = url as NSURL
-        if let cached = cache.object(forKey: cacheKey) {
-            return cached
-        }
-
-        do {
-            let (data, response) = try await URLSession.shared.data(from: url)
-            if let httpResponse = response as? HTTPURLResponse,
-               !(200...399).contains(httpResponse.statusCode) {
-                return nil
-            }
-
-            guard let image = UIImage(data: data) else {
-                return nil
-            }
-
-            cache.setObject(image, forKey: cacheKey)
-            return image
-        } catch {
-            return nil
-        }
     }
 }
 

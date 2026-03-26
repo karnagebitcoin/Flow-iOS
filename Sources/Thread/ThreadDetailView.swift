@@ -79,9 +79,6 @@ struct ThreadDetailView: View {
     }
 
     var body: some View {
-        let threadReplies = filteredReplies
-        let replyCountsByTarget = ReplyCountEstimator.counts(for: threadReplies)
-
         ScrollViewReader { scrollProxy in
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 0) {
@@ -377,29 +374,7 @@ struct ThreadDetailView: View {
     }
 
     private var rootAvatar: some View {
-        Group {
-            if appSettings.textOnlyMode {
-                fallbackRootAvatar
-            } else if let avatarURL = viewModel.rootItem.avatarURL {
-                AsyncImage(url: avatarURL) { phase in
-                    switch phase {
-                    case .success(let image):
-                        image
-                            .resizable()
-                            .scaledToFill()
-                    default:
-                        fallbackRootAvatar
-                    }
-                }
-            } else {
-                fallbackRootAvatar
-            }
-        }
-        .frame(width: 44, height: 44)
-        .clipShape(Circle())
-        .overlay {
-            Circle().stroke(Color(.separator), lineWidth: 0.5)
-        }
+        AvatarView(url: viewModel.rootItem.avatarURL, fallback: viewModel.rootItem.displayName)
         .overlay(alignment: .bottomTrailing) {
             if let rootFollowStatusIconName {
                 ZStack {
@@ -1030,6 +1005,14 @@ struct ThreadDetailView: View {
         appSettings.hideNSFWContent
     }
 
+    private var threadReplies: [FeedItem] {
+        filteredReplies
+    }
+
+    private var replyCountsByTarget: [String: Int] {
+        ReplyCountEstimator.counts(for: threadReplies)
+    }
+
     private var filteredReplies: [FeedItem] {
         viewModel.replies.filter { item in
             if MuteStore.shared.shouldHideAny(item.moderationEvents) {
@@ -1086,7 +1069,7 @@ struct ThreadDetailView: View {
             if appSettings.textOnlyMode {
                 composerAvatarFallbackView
             } else if let composerAvatarURL {
-                AsyncImage(url: composerAvatarURL) { phase in
+                CachedAsyncImage(url: composerAvatarURL) { phase in
                     switch phase {
                     case .success(let image):
                         image

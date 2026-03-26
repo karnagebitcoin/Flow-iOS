@@ -143,28 +143,7 @@ struct HomeSlideoutMenuView: View {
     }
 
     private func accountHeaderAvatar(fallbackName: String) -> some View {
-        Group {
-            if let accountHeaderAvatarURL {
-                AsyncImage(url: accountHeaderAvatarURL) { phase in
-                    switch phase {
-                    case .success(let image):
-                        image
-                            .resizable()
-                            .scaledToFill()
-                    default:
-                        accountHeaderFallbackAvatar(fallbackName: fallbackName)
-                    }
-                }
-            } else {
-                accountHeaderFallbackAvatar(fallbackName: fallbackName)
-            }
-        }
-        .frame(width: 52, height: 52)
-        .clipShape(Circle())
-        .overlay {
-            Circle()
-                .stroke(Color(.separator).opacity(0.35), lineWidth: 0.8)
-        }
+        AvatarView(url: accountHeaderAvatarURL, fallback: fallbackName, size: 52)
     }
 
     private func accountHeaderFallbackAvatar(fallbackName: String) -> some View {

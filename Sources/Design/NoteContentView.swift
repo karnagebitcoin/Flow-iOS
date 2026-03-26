@@ -1124,7 +1124,7 @@ private struct NoteImageFullscreenViewer: View {
                 ForEach(Array(urls.enumerated()), id: \.offset) { index, url in
                     ZStack {
                         viewerBackgroundColor.ignoresSafeArea()
-                        AsyncImage(url: url) { phase in
+                        CachedAsyncImage(url: url) { phase in
                             switch phase {
                             case .success(let image):
                                 image
@@ -1138,8 +1138,6 @@ private struct NoteImageFullscreenViewer: View {
                             case .empty:
                                 ProgressView()
                                     .tint(chromeForegroundColor)
-                            @unknown default:
-                                EmptyView()
                             }
                         }
                     }
@@ -1788,7 +1786,7 @@ private struct NostrEventReferenceCardView: View {
             if appSettings.textOnlyMode {
                 fallbackAvatar(for: item)
             } else if let url = item.avatarURL {
-                AsyncImage(url: url) { phase in
+                CachedAsyncImage(url: url) { phase in
                     switch phase {
                     case .success(let image):
                         image
@@ -2196,53 +2194,15 @@ private final class LinkMetadataLoader: ObservableObject {
 private actor CustomEmojiImageLoader {
     static let shared = CustomEmojiImageLoader()
 
-    private var cache: [URL: UIImage] = [:]
-
     func image(for url: URL) async -> UIImage? {
-        if let cached = cache[url] {
-            return cached
-        }
-
-        do {
-            let (data, response) = try await URLSession.shared.data(from: url)
-            if let httpResponse = response as? HTTPURLResponse,
-               !(200...399).contains(httpResponse.statusCode) {
-                return nil
-            }
-            guard let image = UIImage(data: data) else {
-                return nil
-            }
-            cache[url] = image
-            return image
-        } catch {
-            return nil
-        }
+        await FlowImageCache.shared.image(for: url)
     }
 }
 
 private actor NoteMediaImageLoader {
     static let shared = NoteMediaImageLoader()
 
-    private var cache: [URL: UIImage] = [:]
-
     func image(for url: URL) async -> UIImage? {
-        if let cached = cache[url] {
-            return cached
-        }
-
-        do {
-            let (data, response) = try await URLSession.shared.data(from: url)
-            if let httpResponse = response as? HTTPURLResponse,
-               !(200...399).contains(httpResponse.statusCode) {
-                return nil
-            }
-            guard let image = UIImage(data: data) else {
-                return nil
-            }
-            cache[url] = image
-            return image
-        } catch {
-            return nil
-        }
+        await FlowImageCache.shared.image(for: url)
     }
 }

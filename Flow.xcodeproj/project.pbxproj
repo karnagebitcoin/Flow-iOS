@@ -48,8 +48,10 @@
 		6B8D599DE5F19D6A35B4D796 /* AuthManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = F6C6017D180F1864858B6ECF /* AuthManager.swift */; };
 		6C97A187B541004D4E7965D0 /* ResharePublishService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A5763F0BC13FDA5CB4E0AFA8 /* ResharePublishService.swift */; };
 		7C06FF22A41B51DEC6AB475F /* AppSettingsStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = D3535F42ABCFA81A554B26FE /* AppSettingsStore.swift */; };
+		7DE4C13ED08EDAB073D7DBE2 /* SeenEventStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B77D47257479D0532CE896A /* SeenEventStore.swift */; };
 		7ECE6E88E6E7794ABFCF1E25 /* TimelineKey.swift in Sources */ = {isa = PBXBuildFile; fileRef = F7D8015688B1D51344FFFCB7 /* TimelineKey.swift */; };
 		8221FB25EC505A4C93948B32 /* HomeSlideoutMenuView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA1B291DA499152538A295F6 /* HomeSlideoutMenuView.swift */; };
+		863D8F5E77A252D216D3BAF9 /* FlowMediaCache.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4B67EBE0499A7E029AD05A18 /* FlowMediaCache.swift */; };
 		977E112C8E7948939005ADBA /* HomeFeedViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 87F4B84828ED1C578A57652F /* HomeFeedViewModel.swift */; };
 		98F70D48581019050A4D7C4E /* SignupOnboardingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9906B019376E45D30E7BB2EF /* SignupOnboardingView.swift */; };
 		99843C2501BBE53CC7640FA4 /* FeedCaches.swift in Sources */ = {isa = PBXBuildFile; fileRef = 06FF81777B1A43EA5BB4D808 /* FeedCaches.swift */; };
@@ -109,6 +111,7 @@
 		3D961155CF6467EAA934FDBA /* ReactionButton.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReactionButton.swift; sourceTree = "<group>"; };
 		4326CEACDA9C72B3A03BEC11 /* RelaySettingsStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RelaySettingsStore.swift; sourceTree = "<group>"; };
 		448CEA1E978254AE2F331085 /* ActivityViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ActivityViewModel.swift; sourceTree = "<group>"; };
+		4B67EBE0499A7E029AD05A18 /* FlowMediaCache.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FlowMediaCache.swift; sourceTree = "<group>"; };
 		4C415B7E3F07575507ED1F2B /* ActivityView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ActivityView.swift; sourceTree = "<group>"; };
 		4DE8EBF20CE78C8EC67DDEF4 /* MainTabShellView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MainTabShellView.swift; sourceTree = "<group>"; };
 		6018FB948D5F4B745EA4EFCE /* FlowApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FlowApp.swift; sourceTree = "<group>"; };
@@ -136,6 +139,7 @@
 		96D4B5BA28A24BEE53F56796 /* HomeFeedFilterStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HomeFeedFilterStore.swift; sourceTree = "<group>"; };
 		98FAC17906D393F287394FBD /* AuthStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AuthStore.swift; sourceTree = "<group>"; };
 		9906B019376E45D30E7BB2EF /* SignupOnboardingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SignupOnboardingView.swift; sourceTree = "<group>"; };
+		9B77D47257479D0532CE896A /* SeenEventStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SeenEventStore.swift; sourceTree = "<group>"; };
 		9D1E5AEDAE27235938981B74 /* ProfileQRCodeSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProfileQRCodeSheet.swift; sourceTree = "<group>"; };
 		A5763F0BC13FDA5CB4E0AFA8 /* ResharePublishService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ResharePublishService.swift; sourceTree = "<group>"; };
 		A986D586CC5154F59A114A37 /* ActivityModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ActivityModels.swift; sourceTree = "<group>"; };
@@ -200,6 +204,7 @@
 				925F46E0FC75C191103D09E9 /* AppHaptics.swift */,
 				D3535F42ABCFA81A554B26FE /* AppSettingsStore.swift */,
 				6018FB948D5F4B745EA4EFCE /* FlowApp.swift */,
+				4B67EBE0499A7E029AD05A18 /* FlowMediaCache.swift */,
 				4DE8EBF20CE78C8EC67DDEF4 /* MainTabShellView.swift */,
 				0A50E085529127761FA6C9BD /* MediaUploadService.swift */,
 			);
@@ -253,6 +258,7 @@
 				8B5C4629D9580FC17B515E35 /* RecentFeedStore.swift */,
 				93F2DE09E60173B3EF41F370 /* RelayMessageParser.swift */,
 				4326CEACDA9C72B3A03BEC11 /* RelaySettingsStore.swift */,
+				9B77D47257479D0532CE896A /* SeenEventStore.swift */,
 				F7D8015688B1D51344FFFCB7 /* TimelineKey.swift */,
 			);
 			path = Feed;
@@ -480,6 +486,7 @@
 				1AB2153C6FDB413EFBA7B844 /* FeedFilterConfig.swift in Sources */,
 				FADAB31E8F6C736D855C84D2 /* FeedRowView.swift in Sources */,
 				B71D2BA3782242DAD9267933 /* FlowApp.swift in Sources */,
+				863D8F5E77A252D216D3BAF9 /* FlowMediaCache.swift in Sources */,
 				D2194AE6438D861CC9AFEB79 /* FollowStore.swift in Sources */,
 				E99FCED8B4AC807A09CFDFFD /* FollowingListRoute.swift in Sources */,
 				B3A52A2C4320116B348414E5 /* FollowingListView.swift in Sources */,
@@ -525,6 +532,7 @@
 				6C97A187B541004D4E7965D0 /* ResharePublishService.swift in Sources */,
 				5CE21FBD402B779884AC8EC8 /* SearchView.swift in Sources */,
 				47CE76B972995AF553AE736A /* SearchViewModel.swift in Sources */,
+				7DE4C13ED08EDAB073D7DBE2 /* SeenEventStore.swift in Sources */,
 				3B0A024C116BF616911FB294 /* SettingsView.swift in Sources */,
 				98F70D48581019050A4D7C4E /* SignupOnboardingView.swift in Sources */,
 				3D7804F3F639A1E74869E197 /* ThreadDetailView.swift in Sources */,

@@ -521,7 +521,7 @@ struct ProfileView: View {
             if appSettings.textOnlyMode {
                 profileAvatarFallback
             } else if let avatarURL = viewModel.avatarURL {
-                AsyncImage(url: avatarURL) { phase in
+                CachedAsyncImage(url: avatarURL) { phase in
                     switch phase {
                     case .success(let image):
                         image

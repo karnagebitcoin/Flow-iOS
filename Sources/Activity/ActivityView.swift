@@ -346,7 +346,7 @@ private struct ActivityAvatarView: View {
             if appSettings.textOnlyMode {
                 fallbackAvatar
             } else if let url {
-                AsyncImage(url: url) { phase in
+                CachedAsyncImage(url: url) { phase in
                     switch phase {
                     case .success(let image):
                         image

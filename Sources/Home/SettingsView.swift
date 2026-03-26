@@ -363,6 +363,8 @@ private struct SettingsAppearanceView: View {
 
 private struct SettingsGeneralView: View {
     @EnvironmentObject private var appSettings: AppSettingsStore
+    @State private var mediaCacheSizeDescription = "Calculating..."
+    @State private var isClearingMediaCache = false
 
     var body: some View {
         Form {
@@ -403,9 +405,57 @@ private struct SettingsGeneralView: View {
                     footer: "Connect only to relay.damus.io and hide reactions to reduce relay load."
                 )
             }
+
+            Section {
+                LabeledContent("Stored Media") {
+                    if isClearingMediaCache {
+                        ProgressView()
+                    } else {
+                        Text(mediaCacheSizeDescription)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+
+                Button(role: .destructive) {
+                    clearMediaCache()
+                } label: {
+                    Text(isClearingMediaCache ? "Clearing..." : "Clear Media Cache")
+                }
+                .disabled(isClearingMediaCache)
+            } header: {
+                Text("Media Cache")
+            } footer: {
+                Text("Avatars and note images stay on disk so repeat visits and scrolling feel faster. Clearing this only removes cached media bytes, not your account or notes.")
+            }
         }
         .navigationTitle("General")
         .navigationBarTitleDisplayMode(.large)
+        .task {
+            await refreshMediaCacheSize()
+        }
+    }
+
+    private func clearMediaCache() {
+        guard !isClearingMediaCache else { return }
+        isClearingMediaCache = true
+
+        Task {
+            await FlowImageCache.shared.clearAllCachedImages()
+            await refreshMediaCacheSize()
+            await MainActor.run {
+                isClearingMediaCache = false
+            }
+        }
+    }
+
+    private func refreshMediaCacheSize() async {
+        let bytes = await FlowImageCache.shared.totalCacheSizeBytes()
+        let description = bytes > 0
+            ? ByteCountFormatter.string(fromByteCount: bytes, countStyle: .file)
+            : "Empty"
+        await MainActor.run {
+            mediaCacheSizeDescription = description
+        }
     }
 }
 

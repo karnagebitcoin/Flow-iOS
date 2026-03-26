@@ -528,6 +528,28 @@ struct FeedItem: Identifiable, Hashable, Sendable {
         Self.avatarURL(for: displayProfile)
     }
 
+    var prefetchImageURLs: [URL] {
+        var seen = Set<String>()
+        var ordered: [URL] = []
+
+        func append(_ url: URL?) {
+            guard let url else { return }
+            let normalized = url.absoluteString.lowercased()
+            guard seen.insert(normalized).inserted else { return }
+            ordered.append(url)
+        }
+
+        append(avatarURL)
+        append(actorAvatarURL)
+        append(replyTargetFeedItem?.avatarURL)
+
+        for mediaURL in NoteContentParser.imageURLs(in: displayEvent) {
+            append(mediaURL)
+        }
+
+        return ordered
+    }
+
     private static func displayName(for event: NostrEvent, profile: NostrProfile?) -> String {
         if let displayName = profile?.displayName?.trimmed, !displayName.isEmpty {
             return displayName

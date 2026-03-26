@@ -11,6 +11,10 @@ struct FlowApp: App {
     @StateObject private var relaySettings = RelaySettingsStore.shared
     @StateObject private var toastCenter = AppToastCenter()
 
+    init() {
+        FlowMediaCache.configureSharedURLCache()
+    }
+
     var body: some Scene {
         WindowGroup {
             Group {
