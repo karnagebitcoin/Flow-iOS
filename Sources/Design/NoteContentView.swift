@@ -1,5 +1,6 @@
 import AVFoundation
 import AVKit
+import ImageIO
 import LinkPresentation
 import NostrSDK
 import SwiftUI
@@ -986,28 +987,24 @@ private struct NoteFeedImageTileView: View {
     let height: CGFloat
     let onTap: () -> Void
 
-    @State private var loadedImage: UIImage?
-    @State private var didFailLoading = false
-
     var body: some View {
         Button(action: onTap) {
-            ZStack {
-                if let loadedImage {
-                    Image(uiImage: loadedImage)
-                        .resizable()
-                        .interpolation(.medium)
-                        .scaledToFill()
+            NoteRemoteMediaView(url: url) { asset in
+                NoteMediaAssetContentView(asset: asset, scaling: .fill)
+                    .frame(width: width, height: height)
+            } placeholder: {
+                ZStack {
+                    Color(.secondarySystemBackground)
                         .frame(width: width, height: height)
-                } else if didFailLoading {
+                    ProgressView()
+                }
+            } failure: {
+                ZStack {
                     Color(.secondarySystemBackground)
                         .frame(width: width, height: height)
                     Image(systemName: "photo")
                         .font(.title3)
                         .foregroundStyle(.secondary)
-                } else {
-                    Color(.secondarySystemBackground)
-                        .frame(width: width, height: height)
-                    ProgressView()
                 }
             }
             .frame(width: width, height: height)
@@ -1017,20 +1014,6 @@ private struct NoteFeedImageTileView: View {
         }
         .buttonStyle(.plain)
         .frame(width: width, height: height)
-        .task(id: url) {
-            await loadImageIfNeeded()
-        }
-    }
-
-    @MainActor
-    private func loadImageIfNeeded() async {
-        guard loadedImage == nil, !didFailLoading else { return }
-        if let image = await NoteMediaImageLoader.shared.image(for: url) {
-            loadedImage = image
-            didFailLoading = false
-        } else {
-            didFailLoading = true
-        }
     }
 }
 
@@ -1040,53 +1023,32 @@ private struct NoteSingleImageCellView: View {
     let cornerRadius: CGFloat
     let onTap: () -> Void
 
-    @State private var loadedImage: UIImage?
-    @State private var didFailLoading = false
-
     var body: some View {
         Button(action: onTap) {
-            if let loadedImage {
-                Image(uiImage: loadedImage)
-                    .resizable()
-                    .interpolation(.medium)
-                    .scaledToFit()
+            NoteRemoteMediaView(url: url) { asset in
+                NoteMediaAssetContentView(asset: asset, scaling: .fit)
                     .frame(
-                        maxWidth: preferredImageMaxWidth,
+                        maxWidth: preferredMaxWidth(for: asset),
                         maxHeight: maxHeight,
                         alignment: .center
                     )
                     .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
-            } else if didFailLoading {
+            } placeholder: {
+                ProgressView()
+                    .frame(maxWidth: .infinity, minHeight: 180, alignment: .center)
+            } failure: {
                 Image(systemName: "photo")
                     .font(.title3)
                     .foregroundStyle(.secondary)
-                    .frame(maxWidth: .infinity, minHeight: 180, alignment: .center)
-            } else {
-                ProgressView()
                     .frame(maxWidth: .infinity, minHeight: 180, alignment: .center)
             }
         }
         .buttonStyle(.plain)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .task(id: url) {
-            await loadImageIfNeeded()
-        }
     }
 
-    private var preferredImageMaxWidth: CGFloat {
-        guard let loadedImage else { return .infinity }
-        return loadedImage.size.width > 0 ? loadedImage.size.width : .infinity
-    }
-
-    @MainActor
-    private func loadImageIfNeeded() async {
-        guard loadedImage == nil, !didFailLoading else { return }
-        if let image = await NoteMediaImageLoader.shared.image(for: url) {
-            loadedImage = image
-            didFailLoading = false
-        } else {
-            didFailLoading = true
-        }
+    private func preferredMaxWidth(for asset: NoteMediaAsset) -> CGFloat {
+        asset.size.width > 0 ? asset.size.width : .infinity
     }
 }
 
@@ -1124,21 +1086,16 @@ private struct NoteImageFullscreenViewer: View {
                 ForEach(Array(urls.enumerated()), id: \.offset) { index, url in
                     ZStack {
                         viewerBackgroundColor.ignoresSafeArea()
-                        CachedAsyncImage(url: url) { phase in
-                            switch phase {
-                            case .success(let image):
-                                image
-                                    .resizable()
-                                    .scaledToFit()
-                                    .padding(16)
-                            case .failure:
-                                Image(systemName: "photo")
-                                    .font(.largeTitle)
-                                    .foregroundStyle(chromeForegroundColor.opacity(0.75))
-                            case .empty:
-                                ProgressView()
-                                    .tint(chromeForegroundColor)
-                            }
+                        NoteRemoteMediaView(url: url) { asset in
+                            NoteMediaAssetContentView(asset: asset, scaling: .fit)
+                                .padding(16)
+                        } placeholder: {
+                            ProgressView()
+                                .tint(chromeForegroundColor)
+                        } failure: {
+                            Image(systemName: "photo")
+                                .font(.largeTitle)
+                                .foregroundStyle(chromeForegroundColor.opacity(0.75))
                         }
                     }
                     .tag(index)
@@ -1404,6 +1361,10 @@ private struct NoteVideoPlayerView: View {
                 alignment: .leading
             )
             .clipShape(RoundedRectangle(cornerRadius: mediaCornerRadius, style: .continuous))
+            .overlay(alignment: .bottomTrailing) {
+                muteToggleButton
+                    .padding(12)
+            }
             .task(id: url) {
                 await loadVideoAspectRatio()
             }
@@ -1411,6 +1372,9 @@ private struct NoteVideoPlayerView: View {
                 applyPlaybackPolicy()
             }
             .onChange(of: appSettings.autoplayVideos) { _, _ in
+                applyPlaybackPolicy()
+            }
+            .onChange(of: appSettings.autoplayVideoSoundEnabled) { _, _ in
                 applyPlaybackPolicy()
             }
             .onDisappear {
@@ -1431,6 +1395,66 @@ private struct NoteVideoPlayerView: View {
 
     private var mediaCornerRadius: CGFloat {
         layout == .feed ? 18 : 12
+    }
+
+    private var isMuted: Bool {
+        !appSettings.autoplayVideoSoundEnabled
+    }
+
+    private var muteToggleButton: some View {
+        Button {
+            toggleMute()
+        } label: {
+            Image(systemName: isMuted ? "speaker.slash.fill" : "speaker.wave.2.fill")
+                .font(.system(size: 15, weight: .semibold))
+                .foregroundStyle(.white.opacity(0.98))
+                .frame(width: 42, height: 42)
+                .background {
+                    ZStack {
+                        Circle()
+                            .fill(.ultraThinMaterial)
+
+                        Circle()
+                            .fill(
+                                LinearGradient(
+                                    colors: [
+                                        Color.white.opacity(0.34),
+                                        Color.white.opacity(0.12),
+                                        Color.black.opacity(0.14)
+                                    ],
+                                    startPoint: .topLeading,
+                                    endPoint: .bottomTrailing
+                                )
+                            )
+
+                        Circle()
+                            .fill(
+                                RadialGradient(
+                                    colors: [
+                                        Color.white.opacity(0.34),
+                                        Color.white.opacity(0.06),
+                                        .clear
+                                    ],
+                                    center: .topLeading,
+                                    startRadius: 2,
+                                    endRadius: 24
+                                )
+                            )
+
+                        Circle()
+                            .stroke(Color.white.opacity(0.34), lineWidth: 0.9)
+
+                        Circle()
+                            .stroke(Color.white.opacity(0.16), lineWidth: 3)
+                            .blur(radius: 5)
+                            .opacity(0.8)
+                    }
+                    .shadow(color: Color.black.opacity(0.22), radius: 14, x: 0, y: 6)
+                }
+        }
+        .buttonStyle(.plain)
+        .contentShape(Circle())
+        .accessibilityLabel(isMuted ? "Unmute video" : "Mute video")
     }
 
     private func loadVideoAspectRatio() async {
@@ -1458,11 +1482,21 @@ private struct NoteVideoPlayerView: View {
     }
 
     private func applyPlaybackPolicy() {
+        player.isMuted = isMuted
+
         if appSettings.autoplayVideos {
-            player.isMuted = true
             player.play()
         } else {
             player.pause()
+        }
+    }
+
+    private func toggleMute() {
+        appSettings.autoplayVideoSoundEnabled.toggle()
+        player.isMuted = !appSettings.autoplayVideoSoundEnabled
+
+        if appSettings.autoplayVideos {
+            player.play()
         }
     }
 }
@@ -2199,10 +2233,200 @@ private actor CustomEmojiImageLoader {
     }
 }
 
-private actor NoteMediaImageLoader {
-    static let shared = NoteMediaImageLoader()
+private enum NoteMediaAsset {
+    case still(UIImage)
+    case animated(UIImage)
 
-    func image(for url: URL) async -> UIImage? {
-        await FlowImageCache.shared.image(for: url)
+    var size: CGSize {
+        switch self {
+        case .still(let image), .animated(let image):
+            return image.size
+        }
+    }
+}
+
+private enum NoteMediaScaling {
+    case fill
+    case fit
+
+    var swiftUIContentMode: ContentMode {
+        switch self {
+        case .fill:
+            return .fill
+        case .fit:
+            return .fit
+        }
+    }
+
+    var uiKitContentMode: UIView.ContentMode {
+        switch self {
+        case .fill:
+            return .scaleAspectFill
+        case .fit:
+            return .scaleAspectFit
+        }
+    }
+}
+
+private struct NoteMediaAssetContentView: View {
+    let asset: NoteMediaAsset
+    let scaling: NoteMediaScaling
+
+    var body: some View {
+        Group {
+            switch asset {
+            case .still(let image):
+                Image(uiImage: image)
+                    .resizable()
+                    .interpolation(.medium)
+                    .aspectRatio(contentMode: scaling.swiftUIContentMode)
+            case .animated(let image):
+                AnimatedUIImageView(
+                    image: image,
+                    contentMode: scaling.uiKitContentMode
+                )
+            }
+        }
+    }
+}
+
+private struct NoteRemoteMediaView<Content: View, Placeholder: View, Failure: View>: View {
+    let url: URL
+    @ViewBuilder let content: (NoteMediaAsset) -> Content
+    @ViewBuilder let placeholder: () -> Placeholder
+    @ViewBuilder let failure: () -> Failure
+
+    @State private var asset: NoteMediaAsset?
+    @State private var loadedURL: URL?
+    @State private var didFailLoading = false
+
+    var body: some View {
+        Group {
+            if let asset {
+                content(asset)
+            } else if didFailLoading {
+                failure()
+            } else {
+                placeholder()
+            }
+        }
+        .task(id: url) {
+            await loadIfNeeded()
+        }
+    }
+
+    @MainActor
+    private func loadIfNeeded() async {
+        if loadedURL != url {
+            loadedURL = url
+            asset = nil
+            didFailLoading = false
+        }
+
+        guard asset == nil, !didFailLoading else { return }
+
+        if let loadedAsset = await NoteMediaAssetLoader.shared.asset(for: url) {
+            asset = loadedAsset
+            didFailLoading = false
+        } else {
+            didFailLoading = true
+        }
+    }
+}
+
+private struct AnimatedUIImageView: UIViewRepresentable {
+    let image: UIImage
+    let contentMode: UIView.ContentMode
+
+    func makeUIView(context: Context) -> UIImageView {
+        let imageView = UIImageView()
+        imageView.backgroundColor = .clear
+        imageView.clipsToBounds = true
+        imageView.isUserInteractionEnabled = false
+        return imageView
+    }
+
+    func updateUIView(_ imageView: UIImageView, context: Context) {
+        imageView.stopAnimating()
+        imageView.contentMode = contentMode
+        imageView.image = image
+        if image.images != nil {
+            imageView.startAnimating()
+        }
+    }
+
+    static func dismantleUIView(_ imageView: UIImageView, coordinator: ()) {
+        imageView.stopAnimating()
+        imageView.image = nil
+    }
+}
+
+private actor NoteMediaAssetLoader {
+    static let shared = NoteMediaAssetLoader()
+
+    func asset(for url: URL) async -> NoteMediaAsset? {
+        if shouldAttemptAnimatedGIFDecode(for: url),
+           let data = await FlowImageCache.shared.data(for: url),
+           let decoded = UIImage.animatedGIFImage(from: data) {
+            if decoded.images != nil {
+                return .animated(decoded)
+            }
+            return .still(decoded)
+        }
+
+        guard let image = await FlowImageCache.shared.image(for: url) else {
+            return nil
+        }
+        return .still(image)
+    }
+
+    private func shouldAttemptAnimatedGIFDecode(for url: URL) -> Bool {
+        url.pathExtension.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == "gif"
+    }
+}
+
+private extension UIImage {
+    static func animatedGIFImage(from data: Data) -> UIImage? {
+        guard data.starts(with: [0x47, 0x49, 0x46]),
+              let source = CGImageSourceCreateWithData(data as CFData, nil) else {
+            return UIImage(data: data)
+        }
+
+        let frameCount = CGImageSourceGetCount(source)
+        guard frameCount > 1 else {
+            return UIImage(data: data)
+        }
+
+        var frames: [UIImage] = []
+        frames.reserveCapacity(frameCount)
+        var totalDuration: TimeInterval = 0
+
+        for index in 0..<frameCount {
+            guard let frame = CGImageSourceCreateImageAtIndex(source, index, nil) else { continue }
+            totalDuration += gifFrameDuration(forFrameAt: index, source: source)
+            frames.append(UIImage(cgImage: frame, scale: UIScreen.main.scale, orientation: .up))
+        }
+
+        guard !frames.isEmpty else {
+            return UIImage(data: data)
+        }
+
+        return UIImage.animatedImage(
+            with: frames,
+            duration: max(totalDuration, Double(frames.count) * 0.1)
+        )
+    }
+
+    private static func gifFrameDuration(forFrameAt index: Int, source: CGImageSource) -> TimeInterval {
+        let defaultDelay = 0.1
+        guard let properties = CGImageSourceCopyPropertiesAtIndex(source, index, nil) as? [CFString: Any],
+              let gifProperties = properties[kCGImagePropertyGIFDictionary] as? [CFString: Any] else {
+            return defaultDelay
+        }
+
+        let unclampedDelay = (gifProperties[kCGImagePropertyGIFUnclampedDelayTime] as? NSNumber)?.doubleValue
+        let delay = (gifProperties[kCGImagePropertyGIFDelayTime] as? NSNumber)?.doubleValue
+        let frameDelay = unclampedDelay ?? delay ?? defaultDelay
+        return frameDelay < 0.02 ? defaultDelay : frameDelay
     }
 }

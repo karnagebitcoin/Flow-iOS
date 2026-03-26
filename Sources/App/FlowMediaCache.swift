@@ -29,6 +29,7 @@ actor FlowImageCache {
     private let fileManager: FileManager
     private let directoryURL: URL
     private let memoryCache = NSCache<NSURL, UIImage>()
+    private let dataCache = NSCache<NSURL, NSData>()
     private let maxDiskBytes: Int64 = 384 * 1_024 * 1_024
     private let maxDiskEntries = 12_000
     private let maxEntryAge: TimeInterval = 60 * 60 * 24 * 30
@@ -40,6 +41,7 @@ actor FlowImageCache {
             ?? URL(fileURLWithPath: NSTemporaryDirectory())
         self.directoryURL = root.appendingPathComponent("flow-media-cache", isDirectory: true)
         memoryCache.totalCostLimit = FlowMediaCache.sharedURLCacheMemoryCapacity
+        dataCache.totalCostLimit = FlowMediaCache.sharedURLCacheMemoryCapacity / 2
     }
 
     func image(for url: URL) async -> UIImage? {
@@ -50,8 +52,25 @@ actor FlowImageCache {
             return cached
         }
 
-        if let diskImage = loadImageFromDisk(for: url, cacheKey: cacheKey) {
-            return diskImage
+        guard let data = await data(for: url),
+              let image = preparedImage(from: data) else {
+            return nil
+        }
+
+        memoryCache.setObject(image, forKey: cacheKey, cost: memoryCost(for: image))
+        return image
+    }
+
+    func data(for url: URL) async -> Data? {
+        guard isCacheable(url) else { return nil }
+
+        let cacheKey = url as NSURL
+        if let cachedData = dataCache.object(forKey: cacheKey) {
+            return cachedData as Data
+        }
+
+        if let diskData = loadDataFromDisk(for: url, cacheKey: cacheKey) {
+            return diskData
         }
 
         let request = URLRequest(
@@ -60,19 +79,18 @@ actor FlowImageCache {
             timeoutInterval: 30
         )
 
-        if let cachedResponse = URLCache.shared.cachedResponse(for: request),
-           let sharedCachedImage = storeDecodedImage(
+        if let cachedResponse = URLCache.shared.cachedResponse(for: request) {
+            return storeData(
                 data: cachedResponse.data,
                 for: url,
                 cacheKey: cacheKey,
                 persistToDisk: true
-           ) {
-            return sharedCachedImage
+            )
         }
 
         if let existingTask = inFlight[url] {
             let data = await existingTask.value
-            return storeDecodedImage(data: data, for: url, cacheKey: cacheKey, persistToDisk: true)
+            return storeData(data: data, for: url, cacheKey: cacheKey, persistToDisk: true)
         }
 
         let task = Task {
@@ -82,7 +100,7 @@ actor FlowImageCache {
 
         let data = await task.value
         inFlight[url] = nil
-        return storeDecodedImage(data: data, for: url, cacheKey: cacheKey, persistToDisk: true)
+        return storeData(data: data, for: url, cacheKey: cacheKey, persistToDisk: true)
     }
 
     func prefetch(urls: [URL]) async {
@@ -105,6 +123,7 @@ actor FlowImageCache {
 
     func clearAllCachedImages() async {
         memoryCache.removeAllObjects()
+        dataCache.removeAllObjects()
         for task in inFlight.values {
             task.cancel()
         }
@@ -122,7 +141,7 @@ actor FlowImageCache {
         return scheme == "http" || scheme == "https"
     }
 
-    private func loadImageFromDisk(for url: URL, cacheKey: NSURL) -> UIImage? {
+    private func loadDataFromDisk(for url: URL, cacheKey: NSURL) -> Data? {
         ensureDirectory()
         let fileURL = diskFileURL(for: url)
         guard fileManager.fileExists(atPath: fileURL.path) else { return nil }
@@ -134,33 +153,29 @@ actor FlowImageCache {
             return nil
         }
 
-        guard let data = try? Data(contentsOf: fileURL),
-              let image = preparedImage(from: data) else {
+        guard let data = try? Data(contentsOf: fileURL) else {
             try? fileManager.removeItem(at: fileURL)
             return nil
         }
 
-        memoryCache.setObject(image, forKey: cacheKey, cost: memoryCost(for: image))
+        dataCache.setObject(data as NSData, forKey: cacheKey, cost: data.count)
         try? fileManager.setAttributes([.modificationDate: Date()], ofItemAtPath: fileURL.path)
-        return image
+        return data
     }
 
-    private func storeDecodedImage(
+    private func storeData(
         data: Data?,
         for url: URL,
         cacheKey: NSURL,
         persistToDisk: Bool
-    ) -> UIImage? {
-        guard let data,
-              let image = preparedImage(from: data) else {
-            return nil
-        }
+    ) -> Data? {
+        guard let data else { return nil }
 
-        memoryCache.setObject(image, forKey: cacheKey, cost: memoryCost(for: image))
+        dataCache.setObject(data as NSData, forKey: cacheKey, cost: data.count)
         if persistToDisk {
             persistImageData(data, for: url)
         }
-        return image
+        return data
     }
 
     private func persistImageData(_ data: Data, for url: URL) {

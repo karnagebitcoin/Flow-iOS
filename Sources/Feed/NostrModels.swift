@@ -278,6 +278,44 @@ struct NostrEvent: Codable, Hashable, Sendable {
         return NSFWHashtagDetection.matches(tagHashtags + inlineHashtags)
     }
 
+    var hashtags: [String] {
+        var seen = Set<String>()
+        var ordered: [String] = []
+
+        let rawHashtags = tags.compactMap { tag -> String? in
+            guard let name = tag.first?.lowercased(), name == "t" else { return nil }
+            guard tag.count > 1 else { return nil }
+            return tag[1]
+        } + NSFWHashtagDetection.extractHashtags(from: content)
+
+        for rawHashtag in rawHashtags {
+            let normalized = Self.normalizedHashtagValue(rawHashtag)
+            guard !normalized.isEmpty else { continue }
+            guard seen.insert(normalized).inserted else { continue }
+            ordered.append(normalized)
+        }
+
+        return ordered
+    }
+
+    func containsHashtag(_ hashtag: String) -> Bool {
+        let normalizedHashtag = Self.normalizedHashtagValue(hashtag)
+        guard !normalizedHashtag.isEmpty else { return false }
+        return hashtags.contains(normalizedHashtag)
+    }
+
+    static func normalizedHashtagValue(_ hashtag: String) -> String {
+        hashtag
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .trimmingCharacters(in: CharacterSet(charactersIn: "#"))
+            .lowercased()
+            .replacingOccurrences(
+                of: "[^\\p{L}\\p{N}_+\\-]",
+                with: "",
+                options: .regularExpression
+            )
+    }
+
     private static func decodeEmbeddedEvent(from content: String) -> NostrEvent? {
         let trimmed = content.trimmingCharacters(in: .whitespacesAndNewlines)
         guard trimmed.hasPrefix("{"), trimmed.hasSuffix("}") else { return nil }
@@ -504,6 +542,15 @@ struct FeedItem: Identifiable, Hashable, Sendable {
     var threadNavigationItem: FeedItem {
         guard let displayEventOverride else { return self }
         return FeedItem(event: displayEventOverride, profile: displayProfile)
+    }
+
+    var canonicalDisplayItem: FeedItem {
+        FeedItem(
+            event: displayEvent,
+            profile: displayProfile,
+            replyTargetEvent: replyTargetEvent,
+            replyTargetProfile: replyTargetProfile
+        )
     }
 
     var replyTargetSnippet: String? {

@@ -4,25 +4,57 @@ import Foundation
 final class ActivityViewModel: ObservableObject {
     @Published private(set) var items: [ActivityRow] = []
     @Published var selectedFilter: ActivityFilter = .all
+    @Published private(set) var unreadCount = 0
     @Published private(set) var isLoading = false
     @Published private(set) var isRefreshing = false
     @Published private(set) var errorMessage: String?
 
     private let service: NostrFeedService
+    private let liveSubscriber: NostrLiveFeedSubscriber
+    private let defaults: UserDefaults
+
     private var hasLoadedInitialState = false
     private var currentUserPubkey: String?
     private var readRelayURLs: [URL]
     private var requestCounter = 0
+    private var liveUpdatesTask: Task<Void, Never>?
+    private var liveSubscriptionSignature: String?
+    private var knownEventIDs = Set<String>()
+    private var isActivityTabActive = false
+    private var lastReadCreatedAt = 0
+
     private static let fastActivityFetchTimeout: TimeInterval = 3
     private static let fastActivityRelayFetchMode: RelayFetchMode = .firstNonEmptyRelay
+    private static let activityKinds = [1, 6, 7, 16, 1111, 1244]
+    private static let lastReadStoragePrefix = "flow.activity.lastRead"
 
-    init(service: NostrFeedService = NostrFeedService()) {
+    init(
+        service: NostrFeedService = NostrFeedService(),
+        liveSubscriber: NostrLiveFeedSubscriber = NostrLiveFeedSubscriber(),
+        defaults: UserDefaults = .standard
+    ) {
         self.service = service
+        self.liveSubscriber = liveSubscriber
+        self.defaults = defaults
         self.readRelayURLs = RelaySettingsStore.defaultReadRelayURLs.compactMap(URL.init(string:))
     }
 
+    deinit {
+        liveUpdatesTask?.cancel()
+    }
+
     var visibleItems: [ActivityRow] {
-        items
+        itemsMatchingSelectedFilter.filter { item in
+            AppSettingsStore.shared.isActivityNotificationEnabled(for: item.action.notificationPreference)
+        }
+    }
+
+    var hasItemsHiddenByNotificationPreferences: Bool {
+        !itemsMatchingSelectedFilter.isEmpty && visibleItems.isEmpty
+    }
+
+    var hasUnread: Bool {
+        unreadCount > 0
     }
 
     var primaryRelayURL: URL {
@@ -37,34 +69,59 @@ final class ActivityViewModel: ObservableObject {
         let relaysChanged = normalizedRelays.map { $0.absoluteString.lowercased() } != self.readRelayURLs.map { $0.absoluteString.lowercased() }
         let userChanged = normalizedUser != self.currentUserPubkey
 
-        self.currentUserPubkey = normalizedUser
+        if userChanged {
+            self.currentUserPubkey = normalizedUser
+            lastReadCreatedAt = normalizedUser.map(loadLastReadCreatedAt(for:)) ?? 0
+        }
+
         if !normalizedRelays.isEmpty {
             self.readRelayURLs = normalizedRelays
         }
+
+        guard let normalizedUser, !normalizedUser.isEmpty else {
+            resetStateForSignedOutUser()
+            return
+        }
+
+        recomputeUnreadCount()
 
         guard hasLoadedInitialState else { return }
         guard relaysChanged || userChanged else { return }
 
         Task { [weak self] in
-            await self?.refreshForSelectedTab(showFullScreenLoading: true)
+            await self?.refreshForCurrentConfiguration(showFullScreenLoading: true)
         }
     }
 
     func loadIfNeeded() async {
-        guard !hasLoadedInitialState else { return }
+        guard !hasLoadedInitialState else {
+            startLiveUpdatesIfNeeded()
+            return
+        }
         hasLoadedInitialState = true
-        await refreshForSelectedTab(showFullScreenLoading: true)
+        await refreshForCurrentConfiguration(showFullScreenLoading: true)
     }
 
     func refresh() async {
-        await refreshForSelectedTab(showFullScreenLoading: visibleItems.isEmpty)
+        await refreshForCurrentConfiguration(showFullScreenLoading: items.isEmpty)
     }
 
     func selectedFilterChanged() async {
-        await refreshForSelectedTab(showFullScreenLoading: visibleItems.isEmpty)
+        // Filtering is local now so the segmented control responds instantly.
     }
 
-    private func refreshForSelectedTab(showFullScreenLoading: Bool) async {
+    func setActivityTabActive(_ isActive: Bool) {
+        isActivityTabActive = isActive
+        if isActive {
+            markAllAsRead()
+        }
+    }
+
+    func notificationPreferencesChanged() {
+        recomputeUnreadCount()
+    }
+
+    private func refreshForCurrentConfiguration(showFullScreenLoading: Bool) async {
         if showFullScreenLoading {
             guard !isLoading else { return }
             isLoading = true
@@ -76,7 +133,6 @@ final class ActivityViewModel: ObservableObject {
         errorMessage = nil
         requestCounter += 1
         let requestID = requestCounter
-        let filter = selectedFilter
         let relays = readRelayURLs
         let user = currentUserPubkey
 
@@ -86,7 +142,7 @@ final class ActivityViewModel: ObservableObject {
         }
 
         guard let user, !user.isEmpty else {
-            items = []
+            resetStateForSignedOutUser()
             errorMessage = "Sign in to view activity."
             return
         }
@@ -95,7 +151,7 @@ final class ActivityViewModel: ObservableObject {
             let fetched = try await service.fetchActivityRows(
                 relayURLs: relays,
                 currentUserPubkey: user,
-                filter: filter,
+                filter: .all,
                 limit: 120,
                 fetchTimeout: Self.fastActivityFetchTimeout,
                 relayFetchMode: Self.fastActivityRelayFetchMode,
@@ -103,7 +159,15 @@ final class ActivityViewModel: ObservableObject {
                 profileRelayFetchMode: Self.fastActivityRelayFetchMode
             )
             guard requestID == requestCounter else { return }
+
             items = sortAndDeduplicate(items: fetched)
+            knownEventIDs = Set(items.map { $0.id.lowercased() })
+            if isActivityTabActive {
+                markAllAsRead()
+            } else {
+                recomputeUnreadCount()
+            }
+            startLiveUpdatesIfNeeded()
         } catch {
             guard requestID == requestCounter else { return }
             if items.isEmpty {
@@ -111,13 +175,141 @@ final class ActivityViewModel: ObservableObject {
             } else {
                 errorMessage = "Couldn't refresh activity."
             }
+            startLiveUpdatesIfNeeded()
         }
+    }
+
+    private func startLiveUpdatesIfNeeded(forceRestart: Bool = false) {
+        guard hasLoadedInitialState else { return }
+        guard let user = currentUserPubkey, !user.isEmpty else {
+            stopLiveUpdates()
+            return
+        }
+
+        let relays = normalizedRelayURLs(readRelayURLs)
+        guard !relays.isEmpty else {
+            stopLiveUpdates()
+            return
+        }
+
+        let filter = NostrFilter(
+            kinds: Self.activityKinds,
+            limit: 100,
+            tagFilters: ["p": [user]]
+        )
+        let signature = relays
+            .map { $0.absoluteString.lowercased() }
+            .sorted()
+            .joined(separator: "|") + "|\(user)"
+
+        if !forceRestart,
+           liveUpdatesTask != nil,
+           liveSubscriptionSignature == signature {
+            return
+        }
+
+        stopLiveUpdates()
+        liveSubscriptionSignature = signature
+
+        liveUpdatesTask = Task { [weak self] in
+            guard let self else { return }
+
+            await withTaskGroup(of: Void.self) { group in
+                for relayURL in relays {
+                    group.addTask { [weak self] in
+                        guard let self else { return }
+                        await self.liveSubscriber.run(
+                            relayURL: relayURL,
+                            filter: filter,
+                            onNewEvent: { [weak self] event in
+                                guard let self else { return }
+                                await self.handleLiveEvent(event)
+                            }
+                        )
+                    }
+                }
+                await group.waitForAll()
+            }
+        }
+    }
+
+    private func stopLiveUpdates() {
+        liveUpdatesTask?.cancel()
+        liveUpdatesTask = nil
+        liveSubscriptionSignature = nil
+    }
+
+    private func handleLiveEvent(_ event: NostrEvent) async {
+        guard let user = currentUserPubkey, !user.isEmpty else { return }
+        guard event.activityAction != nil else { return }
+        guard event.mentionedPubkeys.contains(where: { $0.lowercased() == user }) else { return }
+        guard normalizePubkey(event.pubkey) != user else { return }
+
+        let normalizedEventID = event.id.lowercased()
+        guard !knownEventIDs.contains(normalizedEventID) else { return }
+
+        let newRows = await service.buildActivityRows(
+            relayURLs: readRelayURLs,
+            currentUserPubkey: user,
+            events: [event],
+            fetchTimeout: Self.fastActivityFetchTimeout,
+            relayFetchMode: Self.fastActivityRelayFetchMode,
+            profileFetchTimeout: Self.fastActivityFetchTimeout,
+            profileRelayFetchMode: Self.fastActivityRelayFetchMode
+        )
+        guard !newRows.isEmpty else { return }
+
+        items = sortAndDeduplicate(items: newRows + items)
+        knownEventIDs = Set(items.map { $0.id.lowercased() })
+
+        if isActivityTabActive {
+            markAllAsRead()
+        } else {
+            recomputeUnreadCount()
+        }
+    }
+
+    private func markAllAsRead() {
+        guard let user = currentUserPubkey, !user.isEmpty else {
+            unreadCount = 0
+            return
+        }
+
+        lastReadCreatedAt = max(
+            Int(Date().timeIntervalSince1970),
+            items.first?.createdAt ?? 0
+        )
+        persistLastReadCreatedAt(lastReadCreatedAt, for: user)
+        unreadCount = 0
+    }
+
+    private func recomputeUnreadCount() {
+        guard !isActivityTabActive else {
+            unreadCount = 0
+            return
+        }
+
+        unreadCount = items.reduce(into: 0) { count, item in
+            guard item.createdAt > lastReadCreatedAt else { return }
+            guard AppSettingsStore.shared.isActivityNotificationEnabled(for: item.action.notificationPreference) else {
+                return
+            }
+            count += 1
+        }
+    }
+
+    private func resetStateForSignedOutUser() {
+        stopLiveUpdates()
+        items = []
+        knownEventIDs = []
+        unreadCount = 0
+        errorMessage = nil
     }
 
     private func sortAndDeduplicate(items: [ActivityRow]) -> [ActivityRow] {
         var dedupedByID: [String: ActivityRow] = [:]
         for item in items {
-            dedupedByID[item.id] = item
+            dedupedByID[item.id.lowercased()] = item
         }
 
         return dedupedByID.values.sorted { lhs, rhs in
@@ -128,10 +320,26 @@ final class ActivityViewModel: ObservableObject {
         }
     }
 
+    private func loadLastReadCreatedAt(for user: String) -> Int {
+        defaults.integer(forKey: lastReadStorageKey(for: user))
+    }
+
+    private func persistLastReadCreatedAt(_ value: Int, for user: String) {
+        defaults.set(value, forKey: lastReadStorageKey(for: user))
+    }
+
+    private func lastReadStorageKey(for user: String) -> String {
+        "\(Self.lastReadStoragePrefix).\(user)"
+    }
+
     private func normalizePubkey(_ value: String?) -> String? {
         guard let value else { return nil }
         let normalized = value.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         return normalized.isEmpty ? nil : normalized
+    }
+
+    private var itemsMatchingSelectedFilter: [ActivityRow] {
+        items.filter { $0.action.matches(selectedFilter) }
     }
 
     private func normalizedRelayURLs(_ relayURLs: [URL]) -> [URL] {

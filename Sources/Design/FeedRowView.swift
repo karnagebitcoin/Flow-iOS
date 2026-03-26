@@ -8,7 +8,9 @@ struct FeedRowView: View {
     @EnvironmentObject private var auth: AuthManager
     @EnvironmentObject private var appSettings: AppSettingsStore
     @EnvironmentObject private var relaySettings: RelaySettingsStore
+    @EnvironmentObject private var toastCenter: AppToastCenter
     @ObservedObject private var reactionStats = NoteReactionStatsService.shared
+    @ObservedObject private var muteStore = MuteStore.shared
 
     struct AvatarMenuActions {
         let followLabel: String
@@ -28,6 +30,7 @@ struct FeedRowView: View {
     var onReferencedEventTap: ((FeedItem) -> Void)? = nil
     var onReplyTap: (() -> Void)? = nil
     var onMuteConversation: ((String) -> Void)? = nil
+    var suppressReplyContextForDirectReplyTargetEventID: String? = nil
 
     @State private var isShowingReshareSheet = false
     @State private var quoteDraft: ReshareQuoteDraft?
@@ -46,7 +49,7 @@ struct FeedRowView: View {
                     .padding(.leading, 56)
             }
 
-            if item.displayEvent.isReplyNote, let snippet = item.replyTargetSnippet {
+            if shouldShowReplyContext, let snippet = item.replyTargetSnippet {
                 replyContextRow(snippet: snippet)
                     .padding(.leading, 56)
             }
@@ -195,7 +198,7 @@ struct FeedRowView: View {
                     presentTranslation()
                 } : nil,
                 onMute: {
-                    MuteStore.shared.toggleMute(item.displayAuthorPubkey)
+                    handleMuteAuthor()
                 }
             )
             .presentationDetents([.height(canTranslateNote ? 390 : 335), .medium])
@@ -319,6 +322,19 @@ struct FeedRowView: View {
         .disabled(onRepostActorTap == nil)
     }
 
+    private var shouldShowReplyContext: Bool {
+        guard item.displayEvent.isReplyNote, item.replyTargetSnippet != nil else {
+            return false
+        }
+
+        guard let suppressedTargetID = normalizedEventID(suppressReplyContextForDirectReplyTargetEventID) else {
+            return true
+        }
+
+        let directReplyTargetID = normalizedEventID(item.displayEvent.directReplyEventReferenceID)
+        return directReplyTargetID != suppressedTargetID
+    }
+
     @ViewBuilder
     private func replyContextRow(snippet: String) -> some View {
         let content = HStack(spacing: 6) {
@@ -364,6 +380,12 @@ struct FeedRowView: View {
         }
         .buttonStyle(.plain)
         .accessibilityLabel("Note options")
+    }
+
+    private func normalizedEventID(_ value: String?) -> String? {
+        guard let value else { return nil }
+        let normalized = value.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        return normalized.isEmpty ? nil : normalized
     }
 
     @MainActor
@@ -498,6 +520,21 @@ struct FeedRowView: View {
             try? await Task.sleep(nanoseconds: 180_000_000)
             guard !Task.isCancelled else { return }
             isShowingTranslation = true
+        }
+    }
+
+    private func handleMuteAuthor() {
+        let wasMuted = muteStore.isMuted(item.displayAuthorPubkey)
+        muteStore.toggleMute(item.displayAuthorPubkey)
+        let isMuted = muteStore.isMuted(item.displayAuthorPubkey)
+
+        if !wasMuted && isMuted {
+            toastCenter.show("Muted \(item.displayName)")
+        } else if wasMuted && !isMuted {
+            toastCenter.show("Unmuted \(item.displayName)", style: .info)
+        } else if let errorMessage = muteStore.lastPublishError,
+                  !errorMessage.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            toastCenter.show(errorMessage, style: .error, duration: 2.8)
         }
     }
 }

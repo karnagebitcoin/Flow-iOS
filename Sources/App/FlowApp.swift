@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 enum AppBrand {
     static let displayName = "Flow"
@@ -24,6 +25,9 @@ struct FlowApp: App {
                     WelcomeOnboardingView()
                 }
             }
+            .overlay {
+                GlobalProfileQRCodeBridge()
+            }
             .overlay(alignment: .top) {
                 AppToastOverlay()
             }
@@ -43,6 +47,211 @@ struct FlowApp: App {
             }
         }
     }
+}
+
+private struct GlobalProfileQRCodeBridge: View {
+    @Environment(\.scenePhase) private var scenePhase
+    @EnvironmentObject private var auth: AuthManager
+
+    @State private var isMonitoringOrientation = false
+
+    private let overlayController = GlobalProfileQRCodeOverlayController.shared
+
+    var body: some View {
+        Color.clear
+            .ignoresSafeArea()
+            .allowsHitTesting(false)
+            .onAppear {
+                guard !isMonitoringOrientation else { return }
+                isMonitoringOrientation = true
+                UIDevice.current.beginGeneratingDeviceOrientationNotifications()
+                syncPresentation()
+            }
+            .onDisappear {
+                guard isMonitoringOrientation else { return }
+                isMonitoringOrientation = false
+                UIDevice.current.endGeneratingDeviceOrientationNotifications()
+                overlayController.dismiss()
+            }
+            .onReceive(NotificationCenter.default.publisher(for: UIDevice.orientationDidChangeNotification)) { _ in
+                syncPresentation()
+            }
+            .onChange(of: auth.currentAccount?.id) { _, _ in
+                syncPresentation(forceRefresh: true)
+            }
+            .onChange(of: scenePhase) { _, _ in
+                syncPresentation(forceRefresh: true)
+            }
+    }
+
+    private func syncPresentation(forceRefresh: Bool = false) {
+        overlayController.update(
+            orientation: UIDevice.current.orientation,
+            currentAccount: auth.currentAccount,
+            scenePhase: scenePhase,
+            forceRefresh: forceRefresh
+        )
+    }
+}
+
+@MainActor
+private final class GlobalProfileQRCodeOverlayController {
+    static let shared = GlobalProfileQRCodeOverlayController()
+
+    private var overlayWindow: UIWindow?
+    private var pendingPresentationTask: Task<Void, Never>?
+    private var presentedPubkey: String?
+
+    func update(
+        orientation: UIDeviceOrientation,
+        currentAccount: AuthAccount?,
+        scenePhase: ScenePhase,
+        forceRefresh: Bool = false
+    ) {
+        guard scenePhase == .active, let currentAccount else {
+            dismiss()
+            return
+        }
+
+        switch orientation {
+        case .portraitUpsideDown:
+            presentIfNeeded(for: currentAccount, forceRefresh: forceRefresh)
+        case .faceUp, .faceDown, .unknown:
+            break
+        default:
+            dismiss()
+        }
+    }
+
+    func dismiss() {
+        pendingPresentationTask?.cancel()
+        pendingPresentationTask = nil
+        overlayWindow?.isHidden = true
+        overlayWindow = nil
+        presentedPubkey = nil
+    }
+
+    private func presentIfNeeded(for account: AuthAccount, forceRefresh: Bool) {
+        let shouldRefresh = forceRefresh || presentedPubkey != account.pubkey
+        guard shouldRefresh || overlayWindow == nil else { return }
+
+        pendingPresentationTask?.cancel()
+        presentedPubkey = account.pubkey
+
+        pendingPresentationTask = Task { [weak self] in
+            guard let self else { return }
+
+            let presentation = await self.buildPresentation(for: account)
+            guard !Task.isCancelled else { return }
+            self.show(presentation)
+        }
+    }
+
+    private func buildPresentation(for account: AuthAccount) async -> GlobalProfileQRCodePresentation {
+        let profile = await ProfileCache.shared.cachedProfile(pubkey: account.pubkey)
+
+        return GlobalProfileQRCodePresentation(
+            displayName: preferredDisplayName(from: profile, fallbackPubkey: account.pubkey),
+            handle: preferredHandle(from: profile, fallbackPubkey: account.pubkey),
+            avatarURL: preferredAvatarURL(from: profile),
+            qrCodeImage: QRCodeRenderer.render(payload: "nostr:\(account.npub)")
+        )
+    }
+
+    private func show(_ presentation: GlobalProfileQRCodePresentation) {
+        guard let windowScene = activeWindowScene() else { return }
+
+        let content = PresentedProfileQRCodeView(
+            trigger: .automatic,
+            displayName: presentation.displayName,
+            handle: presentation.handle,
+            avatarURL: presentation.avatarURL,
+            qrCodeImage: presentation.qrCodeImage,
+            onDismiss: { [weak self] in
+                self?.dismiss()
+            }
+        )
+
+        let hostingController = UIHostingController(rootView: content)
+        hostingController.view.backgroundColor = .black
+
+        if let overlayWindow {
+            overlayWindow.rootViewController = hostingController
+            overlayWindow.isHidden = false
+            return
+        }
+
+        let window = UIWindow(windowScene: windowScene)
+        window.backgroundColor = .black
+        window.windowLevel = .alert + 1
+        window.rootViewController = hostingController
+        window.isHidden = false
+
+        overlayWindow = window
+    }
+
+    private func activeWindowScene() -> UIWindowScene? {
+        let windowScenes = UIApplication.shared.connectedScenes
+            .compactMap { $0 as? UIWindowScene }
+
+        return windowScenes.first(where: { scene in
+            scene.activationState == .foregroundActive &&
+                scene.windows.contains(where: \.isKeyWindow)
+        }) ?? windowScenes.first(where: { $0.activationState == .foregroundActive })
+            ?? windowScenes.first(where: { $0.activationState == .foregroundInactive })
+    }
+
+    private func preferredDisplayName(from profile: NostrProfile?, fallbackPubkey: String) -> String {
+        if let displayName = trimmedNonEmpty(profile?.displayName) {
+            return displayName
+        }
+        if let name = trimmedNonEmpty(profile?.name) {
+            return name
+        }
+        return shortNostrIdentifier(fallbackPubkey)
+    }
+
+    private func preferredHandle(from profile: NostrProfile?, fallbackPubkey: String) -> String {
+        if let name = trimmedNonEmpty(profile?.name) {
+            return "@\(normalizedHandleComponent(from: name))"
+        }
+        if let displayName = trimmedNonEmpty(profile?.displayName) {
+            return "@\(normalizedHandleComponent(from: displayName))"
+        }
+        return "@\(shortNostrIdentifier(fallbackPubkey).lowercased())"
+    }
+
+    private func preferredAvatarURL(from profile: NostrProfile?) -> URL? {
+        guard let picture = trimmedNonEmpty(profile?.picture),
+              let url = URL(string: picture),
+              url.scheme != nil else {
+            return nil
+        }
+        return url
+    }
+
+    private func trimmedNonEmpty(_ value: String?) -> String? {
+        guard let value = value?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !value.isEmpty else {
+            return nil
+        }
+        return value
+    }
+
+    private func normalizedHandleComponent(from value: String) -> String {
+        let compact = value
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .replacingOccurrences(of: " ", with: "")
+            .lowercased()
+        return compact.isEmpty ? "user" : compact
+    }
+}
+
+private struct GlobalProfileQRCodePresentation {
+    let displayName: String
+    let handle: String?
+    let avatarURL: URL?
+    let qrCodeImage: UIImage?
 }
 
 enum AppToastStyle {

@@ -6,6 +6,7 @@ struct ProfileView: View {
     private static let bottomScrollClearance: CGFloat = 110
     @EnvironmentObject private var auth: AuthManager
     @EnvironmentObject private var appSettings: AppSettingsStore
+    @EnvironmentObject private var toastCenter: AppToastCenter
     @EnvironmentObject private var relaySettings: RelaySettingsStore
     @Environment(\.dismiss) private var dismiss
     @StateObject private var viewModel: ProfileViewModel
@@ -21,8 +22,6 @@ struct ProfileView: View {
     @State private var isShowingProfileQR = false
     @State private var isShowingAvatarViewer = false
     @State private var shouldAutoFocusReplyInThread = false
-    @State private var transientActionMessage: String?
-    @State private var transientActionMessageTask: Task<Void, Never>?
 
     init(
         pubkey: String,
@@ -238,7 +237,8 @@ struct ProfileView: View {
             HashtagFeedView(
                 hashtag: route.normalizedHashtag,
                 relayURL: effectivePrimaryRelayURL,
-                readRelayURLs: effectiveReadRelayURLs
+                readRelayURLs: effectiveReadRelayURLs,
+                seedItems: route.seedItems
             )
         }
         .navigationDestination(item: $selectedProfileRoute) { route in
@@ -702,9 +702,6 @@ struct ProfileView: View {
     }
 
     private var actionMessage: String? {
-        if let transientActionMessage, !transientActionMessage.isEmpty {
-            return transientActionMessage
-        }
         if let profileSaveError = viewModel.profileSaveError, !profileSaveError.isEmpty, !isShowingProfileEditor {
             return profileSaveError
         }
@@ -727,22 +724,7 @@ struct ProfileView: View {
 
     private func copyNpubToPasteboard() {
         UIPasteboard.general.string = viewModel.npub
-        showTransientActionMessage("Copied ID")
-    }
-
-    private func showTransientActionMessage(_ message: String) {
-        transientActionMessageTask?.cancel()
-        transientActionMessage = message
-
-        transientActionMessageTask = Task {
-            try? await Task.sleep(nanoseconds: 1_800_000_000)
-            guard !Task.isCancelled else { return }
-            await MainActor.run {
-                if transientActionMessage == message {
-                    transientActionMessage = nil
-                }
-            }
-        }
+        toastCenter.show("Copied")
     }
 
     private func actionButton(
@@ -861,7 +843,13 @@ struct ProfileView: View {
     }
 
     private func openHashtagFeed(hashtag: String) {
-        selectedHashtagRoute = HashtagRoute(hashtag: hashtag)
+        selectedHashtagRoute = HashtagRoute(
+            hashtag: hashtag,
+            seedItems: matchingHashtagSeedItems(
+                hashtag: hashtag,
+                from: viewModel.visibleItems
+            )
+        )
     }
 
     private func openProfile(pubkey: String) {

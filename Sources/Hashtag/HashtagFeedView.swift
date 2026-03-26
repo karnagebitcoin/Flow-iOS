@@ -9,6 +9,7 @@ struct HashtagFeedView: View {
     @StateObject private var viewModel: HashtagFeedViewModel
     @ObservedObject private var reactionStats = NoteReactionStatsService.shared
     @ObservedObject private var followStore = FollowStore.shared
+    @ObservedObject private var muteStore = MuteStore.shared
     @ObservedObject private var hashtagFavoritesStore = HashtagFavoritesStore.shared
     @State private var selectedThreadItem: FeedItem?
     @State private var selectedHashtagRoute: HashtagRoute?
@@ -19,6 +20,7 @@ struct HashtagFeedView: View {
         hashtag: String,
         relayURL: URL,
         readRelayURLs: [URL]? = nil,
+        seedItems: [FeedItem] = [],
         service: NostrFeedService = NostrFeedService()
     ) {
         _viewModel = StateObject(
@@ -26,12 +28,14 @@ struct HashtagFeedView: View {
                 hashtag: hashtag,
                 relayURL: relayURL,
                 readRelayURLs: readRelayURLs,
+                seedItems: seedItems,
                 service: service
             )
         )
     }
 
     var body: some View {
+        let _ = muteStore.filterRevision
         let visibleItems = viewModel.visibleItems
         let visibleReplyCounts = ReplyCountEstimator.counts(for: visibleItems)
 
@@ -213,7 +217,8 @@ struct HashtagFeedView: View {
             HashtagFeedView(
                 hashtag: route.normalizedHashtag,
                 relayURL: effectiveRelayURL,
-                readRelayURLs: effectiveReadRelayURLs
+                readRelayURLs: effectiveReadRelayURLs,
+                seedItems: route.seedItems
             )
         }
         .navigationDestination(item: $selectedProfileRoute) { route in
@@ -251,7 +256,13 @@ struct HashtagFeedView: View {
     }
 
     private func openHashtagFeed(hashtag: String) {
-        let route = HashtagRoute(hashtag: hashtag)
+        let route = HashtagRoute(
+            hashtag: hashtag,
+            seedItems: matchingHashtagSeedItems(
+                hashtag: hashtag,
+                from: viewModel.visibleItems
+            )
+        )
         guard route.normalizedHashtag != viewModel.normalizedHashtag else { return }
         selectedHashtagRoute = route
     }

@@ -106,7 +106,7 @@ struct ProfileQRCodeSheet: View {
     private var avatarView: some View {
         Group {
             if let avatarURL {
-                AsyncImage(url: avatarURL) { phase in
+                CachedAsyncImage(url: avatarURL) { phase in
                     switch phase {
                     case .success(let image):
                         image
@@ -138,18 +138,12 @@ struct ProfileQRCodeSheet: View {
 
     private var qrCard: some View {
         VStack(spacing: 12) {
-            Group {
-                if let qrCodeImage {
-                    Image(uiImage: qrCodeImage)
-                        .interpolation(.none)
-                        .resizable()
-                        .scaledToFit()
-                } else {
-                    Image(systemName: "qrcode")
-                        .font(.system(size: 92, weight: .medium))
-                        .foregroundStyle(.secondary)
-                }
-            }
+            ProfileQRCodeArtwork(
+                qrCodeImage: qrCodeImage,
+                avatarURL: avatarURL,
+                displayName: displayName,
+                avatarSize: 54
+            )
             .frame(maxWidth: .infinity)
             .padding(18)
             .background(Color.white, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
@@ -162,6 +156,11 @@ struct ProfileQRCodeSheet: View {
                 .font(.footnote.monospaced())
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
+
+            Text("Flip your phone over from anywhere in the app to present this code full-screen.")
+                .font(.footnote.weight(.medium))
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
         }
         .padding(16)
         .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 26, style: .continuous))
@@ -241,12 +240,259 @@ struct ProfileQRCodeSheet: View {
     }
 }
 
-private enum QRCodeRenderer {
+enum FullScreenQRCodeTrigger: String, Identifiable {
+    case automatic
+
+    var id: String { rawValue }
+}
+
+struct ProfileQRCodeArtwork: View {
+    let qrCodeImage: UIImage?
+    let avatarURL: URL?
+    let displayName: String
+    let avatarSize: CGFloat
+
+    private var centerBadgeSize: CGFloat {
+        avatarSize + 10
+    }
+
+    var body: some View {
+        ZStack {
+            Group {
+                if let qrCodeImage {
+                    Image(uiImage: qrCodeImage)
+                        .interpolation(.none)
+                        .resizable()
+                        .scaledToFit()
+                } else {
+                    Image(systemName: "qrcode")
+                        .font(.system(size: 92, weight: .medium))
+                        .foregroundStyle(.secondary)
+                }
+            }
+
+            Circle()
+                .fill(Color.white)
+                .frame(width: centerBadgeSize, height: centerBadgeSize)
+
+            ProfileQRCodeAvatarBadge(
+                avatarURL: avatarURL,
+                displayName: displayName,
+                size: avatarSize
+            )
+        }
+        .aspectRatio(1, contentMode: .fit)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Profile QR code for \(displayName)")
+    }
+}
+
+struct ProfileQRCodeAvatarBadge: View {
+    let avatarURL: URL?
+    let displayName: String
+    let size: CGFloat
+
+    var body: some View {
+        Group {
+            if let avatarURL {
+                CachedAsyncImage(url: avatarURL) { phase in
+                    switch phase {
+                    case .success(let image):
+                        image
+                            .resizable()
+                            .scaledToFill()
+                    default:
+                        fallbackAvatar
+                    }
+                }
+            } else {
+                fallbackAvatar
+            }
+        }
+        .frame(width: size, height: size)
+        .clipShape(Circle())
+        .overlay {
+            Circle()
+                .stroke(Color.white, lineWidth: 3)
+        }
+    }
+
+    private var fallbackAvatar: some View {
+        ZStack {
+            Circle()
+                .fill(Color(.systemGray5))
+            Text(String(displayName.prefix(1)).uppercased())
+                .font(.system(size: size * 0.42, weight: .semibold))
+                .foregroundStyle(.secondary)
+        }
+    }
+}
+
+struct PresentedProfileQRCodeView: View {
+    let trigger: FullScreenQRCodeTrigger
+    let displayName: String
+    let handle: String?
+    let avatarURL: URL?
+    let qrCodeImage: UIImage?
+    let onDismiss: () -> Void
+
+    @State private var hasAnimatedEntrance = false
+
+    var body: some View {
+        GeometryReader { proxy in
+            let rotationDegrees = presentationRotationDegrees
+            let contentSize = presentationContentSize(for: proxy.size, rotationDegrees: rotationDegrees)
+            let presentationHasSettled = trigger != .automatic || hasAnimatedEntrance
+            let contentEntranceOffset = presentationHasSettled ? 0 : -min(220, max(96, proxy.size.height * 0.22))
+            let backgroundEntranceOffset = presentationHasSettled ? 0 : contentEntranceOffset * 0.28
+
+            ZStack {
+                ProfileQRCodePresentationBackground()
+                    .frame(width: contentSize.width, height: contentSize.height)
+                    .rotationEffect(.degrees(rotationDegrees))
+                    .position(x: proxy.size.width / 2, y: proxy.size.height / 2)
+                    .offset(y: backgroundEntranceOffset)
+                    .scaleEffect(presentationHasSettled ? 1 : 1.05)
+                    .opacity(presentationHasSettled ? 1 : 0.84)
+
+                portraitPresentation(in: contentSize)
+                    .frame(width: contentSize.width, height: contentSize.height)
+                    .rotationEffect(.degrees(rotationDegrees))
+                    .position(x: proxy.size.width / 2, y: proxy.size.height / 2)
+                    .offset(y: contentEntranceOffset)
+                    .scaleEffect(presentationHasSettled ? 1 : 0.95)
+                    .opacity(presentationHasSettled ? 1 : 0)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .animation(automaticEntranceAnimation, value: hasAnimatedEntrance)
+        }
+        .ignoresSafeArea()
+        .contentShape(Rectangle())
+        .onAppear {
+            guard trigger == .automatic, !hasAnimatedEntrance else { return }
+            DispatchQueue.main.async {
+                guard !hasAnimatedEntrance else { return }
+                hasAnimatedEntrance = true
+            }
+        }
+        .onTapGesture {
+            onDismiss()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: UIDevice.orientationDidChangeNotification)) { _ in
+            guard trigger == .automatic else { return }
+            switch UIDevice.current.orientation {
+            case .portraitUpsideDown, .faceUp, .faceDown, .unknown:
+                break
+            default:
+                onDismiss()
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func portraitPresentation(in size: CGSize) -> some View {
+        let qrDimension = min(size.width - 88, size.height * 0.5, 384)
+        let avatarSize = max(76, min(98, qrDimension * 0.25))
+
+        VStack(spacing: 24) {
+            Text(displayName)
+                .font(.custom("SF Pro Display", size: 38).weight(.bold))
+                .foregroundStyle(.white.opacity(0.97))
+                .multilineTextAlignment(.center)
+                .lineLimit(2)
+                .kerning(-0.6)
+                .padding(.horizontal, 18)
+
+            ProfileQRCodeArtwork(
+                qrCodeImage: qrCodeImage,
+                avatarURL: avatarURL,
+                displayName: displayName,
+                avatarSize: avatarSize
+            )
+            .frame(width: qrDimension, height: qrDimension)
+            .padding(16)
+            .background(Color.white, in: RoundedRectangle(cornerRadius: 34, style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: 34, style: .continuous)
+                    .stroke(Color.black.opacity(0.08), lineWidth: 1.2)
+            }
+        }
+        .frame(maxWidth: 560)
+        .padding(.horizontal, 24)
+        .padding(.vertical, 40)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    private var presentationRotationDegrees: Double {
+        var angle: Double = 0
+
+        switch activeInterfaceOrientation {
+        case .landscapeLeft:
+            angle += 90
+        case .landscapeRight:
+            angle -= 90
+        default:
+            break
+        }
+
+        if trigger == .automatic {
+            angle += 180
+        }
+
+        return angle
+    }
+
+    private func presentationContentSize(for size: CGSize, rotationDegrees: Double) -> CGSize {
+        let normalized = abs(rotationDegrees).truncatingRemainder(dividingBy: 180)
+        guard normalized == 90 else { return size }
+
+        return CGSize(width: size.height, height: size.width)
+    }
+
+    private var automaticEntranceAnimation: Animation {
+        .spring(response: 0.72, dampingFraction: 0.82, blendDuration: 0.12)
+    }
+
+    private var activeInterfaceOrientation: UIInterfaceOrientation {
+        UIApplication.shared.connectedScenes
+            .compactMap { $0 as? UIWindowScene }
+            .first(where: { $0.activationState == .foregroundActive })?
+            .interfaceOrientation ?? .unknown
+    }
+}
+
+struct ProfileQRCodePresentationBackground: View {
+    var body: some View {
+        ZStack {
+            Color.black
+                .ignoresSafeArea()
+
+            UnicornStudioBackgroundView(
+                source: .bundledJSON("welcome_onboarding_unicorn.json"),
+                opacity: 1
+            )
+            .ignoresSafeArea()
+
+            LinearGradient(
+                colors: [
+                    Color.black.opacity(0.12),
+                    Color.black.opacity(0.20),
+                    Color.black.opacity(0.28)
+                ],
+                startPoint: .top,
+                endPoint: .bottom
+            )
+            .ignoresSafeArea()
+        }
+    }
+}
+
+enum QRCodeRenderer {
     static func render(payload: String) -> UIImage? {
         let data = Data(payload.utf8)
         let filter = CIFilter.qrCodeGenerator()
         filter.message = data
-        filter.correctionLevel = "M"
+        filter.correctionLevel = "H"
 
         guard let outputImage = filter.outputImage else { return nil }
         let scaledImage = outputImage.transformed(by: CGAffineTransform(scaleX: 12, y: 12))

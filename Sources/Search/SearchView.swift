@@ -8,6 +8,7 @@ struct SearchView: View {
     @EnvironmentObject private var relaySettings: RelaySettingsStore
     @ObservedObject private var reactionStats = NoteReactionStatsService.shared
     @ObservedObject private var followStore = FollowStore.shared
+    @ObservedObject private var muteStore = MuteStore.shared
 
     @StateObject private var viewModel: SearchViewModel
 
@@ -26,6 +27,7 @@ struct SearchView: View {
     }
 
     var body: some View {
+        let _ = muteStore.filterRevision
         let visibleItems = viewModel.visibleItems
         let visibleReplyCounts = ReplyCountEstimator.counts(for: visibleItems)
 
@@ -268,7 +270,8 @@ struct SearchView: View {
                 HashtagFeedView(
                     hashtag: route.normalizedHashtag,
                     relayURL: effectivePrimaryRelayURL,
-                    readRelayURLs: effectiveReadRelayURLs
+                    readRelayURLs: effectiveReadRelayURLs,
+                    seedItems: route.seedItems
                 )
             }
             .navigationDestination(item: $selectedProfileRoute) { route in
@@ -447,7 +450,13 @@ struct SearchView: View {
     }
 
     private func openHashtagFeed(hashtag: String) {
-        let route = HashtagRoute(hashtag: hashtag)
+        let route = HashtagRoute(
+            hashtag: hashtag,
+            seedItems: matchingHashtagSeedItems(
+                hashtag: hashtag,
+                from: viewModel.visibleItems
+            )
+        )
         selectedHashtagRoute = route
     }
 

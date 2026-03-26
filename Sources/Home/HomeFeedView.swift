@@ -11,6 +11,7 @@ struct HomeFeedView: View {
     @ObservedObject var viewModel: HomeFeedViewModel
     @ObservedObject private var reactionStats = NoteReactionStatsService.shared
     @ObservedObject private var followStore = FollowStore.shared
+    @ObservedObject private var muteStore = MuteStore.shared
     @ObservedObject private var interestFeedStore = InterestFeedStore.shared
     @ObservedObject private var hashtagFavoritesStore = HashtagFavoritesStore.shared
 
@@ -30,6 +31,7 @@ struct HomeFeedView: View {
     @State private var shouldAutoFocusReplyInThread = false
 
     var body: some View {
+        let _ = muteStore.filterRevision
         let visibleItems = viewModel.visibleItems
         let visibleReplyCounts = ReplyCountEstimator.counts(for: visibleItems)
 
@@ -281,7 +283,8 @@ struct HomeFeedView: View {
                 HashtagFeedView(
                     hashtag: route.normalizedHashtag,
                     relayURL: effectivePrimaryRelayURL,
-                    readRelayURLs: effectiveReadRelayURLs
+                    readRelayURLs: effectiveReadRelayURLs,
+                    seedItems: route.seedItems
                 )
             }
             .navigationDestination(item: $selectedProfileRoute) { route in
@@ -742,7 +745,13 @@ struct HomeFeedView: View {
     }
 
     private func openHashtagFeed(hashtag: String) {
-        selectedHashtagRoute = HashtagRoute(hashtag: hashtag)
+        selectedHashtagRoute = HashtagRoute(
+            hashtag: hashtag,
+            seedItems: matchingHashtagSeedItems(
+                hashtag: hashtag,
+                from: viewModel.visibleItems
+            )
+        )
     }
 
     private func openProfile(pubkey: String) {
@@ -780,7 +789,7 @@ struct HomeFeedView: View {
         case .custom(let feedID):
             return viewModel.customFeedDefinition(id: feedID)?.name ?? "Custom Feed"
         case .hashtag(let hashtag):
-            return "#\(HomePrimaryFeedSource.normalizeHashtag(hashtag))"
+            return HomePrimaryFeedSource.normalizeHashtag(hashtag)
         }
     }
 

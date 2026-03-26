@@ -919,28 +919,56 @@ struct NostrFeedService: Sendable {
             timeout: fetchTimeout,
             relayFetchMode: relayFetchMode
         )
-        .filter { $0.mentionedPubkeys.contains(where: { $0.lowercased() == normalizedPubkey }) }
-        .filter { $0.pubkey.lowercased() != normalizedPubkey }
-        .sorted(by: { lhs, rhs in
-            if lhs.createdAt == rhs.createdAt {
-                return lhs.id > rhs.id
-            }
-            return lhs.createdAt > rhs.createdAt
-        })
 
-        let uniqueEvents = deduplicateEvents(activityEvents)
-        let limitedEvents = Array(uniqueEvents.prefix(limit))
-        guard !limitedEvents.isEmpty else { return [] }
+        let limitedEvents = Array(
+            filteredActivityEvents(
+                from: activityEvents,
+                currentUserPubkey: normalizedPubkey
+            )
+            .prefix(limit)
+        )
+
+        return await buildActivityRows(
+            relayURLs: relayTargets,
+            currentUserPubkey: normalizedPubkey,
+            events: limitedEvents,
+            fetchTimeout: fetchTimeout,
+            relayFetchMode: relayFetchMode,
+            profileFetchTimeout: profileFetchTimeout,
+            profileRelayFetchMode: profileRelayFetchMode
+        )
+    }
+
+    func buildActivityRows(
+        relayURLs: [URL],
+        currentUserPubkey: String,
+        events: [NostrEvent],
+        fetchTimeout: TimeInterval = 12,
+        relayFetchMode: RelayFetchMode = .allRelays,
+        profileFetchTimeout: TimeInterval = 8,
+        profileRelayFetchMode: RelayFetchMode = .allRelays
+    ) async -> [ActivityRow] {
+        let normalizedPubkey = normalizePubkey(currentUserPubkey)
+        guard !normalizedPubkey.isEmpty else { return [] }
+
+        let relayTargets = normalizedRelayURLs(relayURLs)
+        guard !relayTargets.isEmpty else { return [] }
+
+        let filteredEvents = filteredActivityEvents(
+            from: events,
+            currentUserPubkey: normalizedPubkey
+        )
+        guard !filteredEvents.isEmpty else { return [] }
 
         async let actorProfilesTask = hydrateActorProfiles(
-            for: limitedEvents,
+            for: filteredEvents,
             relayURLs: relayTargets,
             fetchTimeout: profileFetchTimeout,
             relayFetchMode: profileRelayFetchMode
         )
         async let targetEventsTask = resolveActivityTargetEvents(
             relayURLs: relayTargets,
-            sourceEvents: limitedEvents,
+            sourceEvents: filteredEvents,
             fetchTimeout: fetchTimeout,
             relayFetchMode: relayFetchMode
         )
@@ -948,10 +976,11 @@ struct NostrFeedService: Sendable {
         let actorProfiles = await actorProfilesTask
         let targetEventsByReference = await targetEventsTask
 
-        return limitedEvents.map { event in
+        return filteredEvents.compactMap { event in
+            guard let action = event.activityAction else { return nil }
+
             let normalizedActorPubkey = normalizePubkey(event.pubkey)
             let actor = ActivityActor(pubkey: event.pubkey, profile: actorProfiles[normalizedActorPubkey])
-            let action = event.activityAction ?? .mention(kind: event.kind)
             let targetReference = event.activityTargetReference
             let resolvedTargetEvent = targetReference.flatMap { targetEventsByReference[$0] }
             let targetSnippet = resolvedTargetEvent?.activitySnippet()
@@ -1003,10 +1032,7 @@ struct NostrFeedService: Sendable {
         }
         let fetchLimit = expandedTimelineLimit(for: limit, moderationSnapshot: moderationSnapshot)
 
-        let normalizedHashtag = hashtag
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-            .trimmingCharacters(in: CharacterSet(charactersIn: "#"))
-            .lowercased()
+        let normalizedHashtag = NostrEvent.normalizedHashtagValue(hashtag)
         
         guard !normalizedHashtag.isEmpty else {
             return []
@@ -1059,11 +1085,7 @@ struct NostrFeedService: Sendable {
         let normalizedHashtags = Array(
             Set(
                 hashtags
-                    .map {
-                        $0.trimmingCharacters(in: .whitespacesAndNewlines)
-                            .trimmingCharacters(in: CharacterSet(charactersIn: "#"))
-                            .lowercased()
-                    }
+                    .map(NostrEvent.normalizedHashtagValue)
                     .filter { !$0.isEmpty }
             )
         )
@@ -1897,11 +1919,31 @@ struct NostrFeedService: Sendable {
 
     private func fallbackActivitySnippet(for event: NostrEvent, action: ActivityAction) -> String {
         switch action {
-        case .mention:
+        case .mention, .reply, .quoteShare:
             return event.activitySnippet()
         case .reaction(let reaction):
             return reaction.displayValue
+        case .reshare:
+            return "Re-shared your note"
         }
+    }
+
+    private func filteredActivityEvents(
+        from events: [NostrEvent],
+        currentUserPubkey: String
+    ) -> [NostrEvent] {
+        deduplicateEvents(
+            events
+                .filter { $0.activityAction != nil }
+                .filter { $0.mentionedPubkeys.contains(where: { $0.lowercased() == currentUserPubkey }) }
+                .filter { normalizePubkey($0.pubkey) != currentUserPubkey }
+                .sorted(by: { lhs, rhs in
+                    if lhs.createdAt == rhs.createdAt {
+                        return lhs.id > rhs.id
+                    }
+                    return lhs.createdAt > rhs.createdAt
+                })
+        )
     }
 
     private func normalizedEventID(_ value: String?) -> String? {

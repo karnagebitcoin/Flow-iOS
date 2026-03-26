@@ -697,9 +697,15 @@ final class HomeFeedViewModel: ObservableObject {
 
             guard latestRefreshRequestID == refreshRequestID else { return }
 
-            let mergedItems = pruneMutedItems(startedWithEmptyItems
-                ? mergeItemArrays(primary: bufferedNewItems, secondary: fetched)
-                : fetched)
+            let mergedItems = pruneItemsForSource(
+                pruneMutedItems(
+                    startedWithEmptyItems
+                        ? mergeItemArrays(primary: bufferedNewItems, secondary: fetched)
+                        : fetched
+                ),
+                feedSource: requestSource,
+                followingPubkeys: requestSource == .following ? self.followingPubkeys : nil
+            )
 
             items = mergedItems
             bufferedNewItems = []
@@ -1023,6 +1029,7 @@ final class HomeFeedViewModel: ObservableObject {
         )
         guard let item = hydrated.first else { return }
         guard !knownEventIDs.contains(item.id) else { return }
+        guard itemIsAllowedForCurrentSource(item) else { return }
 
         knownEventIDs.insert(item.id)
         bufferedNewItems = mergeItemArrays(
@@ -1033,7 +1040,9 @@ final class HomeFeedViewModel: ObservableObject {
     }
 
     private func mergeKeepingNewest(itemsToMerge: [FeedItem]) {
-        items = pruneMutedItems(mergeItemArrays(primary: itemsToMerge, secondary: items))
+        items = pruneItemsForSource(
+            pruneMutedItems(mergeItemArrays(primary: itemsToMerge, secondary: items))
+        )
         scheduleAssetPrefetch(for: items)
 
         let currentlyVisibleIDs = Set(items.map(\.id))
@@ -1187,6 +1196,10 @@ final class HomeFeedViewModel: ObservableObject {
         let hideNSFW = AppSettingsStore.shared.hideNSFWContent
 
         return source.filter { item in
+            if !itemIsAllowedForCurrentSource(item) {
+                return false
+            }
+
             if mutedConversationIDs.contains(item.displayEvent.conversationID) {
                 return false
             }
@@ -1230,6 +1243,40 @@ final class HomeFeedViewModel: ObservableObject {
         }
     }
 
+    private func pruneItemsForSource(
+        _ source: [FeedItem],
+        feedSource: HomePrimaryFeedSource? = nil,
+        followingPubkeys: [String]? = nil
+    ) -> [FeedItem] {
+        let resolvedSource = feedSource ?? self.feedSource
+        switch resolvedSource {
+        case .following:
+            let allowedAuthors = allowedFollowingAuthors(followingPubkeys: followingPubkeys)
+            guard !allowedAuthors.isEmpty else { return [] }
+            return source.filter { item in
+                allowedAuthors.contains(self.normalizePubkey(item.displayAuthorPubkey))
+            }
+        default:
+            return source
+        }
+    }
+
+    private func itemIsAllowedForCurrentSource(_ item: FeedItem) -> Bool {
+        switch feedSource {
+        case .following:
+            let allowedAuthors = allowedFollowingAuthors()
+            guard !allowedAuthors.isEmpty else { return false }
+            return allowedAuthors.contains(self.normalizePubkey(item.displayAuthorPubkey))
+        default:
+            return true
+        }
+    }
+
+    private func allowedFollowingAuthors(followingPubkeys: [String]? = nil) -> Set<String> {
+        let followings = followingPubkeys ?? (self.followingPubkeys.isEmpty ? localFollowings() : self.followingPubkeys)
+        return Set(normalizedOrderedPubkeys(followings))
+    }
+
     private func filteredMainItems(ignoreMediaOnly: Bool = false) -> [FeedItem] {
         let key = VisibleItemsCacheKey(
             itemsRevision: itemsRevision,
@@ -1269,7 +1316,7 @@ final class HomeFeedViewModel: ObservableObject {
             hydrationMode: .cachedProfilesOnly,
             moderationSnapshot: muteFilterSnapshot
         )
-        let prunedHydrated = pruneMutedItems(hydrated)
+        let prunedHydrated = pruneItemsForSource(pruneMutedItems(hydrated))
         guard !prunedHydrated.isEmpty else { return false }
 
         items = prunedHydrated
@@ -1329,9 +1376,15 @@ final class HomeFeedViewModel: ObservableObject {
 
     private func localFollowings() -> [String] {
         Array(FollowStore.shared.followedPubkeys)
-            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() }
+            .map(normalizePubkey)
             .filter { !$0.isEmpty }
             .sorted()
+    }
+
+    private func normalizePubkey(_ value: String?) -> String {
+        (value ?? "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
     }
 
     private static func normalizedRelayURLs(_ relayURLs: [URL]) -> [URL] {
@@ -1738,8 +1791,11 @@ final class HomeFeedViewModel: ObservableObject {
                     return
                 }
 
-                self.items = self.pruneMutedItems(
-                    self.mergeItemArrays(primary: hydrated, secondary: self.items)
+                self.items = self.pruneItemsForSource(
+                    self.pruneMutedItems(
+                        self.mergeItemArrays(primary: hydrated, secondary: self.items)
+                    ),
+                    feedSource: source
                 )
                 self.scheduleAssetPrefetch(for: self.items)
                 self.knownEventIDs = Set(self.items.map(\.id))

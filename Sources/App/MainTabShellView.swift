@@ -29,12 +29,14 @@ struct MainTabShellView: View {
     @EnvironmentObject private var auth: AuthManager
     @EnvironmentObject private var appSettings: AppSettingsStore
     @EnvironmentObject private var relaySettings: RelaySettingsStore
-
+    
     @State private var selectedTab: Tab = .home
     @State private var homeRootResetID = UUID()
+    @State private var activityRootResetID = UUID()
     @State private var isShowingComposeSheet = false
     @State private var isShowingAuthSheet = false
     @State private var authSheetInitialTab: AuthSheetTab = .signIn
+    @State private var isActivityRootVisible = true
 
     @StateObject private var homeViewModel = HomeFeedViewModel(
         relayURL: URL(string: RelaySettingsStore.defaultReadRelayURLs.first ?? "wss://relay.damus.io/")!
@@ -42,6 +44,7 @@ struct MainTabShellView: View {
     @StateObject private var searchViewModel = SearchViewModel(
         relayURL: URL(string: RelaySettingsStore.defaultReadRelayURLs.first ?? "wss://relay.damus.io/")!
     )
+    @StateObject private var activityViewModel = ActivityViewModel()
 
     var body: some View {
         TabView(selection: $selectedTab) {
@@ -58,7 +61,11 @@ struct MainTabShellView: View {
                 .tag(Tab.dms)
                 .toolbar(.hidden, for: .tabBar)
 
-            ActivityView()
+            ActivityView(
+                viewModel: activityViewModel,
+                isRootVisible: $isActivityRootVisible
+            )
+                .id(activityRootResetID)
                 .tag(Tab.activity)
                 .toolbar(.hidden, for: .tabBar)
         }
@@ -90,6 +97,34 @@ struct MainTabShellView: View {
                 .environmentObject(appSettings)
                 .environmentObject(relaySettings)
         }
+        .task {
+            relaySettings.configure(
+                accountPubkey: auth.currentAccount?.pubkey,
+                nsec: auth.currentNsec
+            )
+            configureActivityViewModel()
+            await activityViewModel.loadIfNeeded()
+            syncActivityTabActiveState()
+        }
+        .onChange(of: auth.currentAccount?.pubkey) { _, _ in
+            relaySettings.configure(
+                accountPubkey: auth.currentAccount?.pubkey,
+                nsec: auth.currentNsec
+            )
+            configureActivityViewModel()
+        }
+        .onChange(of: relaySettings.readRelays) { _, _ in
+            configureActivityViewModel()
+        }
+        .onChange(of: appSettings.slowConnectionMode) { _, _ in
+            configureActivityViewModel()
+        }
+        .onChange(of: appSettings.activityNotificationPreferenceSignature) { _, _ in
+            activityViewModel.notificationPreferencesChanged()
+        }
+        .onChange(of: isActivityRootVisible) { _, _ in
+            syncActivityTabActiveState()
+        }
         .tint(appSettings.primaryColor)
     }
 
@@ -113,19 +148,31 @@ struct MainTabShellView: View {
     }
 
     private func tabBarButton(for tab: Tab) -> some View {
-        Button {
+        let isHighlighted = isTabHighlighted(tab)
+
+        return Button {
             handleTabSelection(tab)
         } label: {
-            Image(systemName: tab.symbolName)
-                .font(.system(size: 21, weight: .regular))
-                .foregroundStyle(selectedTab == tab ? appSettings.primaryColor : .secondary)
-                .frame(maxWidth: .infinity)
-                .frame(height: 46)
-                .contentShape(Rectangle())
+            ZStack(alignment: .topTrailing) {
+                Image(systemName: tab.symbolName)
+                    .font(.system(size: 21, weight: .regular))
+                    .foregroundStyle(isHighlighted ? appSettings.primaryColor : .secondary)
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 46)
+                    .contentShape(Rectangle())
+
+                if tab == .activity, activityViewModel.hasUnread, !isActivityListVisible {
+                    Circle()
+                        .fill(Color.red)
+                        .frame(width: 10, height: 10)
+                        .offset(x: -20, y: 8)
+                        .accessibilityHidden(true)
+                }
+            }
         }
         .buttonStyle(.plain)
         .accessibilityLabel(tab.accessibilityLabel)
-        .accessibilityAddTraits(selectedTab == tab ? [.isSelected] : [])
+        .accessibilityAddTraits(isHighlighted ? [.isSelected] : [])
     }
 
     private var composeTabButton: some View {
@@ -165,10 +212,49 @@ struct MainTabShellView: View {
     }
 
     private func handleTabSelection(_ tab: Tab) {
+        let previousTab = selectedTab
+        let wasActivityRootVisible = isActivityRootVisible
+
+        if previousTab == .activity, tab != .activity {
+            resetActivityTabToRoot()
+        } else if tab == .activity, previousTab == .activity, !wasActivityRootVisible {
+            resetActivityTabToRoot()
+        }
+
         selectedTab = tab
+        syncActivityTabActiveState()
 
         guard tab == .home else { return }
 
         homeRootResetID = UUID()
+    }
+
+    private func configureActivityViewModel() {
+        activityViewModel.configure(
+            currentUserPubkey: auth.currentAccount?.pubkey,
+            readRelayURLs: appSettings.effectiveReadRelayURLs(from: relaySettings.readRelayURLs)
+        )
+    }
+
+    private var isActivityListVisible: Bool {
+        selectedTab == .activity && isActivityRootVisible
+    }
+
+    private func isTabHighlighted(_ tab: Tab) -> Bool {
+        switch tab {
+        case .activity:
+            return isActivityListVisible
+        default:
+            return selectedTab == tab
+        }
+    }
+
+    private func resetActivityTabToRoot() {
+        isActivityRootVisible = true
+        activityRootResetID = UUID()
+    }
+
+    private func syncActivityTabActiveState() {
+        activityViewModel.setActivityTabActive(isActivityListVisible)
     }
 }

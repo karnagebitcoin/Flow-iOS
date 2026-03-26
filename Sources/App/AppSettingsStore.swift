@@ -239,6 +239,7 @@ final class AppSettingsStore: ObservableObject {
 
     @Published private var persistedSettings: PersistedSettings
     @Published private(set) var notificationAuthorizationStatus: UNAuthorizationStatus = .notDetermined
+    @Published var autoplayVideoSoundEnabled = false
 
     private let defaults: UserDefaults
     private let authStore: AuthStore
@@ -255,6 +256,11 @@ final class AppSettingsStore: ObservableObject {
             case textOnlyMode
             case slowConnectionMode
             case notificationsEnabled
+            case activityMentionNotificationsEnabled
+            case activityReactionNotificationsEnabled
+            case activityReplyNotificationsEnabled
+            case activityReshareNotificationsEnabled
+            case activityQuoteShareNotificationsEnabled
             case mediaUploadProvider
             case newsRelayURLs
             case newsAuthorPubkeys
@@ -271,6 +277,11 @@ final class AppSettingsStore: ObservableObject {
         var textOnlyMode: Bool = false
         var slowConnectionMode: Bool = false
         var notificationsEnabled: Bool = false
+        var activityMentionNotificationsEnabled: Bool = true
+        var activityReactionNotificationsEnabled: Bool = true
+        var activityReplyNotificationsEnabled: Bool = true
+        var activityReshareNotificationsEnabled: Bool = true
+        var activityQuoteShareNotificationsEnabled: Bool = true
         var mediaUploadProvider: MediaUploadProvider = .blossom
         var newsRelayURLs: [URL] = AppSettingsStore.defaultNewsRelayURLs
         var newsAuthorPubkeys: [String] = []
@@ -290,6 +301,11 @@ final class AppSettingsStore: ObservableObject {
             textOnlyMode = try container.decodeIfPresent(Bool.self, forKey: .textOnlyMode) ?? false
             slowConnectionMode = try container.decodeIfPresent(Bool.self, forKey: .slowConnectionMode) ?? false
             notificationsEnabled = try container.decodeIfPresent(Bool.self, forKey: .notificationsEnabled) ?? false
+            activityMentionNotificationsEnabled = try container.decodeIfPresent(Bool.self, forKey: .activityMentionNotificationsEnabled) ?? true
+            activityReactionNotificationsEnabled = try container.decodeIfPresent(Bool.self, forKey: .activityReactionNotificationsEnabled) ?? true
+            activityReplyNotificationsEnabled = try container.decodeIfPresent(Bool.self, forKey: .activityReplyNotificationsEnabled) ?? true
+            activityReshareNotificationsEnabled = try container.decodeIfPresent(Bool.self, forKey: .activityReshareNotificationsEnabled) ?? true
+            activityQuoteShareNotificationsEnabled = try container.decodeIfPresent(Bool.self, forKey: .activityQuoteShareNotificationsEnabled) ?? true
             mediaUploadProvider = (try? container.decode(MediaUploadProvider.self, forKey: .mediaUploadProvider)) ?? .blossom
             newsRelayURLs = AppSettingsStore.normalizedRelayURLs(
                 (try? container.decode([URL].self, forKey: .newsRelayURLs)) ?? AppSettingsStore.defaultNewsRelayURLs,
@@ -319,6 +335,11 @@ final class AppSettingsStore: ObservableObject {
             try container.encode(textOnlyMode, forKey: .textOnlyMode)
             try container.encode(slowConnectionMode, forKey: .slowConnectionMode)
             try container.encode(notificationsEnabled, forKey: .notificationsEnabled)
+            try container.encode(activityMentionNotificationsEnabled, forKey: .activityMentionNotificationsEnabled)
+            try container.encode(activityReactionNotificationsEnabled, forKey: .activityReactionNotificationsEnabled)
+            try container.encode(activityReplyNotificationsEnabled, forKey: .activityReplyNotificationsEnabled)
+            try container.encode(activityReshareNotificationsEnabled, forKey: .activityReshareNotificationsEnabled)
+            try container.encode(activityQuoteShareNotificationsEnabled, forKey: .activityQuoteShareNotificationsEnabled)
             try container.encode(mediaUploadProvider, forKey: .mediaUploadProvider)
             try container.encode(newsRelayURLs, forKey: .newsRelayURLs)
             try container.encode(newsAuthorPubkeys, forKey: .newsAuthorPubkeys)
@@ -473,6 +494,46 @@ final class AppSettingsStore: ObservableObject {
                 notificationAuthorizationTask?.cancel()
                 notificationAuthorizationTask = nil
             }
+        }
+    }
+
+    var activityMentionNotificationsEnabled: Bool {
+        get { persistedSettings.activityMentionNotificationsEnabled }
+        set {
+            persistedSettings.activityMentionNotificationsEnabled = newValue
+            persist()
+        }
+    }
+
+    var activityReactionNotificationsEnabled: Bool {
+        get { persistedSettings.activityReactionNotificationsEnabled }
+        set {
+            persistedSettings.activityReactionNotificationsEnabled = newValue
+            persist()
+        }
+    }
+
+    var activityReplyNotificationsEnabled: Bool {
+        get { persistedSettings.activityReplyNotificationsEnabled }
+        set {
+            persistedSettings.activityReplyNotificationsEnabled = newValue
+            persist()
+        }
+    }
+
+    var activityReshareNotificationsEnabled: Bool {
+        get { persistedSettings.activityReshareNotificationsEnabled }
+        set {
+            persistedSettings.activityReshareNotificationsEnabled = newValue
+            persist()
+        }
+    }
+
+    var activityQuoteShareNotificationsEnabled: Bool {
+        get { persistedSettings.activityQuoteShareNotificationsEnabled }
+        set {
+            persistedSettings.activityQuoteShareNotificationsEnabled = newValue
+            persist()
         }
     }
 
@@ -657,6 +718,33 @@ final class AppSettingsStore: ObservableObject {
             return "Notifications are blocked in iOS Settings."
         @unknown default:
             return "Notification status is unavailable."
+        }
+    }
+
+    var activityNotificationPreferenceSignature: String {
+        [
+            activityMentionNotificationsEnabled,
+            activityReactionNotificationsEnabled,
+            activityReplyNotificationsEnabled,
+            activityReshareNotificationsEnabled,
+            activityQuoteShareNotificationsEnabled
+        ]
+        .map { $0 ? "1" : "0" }
+        .joined(separator: "-")
+    }
+
+    func isActivityNotificationEnabled(for preference: ActivityNotificationPreference) -> Bool {
+        switch preference {
+        case .mentions:
+            return activityMentionNotificationsEnabled
+        case .reactions:
+            return activityReactionNotificationsEnabled
+        case .replies:
+            return activityReplyNotificationsEnabled
+        case .reshares:
+            return activityReshareNotificationsEnabled
+        case .quoteShares:
+            return activityQuoteShareNotificationsEnabled
         }
     }
 

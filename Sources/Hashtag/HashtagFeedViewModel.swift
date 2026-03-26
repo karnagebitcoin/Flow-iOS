@@ -2,6 +2,11 @@ import Foundation
 
 @MainActor
 final class HashtagFeedViewModel: ObservableObject {
+    private struct InitialHashtagPageResult {
+        let items: [FeedItem]
+        let fetchedFullPage: Bool
+    }
+
     private struct VisibleItemsCacheKey: Equatable {
         let itemsRevision: Int
         let mode: FeedMode
@@ -32,6 +37,7 @@ final class HashtagFeedViewModel: ObservableObject {
     private static let fastHashtagFetchTimeout: TimeInterval = 3
     private static let fullHashtagFetchTimeout: TimeInterval = 8
     private static let fastHashtagRelayFetchMode: RelayFetchMode = .firstNonEmptyRelay
+    private static let fastInitialPageSize = 24
     private var oldestCreatedAt: Int?
     private var hasReachedEnd = false
     private var hasLoadedInitialState = false
@@ -52,6 +58,7 @@ final class HashtagFeedViewModel: ObservableObject {
         hashtag: String,
         relayURL: URL,
         readRelayURLs: [URL]? = nil,
+        seedItems: [FeedItem] = [],
         pageSize: Int = 70,
         service: NostrFeedService = NostrFeedService()
     ) {
@@ -62,12 +69,15 @@ final class HashtagFeedViewModel: ObservableObject {
 
         self.readRelayURLs = normalizedReadRelays.isEmpty ? [relayURL] : normalizedReadRelays
         self.relayURL = self.readRelayURLs.first ?? relayURL
-        self.normalizedHashtag = hashtag
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-            .trimmingCharacters(in: CharacterSet(charactersIn: "#"))
-            .lowercased()
+        self.normalizedHashtag = NostrEvent.normalizedHashtagValue(hashtag)
         self.pageSize = pageSize
         self.service = service
+        self.items = Self.sortedNewestFirst(
+            seedItems.filter { $0.displayEvent.containsHashtag(self.normalizedHashtag) }
+        )
+        if !self.items.isEmpty {
+            scheduleItemHydration(for: self.items)
+        }
     }
 
     deinit {
@@ -146,12 +156,19 @@ final class HashtagFeedViewModel: ObservableObject {
         }
 
         do {
-            let fetched = try await fetchInitialHashtagPage()
-            items = pruneMutedItems(fetched)
-            oldestCreatedAt = items.last?.event.createdAt ?? fetched.last?.event.createdAt
-            hasReachedEnd = fetched.count < pageSize
+            let initialPage = try await fetchInitialHashtagPage()
+            let initialItems = pruneMutedItems(initialPage.items)
+            if items.isEmpty {
+                items = initialItems
+            } else if !initialItems.isEmpty {
+                mergeKeepingNewest(itemsToMerge: initialItems)
+            }
+            oldestCreatedAt = initialItems.last?.event.createdAt
+            hasReachedEnd = initialPage.fetchedFullPage ? initialPage.items.count < pageSize : false
             scheduleItemHydration(for: items)
-            scheduleRelayExpansionIfNeeded()
+            if !initialPage.fetchedFullPage {
+                scheduleRelayExpansionIfNeeded()
+            }
         } catch {
             if items.isEmpty {
                 errorMessage = "Couldn't load #\(normalizedHashtag) right now."
@@ -257,12 +274,12 @@ final class HashtagFeedViewModel: ObservableObject {
         }
     }
 
-    private func fetchInitialHashtagPage() async throws -> [FeedItem] {
+    private func fetchInitialHashtagPage() async throws -> InitialHashtagPageResult {
         let fastFetched = try await service.fetchHashtagFeed(
-            relayURLs: hashtagRelayURLs,
+            relayURLs: fastHashtagRelayURLs,
             hashtag: normalizedHashtag,
             kinds: requestKinds,
-            limit: pageSize,
+            limit: min(pageSize, Self.fastInitialPageSize),
             until: nil,
             hydrationMode: .cachedProfilesOnly,
             fetchTimeout: Self.fastHashtagFetchTimeout,
@@ -271,10 +288,10 @@ final class HashtagFeedViewModel: ObservableObject {
         )
 
         if !fastFetched.isEmpty {
-            return fastFetched
+            return InitialHashtagPageResult(items: fastFetched, fetchedFullPage: false)
         }
 
-        return try await service.fetchHashtagFeed(
+        let fullFetched = try await service.fetchHashtagFeed(
             relayURLs: hashtagRelayURLs,
             hashtag: normalizedHashtag,
             kinds: requestKinds,
@@ -285,6 +302,7 @@ final class HashtagFeedViewModel: ObservableObject {
             relayFetchMode: .allRelays,
             moderationSnapshot: muteFilterSnapshot
         )
+        return InitialHashtagPageResult(items: fullFetched, fetchedFullPage: true)
     }
 
     private func scheduleRelayExpansionIfNeeded() {
@@ -311,8 +329,8 @@ final class HashtagFeedViewModel: ObservableObject {
 
             await MainActor.run {
                 self.mergeKeepingNewest(itemsToMerge: expanded)
-                self.oldestCreatedAt = self.items.last?.event.createdAt
-                self.hasReachedEnd = expanded.count < self.pageSize && self.items.count <= expanded.count
+                self.oldestCreatedAt = expanded.last?.event.createdAt
+                self.hasReachedEnd = expanded.count < self.pageSize
                 self.scheduleItemHydration(for: self.items)
             }
         }
@@ -320,6 +338,10 @@ final class HashtagFeedViewModel: ObservableObject {
 
     private var hashtagRelayURLs: [URL] {
         Self.normalizedRelayURLs(readRelayURLs + Self.supplementalRelayURLs)
+    }
+
+    private var fastHashtagRelayURLs: [URL] {
+        Self.normalizedRelayURLs([relayURL] + Self.supplementalRelayURLs)
     }
 
     private static func normalizedRelayURLs(_ relayURLs: [URL]) -> [URL] {
@@ -333,5 +355,19 @@ final class HashtagFeedViewModel: ObservableObject {
         }
 
         return ordered
+    }
+
+    private static func sortedNewestFirst(_ items: [FeedItem]) -> [FeedItem] {
+        var byID: [String: FeedItem] = [:]
+        for item in items {
+            byID[item.id.lowercased()] = item
+        }
+
+        return byID.values.sorted {
+            if $0.event.createdAt == $1.event.createdAt {
+                return $0.id.lowercased() > $1.id.lowercased()
+            }
+            return $0.event.createdAt > $1.event.createdAt
+        }
     }
 }

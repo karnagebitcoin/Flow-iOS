@@ -21,11 +21,36 @@ enum ActivityFilter: String, CaseIterable, Identifiable, Sendable {
     var eventKinds: [Int] {
         switch self {
         case .all:
-            return [1, 7, 1111, 1244]
+            return [1, 6, 7, 16, 1111, 1244]
         case .mentions:
             return [1, 1111, 1244]
         case .reactions:
             return [7]
+        }
+    }
+}
+
+enum ActivityNotificationPreference: String, CaseIterable, Identifiable, Codable, Sendable {
+    case mentions
+    case reactions
+    case replies
+    case reshares
+    case quoteShares
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .mentions:
+            return "Mentions"
+        case .reactions:
+            return "Reactions"
+        case .replies:
+            return "Replies"
+        case .reshares:
+            return "Reshares"
+        case .quoteShares:
+            return "Quote Shares"
         }
     }
 }
@@ -88,14 +113,19 @@ struct ActivityReaction: Hashable, Sendable {
 
 enum ActivityAction: Hashable, Sendable {
     case mention(kind: Int)
+    case reply(kind: Int)
     case reaction(ActivityReaction)
+    case reshare(kind: Int)
+    case quoteShare(kind: Int)
 
     var category: ActivityFilter {
         switch self {
-        case .mention:
+        case .mention, .reply, .quoteShare:
             return .mentions
         case .reaction:
             return .reactions
+        case .reshare:
+            return .all
         }
     }
 
@@ -103,14 +133,20 @@ enum ActivityAction: Hashable, Sendable {
         switch self {
         case .mention:
             return "Mention"
+        case .reply:
+            return "Reply"
         case .reaction:
             return "Reaction"
+        case .reshare:
+            return "Reshare"
+        case .quoteShare:
+            return "Quote share"
         }
     }
 
     var sourceKind: Int? {
         switch self {
-        case .mention(let kind):
+        case .mention(let kind), .reply(let kind), .reshare(let kind), .quoteShare(let kind):
             return kind
         case .reaction:
             return nil
@@ -122,6 +158,40 @@ enum ActivityAction: Hashable, Sendable {
             return reaction
         }
         return nil
+    }
+
+    var notificationPreference: ActivityNotificationPreference {
+        switch self {
+        case .mention:
+            return .mentions
+        case .reply:
+            return .replies
+        case .reaction:
+            return .reactions
+        case .reshare:
+            return .reshares
+        case .quoteShare:
+            return .quoteShares
+        }
+    }
+
+    func matches(_ filter: ActivityFilter) -> Bool {
+        switch filter {
+        case .all:
+            return true
+        case .mentions:
+            switch self {
+            case .mention, .reply, .quoteShare:
+                return true
+            case .reaction, .reshare:
+                return false
+            }
+        case .reactions:
+            if case .reaction = self {
+                return true
+            }
+            return false
+        }
     }
 }
 
@@ -158,7 +228,7 @@ enum ActivityTargetReference: Hashable, Sendable {
         guard !rawValue.isEmpty else { return nil }
 
         switch name {
-        case "e":
+        case "e", "q":
             self = .eventID(rawValue.lowercased())
 
         case "a":
@@ -233,7 +303,15 @@ extension NostrEvent {
         switch kind {
         case 7:
             return .reaction(activityReaction)
+        case 6, 16:
+            return .reshare(kind: kind)
         case 1, 1111, 1244:
+            if containsActivityQuoteReference {
+                return .quoteShare(kind: kind)
+            }
+            if isReplyNote {
+                return .reply(kind: kind)
+            }
             return .mention(kind: kind)
         default:
             return nil
@@ -241,6 +319,13 @@ extension NostrEvent {
     }
 
     var activityTargetReference: ActivityTargetReference? {
+        for tag in tags {
+            guard let name = tag.first?.lowercased(), name == "q" else { continue }
+            if let reference = ActivityTargetReference(tag: tag) {
+                return reference
+            }
+        }
+
         var fallback: ActivityTargetReference?
 
         for tag in tags {
@@ -270,6 +355,13 @@ extension NostrEvent {
         }
 
         return fallback
+    }
+
+    var containsActivityQuoteReference: Bool {
+        tags.contains { tag in
+            guard let name = tag.first?.lowercased(), name == "q" else { return false }
+            return tag.count > 1 && !tag[1].trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        }
     }
 
     var activityReaction: ActivityReaction {

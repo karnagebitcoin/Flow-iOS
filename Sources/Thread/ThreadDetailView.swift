@@ -13,6 +13,7 @@ struct ThreadDetailView: View {
     @StateObject private var viewModel: ThreadDetailViewModel
     @ObservedObject private var reactionStats = NoteReactionStatsService.shared
     @ObservedObject private var followStore = FollowStore.shared
+    @ObservedObject private var muteStore = MuteStore.shared
 
     @State private var selectedThreadItem: FeedItem?
     @State private var selectedHashtagRoute: HashtagRoute?
@@ -112,6 +113,7 @@ struct ThreadDetailView: View {
                 await viewModel.refresh()
             }
             .task {
+                configureStores()
                 if appSettings.reactionsVisibleInFeeds {
                     reactionStats.prefetch(events: [viewModel.rootItem.displayEvent], relayURLs: effectiveReadRelayURLs)
                 }
@@ -150,9 +152,22 @@ struct ThreadDetailView: View {
                 }
             }
             .onChange(of: auth.currentAccount?.pubkey) { _, _ in
+                configureStores()
                 Task {
                     await refreshComposerAvatar()
                 }
+            }
+            .onChange(of: auth.currentNsec) { _, _ in
+                configureStores()
+            }
+            .onChange(of: relaySettings.readRelays) { _, _ in
+                configureStores()
+            }
+            .onChange(of: relaySettings.writeRelays) { _, _ in
+                configureStores()
+            }
+            .onChange(of: appSettings.slowConnectionMode) { _, _ in
+                configureStores()
             }
             .onDisappear {
                 speechTranscriber.stopRecording()
@@ -171,7 +186,8 @@ struct ThreadDetailView: View {
                 HashtagFeedView(
                     hashtag: route.normalizedHashtag,
                     relayURL: effectiveRelayURL,
-                    readRelayURLs: effectiveReadRelayURLs
+                    readRelayURLs: effectiveReadRelayURLs,
+                    seedItems: route.seedItems
                 )
             }
             .navigationDestination(item: $selectedThreadItem) { item in
@@ -523,7 +539,8 @@ struct ThreadDetailView: View {
                         onReplyTap: {
                             shouldAutoFocusReplyInNestedThread = true
                             selectedThreadItem = reply.threadNavigationItem
-                        }
+                        },
+                        suppressReplyContextForDirectReplyTargetEventID: viewModel.rootItem.displayEventID
                     )
                     .id(replyAnchorID(for: reply.id))
                     .padding(.horizontal, 16)
@@ -955,7 +972,13 @@ struct ThreadDetailView: View {
     }
 
     private func openHashtagFeed(hashtag: String) {
-        selectedHashtagRoute = HashtagRoute(hashtag: hashtag)
+        selectedHashtagRoute = HashtagRoute(
+            hashtag: hashtag,
+            seedItems: matchingHashtagSeedItems(
+                hashtag: hashtag,
+                from: [viewModel.rootItem] + threadReplies
+            )
+        )
     }
 
     private func handleReplySpeechToggle() async {
@@ -1015,7 +1038,7 @@ struct ThreadDetailView: View {
 
     private var filteredReplies: [FeedItem] {
         viewModel.replies.filter { item in
-            if MuteStore.shared.shouldHideAny(item.moderationEvents) {
+            if muteStore.shouldHideAny(item.moderationEvents) {
                 return false
             }
             if hideNSFWEnabled && item.moderationEvents.contains(where: { $0.containsNSFWHashtag }) {
@@ -1062,6 +1085,25 @@ struct ThreadDetailView: View {
             return AppSettingsStore.slowModeRelayURL
         }
         return viewModel.relayURL
+    }
+
+    private func configureStores() {
+        relaySettings.configure(
+            accountPubkey: auth.currentAccount?.pubkey,
+            nsec: auth.currentNsec
+        )
+        followStore.configure(
+            accountPubkey: auth.currentAccount?.pubkey,
+            nsec: auth.currentNsec,
+            readRelayURLs: effectiveReadRelayURLs,
+            writeRelayURLs: effectiveWriteRelayURLs
+        )
+        muteStore.configure(
+            accountPubkey: auth.currentAccount?.pubkey,
+            nsec: auth.currentNsec,
+            readRelayURLs: effectiveReadRelayURLs,
+            writeRelayURLs: effectiveWriteRelayURLs
+        )
     }
 
     private var replyComposerAvatar: some View {

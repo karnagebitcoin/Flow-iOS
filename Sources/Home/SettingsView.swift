@@ -132,6 +132,82 @@ private struct SettingsToggleRow: View {
     }
 }
 
+struct NotificationPreferencesView: View {
+    @EnvironmentObject private var appSettings: AppSettingsStore
+
+    var navigationTitleText: String = "Notifications"
+    var titleDisplayMode: NavigationBarItem.TitleDisplayMode = .large
+
+    var body: some View {
+        Form {
+            Section("System Notifications") {
+                NotificationPreferencesToggleRow(
+                    title: "Enable Notifications",
+                    isOn: Binding(
+                        get: { appSettings.notificationsEnabled },
+                        set: { appSettings.notificationsEnabled = $0 }
+                    ),
+                    footer: appSettings.notificationsStatusDescription
+                )
+            }
+
+            Section {
+                Toggle("Mentions", isOn: Binding(
+                    get: { appSettings.activityMentionNotificationsEnabled },
+                    set: { appSettings.activityMentionNotificationsEnabled = $0 }
+                ))
+
+                Toggle("Reactions", isOn: Binding(
+                    get: { appSettings.activityReactionNotificationsEnabled },
+                    set: { appSettings.activityReactionNotificationsEnabled = $0 }
+                ))
+
+                Toggle("Replies", isOn: Binding(
+                    get: { appSettings.activityReplyNotificationsEnabled },
+                    set: { appSettings.activityReplyNotificationsEnabled = $0 }
+                ))
+
+                Toggle("Reshares", isOn: Binding(
+                    get: { appSettings.activityReshareNotificationsEnabled },
+                    set: { appSettings.activityReshareNotificationsEnabled = $0 }
+                ))
+
+                Toggle("Quote Shares", isOn: Binding(
+                    get: { appSettings.activityQuoteShareNotificationsEnabled },
+                    set: { appSettings.activityQuoteShareNotificationsEnabled = $0 }
+                ))
+            } header: {
+                Text("Activity Alerts")
+            } footer: {
+                Text("These controls decide which activity types trigger the in-app bell badge and future notification delivery.")
+            }
+        }
+        .navigationTitle(navigationTitleText)
+        .navigationBarTitleDisplayMode(titleDisplayMode)
+        .task {
+            await appSettings.refreshNotificationAuthorizationStatus()
+        }
+    }
+}
+
+private struct NotificationPreferencesToggleRow: View {
+    let title: String
+    @Binding var isOn: Bool
+    let footer: String
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Toggle(title, isOn: $isOn)
+
+            Text(footer)
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(.vertical, 4)
+    }
+}
+
 private struct SettingsAppearanceView: View {
     @EnvironmentObject private var appSettings: AppSettingsStore
 
@@ -2232,22 +2308,7 @@ private struct SettingsMutedKeywordListDetailView: View {
 }
 
 private struct SettingsNotificationsView: View {
-    @EnvironmentObject private var appSettings: AppSettingsStore
-
     var body: some View {
-        Form {
-            Section("Notifications") {
-                SettingsToggleRow(
-                    title: "Enable Notifications",
-                    isOn: Binding(
-                        get: { appSettings.notificationsEnabled },
-                        set: { appSettings.notificationsEnabled = $0 }
-                    ),
-                    footer: appSettings.notificationsStatusDescription
-                )
-            }
-        }
-        .navigationTitle("Notifications")
-        .navigationBarTitleDisplayMode(.large)
+        NotificationPreferencesView()
     }
 }
