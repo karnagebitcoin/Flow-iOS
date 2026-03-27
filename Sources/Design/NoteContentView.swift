@@ -1816,12 +1816,43 @@ private struct NoteImageRemixComposeDraft: Identifiable {
     let replyTargetEvent: NostrEvent?
 }
 
+@MainActor
+private final class InlineVideoPlaybackCoordinator: ObservableObject {
+    static let shared = InlineVideoPlaybackCoordinator()
+
+    @Published private(set) var activeVideoID: UUID?
+
+    private var visibleVideoOrder: [UUID: Int] = [:]
+    private var sequence = 0
+
+    func videoDidAppear(_ id: UUID) {
+        sequence += 1
+        visibleVideoOrder[id] = sequence
+        activeVideoID = id
+    }
+
+    func videoDidDisappear(_ id: UUID) {
+        visibleVideoOrder.removeValue(forKey: id)
+        guard activeVideoID == id else { return }
+        activeVideoID = visibleVideoOrder.max(by: { $0.value < $1.value })?.key
+    }
+
+    func requestPlayback(_ id: UUID) {
+        sequence += 1
+        visibleVideoOrder[id] = sequence
+        guard activeVideoID != id else { return }
+        activeVideoID = id
+    }
+}
+
 private struct NoteVideoPlayerView: View {
     let url: URL
     let layout: NoteContentMediaLayout
     let forceMute: Bool
     @EnvironmentObject private var appSettings: AppSettingsStore
+    @ObservedObject private var playbackCoordinator = InlineVideoPlaybackCoordinator.shared
     @State private var player: AVPlayer
+    @State private var playbackID = UUID()
     @State private var videoAspectRatio: CGFloat = 16.0 / 9.0
     @State private var suppressSharedMuteSync = false
     private let muteSyncTimer = Timer.publish(every: 0.15, on: .main, in: .common).autoconnect()
@@ -1834,41 +1865,103 @@ private struct NoteVideoPlayerView: View {
     }
 
     var body: some View {
-        VideoPlayer(player: player)
-            // Constrain height before aspect-fit so portrait videos shrink to a valid
-            // in-card width instead of rendering wider than the visible container.
-            .frame(maxWidth: .infinity, maxHeight: maxVideoHeight, alignment: .leading)
-            .aspectRatio(videoAspectRatio, contentMode: .fit)
-            .compositingGroup()
-            .clipShape(
-                RoundedRectangle(cornerRadius: mediaCornerRadius, style: .continuous)
-            )
-            .contentShape(
-                RoundedRectangle(cornerRadius: mediaCornerRadius, style: .continuous)
-            )
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .task(id: url) {
-                await loadVideoAspectRatio()
+        ZStack(alignment: .bottomTrailing) {
+            VideoPlayer(player: player)
+
+            if !forceMute {
+                muteToggleButton
+                    .padding(.trailing, 12)
+                    .padding(.bottom, muteButtonBottomInset)
             }
-            .onAppear {
-                applyPlaybackPolicy()
-            }
-            .onChange(of: appSettings.autoplayVideos) { _, _ in
-                applyPlaybackPolicy()
-            }
-            .onChange(of: appSettings.autoplayVideoSoundEnabled) { _, _ in
-                applyPlaybackPolicy()
-            }
-            .onChange(of: forceMute) { _, _ in
-                applyPlaybackPolicy()
-            }
-            .onReceive(muteSyncTimer) { _ in
-                syncMutePreferenceFromPlayer()
-            }
-            .onDisappear {
-                syncMutePreferenceFromPlayer()
-                player.pause()
-            }
+        }
+        // Constrain height before aspect-fit so portrait videos shrink to a valid
+        // in-card width instead of rendering wider than the visible container.
+        .frame(maxWidth: .infinity, maxHeight: maxVideoHeight, alignment: .leading)
+        .aspectRatio(videoAspectRatio, contentMode: .fit)
+        .compositingGroup()
+        .clipShape(
+            RoundedRectangle(cornerRadius: mediaCornerRadius, style: .continuous)
+        )
+        .contentShape(
+            RoundedRectangle(cornerRadius: mediaCornerRadius, style: .continuous)
+        )
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .task(id: url) {
+            await loadVideoAspectRatio()
+        }
+        .onAppear {
+            playbackCoordinator.videoDidAppear(playbackID)
+            applyPlaybackPolicy()
+        }
+        .onChange(of: appSettings.autoplayVideos) { _, _ in
+            applyPlaybackPolicy()
+        }
+        .onChange(of: appSettings.autoplayVideoSoundEnabled) { _, _ in
+            applyPlaybackPolicy()
+        }
+        .onChange(of: forceMute) { _, _ in
+            applyPlaybackPolicy()
+        }
+        .onChange(of: playbackCoordinator.activeVideoID) { _, _ in
+            applyPlaybackPolicy()
+        }
+        .onReceive(muteSyncTimer) { _ in
+            syncMutePreferenceFromPlayer()
+            syncPlaybackPriorityFromPlayer()
+        }
+        .onDisappear {
+            playbackCoordinator.videoDidDisappear(playbackID)
+            syncMutePreferenceFromPlayer()
+            player.pause()
+        }
+    }
+
+    private var muteToggleButton: some View {
+        Button {
+            toggleMute()
+        } label: {
+            Image(systemName: player.isMuted ? "speaker.slash.fill" : "speaker.wave.2.fill")
+                .font(.system(size: 14, weight: .semibold))
+                .foregroundStyle(muteButtonForegroundColor)
+                .frame(width: 36, height: 36)
+                .background(muteButtonBackground)
+        }
+        .buttonStyle(.plain)
+        .frame(width: 52, height: 52)
+        .contentShape(Circle())
+        .accessibilityLabel(player.isMuted ? "Unmute video" : "Mute video")
+        .accessibilityHint("Toggles video sound instantly")
+    }
+
+    @ViewBuilder
+    private var muteButtonBackground: some View {
+        if #available(iOS 26, *) {
+            Circle()
+                .fill(.clear)
+                .glassEffect(.regular.tint(.white.opacity(0.06)).interactive(), in: .circle)
+        } else {
+            Circle()
+                .fill(.ultraThinMaterial.opacity(0.92))
+                .shadow(color: .black.opacity(0.10), radius: 8, x: 0, y: 3)
+        }
+    }
+
+    private var muteButtonForegroundColor: Color {
+        .white.opacity(0.86)
+    }
+
+    private var muteButtonBottomInset: CGFloat {
+        layout == .feed ? 54 : 60
+    }
+
+    private func toggleMute() {
+        let shouldMute = !player.isMuted
+        suppressSharedMuteSync = true
+        player.isMuted = shouldMute
+        setSharedAutoplaySoundEnabled(!shouldMute)
+        DispatchQueue.main.async {
+            suppressSharedMuteSync = false
+        }
     }
 
     private var maxVideoHeight: CGFloat {
@@ -1912,9 +2005,14 @@ private struct NoteVideoPlayerView: View {
             }
         }
 
-        if appSettings.autoplayVideos {
-            player.play()
-        } else {
+        let isActiveVideo = playbackCoordinator.activeVideoID == playbackID
+        let isAlreadyPlaying = player.timeControlStatus == .playing || player.rate > 0
+
+        if isActiveVideo {
+            if appSettings.autoplayVideos && !isAlreadyPlaying {
+                player.play()
+            }
+        } else if isAlreadyPlaying {
             player.pause()
         }
     }
@@ -1930,6 +2028,15 @@ private struct NoteVideoPlayerView: View {
     private func setSharedAutoplaySoundEnabled(_ soundEnabled: Bool) {
         guard appSettings.autoplayVideoSoundEnabled != soundEnabled else { return }
         appSettings.autoplayVideoSoundEnabled = soundEnabled
+    }
+
+    @MainActor
+    private func syncPlaybackPriorityFromPlayer() {
+        guard !forceMute else { return }
+        let isAlreadyPlaying = player.timeControlStatus == .playing || player.rate > 0
+        guard isAlreadyPlaying else { return }
+        guard playbackCoordinator.activeVideoID != playbackID else { return }
+        playbackCoordinator.requestPlayback(playbackID)
     }
 }
 

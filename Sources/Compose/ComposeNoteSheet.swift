@@ -492,7 +492,6 @@ struct ComposeNoteSheet: View {
                     .frame(minHeight: 74)
             }
 
-            emojiSuggestionRow
             quoteActionRow
 
             if !mediaAttachments.isEmpty {
@@ -627,8 +626,6 @@ struct ComposeNoteSheet: View {
                     .frame(minHeight: 180)
             }
             .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 20, style: .continuous))
-
-            emojiSuggestionRow
 
             if !mediaAttachments.isEmpty {
                 mediaAttachmentPreviewList
@@ -777,91 +774,6 @@ struct ComposeNoteSheet: View {
         )
         .padding(.horizontal, horizontalPadding)
         .padding(.vertical, verticalPadding)
-    }
-
-    @ViewBuilder
-    private var emojiSuggestionRow: some View {
-        if !emojiSuggestions.isEmpty {
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 8) {
-                    ForEach(emojiSuggestions) { suggestion in
-                        Button {
-                            applyEmojiSuggestion(suggestion)
-                        } label: {
-                            HStack(spacing: 8) {
-                                Text(suggestion.emoji)
-                                    .font(.system(size: 20))
-
-                                Text(suggestion.label)
-                                    .font(.caption.weight(.semibold))
-                            }
-                            .foregroundStyle(suggestionChipForegroundColor)
-                            .padding(.horizontal, 12)
-                            .padding(.vertical, 8)
-                            .background(
-                                suggestionChipBackgroundColor,
-                                in: Capsule()
-                            )
-                            .overlay(
-                                Capsule()
-                                    .stroke(suggestionChipBorderColor, lineWidth: 1)
-                            )
-                        }
-                        .buttonStyle(.plain)
-                    }
-                }
-            }
-            .transition(.opacity)
-        }
-    }
-
-    private var emojiSuggestions: [ComposeEmojiSuggestion] {
-        guard let token = normalizedEmojiSuggestionToken else { return [] }
-        return Array(ComposeEmojiSuggestion.defaultSuggestions.filter { $0.matches(token) }.prefix(5))
-    }
-
-    private var normalizedEmojiSuggestionToken: String? {
-        let trailingToken = viewModel.text.split(whereSeparator: \.isWhitespace).last.map(String.init) ?? ""
-        let normalized = trailingToken
-            .trimmingCharacters(in: .punctuationCharacters.union(.symbols))
-            .lowercased()
-
-        guard normalized.count >= 2 else { return nil }
-        return normalized
-    }
-
-    private var suggestionChipBackgroundColor: Color {
-        colorScheme == .dark ? Color.white.opacity(0.08) : Color.black.opacity(0.05)
-    }
-
-    private var suggestionChipBorderColor: Color {
-        colorScheme == .dark ? Color.white.opacity(0.12) : Color.black.opacity(0.08)
-    }
-
-    private var suggestionChipForegroundColor: Color {
-        colorScheme == .dark ? .white : Color.black.opacity(0.9)
-    }
-
-    private func applyEmojiSuggestion(_ suggestion: ComposeEmojiSuggestion) {
-        viewModel.text = replacingTrailingToken(in: viewModel.text, with: suggestion.emoji)
-        isEditorFocused = true
-    }
-
-    private func replacingTrailingToken(in text: String, with replacement: String) -> String {
-        guard !text.isEmpty else { return replacement + " " }
-
-        var suffixStart = text.endIndex
-        while suffixStart > text.startIndex && text[text.index(before: suffixStart)].isWhitespace {
-            suffixStart = text.index(before: suffixStart)
-        }
-
-        var tokenStart = suffixStart
-        while tokenStart > text.startIndex && !text[text.index(before: tokenStart)].isWhitespace {
-            tokenStart = text.index(before: tokenStart)
-        }
-
-        let prefix = text[..<tokenStart]
-        return String(prefix) + replacement + " "
     }
 
     private var canPublish: Bool {
@@ -2251,35 +2163,6 @@ private struct CameraCapturePermissionSheet: View {
         }
         return "To capture photos or videos for your note, \(AppBrand.displayName) needs access to your camera and microphone. You can change this any time later in app settings."
     }
-}
-
-private struct ComposeEmojiSuggestion: Identifiable, Hashable {
-    let emoji: String
-    let label: String
-    let keywords: [String]
-
-    var id: String { "\(emoji)-\(label)" }
-
-    func matches(_ token: String) -> Bool {
-        keywords.contains { keyword in
-            keyword.hasPrefix(token) || token.hasPrefix(keyword)
-        }
-    }
-
-    static let defaultSuggestions: [ComposeEmojiSuggestion] = [
-        ComposeEmojiSuggestion(emoji: "👍", label: "OK", keywords: ["ok", "okay", "yes", "sure"]),
-        ComposeEmojiSuggestion(emoji: "✅", label: "Check", keywords: ["check", "done", "complete", "confirm"]),
-        ComposeEmojiSuggestion(emoji: "🔥", label: "Fire", keywords: ["fire", "lit", "hot"]),
-        ComposeEmojiSuggestion(emoji: "❤️", label: "Love", keywords: ["love", "heart", "like"]),
-        ComposeEmojiSuggestion(emoji: "😂", label: "Laugh", keywords: ["lol", "haha", "laugh", "funny"]),
-        ComposeEmojiSuggestion(emoji: "🙏", label: "Thanks", keywords: ["thanks", "thank", "grateful", "pray"]),
-        ComposeEmojiSuggestion(emoji: "🎉", label: "Celebrate", keywords: ["party", "celebrate", "celebration", "yay"]),
-        ComposeEmojiSuggestion(emoji: "👀", label: "Look", keywords: ["look", "watch", "see", "eyes"]),
-        ComposeEmojiSuggestion(emoji: "🤝", label: "Deal", keywords: ["deal", "agree", "handshake"]),
-        ComposeEmojiSuggestion(emoji: "🚀", label: "Launch", keywords: ["launch", "ship", "rocket", "go"]),
-        ComposeEmojiSuggestion(emoji: "💯", label: "Hundred", keywords: ["100", "hundred", "perfect", "agree"]),
-        ComposeEmojiSuggestion(emoji: "✨", label: "Sparkles", keywords: ["sparkle", "sparkles", "magic", "shiny"])
-    ]
 }
 
 private struct ComposeMultilineTextView: UIViewRepresentable {
