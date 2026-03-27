@@ -20,8 +20,10 @@ final class ActivityViewModel: ObservableObject {
     private var liveUpdatesTask: Task<Void, Never>?
     private var liveSubscriptionSignature: String?
     private var knownEventIDs = Set<String>()
+    private var pendingLiveEventIDs = Set<String>()
     private var isActivityTabActive = false
     private var lastReadCreatedAt = 0
+    private var onLiveReactionDetected: ((ActivityReaction) -> Void)?
 
     private static let fastActivityFetchTimeout: TimeInterval = 3
     private static let fastActivityRelayFetchMode: RelayFetchMode = .firstNonEmptyRelay
@@ -62,9 +64,14 @@ final class ActivityViewModel: ObservableObject {
             ?? URL(string: RelaySettingsStore.defaultReadRelayURLs.first ?? "wss://relay.damus.io/")!
     }
 
-    func configure(currentUserPubkey: String?, readRelayURLs: [URL]) {
+    func configure(
+        currentUserPubkey: String?,
+        readRelayURLs: [URL],
+        onLiveReactionDetected: ((ActivityReaction) -> Void)? = nil
+    ) {
         let normalizedUser = normalizePubkey(currentUserPubkey)
         let normalizedRelays = normalizedRelayURLs(readRelayURLs)
+        self.onLiveReactionDetected = onLiveReactionDetected
 
         let relaysChanged = normalizedRelays.map { $0.absoluteString.lowercased() } != self.readRelayURLs.map { $0.absoluteString.lowercased() }
         let userChanged = normalizedUser != self.currentUserPubkey
@@ -162,6 +169,7 @@ final class ActivityViewModel: ObservableObject {
 
             items = sortAndDeduplicate(items: fetched)
             knownEventIDs = Set(items.map { $0.id.lowercased() })
+            pendingLiveEventIDs = []
             if isActivityTabActive {
                 markAllAsRead()
             } else {
@@ -247,6 +255,12 @@ final class ActivityViewModel: ObservableObject {
 
         let normalizedEventID = event.id.lowercased()
         guard !knownEventIDs.contains(normalizedEventID) else { return }
+        guard !pendingLiveEventIDs.contains(normalizedEventID) else { return }
+        pendingLiveEventIDs.insert(normalizedEventID)
+
+        if let reaction = event.activityAction?.reaction {
+            onLiveReactionDetected?(reaction)
+        }
 
         let newRows = await service.buildActivityRows(
             relayURLs: readRelayURLs,
@@ -257,6 +271,7 @@ final class ActivityViewModel: ObservableObject {
             profileFetchTimeout: Self.fastActivityFetchTimeout,
             profileRelayFetchMode: Self.fastActivityRelayFetchMode
         )
+        pendingLiveEventIDs.remove(normalizedEventID)
         guard !newRows.isEmpty else { return }
 
         items = sortAndDeduplicate(items: newRows + items)
@@ -302,6 +317,7 @@ final class ActivityViewModel: ObservableObject {
         stopLiveUpdates()
         items = []
         knownEventIDs = []
+        pendingLiveEventIDs = []
         unreadCount = 0
         errorMessage = nil
     }

@@ -12,6 +12,7 @@ final class ThreadDetailViewModel: ObservableObject {
 
     private let service: NostrFeedService
     private var hasLoadedInitialState = false
+    private var rootHydrationTask: Task<Void, Never>?
     private var itemHydrationTask: Task<Void, Never>?
     private static let fastThreadFetchTimeout: TimeInterval = 3
     private static let fastThreadRelayFetchMode: RelayFetchMode = .firstNonEmptyRelay
@@ -30,6 +31,7 @@ final class ThreadDetailViewModel: ObservableObject {
     }
 
     deinit {
+        rootHydrationTask?.cancel()
         itemHydrationTask?.cancel()
     }
 
@@ -54,12 +56,16 @@ final class ThreadDetailViewModel: ObservableObject {
         guard !isLoading else { return }
         isLoading = true
         errorMessage = nil
+        rootHydrationTask?.cancel()
         itemHydrationTask?.cancel()
+        rootHydrationTask = nil
         itemHydrationTask = nil
 
         defer {
             isLoading = false
         }
+
+        scheduleRootHydration()
 
         do {
             replies = pruneMutedItems(try await service.fetchThreadReplies(
@@ -88,6 +94,28 @@ final class ThreadDetailViewModel: ObservableObject {
         replies = Self.sortedReplies(replies)
     }
 
+    private func scheduleRootHydration() {
+        let sourceEvent = rootItem.event
+        let relayTargets = readRelayURLs
+
+        rootHydrationTask = Task { [weak self] in
+            guard let self else { return }
+
+            await self.hydrateRootItem(
+                sourceEvent: sourceEvent,
+                relayURLs: relayTargets,
+                hydrationMode: .cachedProfilesOnly
+            )
+            guard !Task.isCancelled else { return }
+
+            await self.hydrateRootItem(
+                sourceEvent: sourceEvent,
+                relayURLs: relayTargets,
+                hydrationMode: .full
+            )
+        }
+    }
+
     private func scheduleItemHydration(for sourceItems: [FeedItem]) {
         itemHydrationTask?.cancel()
 
@@ -109,6 +137,24 @@ final class ThreadDetailViewModel: ObservableObject {
             await MainActor.run {
                 self.mergeKeepingThreadOrder(itemsToMerge: hydrated)
             }
+        }
+    }
+
+    private func hydrateRootItem(
+        sourceEvent: NostrEvent,
+        relayURLs: [URL],
+        hydrationMode: FeedItemHydrationMode
+    ) async {
+        let hydrated = await service.buildFeedItems(
+            relayURLs: relayURLs,
+            events: [sourceEvent],
+            hydrationMode: hydrationMode
+        )
+        guard !Task.isCancelled, let hydratedRootItem = hydrated.first else { return }
+
+        await MainActor.run {
+            guard self.rootItem.event.id.lowercased() == sourceEvent.id.lowercased() else { return }
+            self.rootItem = Self.mergedRootItem(current: self.rootItem, hydrated: hydratedRootItem)
         }
     }
 
@@ -139,6 +185,17 @@ final class ThreadDetailViewModel: ObservableObject {
             }
             return lhs.event.createdAt < rhs.event.createdAt
         }
+    }
+
+    private static func mergedRootItem(current: FeedItem, hydrated: FeedItem) -> FeedItem {
+        FeedItem(
+            event: hydrated.event,
+            profile: hydrated.profile ?? current.profile,
+            displayEventOverride: hydrated.displayEventOverride ?? current.displayEventOverride,
+            displayProfileOverride: hydrated.displayProfileOverride ?? current.displayProfileOverride,
+            replyTargetEvent: hydrated.replyTargetEvent ?? current.replyTargetEvent,
+            replyTargetProfile: hydrated.replyTargetProfile ?? current.replyTargetProfile
+        )
     }
 
     private static func normalizedRelayURLs(_ relayURLs: [URL]) -> [URL] {

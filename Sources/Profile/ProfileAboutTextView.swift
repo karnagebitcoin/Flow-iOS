@@ -31,7 +31,7 @@ struct ProfileAboutTextView: View {
             .fixedSize(horizontal: false, vertical: true)
             .frame(maxWidth: .infinity, alignment: .leading)
             .environment(\.openURL, OpenURLAction { url in
-                if let pubkey = Self.profilePubkey(fromActionURL: url) {
+                if let pubkey = NoteContentParser.profilePubkey(fromActionURL: url) {
                     onProfileTap(pubkey)
                     return .handled
                 }
@@ -57,7 +57,7 @@ struct ProfileAboutTextView: View {
             case .nostrMention:
                 let normalized = Self.normalizeMentionIdentifier(token.value)
                 if let pubkey = Self.mentionedPubkey(from: normalized),
-                   let actionURL = Self.profileActionURL(for: pubkey) {
+                   let actionURL = NoteContentParser.profileActionURL(for: pubkey) {
                     segment.link = actionURL
                     segment.foregroundColor = .accentColor
                 } else if let externalURL = NoteContentParser.njumpURL(for: normalized) {
@@ -243,23 +243,5 @@ struct ProfileAboutTextView: View {
             return "\(normalized.prefix(10))...\(normalized.suffix(4))"
         }
         return normalized
-    }
-
-    private static func profileActionURL(for pubkey: String) -> URL? {
-        var components = URLComponents()
-        components.scheme = "x21-profile"
-        components.host = "open"
-        components.queryItems = [URLQueryItem(name: "pubkey", value: pubkey.lowercased())]
-        return components.url
-    }
-
-    private static func profilePubkey(fromActionURL url: URL) -> String? {
-        guard url.scheme == "x21-profile" else { return nil }
-        guard let components = URLComponents(url: url, resolvingAgainstBaseURL: false) else { return nil }
-        let pubkey = components.queryItems?.first(where: { $0.name == "pubkey" })?.value?
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-            .lowercased()
-        guard let pubkey, !pubkey.isEmpty else { return nil }
-        return pubkey
     }
 }

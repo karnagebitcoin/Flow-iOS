@@ -59,12 +59,11 @@ struct ProfileView: View {
 
             Section {
                 VStack(alignment: .leading, spacing: 10) {
-                    Picker("Feed", selection: $viewModel.mode) {
-                        ForEach(FeedMode.allCases) { mode in
-                            Text(mode.title).tag(mode)
-                        }
-                    }
-                    .pickerStyle(.segmented)
+                    FlowCapsuleTabBar(
+                        selection: $viewModel.mode,
+                        items: FeedMode.allCases,
+                        title: { $0.title }
+                    )
                 }
                 .padding(.vertical, 4)
             }
@@ -126,6 +125,9 @@ struct ProfileView: View {
                         ),
                         onHashtagTap: { hashtag in
                             openHashtagFeed(hashtag: hashtag)
+                        },
+                        onProfileTap: { pubkey in
+                            openProfile(pubkey: pubkey)
                         },
                         onOpenThread: {
                             shouldAutoFocusReplyInThread = false

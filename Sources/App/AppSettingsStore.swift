@@ -114,6 +114,46 @@ enum AppFontSize: Int, CaseIterable, Codable, Identifiable, Hashable, Sendable {
     }
 }
 
+enum BreakReminderInterval: String, CaseIterable, Codable, Identifiable, Hashable, Sendable {
+    case off
+    case twentyMinutes
+    case fortyMinutes
+    case oneHour
+    case twoHours
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .off:
+            return "Off"
+        case .twentyMinutes:
+            return "20 Minutes"
+        case .fortyMinutes:
+            return "40 Minutes"
+        case .oneHour:
+            return "1 Hour"
+        case .twoHours:
+            return "2 Hours"
+        }
+    }
+
+    var duration: TimeInterval? {
+        switch self {
+        case .off:
+            return nil
+        case .twentyMinutes:
+            return 20 * 60
+        case .fortyMinutes:
+            return 40 * 60
+        case .oneHour:
+            return 60 * 60
+        case .twoHours:
+            return 2 * 60 * 60
+        }
+    }
+}
+
 struct CustomFeedDefinition: Codable, Identifiable, Hashable, Sendable {
     var id: String
     var name: String
@@ -239,7 +279,6 @@ final class AppSettingsStore: ObservableObject {
 
     @Published private var persistedSettings: PersistedSettings
     @Published private(set) var notificationAuthorizationStatus: UNAuthorizationStatus = .notDetermined
-    @Published var autoplayVideoSoundEnabled = false
 
     private let defaults: UserDefaults
     private let authStore: AuthStore
@@ -251,8 +290,12 @@ final class AppSettingsStore: ObservableObject {
             case primaryColor
             case theme
             case fontSize
+            case breakReminderInterval
+            case liveReactsEnabled
             case hideNSFWContent
             case autoplayVideos
+            case autoplayVideoSoundEnabled
+            case blurMediaFromUnfollowedAuthors
             case textOnlyMode
             case slowConnectionMode
             case notificationsEnabled
@@ -272,8 +315,12 @@ final class AppSettingsStore: ObservableObject {
         var primaryColor: StoredColor?
         var theme: AppThemeOption = .system
         var fontSize: AppFontSize = .medium
+        var breakReminderInterval: BreakReminderInterval = .fortyMinutes
+        var liveReactsEnabled: Bool = true
         var hideNSFWContent: Bool = true
         var autoplayVideos: Bool = true
+        var autoplayVideoSoundEnabled: Bool = false
+        var blurMediaFromUnfollowedAuthors: Bool = true
         var textOnlyMode: Bool = false
         var slowConnectionMode: Bool = false
         var notificationsEnabled: Bool = false
@@ -296,8 +343,12 @@ final class AppSettingsStore: ObservableObject {
             primaryColor = try container.decodeIfPresent(StoredColor.self, forKey: .primaryColor)
             theme = (try? container.decode(AppThemeOption.self, forKey: .theme)) ?? .system
             fontSize = (try? container.decode(AppFontSize.self, forKey: .fontSize)) ?? .medium
+            breakReminderInterval = (try? container.decode(BreakReminderInterval.self, forKey: .breakReminderInterval)) ?? .fortyMinutes
+            liveReactsEnabled = try container.decodeIfPresent(Bool.self, forKey: .liveReactsEnabled) ?? true
             hideNSFWContent = try container.decodeIfPresent(Bool.self, forKey: .hideNSFWContent) ?? true
             autoplayVideos = try container.decodeIfPresent(Bool.self, forKey: .autoplayVideos) ?? true
+            autoplayVideoSoundEnabled = try container.decodeIfPresent(Bool.self, forKey: .autoplayVideoSoundEnabled) ?? false
+            blurMediaFromUnfollowedAuthors = try container.decodeIfPresent(Bool.self, forKey: .blurMediaFromUnfollowedAuthors) ?? true
             textOnlyMode = try container.decodeIfPresent(Bool.self, forKey: .textOnlyMode) ?? false
             slowConnectionMode = try container.decodeIfPresent(Bool.self, forKey: .slowConnectionMode) ?? false
             notificationsEnabled = try container.decodeIfPresent(Bool.self, forKey: .notificationsEnabled) ?? false
@@ -330,8 +381,12 @@ final class AppSettingsStore: ObservableObject {
             try container.encodeIfPresent(primaryColor, forKey: .primaryColor)
             try container.encode(theme, forKey: .theme)
             try container.encode(fontSize, forKey: .fontSize)
+            try container.encode(breakReminderInterval, forKey: .breakReminderInterval)
+            try container.encode(liveReactsEnabled, forKey: .liveReactsEnabled)
             try container.encode(hideNSFWContent, forKey: .hideNSFWContent)
             try container.encode(autoplayVideos, forKey: .autoplayVideos)
+            try container.encode(autoplayVideoSoundEnabled, forKey: .autoplayVideoSoundEnabled)
+            try container.encode(blurMediaFromUnfollowedAuthors, forKey: .blurMediaFromUnfollowedAuthors)
             try container.encode(textOnlyMode, forKey: .textOnlyMode)
             try container.encode(slowConnectionMode, forKey: .slowConnectionMode)
             try container.encode(notificationsEnabled, forKey: .notificationsEnabled)
@@ -450,6 +505,22 @@ final class AppSettingsStore: ObservableObject {
         }
     }
 
+    var breakReminderInterval: BreakReminderInterval {
+        get { persistedSettings.breakReminderInterval }
+        set {
+            persistedSettings.breakReminderInterval = newValue
+            persist()
+        }
+    }
+
+    var liveReactsEnabled: Bool {
+        get { persistedSettings.liveReactsEnabled }
+        set {
+            persistedSettings.liveReactsEnabled = newValue
+            persist()
+        }
+    }
+
     var textOnlyMode: Bool {
         get { persistedSettings.textOnlyMode }
         set {
@@ -470,6 +541,22 @@ final class AppSettingsStore: ObservableObject {
         get { persistedSettings.autoplayVideos }
         set {
             persistedSettings.autoplayVideos = newValue
+            persist()
+        }
+    }
+
+    var autoplayVideoSoundEnabled: Bool {
+        get { persistedSettings.autoplayVideoSoundEnabled }
+        set {
+            persistedSettings.autoplayVideoSoundEnabled = newValue
+            persist()
+        }
+    }
+
+    var blurMediaFromUnfollowedAuthors: Bool {
+        get { persistedSettings.blurMediaFromUnfollowedAuthors }
+        set {
+            persistedSettings.blurMediaFromUnfollowedAuthors = newValue
             persist()
         }
     }

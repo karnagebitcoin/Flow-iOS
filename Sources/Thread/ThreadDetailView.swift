@@ -314,11 +314,15 @@ struct ThreadDetailView: View {
                     onHashtagTap: { hashtag in
                         openHashtagFeed(hashtag: hashtag)
                     },
+                    onProfileTap: { pubkey in
+                        openProfile(pubkey: pubkey)
+                    },
                     onReferencedEventTap: { referencedItem in
                         shouldAutoFocusReplyInNestedThread = false
                         selectedThreadItem = referencedItem.threadNavigationItem
                     }
                 )
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
 
             if appSettings.reactionsVisibleInFeeds {
@@ -363,7 +367,7 @@ struct ThreadDetailView: View {
                     .foregroundStyle(.secondary)
                     .accessibilityLabel("Re-share")
 
-                    ShareLink(item: "nostr:\(viewModel.rootItem.displayEventID)") {
+                    ShareLink(item: rootNoteShareLink) {
                         Image(systemName: "paperplane")
                             .frame(minWidth: 34, minHeight: 30, alignment: .leading)
                     }
@@ -387,6 +391,13 @@ struct ThreadDetailView: View {
                 .padding(.horizontal, 16)
                 .padding(.vertical, 12)
         }
+    }
+
+    private var rootNoteShareLink: String {
+        if let externalURL = NoteContentParser.njumpURL(for: viewModel.rootItem.displayEventID) {
+            return externalURL.absoluteString
+        }
+        return "https://nlink.to/\(viewModel.rootItem.displayEventID)"
     }
 
     private var rootAvatar: some View {
@@ -525,6 +536,9 @@ struct ThreadDetailView: View {
                         onHashtagTap: { hashtag in
                             openHashtagFeed(hashtag: hashtag)
                         },
+                        onProfileTap: { pubkey in
+                            openProfile(pubkey: pubkey)
+                        },
                         onOpenThread: {
                             shouldAutoFocusReplyInNestedThread = false
                             selectedThreadItem = reply.threadNavigationItem
@@ -588,6 +602,7 @@ struct ThreadDetailView: View {
                                         CompactMediaAttachmentPreview(
                                             url: attachment.url,
                                             mimeType: attachment.mimeType,
+                                            fileSizeBytes: attachment.fileSizeBytes,
                                             colorScheme: colorScheme
                                         )
 
@@ -899,9 +914,6 @@ struct ThreadDetailView: View {
             for: eventID,
             currentPubkey: auth.currentAccount?.pubkey
         )
-        if optimisticToggle != nil {
-            AppHaptics.reactionTap()
-        }
         defer {
             reactionStats.endPublishingReaction(for: eventID)
         }
@@ -1266,18 +1278,12 @@ struct ThreadDetailView: View {
     }
 
     private func uploadReplyAttachment(from item: PhotosPickerItem, normalizedNsec: String) async throws -> ReplyComposerAttachment {
-        guard let data = try await item.loadTransferable(type: Data.self), !data.isEmpty else {
-            throw MediaUploadError.missingFileData
-        }
-
-        let contentType = item.supportedContentTypes.first ?? .jpeg
-        let mimeType = contentType.preferredMIMEType ?? "image/jpeg"
-        let fileExtension = contentType.preferredFilenameExtension ?? defaultFileExtension(for: mimeType)
-        let filename = "reply-\(UUID().uuidString).\(fileExtension)"
+        let preparedMedia = try await MediaUploadPreparation.prepareUploadMedia(from: item)
+        let filename = "reply-\(UUID().uuidString).\(preparedMedia.fileExtension)"
 
         let result = try await mediaUploadService.uploadMedia(
-            data: data,
-            mimeType: mimeType,
+            data: preparedMedia.data,
+            mimeType: preparedMedia.mimeType,
             filename: filename,
             nsec: normalizedNsec,
             provider: .blossom
@@ -1286,7 +1292,8 @@ struct ThreadDetailView: View {
         return ReplyComposerAttachment(
             url: result.url,
             imetaTag: result.imetaTag,
-            mimeType: mimeType
+            mimeType: preparedMedia.mimeType,
+            fileSizeBytes: preparedMedia.data.count
         )
     }
 
@@ -1344,4 +1351,5 @@ private struct ReplyComposerAttachment: Identifiable {
     let url: URL
     let imetaTag: [String]
     let mimeType: String
+    let fileSizeBytes: Int?
 }

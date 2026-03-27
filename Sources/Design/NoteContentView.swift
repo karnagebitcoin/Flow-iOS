@@ -1,5 +1,6 @@
 import AVFoundation
 import AVKit
+import Combine
 import ImageIO
 import LinkPresentation
 import NostrSDK
@@ -33,6 +34,7 @@ struct NoteContentView: View {
     private let websitePreviewURL: URL?
     private let sourceEvent: NostrEvent
     private let onHashtagTap: ((String) -> Void)?
+    private let onProfileTap: ((String) -> Void)?
     private let onReferencedEventTap: ((FeedItem) -> Void)?
     private let mediaLayout: NoteContentMediaLayout
     private let reactionCount: Int
@@ -40,12 +42,15 @@ struct NoteContentView: View {
     private let embedDepth: Int
     private let mentionIdentifiers: [String]
     private let emojiTagURLs: [String: URL]
+    @EnvironmentObject private var auth: AuthManager
     @EnvironmentObject private var appSettings: AppSettingsStore
+    @ObservedObject private var followStore = FollowStore.shared
 
     @State private var mentionLabels: [String: String] = [:]
     @State private var emojiImages: [String: UIImage] = [:]
     @State private var isExpanded = false
     @State private var revealsMediaInTextOnlyMode = false
+    @State private var revealsBlurredMedia = false
 
     private static let collapsedPreviewCharacterLimit = 520
     private static let collapsedPreviewLineLimit = 9
@@ -59,6 +64,7 @@ struct NoteContentView: View {
         commentCount: Int = 0,
         embedDepth: Int = 0,
         onHashtagTap: ((String) -> Void)? = nil,
+        onProfileTap: ((String) -> Void)? = nil,
         onReferencedEventTap: ((FeedItem) -> Void)? = nil
     ) {
         sourceEvent = event
@@ -79,6 +85,7 @@ struct NoteContentView: View {
         emojiTagURLs = parsedContent.emojiTagURLs
         websitePreviewURL = parsedContent.websitePreviewURL
         self.onHashtagTap = onHashtagTap
+        self.onProfileTap = onProfileTap
         self.onReferencedEventTap = onReferencedEventTap
         self.mediaLayout = mediaLayout
         self.reactionCount = reactionCount
@@ -120,13 +127,15 @@ struct NoteContentView: View {
                             }
                         )
                     } else {
-                        NoteImageGalleryView(
-                            imageURLs: imageURLs,
-                            layout: mediaLayout,
-                            sourceEvent: sourceEvent,
-                            reactionCount: reactionCount,
-                            commentCount: commentCount
-                        )
+                        restrictedMediaView {
+                            NoteImageGalleryView(
+                                imageURLs: imageURLs,
+                                layout: mediaLayout,
+                                sourceEvent: sourceEvent,
+                                reactionCount: reactionCount,
+                                commentCount: commentCount
+                            )
+                        }
                     }
                 case .video(let url):
                     if appSettings.textOnlyMode {
@@ -135,7 +144,13 @@ struct NoteContentView: View {
                             text: "Video hidden in Text Only Mode"
                         )
                     } else {
-                        NoteVideoPlayerView(url: url, layout: mediaLayout)
+                        restrictedMediaView {
+                            NoteVideoPlayerView(
+                                url: url,
+                                layout: mediaLayout,
+                                forceMute: shouldBlurMediaFromUnfollowedAuthors
+                            )
+                        }
                     }
                 case .audio(let url):
                     if appSettings.textOnlyMode {
@@ -170,6 +185,11 @@ struct NoteContentView: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .environment(\.openURL, OpenURLAction { url in
+            if let pubkey = NoteContentParser.profilePubkey(fromActionURL: url),
+               let onProfileTap {
+                onProfileTap(pubkey)
+                return .handled
+            }
             if let hashtag = NoteContentParser.hashtagFromActionURL(url) {
                 onHashtagTap?(hashtag)
                 return .handled
@@ -180,6 +200,22 @@ struct NoteContentView: View {
             async let mentionsTask: Void = resolveMentionLabelsIfNeeded()
             async let emojiTask: Void = loadCustomEmojiImagesIfNeeded()
             _ = await (mentionsTask, emojiTask)
+        }
+    }
+
+    @ViewBuilder
+    private func restrictedMediaView<Content: View>(@ViewBuilder content: () -> Content) -> some View {
+        if shouldBlurMediaFromUnfollowedAuthors {
+            NoteBlurRevealContainer(
+                cornerRadius: restrictedMediaCornerRadius,
+                onReveal: {
+                    revealsBlurredMedia = true
+                }
+            ) {
+                content()
+            }
+        } else {
+            content()
         }
     }
 
@@ -234,6 +270,28 @@ struct NoteContentView: View {
 
     private var shouldCollapseLongNote: Bool {
         inlineCharacterCount > Self.collapsedPreviewCharacterLimit
+    }
+
+    private var restrictedMediaCornerRadius: CGFloat {
+        mediaLayout == .feed ? 18 : 12
+    }
+
+    private var shouldBlurMediaFromUnfollowedAuthors: Bool {
+        guard appSettings.blurMediaFromUnfollowedAuthors else { return false }
+        guard !revealsBlurredMedia else { return false }
+        guard let currentPubkey = auth.currentAccount?.pubkey else { return false }
+
+        let authorPubkey = normalizedMediaAuthorPubkey(sourceEvent.pubkey)
+        let normalizedCurrentPubkey = normalizedMediaAuthorPubkey(currentPubkey)
+        guard !authorPubkey.isEmpty, authorPubkey != normalizedCurrentPubkey else { return false }
+
+        return !followStore.isFollowing(authorPubkey)
+    }
+
+    private func normalizedMediaAuthorPubkey(_ pubkey: String?) -> String {
+        pubkey?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased() ?? ""
     }
 
     private var inlineCharacterCount: Int {
@@ -450,7 +508,12 @@ struct NoteContentView: View {
             }
         case .nostrMention:
             let normalized = Self.normalizeMentionIdentifier(token.value)
-            if let url = NoteContentParser.njumpURL(for: normalized) {
+            if let pubkey = Self.mentionedPubkey(from: normalized),
+               let actionURL = NoteContentParser.profileActionURL(for: pubkey),
+               onProfileTap != nil {
+                segment.link = actionURL
+                segment.foregroundColor = .accentColor
+            } else if let url = NoteContentParser.njumpURL(for: normalized) {
                 segment.link = url
                 segment.foregroundColor = .accentColor
             }
@@ -839,6 +902,81 @@ private struct NoteMediaPlaceholderView: View {
     }
 }
 
+private struct NoteBlurRevealContainer<Content: View>: View {
+    let cornerRadius: CGFloat
+    let onReveal: () -> Void
+    let content: Content
+
+    init(
+        cornerRadius: CGFloat,
+        onReveal: @escaping () -> Void,
+        @ViewBuilder content: () -> Content
+    ) {
+        self.cornerRadius = cornerRadius
+        self.onReveal = onReveal
+        self.content = content()
+    }
+
+    var body: some View {
+        Button(action: onReveal) {
+            ZStack {
+                content
+                    .blur(radius: 22)
+                    .overlay {
+                        RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                            .fill(Color.black.opacity(0.22))
+                    }
+
+                VStack(spacing: 8) {
+                    Image(systemName: "eye.slash.fill")
+                        .font(.headline.weight(.semibold))
+                    Text("Tap to reveal")
+                        .font(.footnote.weight(.semibold))
+                }
+                .foregroundStyle(.white)
+                .padding(.horizontal, 16)
+                .padding(.vertical, 12)
+                .background(
+                    ZStack {
+                        Capsule(style: .continuous)
+                            .fill(.ultraThinMaterial)
+
+                        Capsule(style: .continuous)
+                            .fill(
+                                LinearGradient(
+                                    colors: [
+                                        Color.white.opacity(0.28),
+                                        Color.white.opacity(0.08),
+                                        Color.clear
+                                    ],
+                                    startPoint: .topLeading,
+                                    endPoint: .bottomTrailing
+                                )
+                            )
+
+                        Capsule(style: .continuous)
+                            .fill(
+                                LinearGradient(
+                                    colors: [
+                                        Color.black.opacity(0.18),
+                                        Color.clear
+                                    ],
+                                    startPoint: .bottom,
+                                    endPoint: .top
+                                )
+                            )
+                    }
+                )
+                .shadow(color: Color.black.opacity(0.18), radius: 14, x: 0, y: 8)
+            }
+            .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
+            .contentShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Reveal media")
+    }
+}
+
 private struct NoteImageGalleryView: View {
     private struct SelectedImage: Identifiable {
         let id: Int
@@ -1059,7 +1197,9 @@ private struct NoteImageFullscreenViewer: View {
     let commentCount: Int
     @EnvironmentObject private var auth: AuthManager
     @EnvironmentObject private var appSettings: AppSettingsStore
+    @EnvironmentObject private var composeSheetCoordinator: AppComposeSheetCoordinator
     @EnvironmentObject private var relaySettings: RelaySettingsStore
+    @EnvironmentObject private var toastCenter: AppToastCenter
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.dismiss) private var dismiss
     @ObservedObject private var reactionStats = NoteReactionStatsService.shared
@@ -1069,6 +1209,10 @@ private struct NoteImageFullscreenViewer: View {
     @State private var isPublishingRepost = false
     @State private var repostStatusMessage: String?
     @State private var repostStatusIsError = false
+    @State private var remixSourceImage: UIImage?
+    @State private var pendingRemixComposeDraft: NoteImageRemixComposeDraft?
+    @State private var isShowingRemixEditor = false
+    @State private var isPreparingRemixEditor = false
     private let reshareService = ResharePublishService()
     private let reactionPublishService = NoteReactionPublishService()
 
@@ -1152,6 +1296,27 @@ private struct NoteImageFullscreenViewer: View {
                 quotedAvatarURLHint: draft.quotedAvatarURLHint
             )
         }
+        .fullScreenCover(
+            isPresented: $isShowingRemixEditor,
+            onDismiss: handleRemixEditorDismissed
+        ) {
+            if let remixSourceImage {
+                ImageRemixEditorView(
+                    sourceImage: remixSourceImage,
+                    sourceEvent: sourceEvent,
+                    currentAccountPubkey: auth.currentAccount?.pubkey,
+                    currentNsec: auth.currentNsec,
+                    writeRelayURLs: effectiveWriteRelayURLs,
+                    onComposeRequested: { attachment, replyTargetEvent in
+                        pendingRemixComposeDraft = NoteImageRemixComposeDraft(
+                            attachment: attachment,
+                            replyTargetEvent: replyTargetEvent
+                        )
+                        isShowingRemixEditor = false
+                    }
+                )
+            }
+        }
         .task {
             reactionStats.prefetch(events: [sourceEvent], relayURLs: effectiveReadRelayURLs)
         }
@@ -1205,6 +1370,28 @@ private struct NoteImageFullscreenViewer: View {
             }
             .buttonStyle(.plain)
             .accessibilityLabel("Share")
+
+            Button {
+                Task {
+                    await openRemixEditor()
+                }
+            } label: {
+                Group {
+                    if isPreparingRemixEditor {
+                        ProgressView()
+                            .controlSize(.small)
+                            .tint(appSettings.primaryColor)
+                            .frame(minWidth: 36, minHeight: 28, alignment: .leading)
+                    } else {
+                        Image(systemName: "paintbrush.pointed.fill")
+                            .foregroundStyle(appSettings.primaryColor)
+                            .frame(minWidth: 36, minHeight: 28, alignment: .leading)
+                    }
+                }
+            }
+            .buttonStyle(.plain)
+            .disabled(isPreparingRemixEditor)
+            .accessibilityLabel("Edit image")
         }
         .font(.headline)
         .padding(.horizontal, 16)
@@ -1277,9 +1464,6 @@ private struct NoteImageFullscreenViewer: View {
             for: eventID,
             currentPubkey: auth.currentAccount?.pubkey
         )
-        if optimisticToggle != nil {
-            AppHaptics.reactionTap()
-        }
         defer {
             reactionStats.endPublishingReaction(for: eventID)
         }
@@ -1336,35 +1520,83 @@ private struct NoteImageFullscreenViewer: View {
             repostStatusIsError = true
         }
     }
+
+    @MainActor
+    private func openRemixEditor() async {
+        guard !isPreparingRemixEditor else { return }
+        isPreparingRemixEditor = true
+        defer {
+            isPreparingRemixEditor = false
+        }
+
+        let currentURL = urls[selectedIndex]
+        guard let image = await FlowImageCache.shared.image(for: currentURL) else {
+            toastCenter.show("Couldn't load that image for editing.", style: .error, duration: 2.8)
+            return
+        }
+
+        composeSheetCoordinator.dismiss()
+        pendingRemixComposeDraft = nil
+        remixSourceImage = image
+        isShowingRemixEditor = true
+    }
+
+    @MainActor
+    private func handleRemixEditorDismissed() {
+        remixSourceImage = nil
+
+        guard let draft = pendingRemixComposeDraft else { return }
+        pendingRemixComposeDraft = nil
+
+        Task { @MainActor in
+            // Dismiss the fullscreen image viewer before asking the app shell to present compose.
+            dismiss()
+            try? await Task.sleep(nanoseconds: 320_000_000)
+            composeSheetCoordinator.presentRemix(
+                attachment: draft.attachment,
+                replyTargetEvent: draft.replyTargetEvent
+            )
+        }
+    }
+}
+
+private struct NoteImageRemixComposeDraft: Identifiable {
+    let id = UUID()
+    let attachment: ComposeMediaAttachment
+    let replyTargetEvent: NostrEvent?
 }
 
 private struct NoteVideoPlayerView: View {
     let url: URL
     let layout: NoteContentMediaLayout
+    let forceMute: Bool
     @EnvironmentObject private var appSettings: AppSettingsStore
     @State private var player: AVPlayer
     @State private var videoAspectRatio: CGFloat = 16.0 / 9.0
-    @State private var videoNaturalWidth: CGFloat?
+    @State private var suppressSharedMuteSync = false
+    private let muteSyncTimer = Timer.publish(every: 0.15, on: .main, in: .common).autoconnect()
 
-    init(url: URL, layout: NoteContentMediaLayout) {
+    init(url: URL, layout: NoteContentMediaLayout, forceMute: Bool = false) {
         self.url = url
         self.layout = layout
+        self.forceMute = forceMute
         _player = State(initialValue: AVPlayer(url: url))
     }
 
     var body: some View {
         VideoPlayer(player: player)
+            // Constrain height before aspect-fit so portrait videos shrink to a valid
+            // in-card width instead of rendering wider than the visible container.
+            .frame(maxWidth: .infinity, maxHeight: maxVideoHeight, alignment: .leading)
             .aspectRatio(videoAspectRatio, contentMode: .fit)
-            .frame(
-                maxWidth: preferredVideoMaxWidth,
-                maxHeight: maxVideoHeight,
-                alignment: .leading
+            .compositingGroup()
+            .clipShape(
+                RoundedRectangle(cornerRadius: mediaCornerRadius, style: .continuous)
             )
-            .clipShape(RoundedRectangle(cornerRadius: mediaCornerRadius, style: .continuous))
-            .overlay(alignment: .bottomTrailing) {
-                muteToggleButton
-                    .padding(12)
-            }
+            .contentShape(
+                RoundedRectangle(cornerRadius: mediaCornerRadius, style: .continuous)
+            )
+            .frame(maxWidth: .infinity, alignment: .leading)
             .task(id: url) {
                 await loadVideoAspectRatio()
             }
@@ -1377,7 +1609,14 @@ private struct NoteVideoPlayerView: View {
             .onChange(of: appSettings.autoplayVideoSoundEnabled) { _, _ in
                 applyPlaybackPolicy()
             }
+            .onChange(of: forceMute) { _, _ in
+                applyPlaybackPolicy()
+            }
+            .onReceive(muteSyncTimer) { _ in
+                syncMutePreferenceFromPlayer()
+            }
             .onDisappear {
+                syncMutePreferenceFromPlayer()
                 player.pause()
             }
     }
@@ -1386,75 +1625,8 @@ private struct NoteVideoPlayerView: View {
         min(UIScreen.main.bounds.height * 0.72, 620)
     }
 
-    private var preferredVideoMaxWidth: CGFloat {
-        if let videoNaturalWidth, videoNaturalWidth > 0 {
-            return videoNaturalWidth
-        }
-        return .infinity
-    }
-
     private var mediaCornerRadius: CGFloat {
         layout == .feed ? 18 : 12
-    }
-
-    private var isMuted: Bool {
-        !appSettings.autoplayVideoSoundEnabled
-    }
-
-    private var muteToggleButton: some View {
-        Button {
-            toggleMute()
-        } label: {
-            Image(systemName: isMuted ? "speaker.slash.fill" : "speaker.wave.2.fill")
-                .font(.system(size: 15, weight: .semibold))
-                .foregroundStyle(.white.opacity(0.98))
-                .frame(width: 42, height: 42)
-                .background {
-                    ZStack {
-                        Circle()
-                            .fill(.ultraThinMaterial)
-
-                        Circle()
-                            .fill(
-                                LinearGradient(
-                                    colors: [
-                                        Color.white.opacity(0.34),
-                                        Color.white.opacity(0.12),
-                                        Color.black.opacity(0.14)
-                                    ],
-                                    startPoint: .topLeading,
-                                    endPoint: .bottomTrailing
-                                )
-                            )
-
-                        Circle()
-                            .fill(
-                                RadialGradient(
-                                    colors: [
-                                        Color.white.opacity(0.34),
-                                        Color.white.opacity(0.06),
-                                        .clear
-                                    ],
-                                    center: .topLeading,
-                                    startRadius: 2,
-                                    endRadius: 24
-                                )
-                            )
-
-                        Circle()
-                            .stroke(Color.white.opacity(0.34), lineWidth: 0.9)
-
-                        Circle()
-                            .stroke(Color.white.opacity(0.16), lineWidth: 3)
-                            .blur(radius: 5)
-                            .opacity(0.8)
-                    }
-                    .shadow(color: Color.black.opacity(0.22), radius: 14, x: 0, y: 6)
-                }
-        }
-        .buttonStyle(.plain)
-        .contentShape(Circle())
-        .accessibilityLabel(isMuted ? "Unmute video" : "Mute video")
     }
 
     private func loadVideoAspectRatio() async {
@@ -1474,7 +1646,6 @@ private struct NoteVideoPlayerView: View {
             let ratio = max(0.4, min(width / height, 3.0))
             await MainActor.run {
                 videoAspectRatio = ratio
-                videoNaturalWidth = width
             }
         } catch {
             // Keep default fallback ratio when metadata cannot be loaded.
@@ -1482,7 +1653,14 @@ private struct NoteVideoPlayerView: View {
     }
 
     private func applyPlaybackPolicy() {
-        player.isMuted = isMuted
+        let shouldMute = forceMute || !appSettings.autoplayVideoSoundEnabled
+        if player.isMuted != shouldMute {
+            suppressSharedMuteSync = true
+            player.isMuted = shouldMute
+            DispatchQueue.main.async {
+                suppressSharedMuteSync = false
+            }
+        }
 
         if appSettings.autoplayVideos {
             player.play()
@@ -1491,13 +1669,17 @@ private struct NoteVideoPlayerView: View {
         }
     }
 
-    private func toggleMute() {
-        appSettings.autoplayVideoSoundEnabled.toggle()
-        player.isMuted = !appSettings.autoplayVideoSoundEnabled
+    @MainActor
+    private func syncMutePreferenceFromPlayer() {
+        guard !forceMute else { return }
+        guard !suppressSharedMuteSync else { return }
+        setSharedAutoplaySoundEnabled(!player.isMuted)
+    }
 
-        if appSettings.autoplayVideos {
-            player.play()
-        }
+    @MainActor
+    private func setSharedAutoplaySoundEnabled(_ soundEnabled: Bool) {
+        guard appSettings.autoplayVideoSoundEnabled != soundEnabled else { return }
+        appSettings.autoplayVideoSoundEnabled = soundEnabled
     }
 }
 

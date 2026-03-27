@@ -25,6 +25,7 @@ struct FeedRowView: View {
     var onAvatarTap: (() -> Void)? = nil
     var avatarMenuActions: AvatarMenuActions? = nil
     var onHashtagTap: ((String) -> Void)? = nil
+    var onProfileTap: ((String) -> Void)? = nil
     var onOpenThread: (() -> Void)? = nil
     var onRepostActorTap: ((String) -> Void)? = nil
     var onReferencedEventTap: ((FeedItem) -> Void)? = nil
@@ -98,13 +99,17 @@ struct FeedRowView: View {
                         reactionCount: showReactions ? visibleReactionCount : 0,
                         commentCount: showReactions ? commentCount : 0,
                         onHashtagTap: onHashtagTap,
+                        onProfileTap: onProfileTap,
                         onReferencedEventTap: onReferencedEventTap
                     )
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .contentShape(Rectangle())
-                        .onTapGesture {
-                            onOpenThread?()
-                        }
+                        .gesture(
+                            TapGesture().onEnded {
+                                onOpenThread?()
+                            },
+                            including: .gesture
+                        )
 
                     if showReactions {
                         HStack(spacing: 14) {
@@ -148,7 +153,7 @@ struct FeedRowView: View {
                             .foregroundStyle(.secondary)
                             .accessibilityLabel("Re-share")
 
-                            ShareLink(item: "nostr:\(item.displayEventID)") {
+                            ShareLink(item: copyableNoteLink) {
                                 Image(systemName: "paperplane")
                                     .frame(minWidth: 34, minHeight: 28, alignment: .leading)
                             }
@@ -323,10 +328,10 @@ struct FeedRowView: View {
     }
 
     private var shouldShowReplyContext: Bool {
-        guard item.displayEvent.isReplyNote, item.replyTargetSnippet != nil else {
-            return false
-        }
+        item.displayEvent.isReplyNote && item.replyTargetSnippet != nil
+    }
 
+    private var shouldAllowReplyContextNavigation: Bool {
         guard let suppressedTargetID = normalizedEventID(suppressReplyContextForDirectReplyTargetEventID) else {
             return true
         }
@@ -356,7 +361,8 @@ struct FeedRowView: View {
         }
 
         if let parentItem = item.replyTargetFeedItem,
-           let onReferencedEventTap {
+           let onReferencedEventTap,
+           shouldAllowReplyContextNavigation {
             Button {
                 onReferencedEventTap(parentItem.threadNavigationItem)
             } label: {
@@ -400,9 +406,6 @@ struct FeedRowView: View {
             for: eventID,
             currentPubkey: auth.currentAccount?.pubkey
         )
-        if optimisticToggle != nil {
-            AppHaptics.reactionTap()
-        }
         defer {
             reactionStats.endPublishingReaction(for: eventID)
         }
@@ -489,7 +492,7 @@ struct FeedRowView: View {
         if let externalURL = NoteContentParser.njumpURL(for: item.displayEventID) {
             return externalURL.absoluteString
         }
-        return "nostr:\(item.displayEventID)"
+        return "https://nlink.to/\(item.displayEventID)"
     }
 
     private var noteTranslationText: String {

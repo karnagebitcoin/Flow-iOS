@@ -839,6 +839,9 @@ struct NostrFeedService: Sendable {
 
     func fetchTrendingNotes(
         limit: Int = 100,
+        hydrationMode: FeedItemHydrationMode = .full,
+        fetchTimeout: TimeInterval = 12,
+        relayFetchMode: RelayFetchMode = .allRelays,
         moderationSnapshot: MuteFilterSnapshot? = nil
     ) async throws -> [FeedItem] {
         guard limit > 0 else { return [] }
@@ -854,7 +857,9 @@ struct NostrFeedService: Sendable {
 
         let fetchedEvents = try await fetchTimelineEvents(
             relayURLs: [Self.trendingRelayURL],
-            filter: filter
+            filter: filter,
+            timeout: fetchTimeout,
+            relayFetchMode: relayFetchMode
         )
         .filter { $0.kind == 1 }
         let visibleEvents = filterVisibleEvents(fetchedEvents, moderationSnapshot: moderationSnapshot)
@@ -869,11 +874,19 @@ struct NostrFeedService: Sendable {
                 .prefix(cappedLimit)
         )
 
-        return await buildAuthorOnlyFeedItems(
-            relayURLs: [Self.trendingRelayURL],
-            events: timelineEvents,
-            moderationSnapshot: moderationSnapshot
-        )
+        switch hydrationMode {
+        case .cachedProfilesOnly:
+            return await buildCachedFeedItems(
+                events: timelineEvents,
+                moderationSnapshot: moderationSnapshot
+            )
+        case .full:
+            return await buildAuthorOnlyFeedItems(
+                relayURLs: [Self.trendingRelayURL],
+                events: timelineEvents,
+                moderationSnapshot: moderationSnapshot
+            )
+        }
     }
 
     func fetchActivityRows(
@@ -975,6 +988,21 @@ struct NostrFeedService: Sendable {
 
         let actorProfiles = await actorProfilesTask
         let targetEventsByReference = await targetEventsTask
+        let targetPubkeys = Array(
+            Set(
+                targetEventsByReference.values
+                    .map { normalizePubkey($0.pubkey) }
+                    .filter { !$0.isEmpty }
+            )
+        )
+        let targetProfiles = targetPubkeys.isEmpty
+            ? [:]
+            : await fetchProfiles(
+                relayURLs: relayTargets,
+                pubkeys: targetPubkeys,
+                fetchTimeout: profileFetchTimeout,
+                relayFetchMode: profileRelayFetchMode
+            )
 
         return filteredEvents.compactMap { event in
             guard let action = event.activityAction else { return nil }
@@ -983,11 +1011,15 @@ struct NostrFeedService: Sendable {
             let actor = ActivityActor(pubkey: event.pubkey, profile: actorProfiles[normalizedActorPubkey])
             let targetReference = event.activityTargetReference
             let resolvedTargetEvent = targetReference.flatMap { targetEventsByReference[$0] }
+            let targetProfile = resolvedTargetEvent.flatMap {
+                targetProfiles[normalizePubkey($0.pubkey)]
+            }
             let targetSnippet = resolvedTargetEvent?.activitySnippet()
                 ?? fallbackActivitySnippet(for: event, action: action)
             let target = ActivityTargetNote(
                 reference: targetReference,
                 event: resolvedTargetEvent,
+                profile: targetProfile,
                 snippet: targetSnippet
             )
 
@@ -1443,6 +1475,22 @@ struct NostrFeedService: Sendable {
         return filterVisibleFeedItems(items, moderationSnapshot: moderationSnapshot)
     }
 
+    func buildAuthorHydratedFeedItems(
+        relayURLs: [URL],
+        events: [NostrEvent],
+        fetchTimeout: TimeInterval = 8,
+        relayFetchMode: RelayFetchMode = .allRelays,
+        moderationSnapshot: MuteFilterSnapshot? = nil
+    ) async -> [FeedItem] {
+        await buildAuthorOnlyFeedItems(
+            relayURLs: relayURLs,
+            events: events,
+            fetchTimeout: fetchTimeout,
+            relayFetchMode: relayFetchMode,
+            moderationSnapshot: moderationSnapshot
+        )
+    }
+
     private func buildCachedFeedItems(
         events: [NostrEvent],
         moderationSnapshot: MuteFilterSnapshot? = nil
@@ -1502,12 +1550,19 @@ struct NostrFeedService: Sendable {
     private func buildAuthorOnlyFeedItems(
         relayURLs: [URL],
         events: [NostrEvent],
+        fetchTimeout: TimeInterval = 8,
+        relayFetchMode: RelayFetchMode = .allRelays,
         moderationSnapshot: MuteFilterSnapshot? = nil
     ) async -> [FeedItem] {
         let uniqueEvents = deduplicateEvents(
             filterVisibleEvents(events, moderationSnapshot: moderationSnapshot)
         )
-        let profilesByPubkey = await hydrateActorProfiles(for: uniqueEvents, relayURLs: relayURLs)
+        let profilesByPubkey = await hydrateActorProfiles(
+            for: uniqueEvents,
+            relayURLs: relayURLs,
+            fetchTimeout: fetchTimeout,
+            relayFetchMode: relayFetchMode
+        )
         let items = uniqueEvents.map { event in
             let normalizedPubkey = normalizePubkey(event.pubkey)
             return FeedItem(event: event, profile: profilesByPubkey[normalizedPubkey])

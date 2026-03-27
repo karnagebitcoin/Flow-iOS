@@ -99,6 +99,9 @@ struct SearchView: View {
                                 onHashtagTap: { hashtag in
                                     openHashtagFeed(hashtag: hashtag)
                                 },
+                                onProfileTap: { pubkey in
+                                    openProfile(pubkey: pubkey)
+                                },
                                 onOpenThread: {
                                     shouldAutoFocusReplyInThread = false
                                     selectedThreadItem = item.threadNavigationItem
@@ -167,6 +170,9 @@ struct SearchView: View {
                             ),
                             onHashtagTap: { hashtag in
                                 openHashtagFeed(hashtag: hashtag)
+                            },
+                            onProfileTap: { pubkey in
+                                openProfile(pubkey: pubkey)
                             },
                             onOpenThread: {
                                 shouldAutoFocusReplyInThread = false

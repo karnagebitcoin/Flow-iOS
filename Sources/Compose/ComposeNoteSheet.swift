@@ -1,4 +1,5 @@
 import AVFoundation
+import AVKit
 import NostrSDK
 import PhotosUI
 import SwiftUI
@@ -13,9 +14,14 @@ final class ComposeNoteViewModel: ObservableObject {
     @Published var feedbackIsError = false
 
     private let publishingService: ComposeNotePublishService
+    private let replyPublishingService: ThreadReplyPublishService
 
-    init(publishingService: ComposeNotePublishService = ComposeNotePublishService()) {
+    init(
+        publishingService: ComposeNotePublishService = ComposeNotePublishService(),
+        replyPublishingService: ThreadReplyPublishService = ThreadReplyPublishService()
+    ) {
         self.publishingService = publishingService
+        self.replyPublishingService = replyPublishingService
     }
 
     var trimmedText: String {
@@ -27,9 +33,11 @@ final class ComposeNoteViewModel: ObservableObject {
     }
 
     func publish(
+        currentAccountPubkey: String?,
         currentNsec: String?,
         writeRelayURLs: [URL],
-        additionalTags: [[String]] = []
+        additionalTags: [[String]] = [],
+        replyTargetEvent: NostrEvent? = nil
     ) async -> Bool {
         guard !isPublishing else { return false }
 
@@ -42,17 +50,32 @@ final class ComposeNoteViewModel: ObservableObject {
         }
 
         do {
-            let successfulRelayCount = try await publishingService.publishNote(
-                content: text,
-                currentNsec: currentNsec,
-                writeRelayURLs: writeRelayURLs,
-                additionalTags: additionalTags
-            )
+            if let replyTargetEvent {
+                _ = try await replyPublishingService.publishReply(
+                    content: text,
+                    replyingTo: replyTargetEvent,
+                    currentAccountPubkey: currentAccountPubkey,
+                    currentNsec: currentNsec,
+                    writeRelayURLs: writeRelayURLs,
+                    additionalTags: additionalTags
+                )
+                text = ""
+                feedbackMessage = "Reply posted."
+                feedbackIsError = false
+                return true
+            } else {
+                let successfulRelayCount = try await publishingService.publishNote(
+                    content: text,
+                    currentNsec: currentNsec,
+                    writeRelayURLs: writeRelayURLs,
+                    additionalTags: additionalTags
+                )
 
-            text = ""
-            feedbackMessage = "Posted to \(successfulRelayCount) relay\(successfulRelayCount == 1 ? "" : "s")."
-            feedbackIsError = false
-            return true
+                text = ""
+                feedbackMessage = "Posted to \(successfulRelayCount) relay\(successfulRelayCount == 1 ? "" : "s")."
+                feedbackIsError = false
+                return true
+            }
         } catch {
             feedbackMessage = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
             feedbackIsError = true
@@ -61,11 +84,12 @@ final class ComposeNoteViewModel: ObservableObject {
     }
 }
 
-private struct ComposeMediaAttachment: Identifiable, Hashable {
+struct ComposeMediaAttachment: Identifiable, Hashable {
     let id = UUID()
     let url: URL
     let imetaTag: [String]
     let mimeType: String
+    let fileSizeBytes: Int?
 
     var isImage: Bool {
         let normalized = mimeType.lowercased()
@@ -128,6 +152,20 @@ private enum CapturedCameraMedia {
     case video(fileURL: URL, mimeType: String, fileExtension: String)
 }
 
+private enum SharedComposeImportError: LocalizedError {
+    case missingFileURL
+    case unreadableFile
+
+    var errorDescription: String? {
+        switch self {
+        case .missingFileURL:
+            return "Couldn't access the shared media."
+        case .unreadableFile:
+            return "Couldn't read the shared media."
+        }
+    }
+}
+
 struct ComposeFloatingActionButton: View {
     let action: () -> Void
 
@@ -171,6 +209,9 @@ struct ComposeNoteSheet: View {
     @State private var quotedHandle: String?
     @State private var quotedAvatarURL: URL?
     @State private var hasAppliedInitialDraft = false
+    @State private var hasAppliedInitialAttachments = false
+    @State private var hasAppliedInitialSharedAttachments = false
+    @State private var previewingMediaAttachment: ComposeMediaAttachment?
 
     private let mediaUploadService = MediaUploadService.shared
     private let profileService = NostrFeedService()
@@ -180,6 +221,9 @@ struct ComposeNoteSheet: View {
     let writeRelayURLs: [URL]
     var initialText: String = ""
     var initialAdditionalTags: [[String]] = []
+    var initialUploadedAttachments: [ComposeMediaAttachment] = []
+    var initialSharedAttachments: [SharedComposeAttachment] = []
+    var replyTargetEvent: NostrEvent? = nil
     var quotedEvent: NostrEvent? = nil
     var quotedDisplayNameHint: String? = nil
     var quotedHandleHint: String? = nil
@@ -212,14 +256,24 @@ struct ComposeNoteSheet: View {
                                 await publish()
                             }
                         } label: {
-                            if viewModel.isPublishing {
-                                ProgressView()
-                                    .controlSize(.small)
-                            } else {
-                                Text("Post")
+                            Group {
+                                if viewModel.isPublishing {
+                                    ProgressView()
+                                        .controlSize(.small)
+                                        .tint(.white)
+                                } else {
+                                    Text("Post")
+                                }
                             }
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(.white)
+                            .padding(.horizontal, 16)
+                            .padding(.vertical, 8)
+                            .background(Color.accentColor, in: Capsule())
                         }
+                        .buttonStyle(.plain)
                         .disabled(!canPublish)
+                        .opacity(canPublish ? 1 : 0.45)
                     }
                 }
             }
@@ -229,9 +283,14 @@ struct ComposeNoteSheet: View {
         .presentationDragIndicator(.visible)
         .task {
             applyInitialDraftIfNeeded()
+            applyInitialAttachmentsIfNeeded()
+            await applyInitialSharedAttachmentsIfNeeded()
             isEditorFocused = true
             await refreshComposeAccountSummary()
             await refreshQuotedAuthorSummaryIfNeeded()
+        }
+        .onDisappear {
+            cleanupInitialSharedAttachments()
         }
         .onChange(of: selectedMediaItems) { _, newValue in
             guard !newValue.isEmpty else { return }
@@ -281,6 +340,9 @@ struct ComposeNoteSheet: View {
                 }
             )
             .ignoresSafeArea()
+        }
+        .sheet(item: $previewingMediaAttachment) { attachment in
+            ComposeMediaAttachmentPreviewSheet(attachment: attachment)
         }
     }
 
@@ -466,8 +528,8 @@ struct ComposeNoteSheet: View {
     }
 
     private var quoteBottomBar: some View {
-        let postBackground = colorScheme == .dark ? Color.white : Color.black
-        let postForeground = colorScheme == .dark ? Color.black : Color.white
+        let postBackground = Color.accentColor
+        let postForeground = Color.white
 
         return HStack(spacing: 12) {
             HStack(spacing: 8) {
@@ -952,7 +1014,11 @@ struct ComposeNoteSheet: View {
                         CompactMediaAttachmentPreview(
                             url: attachment.url,
                             mimeType: attachment.mimeType,
-                            colorScheme: colorScheme
+                            fileSizeBytes: attachment.fileSizeBytes,
+                            colorScheme: colorScheme,
+                            onTap: {
+                                previewingMediaAttachment = attachment
+                            }
                         )
 
                         Button {
@@ -1290,18 +1356,12 @@ struct ComposeNoteSheet: View {
     }
 
     private func uploadMediaAttachment(from item: PhotosPickerItem, normalizedNsec: String) async throws -> ComposeMediaAttachment {
-        guard let data = try await item.loadTransferable(type: Data.self), !data.isEmpty else {
-            throw MediaUploadError.missingFileData
-        }
-
-        let contentType = item.supportedContentTypes.first ?? .jpeg
-        let mimeType = contentType.preferredMIMEType ?? "image/jpeg"
-        let fileExtension = contentType.preferredFilenameExtension ?? defaultFileExtension(for: mimeType)
-        let filename = "note-\(UUID().uuidString).\(fileExtension)"
+        let preparedMedia = try await MediaUploadPreparation.prepareUploadMedia(from: item)
+        let filename = "note-\(UUID().uuidString).\(preparedMedia.fileExtension)"
 
         let result = try await mediaUploadService.uploadMedia(
-            data: data,
-            mimeType: mimeType,
+            data: preparedMedia.data,
+            mimeType: preparedMedia.mimeType,
             filename: filename,
             nsec: normalizedNsec,
             provider: .blossom
@@ -1310,7 +1370,8 @@ struct ComposeNoteSheet: View {
         return ComposeMediaAttachment(
             url: result.url,
             imetaTag: result.imetaTag,
-            mimeType: mimeType
+            mimeType: preparedMedia.mimeType,
+            fileSizeBytes: preparedMedia.data.count
         )
     }
 
@@ -1318,26 +1379,28 @@ struct ComposeNoteSheet: View {
         _ capturedMedia: CapturedCameraMedia,
         normalizedNsec: String
     ) async throws -> ComposeMediaAttachment {
-        let data: Data
-        let mimeType: String
-        let fileExtension: String
+        let preparedMedia: PreparedUploadMedia
 
         switch capturedMedia {
         case .image(let imageData, let capturedMimeType, let capturedFileExtension):
-            data = imageData
-            mimeType = capturedMimeType
-            fileExtension = capturedFileExtension
+            preparedMedia = try MediaUploadPreparation.prepareUploadMedia(
+                data: imageData,
+                mimeType: capturedMimeType,
+                fileExtension: capturedFileExtension
+            )
 
         case .video(let fileURL, let capturedMimeType, let capturedFileExtension):
-            data = try Data(contentsOf: fileURL)
-            mimeType = capturedMimeType
-            fileExtension = capturedFileExtension
+            preparedMedia = try await MediaUploadPreparation.prepareUploadMedia(
+                fileURL: fileURL,
+                mimeType: capturedMimeType,
+                fileExtension: capturedFileExtension
+            )
         }
 
-        let filename = "note-\(UUID().uuidString).\(fileExtension)"
+        let filename = "note-\(UUID().uuidString).\(preparedMedia.fileExtension)"
         let result = try await mediaUploadService.uploadMedia(
-            data: data,
-            mimeType: mimeType,
+            data: preparedMedia.data,
+            mimeType: preparedMedia.mimeType,
             filename: filename,
             nsec: normalizedNsec,
             provider: .blossom
@@ -1346,7 +1409,30 @@ struct ComposeNoteSheet: View {
         return ComposeMediaAttachment(
             url: result.url,
             imetaTag: result.imetaTag,
-            mimeType: mimeType
+            mimeType: preparedMedia.mimeType,
+            fileSizeBytes: preparedMedia.data.count
+        )
+    }
+
+    private func uploadSharedComposeAttachment(
+        _ sharedAttachment: SharedComposeAttachment,
+        normalizedNsec: String
+    ) async throws -> ComposeMediaAttachment {
+        let preparedMedia = try await prepareSharedComposeAttachmentForUpload(sharedAttachment)
+        let filename = "note-\(UUID().uuidString).\(preparedMedia.fileExtension)"
+        let result = try await mediaUploadService.uploadMedia(
+            data: preparedMedia.data,
+            mimeType: preparedMedia.mimeType,
+            filename: filename,
+            nsec: normalizedNsec,
+            provider: .blossom
+        )
+
+        return ComposeMediaAttachment(
+            url: result.url,
+            imetaTag: result.imetaTag,
+            mimeType: preparedMedia.mimeType,
+            fileSizeBytes: preparedMedia.data.count
         )
     }
 
@@ -1449,16 +1535,18 @@ struct ComposeNoteSheet: View {
 
         let publishTags = mediaAttachments.map(\.imetaTag) + initialAdditionalTags
         let didPublish = await viewModel.publish(
+            currentAccountPubkey: currentAccountPubkey,
             currentNsec: currentNsec,
             writeRelayURLs: writeRelayURLs,
-            additionalTags: publishTags
+            additionalTags: publishTags,
+            replyTargetEvent: replyTargetEvent
         )
 
         guard didPublish else { return }
 
         mediaAttachments.removeAll()
         onPublished?()
-        toastCenter.show("Note posted")
+        toastCenter.show(replyTargetEvent == nil ? "Note posted" : "Reply posted")
         dismiss()
     }
 
@@ -1469,6 +1557,120 @@ struct ComposeNoteSheet: View {
         guard viewModel.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
         guard !initialText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
         viewModel.text = initialText
+    }
+
+    private func applyInitialAttachmentsIfNeeded() {
+        guard !hasAppliedInitialAttachments else { return }
+        hasAppliedInitialAttachments = true
+
+        guard !initialUploadedAttachments.isEmpty else { return }
+
+        for attachment in initialUploadedAttachments {
+            guard !mediaAttachments.contains(where: { $0.url == attachment.url }) else { continue }
+            mediaAttachments.append(attachment)
+            removeUploadedMediaURLIfPresent(attachment.url)
+        }
+    }
+
+    private func applyInitialSharedAttachmentsIfNeeded() async {
+        guard !hasAppliedInitialSharedAttachments else { return }
+        hasAppliedInitialSharedAttachments = true
+
+        guard !initialSharedAttachments.isEmpty else { return }
+
+        viewModel.feedbackMessage = nil
+        viewModel.feedbackIsError = false
+
+        guard let normalizedNsec = currentNsec?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !normalizedNsec.isEmpty else {
+            viewModel.feedbackMessage = "Sign in with a private key to upload media."
+            viewModel.feedbackIsError = true
+            return
+        }
+
+        isUploadingMedia = true
+        defer {
+            isUploadingMedia = false
+        }
+
+        var failedUploads = 0
+        var firstError: Error?
+
+        for sharedAttachment in initialSharedAttachments {
+            do {
+                let attachment = try await uploadSharedComposeAttachment(
+                    sharedAttachment,
+                    normalizedNsec: normalizedNsec
+                )
+
+                if !mediaAttachments.contains(where: { $0.url == attachment.url }) {
+                    mediaAttachments.append(attachment)
+                    removeUploadedMediaURLIfPresent(attachment.url)
+                }
+
+                FlowSharedComposeDraftStore.cleanupAttachmentFiles([sharedAttachment])
+            } catch {
+                failedUploads += 1
+                if firstError == nil {
+                    firstError = error
+                }
+            }
+        }
+
+        if failedUploads > 0 {
+            let successfulUploads = initialSharedAttachments.count - failedUploads
+            let detailedMessage = (firstError as? LocalizedError)?.errorDescription ?? firstError?.localizedDescription
+            if successfulUploads > 0 {
+                if let detailedMessage, !detailedMessage.isEmpty {
+                    viewModel.feedbackMessage = "Added \(successfulUploads) attachment\(successfulUploads == 1 ? "" : "s"), but \(failedUploads) failed: \(detailedMessage)"
+                } else {
+                    viewModel.feedbackMessage = "Added \(successfulUploads) attachment\(successfulUploads == 1 ? "" : "s"), but \(failedUploads) failed."
+                }
+            } else {
+                viewModel.feedbackMessage = detailedMessage ?? "Couldn't upload media right now."
+            }
+            viewModel.feedbackIsError = true
+        }
+
+        if failedUploads < initialSharedAttachments.count {
+            isEditorFocused = true
+        }
+    }
+
+    private func cleanupInitialSharedAttachments() {
+        guard !initialSharedAttachments.isEmpty else { return }
+        FlowSharedComposeDraftStore.cleanupAttachmentFiles(initialSharedAttachments)
+    }
+
+    private func prepareSharedComposeAttachmentForUpload(
+        _ sharedAttachment: SharedComposeAttachment
+    ) async throws -> PreparedUploadMedia {
+        guard let fileURL = sharedAttachment.resolvedFileURL else {
+            throw SharedComposeImportError.missingFileURL
+        }
+
+        let mimeType = sharedAttachment.mimeType
+        let normalizedMimeType = mimeType.lowercased()
+        let normalizedFileExtension = sharedAttachment.fileExtension.lowercased()
+
+        if normalizedMimeType.hasPrefix("video/") ||
+            ["mp4", "mov", "m4v", "webm", "mkv"].contains(normalizedFileExtension) {
+            return try await MediaUploadPreparation.prepareUploadMedia(
+                fileURL: fileURL,
+                mimeType: mimeType,
+                fileExtension: normalizedFileExtension
+            )
+        }
+
+        guard let data = try? Data(contentsOf: fileURL), !data.isEmpty else {
+            throw SharedComposeImportError.unreadableFile
+        }
+
+        return try MediaUploadPreparation.prepareUploadMedia(
+            data: data,
+            mimeType: mimeType,
+            fileExtension: normalizedFileExtension
+        )
     }
 
     private func normalizedHandleValue(_ value: String) -> String {
@@ -1523,6 +1725,78 @@ struct ComposeNoteSheet: View {
             content: content,
             sig: sig
         )
+    }
+}
+
+private struct ComposeMediaAttachmentPreviewSheet: View {
+    @Environment(\.dismiss) private var dismiss
+
+    let attachment: ComposeMediaAttachment
+
+    var body: some View {
+        NavigationStack {
+            ZStack {
+                Color.black
+                    .ignoresSafeArea()
+
+                if attachment.isVideo {
+                    VideoPreviewPlayer(url: attachment.url)
+                        .ignoresSafeArea(edges: .bottom)
+                } else if attachment.isImage {
+                    AsyncImage(url: attachment.url) { phase in
+                        switch phase {
+                        case .empty:
+                            ProgressView()
+                                .tint(.white)
+                        case .success(let image):
+                            image
+                                .resizable()
+                                .scaledToFit()
+                                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        case .failure:
+                            Image(systemName: "exclamationmark.triangle")
+                                .font(.largeTitle)
+                                .foregroundStyle(.white.opacity(0.8))
+                        @unknown default:
+                            EmptyView()
+                        }
+                    }
+                    .padding()
+                } else {
+                    VStack(spacing: 12) {
+                        Image(systemName: attachment.isAudio ? "waveform" : "paperclip")
+                            .font(.system(size: 34, weight: .medium))
+                        Text("Preview isn't available for this attachment.")
+                            .font(.body)
+                    }
+                    .foregroundStyle(.white.opacity(0.84))
+                }
+            }
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Done") {
+                        dismiss()
+                    }
+                }
+            }
+            .toolbarBackground(.hidden, for: .navigationBar)
+        }
+    }
+}
+
+private struct VideoPreviewPlayer: View {
+    @State private var player: AVPlayer
+
+    init(url: URL) {
+        _player = State(initialValue: AVPlayer(url: url))
+    }
+
+    var body: some View {
+        VideoPlayer(player: player)
+            .background(Color.black)
+            .onDisappear {
+                player.pause()
+            }
     }
 }
 

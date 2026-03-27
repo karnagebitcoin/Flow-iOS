@@ -1,4 +1,5 @@
 import Foundation
+import NostrSDK
 
 enum NoteContentTokenType: Hashable {
     case text
@@ -26,6 +27,8 @@ enum NoteContentParser {
         case hashtag
         case emoji
     }
+
+    private struct ReferenceMetadataDecoder: MetadataCoding {}
 
     private struct Candidate {
         let range: NSRange
@@ -220,6 +223,29 @@ enum NoteContentParser {
         return value.lowercased()
     }
 
+    static func profileActionURL(for pubkey: String) -> URL? {
+        let normalized = pubkey
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+        guard !normalized.isEmpty else { return nil }
+
+        var components = URLComponents()
+        components.scheme = "x21-profile"
+        components.host = "open"
+        components.queryItems = [URLQueryItem(name: "pubkey", value: normalized)]
+        return components.url
+    }
+
+    static func profilePubkey(fromActionURL url: URL) -> String? {
+        guard url.scheme == "x21-profile" else { return nil }
+        guard let components = URLComponents(url: url, resolvingAgainstBaseURL: false) else { return nil }
+        let pubkey = components.queryItems?.first(where: { $0.name == "pubkey" })?.value?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+        guard let pubkey, !pubkey.isEmpty else { return nil }
+        return pubkey
+    }
+
     static func lastWebsiteURL(in tokens: [NoteContentToken]) -> URL? {
         for token in tokens.reversed() where token.type == .url {
             if let url = URL(string: token.value) {
@@ -409,7 +435,7 @@ enum NoteContentParser {
         var existingReferences = Set(
             tokens
                 .filter { $0.type == .nostrEvent }
-                .map { normalizeReferenceValue($0.value) }
+                .map { referenceDeduplicationKey(for: $0.value) }
                 .filter { !$0.isEmpty }
         )
 
@@ -428,7 +454,8 @@ enum NoteContentParser {
 
             let normalized = normalizeReferenceValue(value)
             guard isRenderableReference(normalized) else { continue }
-            guard existingReferences.insert(normalized).inserted else { continue }
+            let deduplicationKey = referenceDeduplicationKey(for: normalized)
+            guard existingReferences.insert(deduplicationKey).inserted else { continue }
 
             if let last = result.last, last.type != .text {
                 result.append(NoteContentToken(type: .text, value: "\n"))
@@ -446,6 +473,128 @@ enum NoteContentParser {
         }
         return trimmed
     }
+
+    private static func referenceDeduplicationKey(for raw: String) -> String {
+        let normalized = normalizeReferenceValue(raw)
+        guard !normalized.isEmpty else { return normalized }
+
+        if let eventID = canonicalEventID(from: normalized) {
+            return "event:\(eventID)"
+        }
+
+        if let coordinate = canonicalReplaceableCoordinate(from: normalized) {
+            return "replaceable:\(coordinate.kind):\(coordinate.pubkey):\(coordinate.identifier)"
+        }
+
+        return normalized
+    }
+
+    private static func canonicalEventID(from normalized: String) -> String? {
+        if isHex64(normalized) {
+            return normalized
+        }
+
+        if normalized.hasPrefix("note1") {
+            return decodedNoteIdentifier(normalized)
+        }
+
+        if normalized.hasPrefix("nevent1") {
+            let decoder = ReferenceMetadataDecoder()
+            guard let metadata = try? decoder.decodedMetadata(from: normalized),
+                  let eventID = metadata.eventId?.lowercased(),
+                  isHex64(eventID) else {
+                return nil
+            }
+            return eventID
+        }
+
+        return nil
+    }
+
+    private static func canonicalReplaceableCoordinate(from normalized: String) -> (kind: Int, pubkey: String, identifier: String)? {
+        if let coordinate = parseReplaceableCoordinate(from: normalized) {
+            return coordinate
+        }
+
+        guard normalized.hasPrefix("naddr1") else { return nil }
+
+        let decoder = ReferenceMetadataDecoder()
+        guard let metadata = try? decoder.decodedMetadata(from: normalized),
+              let kind = metadata.kind,
+              let pubkey = metadata.pubkey?.lowercased(),
+              isHex64(pubkey),
+              let identifier = metadata.identifier?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !identifier.isEmpty else {
+            return nil
+        }
+
+        return (Int(kind), pubkey, identifier)
+    }
+
+    private static func parseReplaceableCoordinate(from value: String) -> (kind: Int, pubkey: String, identifier: String)? {
+        let parts = value.split(separator: ":", maxSplits: 2, omittingEmptySubsequences: false)
+        guard parts.count == 3 else { return nil }
+        guard let kind = Int(parts[0]), kind >= 0 else { return nil }
+
+        let pubkey = String(parts[1]).lowercased()
+        guard isHex64(pubkey) else { return nil }
+
+        let identifier = String(parts[2]).trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !identifier.isEmpty else { return nil }
+
+        return (kind, pubkey, identifier)
+    }
+
+    private static func decodedNoteIdentifier(_ identifier: String) -> String? {
+        let normalized = normalizeReferenceValue(identifier)
+        guard normalized.hasPrefix("note1") else { return nil }
+        guard let separatorIndex = normalized.lastIndex(of: "1") else { return nil }
+
+        let prefix = String(normalized[..<separatorIndex])
+        guard prefix == "note" else { return nil }
+
+        let payloadStart = normalized.index(after: separatorIndex)
+        let payload = normalized[payloadStart...]
+        guard payload.count > 6 else { return nil }
+
+        let checksumlessPayload = payload.dropLast(6)
+        let values = checksumlessPayload.compactMap { bech32Alphabet[$0] }
+        guard values.count == checksumlessPayload.count else { return nil }
+        guard let decoded = dataFromBase32(values), decoded.count == 32 else { return nil }
+
+        return decoded.map { String(format: "%02x", $0) }.joined()
+    }
+
+    private static func dataFromBase32(_ values: [UInt8]) -> Data? {
+        var accumulator: UInt32 = 0
+        var bitCount = 0
+        var output = Data()
+
+        for value in values {
+            accumulator = (accumulator << 5) | UInt32(value)
+            bitCount += 5
+
+            while bitCount >= 8 {
+                bitCount -= 8
+                output.append(UInt8((accumulator >> UInt32(bitCount)) & 0xff))
+            }
+        }
+
+        guard bitCount < 5 else { return nil }
+        let remainderMask = bitCount == 0 ? UInt32(0) : (UInt32(1) << UInt32(bitCount)) - 1
+        guard (accumulator & remainderMask) == 0 else { return nil }
+
+        return output
+    }
+
+    private static func isHex64(_ value: String) -> Bool {
+        value.range(of: "^[0-9a-f]{64}$", options: .regularExpression) != nil
+    }
+
+    private static let bech32Alphabet: [Character: UInt8] = {
+        let characters = Array("qpzry9x8gf2tvdw0s3jn54khce6mua7l")
+        return Dictionary(uniqueKeysWithValues: characters.enumerated().map { ($1, UInt8($0)) })
+    }()
 
     private static func isRenderableReference(_ value: String) -> Bool {
         guard !value.isEmpty else { return false }

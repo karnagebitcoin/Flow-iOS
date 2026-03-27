@@ -20,7 +20,7 @@ final class HashtagFeedViewModel: ObservableObject {
             clearVisibleItemsCache()
         }
     }
-    @Published var mode: FeedMode = .posts {
+    @Published var mode: FeedMode = .postsAndReplies {
         didSet { clearVisibleItemsCache() }
     }
     @Published private(set) var isLoading = false
@@ -33,7 +33,7 @@ final class HashtagFeedViewModel: ObservableObject {
 
     private let pageSize: Int
     private let service: NostrFeedService
-    private let requestKinds = [1, 1111, 1244]
+    private let requestKinds = FeedKindFilters.supportedKinds
     private static let fastHashtagFetchTimeout: TimeInterval = 3
     private static let fullHashtagFetchTimeout: TimeInterval = 8
     private static let fastHashtagRelayFetchMode: RelayFetchMode = .firstNonEmptyRelay

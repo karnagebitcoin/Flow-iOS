@@ -7,10 +7,13 @@ enum AppBrand {
 
 @main
 struct FlowApp: App {
+    @Environment(\.scenePhase) private var scenePhase
     @StateObject private var authManager = AuthManager()
     @StateObject private var appSettings = AppSettingsStore.shared
     @StateObject private var relaySettings = RelaySettingsStore.shared
     @StateObject private var toastCenter = AppToastCenter()
+    @StateObject private var composeSheetCoordinator = AppComposeSheetCoordinator()
+    @StateObject private var breakReminderCoordinator = BreakReminderCoordinator()
 
     init() {
         FlowMediaCache.configureSharedURLCache()
@@ -28,6 +31,9 @@ struct FlowApp: App {
             .overlay {
                 GlobalProfileQRCodeBridge()
             }
+            .overlay {
+                BreakReminderOverlayHost(coordinator: breakReminderCoordinator)
+            }
             .overlay(alignment: .top) {
                 AppToastOverlay()
             }
@@ -35,18 +41,110 @@ struct FlowApp: App {
             .environmentObject(appSettings)
             .environmentObject(relaySettings)
             .environmentObject(toastCenter)
+            .environmentObject(composeSheetCoordinator)
+            .environmentObject(breakReminderCoordinator)
             .tint(appSettings.primaryColor)
             .preferredColorScheme(appSettings.preferredColorScheme)
             .environment(\.dynamicTypeSize, appSettings.dynamicTypeSize)
             .task {
                 appSettings.configure(accountPubkey: authManager.currentAccount?.pubkey)
+                updateBreakReminderMonitoring()
                 await appSettings.refreshNotificationAuthorizationStatus()
+                await presentPendingSharedComposeDraftIfPossible()
             }
             .onChange(of: authManager.currentAccount?.pubkey) { _, newValue in
                 appSettings.configure(accountPubkey: newValue)
+                updateBreakReminderMonitoring()
+                Task {
+                    await presentPendingSharedComposeDraftIfPossible()
+                }
+            }
+            .onChange(of: appSettings.breakReminderInterval) { _, _ in
+                updateBreakReminderMonitoring()
+            }
+            .onChange(of: composeSheetCoordinator.draft?.id) { _, newValue in
+                guard newValue == nil else { return }
+                Task {
+                    await presentPendingSharedComposeDraftIfPossible()
+                }
+            }
+            .onChange(of: scenePhase) { _, newValue in
+                updateBreakReminderMonitoring()
+                guard newValue == .active else { return }
+                Task {
+                    await presentPendingSharedComposeDraftIfPossible()
+                }
+            }
+            .onOpenURL { url in
+                guard FlowSharedComposeDraftStore.canHandleIncomingURL(url) else { return }
+                Task {
+                    await presentPendingSharedComposeDraftIfPossible()
+                }
             }
         }
     }
+
+    @MainActor
+    private func presentPendingSharedComposeDraftIfPossible() async {
+        guard authManager.currentAccount != nil else { return }
+        guard composeSheetCoordinator.draft == nil else { return }
+        guard let pendingDraft = FlowSharedComposeDraftStore.takePendingDraft(),
+              !pendingDraft.attachments.isEmpty else {
+            return
+        }
+
+        composeSheetCoordinator.presentSharedMedia(attachments: pendingDraft.attachments)
+    }
+
+    private func updateBreakReminderMonitoring() {
+        breakReminderCoordinator.update(
+            isEnabled: authManager.currentAccount != nil,
+            interval: appSettings.breakReminderInterval,
+            scenePhase: scenePhase
+        )
+    }
+}
+
+@MainActor
+final class AppComposeSheetCoordinator: ObservableObject {
+    @Published var draft: AppComposeSheetDraft?
+
+    func presentNewNote() {
+        draft = AppComposeSheetDraft()
+    }
+
+    func presentRemix(
+        attachment: ComposeMediaAttachment,
+        replyTargetEvent: NostrEvent?
+    ) {
+        draft = AppComposeSheetDraft(
+            initialUploadedAttachments: [attachment],
+            replyTargetEvent: replyTargetEvent
+        )
+    }
+
+    func presentSharedMedia(attachments: [SharedComposeAttachment]) {
+        draft = AppComposeSheetDraft(
+            initialSharedAttachments: attachments
+        )
+    }
+
+    func dismiss() {
+        draft = nil
+    }
+}
+
+struct AppComposeSheetDraft: Identifiable {
+    let id = UUID()
+    var initialText: String = ""
+    var initialAdditionalTags: [[String]] = []
+    var initialUploadedAttachments: [ComposeMediaAttachment] = []
+    var initialSharedAttachments: [SharedComposeAttachment] = []
+    var replyTargetEvent: NostrEvent? = nil
+    var quotedEvent: NostrEvent? = nil
+    var quotedDisplayNameHint: String? = nil
+    var quotedHandleHint: String? = nil
+    var quotedAvatarURLHint: URL? = nil
 }
 
 private struct GlobalProfileQRCodeBridge: View {

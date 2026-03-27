@@ -29,11 +29,11 @@ struct MainTabShellView: View {
     @EnvironmentObject private var auth: AuthManager
     @EnvironmentObject private var appSettings: AppSettingsStore
     @EnvironmentObject private var relaySettings: RelaySettingsStore
+    @EnvironmentObject private var composeSheetCoordinator: AppComposeSheetCoordinator
     
     @State private var selectedTab: Tab = .home
     @State private var homeRootResetID = UUID()
     @State private var activityRootResetID = UUID()
-    @State private var isShowingComposeSheet = false
     @State private var isShowingAuthSheet = false
     @State private var authSheetInitialTab: AuthSheetTab = .signIn
     @State private var isActivityRootVisible = true
@@ -45,6 +45,7 @@ struct MainTabShellView: View {
         relayURL: URL(string: RelaySettingsStore.defaultReadRelayURLs.first ?? "wss://relay.damus.io/")!
     )
     @StateObject private var activityViewModel = ActivityViewModel()
+    @StateObject private var liveReactsCoordinator = LiveReactsCoordinator()
 
     var body: some View {
         TabView(selection: $selectedTab) {
@@ -72,11 +73,35 @@ struct MainTabShellView: View {
         .safeAreaInset(edge: .bottom, spacing: 0) {
             bottomTabBar
         }
-        .sheet(isPresented: $isShowingComposeSheet) {
+        .overlay(alignment: .bottomTrailing) {
+            GeometryReader { proxy in
+                let horizontalPadding: CGFloat = 10
+                let slotWidth = max((proxy.size.width - (horizontalPadding * 2)) / 5, 56)
+                let bottomAnchor = proxy.safeAreaInsets.bottom + 50
+
+                LiveReactsOverlayHost(coordinator: liveReactsCoordinator)
+                    .frame(width: slotWidth * 1.15, height: 250, alignment: .bottom)
+                    .offset(x: -(slotWidth * 0.04), y: -bottomAnchor)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
+            }
+            .allowsHitTesting(false)
+        }
+        .sheet(item: composeSheetDraftBinding, onDismiss: {
+            composeSheetCoordinator.dismiss()
+        }) { draft in
             ComposeNoteSheet(
                 currentAccountPubkey: auth.currentAccount?.pubkey,
                 currentNsec: auth.currentNsec,
                 writeRelayURLs: effectiveWriteRelayURLs,
+                initialText: draft.initialText,
+                initialAdditionalTags: draft.initialAdditionalTags,
+                initialUploadedAttachments: draft.initialUploadedAttachments,
+                initialSharedAttachments: draft.initialSharedAttachments,
+                replyTargetEvent: draft.replyTargetEvent,
+                quotedEvent: draft.quotedEvent,
+                quotedDisplayNameHint: draft.quotedDisplayNameHint,
+                quotedHandleHint: draft.quotedHandleHint,
+                quotedAvatarURLHint: draft.quotedAvatarURLHint,
                 onPublished: {
                     Task {
                         switch selectedTab {
@@ -201,6 +226,13 @@ struct MainTabShellView: View {
         )
     }
 
+    private var composeSheetDraftBinding: Binding<AppComposeSheetDraft?> {
+        Binding(
+            get: { composeSheetCoordinator.draft },
+            set: { composeSheetCoordinator.draft = $0 }
+        )
+    }
+
     private func handleComposeTap() {
         guard auth.currentAccount != nil else {
             authSheetInitialTab = .signIn
@@ -208,7 +240,7 @@ struct MainTabShellView: View {
             return
         }
 
-        isShowingComposeSheet = true
+        composeSheetCoordinator.presentNewNote()
     }
 
     private func handleTabSelection(_ tab: Tab) {
@@ -232,7 +264,11 @@ struct MainTabShellView: View {
     private func configureActivityViewModel() {
         activityViewModel.configure(
             currentUserPubkey: auth.currentAccount?.pubkey,
-            readRelayURLs: appSettings.effectiveReadRelayURLs(from: relaySettings.readRelayURLs)
+            readRelayURLs: appSettings.effectiveReadRelayURLs(from: relaySettings.readRelayURLs),
+            onLiveReactionDetected: { reaction in
+                guard appSettings.liveReactsEnabled else { return }
+                liveReactsCoordinator.emit(reaction)
+            }
         )
     }
 

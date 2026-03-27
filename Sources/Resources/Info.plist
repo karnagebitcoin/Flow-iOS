@@ -18,14 +18,25 @@
 	<string>$(MARKETING_VERSION)</string>
 	<key>CFBundleVersion</key>
 	<string>$(CURRENT_PROJECT_VERSION)</string>
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>flow</string>
+			</array>
+		</dict>
+	</array>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
-		<key>NSMicrophoneUsageDescription</key>
-		<string>Flow uses the microphone for voice-to-text and video capture while composing notes.</string>
-		<key>NSCameraUsageDescription</key>
-		<string>Flow uses the camera to scan profile QR codes and capture photos and videos for your notes.</string>
-		<key>NSSpeechRecognitionUsageDescription</key>
-		<string>Flow uses speech recognition to transcribe your voice into note text.</string>
+	<key>NSCameraUsageDescription</key>
+	<string>Flow uses the camera to scan profile QR codes and capture photos and videos for your notes.</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>Flow uses the microphone for voice-to-text and video capture while composing notes.</string>
+	<key>NSPhotoLibraryAddUsageDescription</key>
+	<string>Flow saves remixed images to your photo library when you choose Save.</string>
+	<key>NSSpeechRecognitionUsageDescription</key>
+	<string>Flow uses speech recognition to transcribe your voice into note text.</string>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>
@@ -33,18 +44,14 @@
 	</dict>
 	<key>UILaunchScreen</key>
 	<dict/>
+	<key>UIStatusBarStyle</key>
+	<string></string>
 	<key>UISupportedInterfaceOrientations</key>
 	<array>
-		<string>UIInterfaceOrientationPortrait</string>
 		<string>UIInterfaceOrientationLandscapeLeft</string>
 		<string>UIInterfaceOrientationLandscapeRight</string>
-	</array>
-	<key>UISupportedInterfaceOrientations~ipad</key>
-	<array>
 		<string>UIInterfaceOrientationPortrait</string>
 		<string>UIInterfaceOrientationPortraitUpsideDown</string>
-		<string>UIInterfaceOrientationLandscapeLeft</string>
-		<string>UIInterfaceOrientationLandscapeRight</string>
 	</array>
 </dict>
 </plist>

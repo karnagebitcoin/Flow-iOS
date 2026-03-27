@@ -1,10 +1,15 @@
 import Foundation
 
-actor NostrLiveFeedSubscriber {
+final class NostrLiveFeedSubscriber: @unchecked Sendable {
     private let session: URLSession
+    private let liveEventFallbackDelayNanoseconds: UInt64
 
-    init(session: URLSession = .shared) {
+    init(
+        session: URLSession = .shared,
+        liveEventFallbackDelayNanoseconds: UInt64 = 1_200_000_000
+    ) {
         self.session = session
+        self.liveEventFallbackDelayNanoseconds = liveEventFallbackDelayNanoseconds
     }
 
     func run(
@@ -54,6 +59,7 @@ actor NostrLiveFeedSubscriber {
         }
 
         var isReadyForNewEvents = false
+        let subscriptionStartedAt = DispatchTime.now().uptimeNanoseconds
 
         while !Task.isCancelled {
             let message = try await socket.receive()
@@ -75,7 +81,8 @@ actor NostrLiveFeedSubscriber {
             switch inbound {
             case .event(let id, let event):
                 guard id == subscriptionID else { continue }
-                if isReadyForNewEvents {
+                let elapsedNanoseconds = DispatchTime.now().uptimeNanoseconds - subscriptionStartedAt
+                if isReadyForNewEvents || elapsedNanoseconds >= liveEventFallbackDelayNanoseconds {
                     await onNewEvent(event)
                 }
 

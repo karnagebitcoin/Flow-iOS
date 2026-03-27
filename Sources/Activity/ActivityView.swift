@@ -35,13 +35,11 @@ struct ActivityView: View {
 
                     List {
                         Section {
-                            Picker("Activity filter", selection: $viewModel.selectedFilter) {
-                                ForEach(ActivityFilter.allCases) { filter in
-                                    Text(filter.title).tag(filter)
-                                }
-                            }
-                            .pickerStyle(.segmented)
-                            .controlSize(.small)
+                            FlowCapsuleTabBar(
+                                selection: $viewModel.selectedFilter,
+                                items: ActivityFilter.allCases,
+                                title: { $0.title }
+                            )
                             .accessibilityLabel("Activity filter")
                         }
                         .listRowSeparator(.hidden)
@@ -448,30 +446,46 @@ struct ActivityView: View {
                 let destinationEvent = item.target.event ?? item.event
                 let shouldScrollToReply = destinationEvent.id.lowercased() != item.event.id.lowercased()
                 return ActivityThreadRoute(
-                    initialItem: FeedItem(event: destinationEvent, profile: nil),
+                    initialItem: FeedItem(
+                        event: destinationEvent,
+                        profile: profileForThreadDestination(event: destinationEvent, item: item)
+                    ),
                     initialReplyScrollTargetID: shouldScrollToReply ? item.event.id.lowercased() : nil
                 )
             }
 
             return ActivityThreadRoute(
-                initialItem: FeedItem(event: item.event, profile: nil),
+                initialItem: FeedItem(event: item.event, profile: item.actorProfile),
                 initialReplyScrollTargetID: nil
             )
 
         case .reaction:
             guard let destinationEvent = item.target.event else { return nil }
             return ActivityThreadRoute(
-                initialItem: FeedItem(event: destinationEvent, profile: nil),
+                initialItem: FeedItem(
+                    event: destinationEvent,
+                    profile: profileForThreadDestination(event: destinationEvent, item: item)
+                ),
                 initialReplyScrollTargetID: nil
             )
 
         case .reshare:
             let destinationEvent = item.target.event ?? item.event
             return ActivityThreadRoute(
-                initialItem: FeedItem(event: destinationEvent, profile: nil),
+                initialItem: FeedItem(
+                    event: destinationEvent,
+                    profile: profileForThreadDestination(event: destinationEvent, item: item)
+                ),
                 initialReplyScrollTargetID: nil
             )
         }
+    }
+
+    private func profileForThreadDestination(event: NostrEvent, item: ActivityRow) -> NostrProfile? {
+        if event.id.lowercased() == item.event.id.lowercased() {
+            return item.actorProfile
+        }
+        return item.target.profile
     }
 }
 
@@ -516,7 +530,7 @@ private struct ActivityRowCell: View {
                 .background(Color.accentColor.opacity(0.14), in: Circle())
         case .reaction(let reaction):
             if let customEmojiURL = reaction.customEmojiImageURL {
-                AsyncImage(url: customEmojiURL) { phase in
+                CachedAsyncImage(url: customEmojiURL) { phase in
                     switch phase {
                     case .success(let image):
                         image
@@ -527,7 +541,6 @@ private struct ActivityRowCell: View {
                     }
                 }
                 .frame(width: 20, height: 20)
-                .clipShape(Circle())
             } else {
                 fallbackReactionSymbol(for: reaction)
             }

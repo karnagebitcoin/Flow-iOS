@@ -31,10 +31,12 @@ struct ReactionButton: View {
     @State private var longHoldActivated = false
     @State private var floatingHearts: [ReactionFloatingHeart] = []
     @State private var holdActivationTask: Task<Void, Never>?
+    @State private var holdChargeTask: Task<Void, Never>?
     @State private var floatingHeartTask: Task<Void, Never>?
 
     private let longHoldDurationNanos: UInt64 = 420_000_000
     private let maxTapTranslation: CGFloat = 24
+    private let longPressEffectScale: CGFloat = 2
 
     var body: some View {
         HStack(spacing: 4) {
@@ -59,6 +61,7 @@ struct ReactionButton: View {
         .accessibilityAddTraits(.isButton)
         .accessibilityAction {
             guard isEnabled else { return }
+            AppHaptics.reactionTap()
             action()
         }
         .onChange(of: isLiked) { oldValue, newValue in
@@ -83,6 +86,7 @@ struct ReactionButton: View {
                         && abs(translation.height) <= maxTapTranslation
                     resetPressState()
                     if shouldTriggerTap {
+                        AppHaptics.reactionTap()
                         action()
                     }
                 }
@@ -99,8 +103,8 @@ struct ReactionButton: View {
                 FloatingReactionHeartView(heart: heart, tint: activeColor)
             }
         }
-        .frame(width: 104, height: 132)
-        .offset(y: -22)
+        .frame(width: 104 * longPressEffectScale, height: 132 * longPressEffectScale)
+        .offset(y: -22 * longPressEffectScale)
         .allowsHitTesting(false)
     }
 
@@ -124,6 +128,7 @@ struct ReactionButton: View {
         isPressing = true
         longHoldActivated = false
         startHoldActivationTask()
+        startHoldChargeTask()
     }
 
     @MainActor
@@ -135,9 +140,29 @@ struct ReactionButton: View {
             await MainActor.run {
                 guard isPressing else { return }
                 longHoldActivated = true
+                AppHaptics.reactionChargeCompleted()
                 startFloatingHeartLoop()
                 if !isLiked {
                     action()
+                }
+            }
+        }
+    }
+
+    @MainActor
+    private func startHoldChargeTask() {
+        holdChargeTask?.cancel()
+        holdChargeTask = Task {
+            let chargeSteps: [UInt64] = [110_000_000, 230_000_000, 340_000_000]
+
+            for checkpoint in chargeSteps {
+                try? await Task.sleep(nanoseconds: checkpoint)
+                guard !Task.isCancelled else { return }
+
+                await MainActor.run {
+                    guard isPressing, !longHoldActivated else { return }
+                    let progress = min(Double(checkpoint) / Double(longHoldDurationNanos), 1)
+                    AppHaptics.reactionChargePulse(progress: progress)
                 }
             }
         }
@@ -165,12 +190,12 @@ struct ReactionButton: View {
         guard isPressing, longHoldActivated else { return }
 
         let heart = ReactionFloatingHeart(
-            xDrift: CGFloat.random(in: -30...30),
-            yTravel: CGFloat.random(in: 42...88),
+            xDrift: CGFloat.random(in: -60...60),
+            yTravel: CGFloat.random(in: 84...176),
             rotation: Double.random(in: -28...28),
-            startScale: CGFloat.random(in: 0.8...1.05),
-            endScale: CGFloat.random(in: 1.18...1.58),
-            size: CGFloat.random(in: 11...17),
+            startScale: CGFloat.random(in: 0.9...1.12),
+            endScale: CGFloat.random(in: 1.28...1.82),
+            size: CGFloat.random(in: 22...34),
             duration: Double.random(in: 1.05...1.6),
             opacity: Double.random(in: 0.58...0.95)
         )
@@ -191,6 +216,8 @@ struct ReactionButton: View {
         longHoldActivated = false
         holdActivationTask?.cancel()
         holdActivationTask = nil
+        holdChargeTask?.cancel()
+        holdChargeTask = nil
         floatingHeartTask?.cancel()
         floatingHeartTask = nil
     }
@@ -204,12 +231,12 @@ private struct ReactionSparkleBurstView: View {
 
     var body: some View {
         ZStack {
-            sparkle(angle: -120, distance: 16, rotation: -22, delay: 0)
-            sparkle(angle: -35, distance: 18, rotation: 18, delay: 0.03)
-            sparkle(angle: 36, distance: 17, rotation: -10, delay: 0.015)
-            sparkle(angle: 118, distance: 15, rotation: 22, delay: 0.045)
+            sparkle(angle: -120, distance: 32, rotation: -22, delay: 0)
+            sparkle(angle: -35, distance: 36, rotation: 18, delay: 0.03)
+            sparkle(angle: 36, distance: 34, rotation: -10, delay: 0.015)
+            sparkle(angle: 118, distance: 30, rotation: 22, delay: 0.045)
         }
-        .frame(width: 34, height: 34)
+        .frame(width: 68, height: 68)
         .allowsHitTesting(false)
         .onChange(of: trigger) { _, _ in
             playBurst()
@@ -221,7 +248,7 @@ private struct ReactionSparkleBurstView: View {
         let yOffset = CGFloat(sin(angle * .pi / 180)) * distance
 
         return Image(systemName: "sparkle")
-            .font(.system(size: 8, weight: .bold))
+            .font(.system(size: 16, weight: .bold))
             .foregroundStyle(tint.opacity(isAnimating ? 0.95 : 0))
             .scaleEffect(isAnimating ? 1 : 0.25)
             .offset(

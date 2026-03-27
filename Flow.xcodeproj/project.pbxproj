@@ -18,6 +18,7 @@
 		13B0FBAAFAA006FD2ACFACF8 /* ComposeNoteSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1179EFC9888CA4803C582715 /* ComposeNoteSheet.swift */; };
 		151C23D4ABE5ECA1B40E1D40 /* HomeFeedFilterStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 96D4B5BA28A24BEE53F56796 /* HomeFeedFilterStore.swift */; };
 		15EB392EA8847584F476D765 /* NostrFeedService.swift in Sources */ = {isa = PBXBuildFile; fileRef = EDE66A5BBD34930A34D3923F /* NostrFeedService.swift */; };
+		193FEE523F8578101768CF40 /* LiveReactsOverlay.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5AE5072564E400712902A306 /* LiveReactsOverlay.swift */; };
 		19F757610B10C8A90D063E5D /* ComposeSpeechTranscriber.swift in Sources */ = {isa = PBXBuildFile; fileRef = 73524C099B08853D1740EFED /* ComposeSpeechTranscriber.swift */; };
 		1A670E6A3EBAF1A1BD01595D /* AuthPrivateKeyStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1CF33E746504FBADB0B3F9C3 /* AuthPrivateKeyStore.swift */; };
 		1AB2153C6FDB413EFBA7B844 /* FeedFilterConfig.swift in Sources */ = {isa = PBXBuildFile; fileRef = F2D7134364255C06EB5B710C /* FeedFilterConfig.swift */; };
@@ -47,14 +48,19 @@
 		6A802630793BFAC84B033576 /* WelcomeOnboardingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 39D83C388BD3011D7D65432E /* WelcomeOnboardingView.swift */; };
 		6B8D599DE5F19D6A35B4D796 /* AuthManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = F6C6017D180F1864858B6ECF /* AuthManager.swift */; };
 		6C97A187B541004D4E7965D0 /* ResharePublishService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A5763F0BC13FDA5CB4E0AFA8 /* ResharePublishService.swift */; };
+		790EA013117A7F68FC636CC6 /* FlowCapsuleTabBar.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1ED5C6EF9F220A3E121ECE2E /* FlowCapsuleTabBar.swift */; };
 		7C06FF22A41B51DEC6AB475F /* AppSettingsStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = D3535F42ABCFA81A554B26FE /* AppSettingsStore.swift */; };
 		7DE4C13ED08EDAB073D7DBE2 /* SeenEventStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B77D47257479D0532CE896A /* SeenEventStore.swift */; };
 		7ECE6E88E6E7794ABFCF1E25 /* TimelineKey.swift in Sources */ = {isa = PBXBuildFile; fileRef = F7D8015688B1D51344FFFCB7 /* TimelineKey.swift */; };
 		8221FB25EC505A4C93948B32 /* HomeSlideoutMenuView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA1B291DA499152538A295F6 /* HomeSlideoutMenuView.swift */; };
 		863D8F5E77A252D216D3BAF9 /* FlowMediaCache.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4B67EBE0499A7E029AD05A18 /* FlowMediaCache.swift */; };
+		8879AC3A5F08A6C3834FA14C /* ImageRemixEditorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 06956FE5E9ACFD111F2466F5 /* ImageRemixEditorView.swift */; };
+		8C16C160976FBE2F12BCF5F5 /* FlowSharedComposeDraft.swift in Sources */ = {isa = PBXBuildFile; fileRef = 27A9DD4BD8B693E635A934B8 /* FlowSharedComposeDraft.swift */; };
+		8EDED286A4DEBE2CB6B23BC0 /* FlowSharedComposeDraft.swift in Sources */ = {isa = PBXBuildFile; fileRef = 27A9DD4BD8B693E635A934B8 /* FlowSharedComposeDraft.swift */; };
 		977E112C8E7948939005ADBA /* HomeFeedViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 87F4B84828ED1C578A57652F /* HomeFeedViewModel.swift */; };
 		98F70D48581019050A4D7C4E /* SignupOnboardingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9906B019376E45D30E7BB2EF /* SignupOnboardingView.swift */; };
 		99843C2501BBE53CC7640FA4 /* FeedCaches.swift in Sources */ = {isa = PBXBuildFile; fileRef = 06FF81777B1A43EA5BB4D808 /* FeedCaches.swift */; };
+		9E849BD43F01C740E0DAFAD5 /* FlowShareExtension.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = B9BEB6EA4B182422CED31E86 /* FlowShareExtension.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		A9EC7D49DEED0D0FE9A902FB /* ThreadDetailViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2641062789F97E9E85F895EB /* ThreadDetailViewModel.swift */; };
 		B17E68CEA9136EFC8EA69BC0 /* RelayMessageParser.swift in Sources */ = {isa = PBXBuildFile; fileRef = 93F2DE09E60173B3EF41F370 /* RelayMessageParser.swift */; };
 		B1BFA3B4912B5F7FA3753EDF /* HashtagFeedViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0A4B108EF9AEA22A4EA620A5 /* HashtagFeedViewModel.swift */; };
@@ -63,11 +69,14 @@
 		B638FCF4207DBFF34C968735 /* ThreadReplyPublishService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 73A09E5C5DEB394F9F612B36 /* ThreadReplyPublishService.swift */; };
 		B71D2BA3782242DAD9267933 /* FlowApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6018FB948D5F4B745EA4EFCE /* FlowApp.swift */; };
 		B7FF9B2A1598892EDDBA9917 /* RelaySettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E6BDD5E9DEFAD0D257ED53A2 /* RelaySettingsView.swift */; };
+		C5002AA523ABEFA3B7A1AD5F /* MediaUploadPreparation.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7D3039E41566418D6E94D7C6 /* MediaUploadPreparation.swift */; };
+		C6DA55EE314F31B0EEEB3C81 /* BreakReminderOverlay.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8030679878DFA4FEAD247B37 /* BreakReminderOverlay.swift */; };
 		C72D533BD5044C624EE6C148 /* ProfileQRScannerFlowView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 30410946618FD33447B63806 /* ProfileQRScannerFlowView.swift */; };
 		CC7ADDDBDE4AEEBB871DB73A /* ProfileViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1480B5E7A53CAE02D9D677C1 /* ProfileViewModel.swift */; };
 		D2194AE6438D861CC9AFEB79 /* FollowStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0C79C9AF2B774553CEEF8299 /* FollowStore.swift */; };
 		D424A84308B9D6A70CC57FBC /* ReactionButton.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3D961155CF6467EAA934FDBA /* ReactionButton.swift */; };
 		D56D1CAA7AD09E392DA35AB0 /* ProfileEventService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 92745AAE627B22A05C5801E1 /* ProfileEventService.swift */; };
+		D7A4A8D2FB728E9EF72BCD22 /* ShareViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = E695E0883CD0CDEE151E004B /* ShareViewController.swift */; };
 		DC2CED795AF182257A442232 /* MuteStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = D3152920AED2041FDC71354A /* MuteStore.swift */; };
 		DCD144B7A43192BD2D1E7509 /* ActivityModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = A986D586CC5154F59A114A37 /* ActivityModels.swift */; };
 		DCEDACF4FDA917B689B6FC06 /* CompactMediaAttachmentPreview.swift in Sources */ = {isa = PBXBuildFile; fileRef = 63D554ED3C23A4F578BBAB7C /* CompactMediaAttachmentPreview.swift */; };
@@ -86,9 +95,34 @@
 		FCF275AC77DF1976CEC3A620 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = C3EF20CFB3AC1F3D6ECAE007 /* Assets.xcassets */; };
 /* End PBXBuildFile section */
 
+/* Begin PBXContainerItemProxy section */
+		749D3333539E6F6A0A9DFBEB /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 2AA6D7BA5D8BD56A395381D5 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = DA5FEEA5CE87A3382A36D91E;
+			remoteInfo = FlowShareExtension;
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXCopyFilesBuildPhase section */
+		1AC7419A9F406571E5E15BF5 /* Embed Foundation Extensions */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 13;
+			files = (
+				9E849BD43F01C740E0DAFAD5 /* FlowShareExtension.appex in Embed Foundation Extensions */,
+			);
+			name = "Embed Foundation Extensions";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXCopyFilesBuildPhase section */
+
 /* Begin PBXFileReference section */
 		0180FA8C1910629B17AC0487 /* FollowingListRoute.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FollowingListRoute.swift; sourceTree = "<group>"; };
 		01C71191885FAD1ED5B7533D /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
+		06956FE5E9ACFD111F2466F5 /* ImageRemixEditorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImageRemixEditorView.swift; sourceTree = "<group>"; };
 		06FF81777B1A43EA5BB4D808 /* FeedCaches.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FeedCaches.swift; sourceTree = "<group>"; };
 		0A4B108EF9AEA22A4EA620A5 /* HashtagFeedViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HashtagFeedViewModel.swift; sourceTree = "<group>"; };
 		0A50E085529127761FA6C9BD /* MediaUploadService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MediaUploadService.swift; sourceTree = "<group>"; };
@@ -100,9 +134,11 @@
 		15127ADED829B8BFB0AF32C2 /* NoteReactionStatsStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NoteReactionStatsStore.swift; sourceTree = "<group>"; };
 		199713AC286ACAD6A6CCA1EC /* ProfileMetadataEditing.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProfileMetadataEditing.swift; sourceTree = "<group>"; };
 		1CF33E746504FBADB0B3F9C3 /* AuthPrivateKeyStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AuthPrivateKeyStore.swift; sourceTree = "<group>"; };
+		1ED5C6EF9F220A3E121ECE2E /* FlowCapsuleTabBar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FlowCapsuleTabBar.swift; sourceTree = "<group>"; };
 		208F8589194C51AD6888863E /* NostrLiveFeedSubscriber.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NostrLiveFeedSubscriber.swift; sourceTree = "<group>"; };
 		21DF8275F493101456489799 /* InterestFeedStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InterestFeedStore.swift; sourceTree = "<group>"; };
 		2641062789F97E9E85F895EB /* ThreadDetailViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ThreadDetailViewModel.swift; sourceTree = "<group>"; };
+		27A9DD4BD8B693E635A934B8 /* FlowSharedComposeDraft.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FlowSharedComposeDraft.swift; sourceTree = "<group>"; };
 		2C03099522A39619940DA10A /* HashtagRoute.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HashtagRoute.swift; sourceTree = "<group>"; };
 		30410946618FD33447B63806 /* ProfileQRScannerFlowView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProfileQRScannerFlowView.swift; sourceTree = "<group>"; };
 		312D40CFB4068A429616F15F /* ProfileEditorSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProfileEditorSheet.swift; sourceTree = "<group>"; };
@@ -114,6 +150,7 @@
 		4B67EBE0499A7E029AD05A18 /* FlowMediaCache.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FlowMediaCache.swift; sourceTree = "<group>"; };
 		4C415B7E3F07575507ED1F2B /* ActivityView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ActivityView.swift; sourceTree = "<group>"; };
 		4DE8EBF20CE78C8EC67DDEF4 /* MainTabShellView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MainTabShellView.swift; sourceTree = "<group>"; };
+		5AE5072564E400712902A306 /* LiveReactsOverlay.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LiveReactsOverlay.swift; sourceTree = "<group>"; };
 		6018FB948D5F4B745EA4EFCE /* FlowApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FlowApp.swift; sourceTree = "<group>"; };
 		63D554ED3C23A4F578BBAB7C /* CompactMediaAttachmentPreview.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CompactMediaAttachmentPreview.swift; sourceTree = "<group>"; };
 		668778178F4FBD32B9CAB751 /* SearchViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SearchViewModel.swift; sourceTree = "<group>"; };
@@ -124,8 +161,10 @@
 		73A09E5C5DEB394F9F612B36 /* ThreadReplyPublishService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ThreadReplyPublishService.swift; sourceTree = "<group>"; };
 		77DB1D6F0859F5EFA6F7D3B6 /* ProfileView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProfileView.swift; sourceTree = "<group>"; };
 		7C05D1C3683EFAEC836826DC /* Flow.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Flow.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		7D3039E41566418D6E94D7C6 /* MediaUploadPreparation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MediaUploadPreparation.swift; sourceTree = "<group>"; };
 		7E1A0D446E96339734859F0F /* HashtagFavoritesStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HashtagFavoritesStore.swift; sourceTree = "<group>"; };
 		7EDAF1E82A260C359E4D827B /* ProfileRoute.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProfileRoute.swift; sourceTree = "<group>"; };
+		8030679878DFA4FEAD247B37 /* BreakReminderOverlay.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BreakReminderOverlay.swift; sourceTree = "<group>"; };
 		845975B17AAA4A48E4DEA9A4 /* AuthSheetView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AuthSheetView.swift; sourceTree = "<group>"; };
 		85EAD6ECBAD9C4846932EE1C /* NoteContentParser.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NoteContentParser.swift; sourceTree = "<group>"; };
 		87F4B84828ED1C578A57652F /* HomeFeedViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HomeFeedViewModel.swift; sourceTree = "<group>"; };
@@ -148,6 +187,8 @@
 		AFABF13735545F8FDEA81317 /* RelativeTimestampFormatter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RelativeTimestampFormatter.swift; sourceTree = "<group>"; };
 		B05785D04DB8CEBA2BD42EA2 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		B16BEBB7843C445E4A56C6D6 /* FollowingListViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FollowingListViewModel.swift; sourceTree = "<group>"; };
+		B9BEB6EA4B182422CED31E86 /* FlowShareExtension.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = FlowShareExtension.appex; sourceTree = BUILT_PRODUCTS_DIR; };
+		BFE1331CC7D26B2FEB4A9096 /* Flow.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = Flow.entitlements; sourceTree = "<group>"; };
 		C3EF20CFB3AC1F3D6ECAE007 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		C54BBAD0B3A458A308239CEB /* NostrModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NostrModels.swift; sourceTree = "<group>"; };
 		D3152920AED2041FDC71354A /* MuteStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MuteStore.swift; sourceTree = "<group>"; };
@@ -155,6 +196,7 @@
 		DAD56D1E53FBA71CADBC7443 /* NoteContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NoteContentView.swift; sourceTree = "<group>"; };
 		DB9619AA2B74AE8DE02E11D9 /* ComposeNotePublishService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ComposeNotePublishService.swift; sourceTree = "<group>"; };
 		DC4B8630B0EC755F3A8BF84E /* NoteReactionStatsService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NoteReactionStatsService.swift; sourceTree = "<group>"; };
+		E695E0883CD0CDEE151E004B /* ShareViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShareViewController.swift; sourceTree = "<group>"; };
 		E6BDD5E9DEFAD0D257ED53A2 /* RelaySettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RelaySettingsView.swift; sourceTree = "<group>"; };
 		EADAAC1F003B015CDB20E50F /* SearchView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SearchView.swift; sourceTree = "<group>"; };
 		EDE66A5BBD34930A34D3923F /* NostrFeedService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NostrFeedService.swift; sourceTree = "<group>"; };
@@ -183,6 +225,7 @@
 			isa = PBXGroup;
 			children = (
 				7C05D1C3683EFAEC836826DC /* Flow.app */,
+				B9BEB6EA4B182422CED31E86 /* FlowShareExtension.appex */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -203,9 +246,13 @@
 			children = (
 				925F46E0FC75C191103D09E9 /* AppHaptics.swift */,
 				D3535F42ABCFA81A554B26FE /* AppSettingsStore.swift */,
+				8030679878DFA4FEAD247B37 /* BreakReminderOverlay.swift */,
+				BFE1331CC7D26B2FEB4A9096 /* Flow.entitlements */,
 				6018FB948D5F4B745EA4EFCE /* FlowApp.swift */,
 				4B67EBE0499A7E029AD05A18 /* FlowMediaCache.swift */,
+				5AE5072564E400712902A306 /* LiveReactsOverlay.swift */,
 				4DE8EBF20CE78C8EC67DDEF4 /* MainTabShellView.swift */,
+				7D3039E41566418D6E94D7C6 /* MediaUploadPreparation.swift */,
 				0A50E085529127761FA6C9BD /* MediaUploadService.swift */,
 			);
 			path = App;
@@ -237,6 +284,15 @@
 				68066ED3E7B3C65784C9C487 /* DMsView.swift */,
 			);
 			path = DMs;
+			sourceTree = "<group>";
+		};
+		800F7B466333857557EB2D17 /* ShareExtension */ = {
+			isa = PBXGroup;
+			children = (
+				E695E0883CD0CDEE151E004B /* ShareViewController.swift */,
+			);
+			name = ShareExtension;
+			path = Sources/ShareExtension;
 			sourceTree = "<group>";
 		};
 		86A9ECD505A876A0919A4C1A /* Feed */ = {
@@ -321,6 +377,7 @@
 				D1F4C5C484BEE2CFD338D56A /* Profile */,
 				463F65893DBDF585407EF30E /* Resources */,
 				B71FF7222967825D507F05B3 /* Search */,
+				CA97F5EAADED56DC803E709E /* ShareSupport */,
 				4E1216E251FA97E1855B7E0E /* Thread */,
 			);
 			path = Sources;
@@ -329,9 +386,18 @@
 		C3DBD8A85E3100385348A5C6 = {
 			isa = PBXGroup;
 			children = (
+				800F7B466333857557EB2D17 /* ShareExtension */,
 				C274BB0896F60F0842C35B35 /* Sources */,
 				12E09804F282BABC47EBF4CF /* Products */,
 			);
+			sourceTree = "<group>";
+		};
+		CA97F5EAADED56DC803E709E /* ShareSupport */ = {
+			isa = PBXGroup;
+			children = (
+				27A9DD4BD8B693E635A934B8 /* FlowSharedComposeDraft.swift */,
+			);
+			path = ShareSupport;
 			sourceTree = "<group>";
 		};
 		CEBAA811C2BD78F681804784 /* Auth */ = {
@@ -372,6 +438,8 @@
 			children = (
 				63D554ED3C23A4F578BBAB7C /* CompactMediaAttachmentPreview.swift */,
 				88E10288F9317E8E9959E77E /* FeedRowView.swift */,
+				1ED5C6EF9F220A3E121ECE2E /* FlowCapsuleTabBar.swift */,
+				06956FE5E9ACFD111F2466F5 /* ImageRemixEditorView.swift */,
 				DAD56D1E53FBA71CADBC7443 /* NoteContentView.swift */,
 				3D961155CF6467EAA934FDBA /* ReactionButton.swift */,
 				AFABF13735545F8FDEA81317 /* RelativeTimestampFormatter.swift */,
@@ -401,10 +469,12 @@
 				C9B4FCAA10698511C325F843 /* Sources */,
 				AAB40E0566E3A1BD1DA0A57E /* Resources */,
 				D550D867A6727211198D1D25 /* Frameworks */,
+				1AC7419A9F406571E5E15BF5 /* Embed Foundation Extensions */,
 			);
 			buildRules = (
 			);
 			dependencies = (
+				B57D7B7ECAF750ED1826117F /* PBXTargetDependency */,
 			);
 			name = Flow;
 			packageProductDependencies = (
@@ -414,6 +484,23 @@
 			productReference = 7C05D1C3683EFAEC836826DC /* Flow.app */;
 			productType = "com.apple.product-type.application";
 		};
+		DA5FEEA5CE87A3382A36D91E /* FlowShareExtension */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 023DDCE8AE61A2E7D5EEE8B6 /* Build configuration list for PBXNativeTarget "FlowShareExtension" */;
+			buildPhases = (
+				73078BA93DDB9345D31EC6B3 /* Sources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = FlowShareExtension;
+			packageProductDependencies = (
+			);
+			productName = FlowShareExtension;
+			productReference = B9BEB6EA4B182422CED31E86 /* FlowShareExtension.appex */;
+			productType = "com.apple.product-type.app-extension";
+		};
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
@@ -421,9 +508,12 @@
 			isa = PBXProject;
 			attributes = {
 				BuildIndependentTargetsInParallel = YES;
-				LastUpgradeCheck = 2630;
+				LastUpgradeCheck = 1430;
 				TargetAttributes = {
 					582133B0091E7B797566D191 = {
+						ProvisioningStyle = Automatic;
+					};
+					DA5FEEA5CE87A3382A36D91E = {
 						ProvisioningStyle = Automatic;
 					};
 				};
@@ -446,6 +536,7 @@
 			projectRoot = "";
 			targets = (
 				582133B0091E7B797566D191 /* Flow */,
+				DA5FEEA5CE87A3382A36D91E /* FlowShareExtension */,
 			);
 		};
 /* End PBXProject section */
@@ -463,6 +554,15 @@
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
+		73078BA93DDB9345D31EC6B3 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				8C16C160976FBE2F12BCF5F5 /* FlowSharedComposeDraft.swift in Sources */,
+				D7A4A8D2FB728E9EF72BCD22 /* ShareViewController.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		C9B4FCAA10698511C325F843 /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
@@ -477,6 +577,7 @@
 				1A670E6A3EBAF1A1BD01595D /* AuthPrivateKeyStore.swift in Sources */,
 				DEC2B5B7F01689B965EAAC78 /* AuthSheetView.swift in Sources */,
 				064EA2E56841A005EFBA1B89 /* AuthStore.swift in Sources */,
+				C6DA55EE314F31B0EEEB3C81 /* BreakReminderOverlay.swift in Sources */,
 				DCEDACF4FDA917B689B6FC06 /* CompactMediaAttachmentPreview.swift in Sources */,
 				0627B86CB55C015CC15C16D3 /* ComposeNotePublishService.swift in Sources */,
 				13B0FBAAFAA006FD2ACFACF8 /* ComposeNoteSheet.swift in Sources */,
@@ -486,7 +587,9 @@
 				1AB2153C6FDB413EFBA7B844 /* FeedFilterConfig.swift in Sources */,
 				FADAB31E8F6C736D855C84D2 /* FeedRowView.swift in Sources */,
 				B71D2BA3782242DAD9267933 /* FlowApp.swift in Sources */,
+				790EA013117A7F68FC636CC6 /* FlowCapsuleTabBar.swift in Sources */,
 				863D8F5E77A252D216D3BAF9 /* FlowMediaCache.swift in Sources */,
+				8EDED286A4DEBE2CB6B23BC0 /* FlowSharedComposeDraft.swift in Sources */,
 				D2194AE6438D861CC9AFEB79 /* FollowStore.swift in Sources */,
 				E99FCED8B4AC807A09CFDFFD /* FollowingListRoute.swift in Sources */,
 				B3A52A2C4320116B348414E5 /* FollowingListView.swift in Sources */,
@@ -499,9 +602,12 @@
 				2F8184A1622F2852891CF9C4 /* HomeFeedView.swift in Sources */,
 				977E112C8E7948939005ADBA /* HomeFeedViewModel.swift in Sources */,
 				8221FB25EC505A4C93948B32 /* HomeSlideoutMenuView.swift in Sources */,
+				8879AC3A5F08A6C3834FA14C /* ImageRemixEditorView.swift in Sources */,
 				49A33778F8CC7699D01EA0C8 /* InterestFeedStore.swift in Sources */,
 				1E35171B279FDBD958C28245 /* KeysView.swift in Sources */,
+				193FEE523F8578101768CF40 /* LiveReactsOverlay.swift in Sources */,
 				DD4C85DADF125539AEBA8E75 /* MainTabShellView.swift in Sources */,
+				C5002AA523ABEFA3B7A1AD5F /* MediaUploadPreparation.swift in Sources */,
 				37EF74A04BBB76BCE818B0F8 /* MediaUploadService.swift in Sources */,
 				DC2CED795AF182257A442232 /* MuteStore.swift in Sources */,
 				15EB392EA8847584F476D765 /* NostrFeedService.swift in Sources */,
@@ -546,12 +652,19 @@
 		};
 /* End PBXSourcesBuildPhase section */
 
+/* Begin PBXTargetDependency section */
+		B57D7B7ECAF750ED1826117F /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = DA5FEEA5CE87A3382A36D91E /* FlowShareExtension */;
+			targetProxy = 749D3333539E6F6A0A9DFBEB /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
+
 /* Begin XCBuildConfiguration section */
 		0149FC17B79E23BFA5D1828A /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ALWAYS_SEARCH_USER_PATHS = NO;
-				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
 				CLANG_ANALYZER_NONNULL = YES;
 				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
 				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
@@ -585,7 +698,6 @@
 				DEBUG_INFORMATION_FORMAT = dwarf;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
 				ENABLE_TESTABILITY = YES;
-				ENABLE_USER_SCRIPT_SANDBOXING = YES;
 				GCC_C_LANGUAGE_STANDARD = gnu11;
 				GCC_DYNAMIC_NO_PIC = NO;
 				GCC_NO_COMMON_BLOCKS = YES;
@@ -605,7 +717,6 @@
 				ONLY_ACTIVE_ARCH = YES;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = iphoneos;
-				STRING_CATALOG_GENERATE_SYMBOLS = YES;
 				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
 				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
 				SWIFT_VERSION = 5.0;
@@ -617,9 +728,11 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = Sources/App/Flow.entitlements;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = Y8R8RLW5BL;
 				INFOPLIST_FILE = Sources/Resources/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = Flow;
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
@@ -640,7 +753,6 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ALWAYS_SEARCH_USER_PATHS = NO;
-				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
 				CLANG_ANALYZER_NONNULL = YES;
 				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
 				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
@@ -674,7 +786,6 @@
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
 				ENABLE_NS_ASSERTIONS = NO;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
-				ENABLE_USER_SCRIPT_SANDBOXING = YES;
 				GCC_C_LANGUAGE_STANDARD = gnu11;
 				GCC_NO_COMMON_BLOCKS = YES;
 				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
@@ -687,10 +798,59 @@
 				MTL_FAST_MATH = YES;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = iphoneos;
-				STRING_CATALOG_GENERATE_SYMBOLS = YES;
 				SWIFT_COMPILATION_MODE = wholemodule;
 				SWIFT_OPTIMIZATION_LEVEL = "-O";
 				SWIFT_VERSION = 5.0;
+			};
+			name = Release;
+		};
+		536D33F2B0870C4E4CAEA3FC /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				APPLICATION_EXTENSION_API_ONLY = YES;
+				CODE_SIGN_ENTITLEMENTS = Sources/ShareExtension/ShareExtension.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = Y8R8RLW5BL;
+				INFOPLIST_FILE = Sources/ShareExtension/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = Flow;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 0.1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = social.x21.ios.ShareExtension;
+				PRODUCT_NAME = FlowShareExtension;
+				SDKROOT = iphoneos;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		787C21654D1621DD54C12D5A /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				APPLICATION_EXTENSION_API_ONLY = YES;
+				CODE_SIGN_ENTITLEMENTS = Sources/ShareExtension/ShareExtension.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = Y8R8RLW5BL;
+				INFOPLIST_FILE = Sources/ShareExtension/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = Flow;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 0.1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = social.x21.ios.ShareExtension;
+				PRODUCT_NAME = FlowShareExtension;
+				SDKROOT = iphoneos;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
 			};
 			name = Release;
 		};
@@ -699,9 +859,11 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = Sources/App/Flow.entitlements;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = Y8R8RLW5BL;
 				INFOPLIST_FILE = Sources/Resources/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = Flow;
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
@@ -721,6 +883,15 @@
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
+		023DDCE8AE61A2E7D5EEE8B6 /* Build configuration list for PBXNativeTarget "FlowShareExtension" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				536D33F2B0870C4E4CAEA3FC /* Debug */,
+				787C21654D1621DD54C12D5A /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
 		CB4A80344CE12B2568C1E711 /* Build configuration list for PBXProject "Flow" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (

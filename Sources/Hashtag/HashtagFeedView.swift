@@ -42,12 +42,11 @@ struct HashtagFeedView: View {
         List {
             Section {
                 VStack(alignment: .leading, spacing: 10) {
-                    Picker("Feed", selection: $viewModel.mode) {
-                        ForEach(FeedMode.allCases) { mode in
-                            Text(mode.title).tag(mode)
-                        }
-                    }
-                    .pickerStyle(.segmented)
+                    FlowCapsuleTabBar(
+                        selection: $viewModel.mode,
+                        items: FeedMode.allCases,
+                        title: hashtagTabTitle(for:)
+                    )
                 }
                 .padding(.vertical, 4)
             }
@@ -110,6 +109,9 @@ struct HashtagFeedView: View {
                         ),
                         onHashtagTap: { hashtag in
                             openHashtagFeed(hashtag: hashtag)
+                        },
+                        onProfileTap: { pubkey in
+                            openProfile(pubkey: pubkey)
                         },
                         onOpenThread: {
                             shouldAutoFocusReplyInThread = false
@@ -288,5 +290,14 @@ struct HashtagFeedView: View {
 
     private var isCurrentHashtagFavorite: Bool {
         hashtagFavoritesStore.isFavorite(viewModel.normalizedHashtag)
+    }
+
+    private func hashtagTabTitle(for mode: FeedMode) -> String {
+        switch mode {
+        case .posts:
+            return "Notes"
+        case .postsAndReplies:
+            return "All"
+        }
     }
 }

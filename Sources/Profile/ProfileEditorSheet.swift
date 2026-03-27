@@ -75,20 +75,6 @@ struct ProfileEditorSheet: View {
                             .keyboardType(.URL)
                             .autocorrectionDisabled()
                     }
-                    HStack(spacing: 10) {
-                        fieldIcon("at")
-                        TextField("Nostr Address", text: $fields.nip05)
-                            .textInputAutocapitalization(.never)
-                            .keyboardType(.emailAddress)
-                            .autocorrectionDisabled()
-                    }
-                    HStack(spacing: 10) {
-                        fieldIcon("bolt.fill")
-                        TextField("Lightning Address", text: $fields.lightningAddress)
-                            .textInputAutocapitalization(.never)
-                            .keyboardType(.emailAddress)
-                            .autocorrectionDisabled()
-                    }
                 }
 
                 if let avatarUploadError, !avatarUploadError.isEmpty {
@@ -164,17 +150,14 @@ struct ProfileEditorSheet: View {
         }
 
         do {
-            guard let data = try await item.loadTransferable(type: Data.self), !data.isEmpty else {
-                avatarUploadError = "Couldn't read the selected image."
-                return
-            }
+            let preparedMedia = try await MediaUploadPreparation.prepareUploadMedia(from: item)
+            let filename = "profile-\(Int(Date().timeIntervalSince1970)).\(preparedMedia.fileExtension)"
 
-            let mediaType = item.supportedContentTypes.first ?? .jpeg
-            let mimeType = mediaType.preferredMIMEType ?? "image/jpeg"
-            let fileExtension = mediaType.preferredFilenameExtension ?? "jpg"
-            let filename = "profile-\(Int(Date().timeIntervalSince1970)).\(fileExtension)"
-
-            let avatarURL = try await onUploadAvatar(data, mimeType, filename)
+            let avatarURL = try await onUploadAvatar(
+                preparedMedia.data,
+                preparedMedia.mimeType,
+                filename
+            )
             fields.avatarURLString = avatarURL
             avatarUploadError = nil
         } catch {

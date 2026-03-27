@@ -43,7 +43,10 @@ final class ComposeSpeechTranscriber: ObservableObject {
             try await startRecording(onTranscript: onTranscript)
             return nil
         } catch {
-            return (error as? LocalizedError)?.errorDescription ?? "Could not start voice input."
+            if let speechError = error as? SpeechInputError {
+                return speechError.errorDescription
+            }
+            return SpeechInputError.startupFailed(startupFailureMessage(for: error)).errorDescription
         }
     }
 
@@ -84,57 +87,21 @@ final class ComposeSpeechTranscriber: ObservableObject {
         startedAt = Date()
         onTranscriptionComplete = onTranscript
 
-        let audioSession = AVAudioSession.sharedInstance()
-        try audioSession.setCategory(.record, mode: .measurement, options: [.duckOthers])
-        try audioSession.setPreferredSampleRate(44_100)
-        try audioSession.setPreferredInputNumberOfChannels(1)
-        try audioSession.setActive(true, options: .notifyOthersOnDeactivation)
-
-        let request = SFSpeechAudioBufferRecognitionRequest()
-        request.shouldReportPartialResults = true
-        if #available(iOS 16.0, *) {
-            request.addsPunctuation = true
-        }
-        recognitionRequest = request
-
-        let inputNode = audioEngine.inputNode
-        guard let format = preferredRecordingFormat(for: inputNode) else {
-            throw SpeechInputError.microphoneUnavailable
-        }
-        inputNode.removeTap(onBus: 0)
-        inputNode.installTap(onBus: 0, bufferSize: 1024, format: format) { [weak self] buffer, _ in
-            self?.recognitionRequest?.append(buffer)
-        }
-
-        audioEngine.prepare()
-        try audioEngine.start()
-
-        recognitionTask = recognizer.recognitionTask(with: request) { [weak self] result, error in
-            Task { @MainActor in
-                guard let self else { return }
-
-                if let result {
-                    self.latestTranscript = result.bestTranscription.formattedString
-                    if result.isFinal {
-                        self.finishTranscription()
-                        return
-                    }
-                }
-
-                if let error {
-                    let nsError = error as NSError
-                    if nsError.domain == "kAFAssistantErrorDomain", nsError.code == 1110 {
-                        self.finishTranscription()
-                        return
-                    }
-                    self.finishTranscription()
-                }
+        var startupError: Error?
+        for strategy in RecordingSessionStrategy.allCases {
+            do {
+                try startRecognitionPipeline(using: recognizer, strategy: strategy)
+                isRecording = true
+                isTranscribing = false
+                startTicker()
+                return
+            } catch {
+                startupError = error
+                cleanupRecognition()
             }
         }
 
-        isRecording = true
-        isTranscribing = false
-        startTicker()
+        throw SpeechInputError.startupFailed(startupFailureMessage(for: startupError))
     }
 
     private func finishTranscription() {
@@ -168,6 +135,77 @@ final class ComposeSpeechTranscriber: ObservableObject {
         audioEngine.inputNode.removeTap(onBus: 0)
 
         try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
+    }
+
+    private func startRecognitionPipeline(
+        using recognizer: SFSpeechRecognizer,
+        strategy: RecordingSessionStrategy
+    ) throws {
+        let audioSession = AVAudioSession.sharedInstance()
+        try configureAudioSession(audioSession, strategy: strategy)
+
+        let request = SFSpeechAudioBufferRecognitionRequest()
+        request.shouldReportPartialResults = true
+        if #available(iOS 16.0, *) {
+            request.addsPunctuation = true
+        }
+        recognitionRequest = request
+
+        let inputNode = audioEngine.inputNode
+        guard let format = preferredRecordingFormat(for: inputNode) else {
+            throw SpeechInputError.microphoneUnavailable
+        }
+
+        inputNode.removeTap(onBus: 0)
+        inputNode.installTap(onBus: 0, bufferSize: 1024, format: format) { [weak self] buffer, _ in
+            self?.recognitionRequest?.append(buffer)
+        }
+
+        audioEngine.prepare()
+        try audioEngine.start()
+
+        recognitionTask = recognizer.recognitionTask(with: request) { [weak self] result, error in
+            Task { @MainActor in
+                guard let self else { return }
+
+                if let result {
+                    self.latestTranscript = result.bestTranscription.formattedString
+                    if result.isFinal {
+                        self.finishTranscription()
+                        return
+                    }
+                }
+
+                if let error {
+                    let nsError = error as NSError
+                    if nsError.domain == "kAFAssistantErrorDomain", nsError.code == 1110 {
+                        self.finishTranscription()
+                        return
+                    }
+                    self.finishTranscription()
+                }
+            }
+        }
+    }
+
+    private func configureAudioSession(
+        _ audioSession: AVAudioSession,
+        strategy: RecordingSessionStrategy
+    ) throws {
+        switch strategy {
+        case .optimized:
+            try audioSession.setCategory(.record, mode: .measurement, options: [.duckOthers])
+            try? audioSession.setPreferredSampleRate(44_100)
+            try? audioSession.setPreferredInputNumberOfChannels(1)
+        case .compatible:
+            try audioSession.setCategory(
+                .playAndRecord,
+                mode: .default,
+                options: [.defaultToSpeaker, .allowBluetoothHFP, .duckOthers]
+            )
+        }
+
+        try audioSession.setActive(true, options: .notifyOthersOnDeactivation)
     }
 
     private func preferredRecordingFormat(for inputNode: AVAudioInputNode) -> AVAudioFormat? {
@@ -228,6 +266,24 @@ final class ComposeSpeechTranscriber: ObservableObject {
             }
         }
     }
+
+    private func startupFailureMessage(for error: Error?) -> String {
+        guard let error else {
+            return "Could not start voice input."
+        }
+
+        if let speechError = error as? SpeechInputError,
+           let description = speechError.errorDescription {
+            return description
+        }
+
+        let nsError = error as NSError
+        if nsError.domain == NSOSStatusErrorDomain || nsError.domain == "com.apple.coreaudio.avfaudio" {
+            return "Voice input couldn't start with the current microphone or audio route."
+        }
+
+        return "Could not start voice input."
+    }
 }
 
 enum SpeechInputError: LocalizedError {
@@ -235,6 +291,7 @@ enum SpeechInputError: LocalizedError {
     case microphonePermissionDenied
     case recognizerUnavailable
     case microphoneUnavailable
+    case startupFailed(String)
 
     var errorDescription: String? {
         switch self {
@@ -246,6 +303,13 @@ enum SpeechInputError: LocalizedError {
             return "Voice input isn't available right now."
         case .microphoneUnavailable:
             return "Microphone input isn't available right now."
+        case .startupFailed(let message):
+            return message
         }
     }
+}
+
+private enum RecordingSessionStrategy: CaseIterable {
+    case optimized
+    case compatible
 }

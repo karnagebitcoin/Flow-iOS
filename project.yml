@@ -11,13 +11,16 @@ targets:
     platform: iOS
     deploymentTarget: "17.0"
     sources:
-      - Sources
+      - path: Sources
+        excludes:
+          - ShareExtension/**
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: social.x21.ios
         PRODUCT_NAME: Flow
         INFOPLIST_KEY_CFBundleDisplayName: Flow
         INFOPLIST_FILE: Sources/Resources/Info.plist
+        CODE_SIGN_ENTITLEMENTS: Sources/App/Flow.entitlements
         SWIFT_VERSION: 5.0
         CURRENT_PROJECT_VERSION: 1
         MARKETING_VERSION: 0.1.0
@@ -26,6 +29,30 @@ targets:
         CODE_SIGN_STYLE: Automatic
     dependencies:
       - package: NostrSDK
+      - target: FlowShareExtension
+        embed: true
+  FlowShareExtension:
+    type: app-extension
+    platform: iOS
+    deploymentTarget: "17.0"
+    sources:
+      - path: Sources/ShareExtension
+        excludes:
+          - Info.plist
+          - ShareExtension.entitlements
+      - Sources/ShareSupport
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: social.x21.ios.ShareExtension
+        PRODUCT_NAME: FlowShareExtension
+        INFOPLIST_KEY_CFBundleDisplayName: Flow
+        INFOPLIST_FILE: Sources/ShareExtension/Info.plist
+        CODE_SIGN_ENTITLEMENTS: Sources/ShareExtension/ShareExtension.entitlements
+        APPLICATION_EXTENSION_API_ONLY: YES
+        SWIFT_VERSION: 5.0
+        CURRENT_PROJECT_VERSION: 1
+        MARKETING_VERSION: 0.1.0
+        CODE_SIGN_STYLE: Automatic
 schemes:
   Flow:
     build:

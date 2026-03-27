@@ -235,20 +235,10 @@ struct RelaySettingsView: View {
                         .stroke(Color(.separator).opacity(0.2), lineWidth: 1)
                 )
 
-            Picker("Use for", selection: $relayScope) {
-                ForEach(RelayAddScope.allCases) { scope in
-                    Text(scope.rawValue).tag(scope)
-                }
-            }
-            .pickerStyle(.segmented)
-            .padding(6)
-            .background(
-                RoundedRectangle(cornerRadius: 16, style: .continuous)
-                    .fill(Color(.tertiarySystemBackground))
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: 16, style: .continuous)
-                    .stroke(Color(.separator).opacity(0.12), lineWidth: 1)
+            FlowCapsuleTabBar(
+                selection: $relayScope,
+                items: RelayAddScope.allCases,
+                title: { $0.rawValue }
             )
 
             Button("Add Source") {

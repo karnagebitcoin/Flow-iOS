@@ -308,7 +308,7 @@ struct SignupOnboardingView: View {
                     if isFinishing {
                         ProgressView()
                             .controlSize(.small)
-                            .tint(.white)
+                            .tint(primaryButtonForeground)
                     }
                     Text(primaryButtonTitle)
                         .font(.headline)
@@ -316,12 +316,16 @@ struct SignupOnboardingView: View {
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, 16)
                 .background(primaryButtonBackground, in: Capsule(style: .continuous))
+                .overlay {
+                    Capsule(style: .continuous)
+                        .stroke(primaryButtonBorder, lineWidth: 1)
+                }
                 .foregroundStyle(primaryButtonForeground)
                 .scaleEffect(isFinishing && animateFinishingButton ? 0.985 : 1)
                 .shadow(
-                    color: isFinishing ? Color.black.opacity(animateFinishingButton ? 0.18 : 0.10) : .clear,
-                    radius: isFinishing ? 18 : 0,
-                    y: isFinishing ? 8 : 0
+                    color: primaryButtonShadowColor,
+                    radius: primaryButtonShadowRadius,
+                    y: primaryButtonShadowYOffset
                 )
             }
             .buttonStyle(.plain)
@@ -490,12 +494,48 @@ struct SignupOnboardingView: View {
         primaryActionDisabled ? Color(.secondaryLabel) : onboardingPrimaryButtonForeground
     }
 
+    private var primaryButtonBorder: Color {
+        if primaryActionDisabled {
+            return Color(.separator).opacity(0.16)
+        }
+
+        return colorScheme == .dark
+            ? Color.white.opacity(0.08)
+            : onboardingInk.opacity(0.16)
+    }
+
+    private var primaryButtonShadowColor: Color {
+        guard !primaryActionDisabled else { return .clear }
+        if isFinishing {
+            return Color.black.opacity(animateFinishingButton ? 0.18 : 0.10)
+        }
+        return colorScheme == .light ? Color.black.opacity(0.08) : .clear
+    }
+
+    private var primaryButtonShadowRadius: CGFloat {
+        if isFinishing {
+            return 18
+        }
+        return colorScheme == .light && !primaryActionDisabled ? 10 : 0
+    }
+
+    private var primaryButtonShadowYOffset: CGFloat {
+        if isFinishing {
+            return 8
+        }
+        return colorScheme == .light && !primaryActionDisabled ? 5 : 0
+    }
+
+    private var onboardingInk: Color {
+        Color(red: 0.06, green: 0.10, blue: 0.18)
+    }
+
     private var onboardingPrimaryButtonFill: Color {
-        Color.white.opacity(0.96)
+        colorScheme == .dark ? Color.white.opacity(0.96) : onboardingInk
     }
 
     private var onboardingPrimaryButtonForeground: Color {
-        Color(red: 0.06, green: 0.10, blue: 0.18)
+        colorScheme == .dark ? onboardingInk : .white
     }
 
     private var onboardingSecondaryAccent: Color {
@@ -507,7 +547,7 @@ struct SignupOnboardingView: View {
     }
 
     private var onboardingInputTint: Color {
-        colorScheme == .dark ? .white : onboardingPrimaryButtonForeground
+        colorScheme == .dark ? .white : onboardingInk
     }
 
     private var onboardingChipSelectedFill: Color {
@@ -515,7 +555,7 @@ struct SignupOnboardingView: View {
     }
 
     private var onboardingChipSelectedForeground: Color {
-        onboardingPrimaryButtonForeground
+        onboardingInk
     }
 
     private var onboardingChipSelectedStroke: Color {

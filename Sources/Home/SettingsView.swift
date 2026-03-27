@@ -1,33 +1,35 @@
 import NostrSDK
 import SwiftUI
+import UIKit
 
 struct SettingsView: View {
     @Environment(\.dismiss) private var dismiss
     @EnvironmentObject private var appSettings: AppSettingsStore
+    @EnvironmentObject private var breakReminderCoordinator: BreakReminderCoordinator
     @EnvironmentObject private var relaySettings: RelaySettingsStore
 
     var body: some View {
         NavigationStack {
             Form {
                 Section {
-                    SettingsNavigationRow(title: "Appearance", systemImage: "paintbrush") {
-                        SettingsAppearanceView()
-                    }
-
                     SettingsNavigationRow(title: "General", systemImage: "slider.horizontal.3") {
                         SettingsGeneralView()
                     }
 
-                    SettingsNavigationRow(
-                        title: "Connection",
-                        subtitle: connectionSummaryText,
-                        systemImage: "dot.radiowaves.left.and.right"
-                    ) {
-                        RelaySettingsView()
+                    SettingsNavigationRow(title: "Appearance", systemImage: "paintbrush") {
+                        SettingsAppearanceView()
                     }
 
                     SettingsNavigationRow(title: "Feeds", systemImage: "newspaper") {
                         SettingsFeedsView()
+                    }
+
+                    SettingsNavigationRow(title: "Notifications", systemImage: "bell.badge") {
+                        SettingsNotificationsView()
+                    }
+
+                    SettingsNavigationRow(title: "Media", systemImage: "photo.on.rectangle.angled") {
+                        SettingsMediaView()
                     }
 
                     SettingsNavigationRow(
@@ -37,12 +39,16 @@ struct SettingsView: View {
                         SettingsMutedContentView()
                     }
 
-                    SettingsNavigationRow(title: "Notifications", systemImage: "bell.badge") {
-                        SettingsNotificationsView()
-                    }
-
                     SettingsNavigationRow(title: "Keys", systemImage: "key") {
                         KeysView()
+                    }
+
+                    SettingsNavigationRow(
+                        title: "Connection",
+                        subtitle: connectionSummaryText,
+                        systemImage: "dot.radiowaves.left.and.right"
+                    ) {
+                        RelaySettingsView()
                     }
                 }
             }
@@ -54,6 +60,9 @@ struct SettingsView: View {
                         dismiss()
                     }
                 }
+            }
+            .overlay {
+                BreakReminderOverlayHost(coordinator: breakReminderCoordinator)
             }
             .task {
                 await appSettings.refreshNotificationAuthorizationStatus()
@@ -210,11 +219,34 @@ private struct NotificationPreferencesToggleRow: View {
 
 private struct SettingsAppearanceView: View {
     @EnvironmentObject private var appSettings: AppSettingsStore
+    @State private var isShowingPrimaryColorPicker = false
 
     var body: some View {
         Form {
             Section("Appearance") {
-                ColorPicker("Primary Color", selection: primaryColorBinding, supportsOpacity: false)
+                Button {
+                    isShowingPrimaryColorPicker = true
+                } label: {
+                    HStack(spacing: 12) {
+                        Text("Primary Color")
+                            .foregroundStyle(.primary)
+
+                        Spacer(minLength: 12)
+
+                        Circle()
+                            .fill(appSettings.primaryColor)
+                            .frame(width: 22, height: 22)
+                            .overlay {
+                                Circle()
+                                    .stroke(Color.primary.opacity(0.08), lineWidth: 1)
+                            }
+
+                        Image(systemName: "chevron.right")
+                            .font(.footnote.weight(.semibold))
+                            .foregroundStyle(.tertiary)
+                    }
+                }
+                .buttonStyle(.plain)
 
                 VStack(alignment: .leading, spacing: 10) {
                     Text("Theme")
@@ -248,13 +280,11 @@ private struct SettingsAppearanceView: View {
                             .foregroundStyle(.secondary)
                     }
 
-                    Picker("Font Size", selection: $appSettings.fontSize) {
-                        ForEach(AppFontSize.allCases) { size in
-                            Text(size.title).tag(size)
-                        }
-                    }
-                    .pickerStyle(.segmented)
-                    .labelsHidden()
+                    FlowCapsuleTabBar(
+                        selection: $appSettings.fontSize,
+                        items: AppFontSize.allCases,
+                        title: { $0.title }
+                    )
 
                     Text("Applies to note text and interface labels.")
                         .font(.caption)
@@ -269,13 +299,18 @@ private struct SettingsAppearanceView: View {
         }
         .navigationTitle("Appearance")
         .navigationBarTitleDisplayMode(.large)
-    }
-
-    private var primaryColorBinding: Binding<Color> {
-        Binding(
-            get: { appSettings.primaryColor },
-            set: { appSettings.primaryColor = $0 }
-        )
+        .sheet(isPresented: $isShowingPrimaryColorPicker) {
+            SettingsNativeColorPicker(
+                title: "Primary Color",
+                color: Binding(
+                    get: { appSettings.primaryColor },
+                    set: { appSettings.primaryColor = $0 }
+                ),
+                onDismiss: {
+                    isShowingPrimaryColorPicker = false
+                }
+            )
+        }
     }
 
     private var notePreviewCard: some View {
@@ -437,14 +472,90 @@ private struct SettingsAppearanceView: View {
     }
 }
 
+private struct SettingsNativeColorPicker: UIViewControllerRepresentable {
+    let title: String
+    @Binding var color: Color
+    let onDismiss: () -> Void
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(color: $color, onDismiss: onDismiss)
+    }
+
+    func makeUIViewController(context: Context) -> UIColorPickerViewController {
+        let controller = UIColorPickerViewController()
+        controller.title = title
+        controller.supportsAlpha = false
+        controller.selectedColor = UIColor(color)
+        controller.delegate = context.coordinator
+        return controller
+    }
+
+    func updateUIViewController(_ controller: UIColorPickerViewController, context: Context) {
+        let currentUIColor = UIColor(color)
+        if controller.selectedColor != currentUIColor {
+            controller.selectedColor = currentUIColor
+        }
+    }
+
+    final class Coordinator: NSObject, UIColorPickerViewControllerDelegate {
+        @Binding private var color: Color
+        private let onDismiss: () -> Void
+
+        init(color: Binding<Color>, onDismiss: @escaping () -> Void) {
+            _color = color
+            self.onDismiss = onDismiss
+        }
+
+        func colorPickerViewControllerDidSelectColor(_ viewController: UIColorPickerViewController) {
+            color = Color(viewController.selectedColor)
+        }
+
+        func colorPickerViewControllerDidFinish(_ viewController: UIColorPickerViewController) {
+            onDismiss()
+        }
+    }
+}
+
 private struct SettingsGeneralView: View {
     @EnvironmentObject private var appSettings: AppSettingsStore
-    @State private var mediaCacheSizeDescription = "Calculating..."
-    @State private var isClearingMediaCache = false
+    @State private var previewQuote: BreakReminderQuote?
+    @State private var lastPreviewQuoteID: String?
+    @StateObject private var liveReactsPreviewCoordinator = LiveReactsCoordinator()
 
     var body: some View {
         Form {
-            Section("General") {
+            Section {
+                LabeledContent("Break Reminder") {
+                    Picker("Break Reminder", selection: breakReminderIntervalBinding) {
+                        ForEach(BreakReminderInterval.allCases) { interval in
+                            Text(interval.title).tag(interval)
+                        }
+                    }
+                    .pickerStyle(.menu)
+                    .labelsHidden()
+                }
+
+                Button {
+                    presentPreviewReminder()
+                } label: {
+                    Label("Preview Break Reminder", systemImage: "hourglass.bottomhalf.filled")
+                }
+
+                SettingsToggleRow(
+                    title: "Reaction Fountain",
+                    isOn: Binding(
+                        get: { appSettings.liveReactsEnabled },
+                        set: { appSettings.liveReactsEnabled = $0 }
+                    ),
+                    footer: "Animate incoming reactions from the Activity tab area in real time while Flow is open."
+                )
+
+                Button {
+                    liveReactsPreviewCoordinator.emitPreviewSequence()
+                } label: {
+                    Label("Simulate Reaction Fountain", systemImage: "sparkles")
+                }
+
                 SettingsToggleRow(
                     title: "Hide NSFW Content",
                     isOn: Binding(
@@ -480,6 +591,80 @@ private struct SettingsGeneralView: View {
                     ),
                     footer: "Connect only to relay.damus.io and hide reactions to reduce relay load."
                 )
+            } header: {
+                Text("General")
+            } footer: {
+                Text("When enabled, Flow shows a gentle break reminder after the app has stayed open continuously for this long. Leaving the app or closing the reminder resets the timer. Use Preview to test the sheet right away.")
+            }
+        }
+        .navigationTitle("General")
+        .navigationBarTitleDisplayMode(.large)
+        .overlay {
+            if let previewQuote {
+                BreakReminderOverlayPresentation(
+                    quote: previewQuote,
+                    accentColor: appSettings.primaryColor,
+                    onDismiss: dismissPreviewReminder
+                )
+            }
+        }
+        .overlay(alignment: .bottomTrailing) {
+            GeometryReader { proxy in
+                let previewWidth = max(84, min(proxy.size.width * 0.26, 118))
+
+                LiveReactsOverlayHost(coordinator: liveReactsPreviewCoordinator)
+                    .frame(width: previewWidth, height: 250, alignment: .bottom)
+                    .offset(x: -18, y: -18)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
+            }
+            .allowsHitTesting(false)
+        }
+    }
+
+    private var breakReminderIntervalBinding: Binding<BreakReminderInterval> {
+        Binding(
+            get: { appSettings.breakReminderInterval },
+            set: { appSettings.breakReminderInterval = $0 }
+        )
+    }
+
+    private func presentPreviewReminder() {
+        let quote = BreakReminderQuote.next(excluding: lastPreviewQuoteID)
+        lastPreviewQuoteID = quote.id
+
+        withAnimation(.spring(response: 0.42, dampingFraction: 0.88)) {
+            previewQuote = quote
+        }
+    }
+
+    private func dismissPreviewReminder() {
+        withAnimation(.spring(response: 0.42, dampingFraction: 0.88)) {
+            previewQuote = nil
+        }
+    }
+}
+
+private struct SettingsMediaView: View {
+    @EnvironmentObject private var appSettings: AppSettingsStore
+    @State private var mediaCacheSizeDescription = "Calculating..."
+    @State private var isClearingMediaCache = false
+    @State private var isShowingClearMediaCacheConfirmation = false
+
+    var body: some View {
+        Form {
+            Section {
+                SettingsToggleRow(
+                    title: "Blur Media From People I Don't Follow",
+                    isOn: Binding(
+                        get: { appSettings.blurMediaFromUnfollowedAuthors },
+                        set: { appSettings.blurMediaFromUnfollowedAuthors = $0 }
+                    ),
+                    footer: "Images and videos from accounts you don't follow stay blurred until you tap to reveal them."
+                )
+            } header: {
+                Text("Media")
+            } footer: {
+                Text("This only applies while you're signed in and does not blur your own posts.")
             }
 
             Section {
@@ -493,21 +678,39 @@ private struct SettingsGeneralView: View {
                 }
 
                 Button(role: .destructive) {
-                    clearMediaCache()
+                    isShowingClearMediaCacheConfirmation = true
                 } label: {
                     Text(isClearingMediaCache ? "Clearing..." : "Clear Media Cache")
                 }
                 .disabled(isClearingMediaCache)
             } header: {
-                Text("Media Cache")
+                Text("Cache")
             } footer: {
                 Text("Avatars and note images stay on disk so repeat visits and scrolling feel faster. Clearing this only removes cached media bytes, not your account or notes.")
             }
         }
-        .navigationTitle("General")
+        .navigationTitle("Media")
         .navigationBarTitleDisplayMode(.large)
+        .alert("Clear Media Cache?", isPresented: $isShowingClearMediaCacheConfirmation) {
+            Button("Cancel", role: .cancel) {}
+            Button("Clear", role: .destructive) {
+                clearMediaCache()
+            }
+        } message: {
+            Text("This will remove cached avatars and note images from this device. Your account and notes will not be affected.")
+        }
         .task {
             await refreshMediaCacheSize()
+        }
+    }
+
+    private func refreshMediaCacheSize() async {
+        let bytes = await FlowImageCache.shared.totalCacheSizeBytes()
+        let description = bytes > 0
+            ? ByteCountFormatter.string(fromByteCount: bytes, countStyle: .file)
+            : "Empty"
+        await MainActor.run {
+            mediaCacheSizeDescription = description
         }
     }
 
@@ -521,16 +724,6 @@ private struct SettingsGeneralView: View {
             await MainActor.run {
                 isClearingMediaCache = false
             }
-        }
-    }
-
-    private func refreshMediaCacheSize() async {
-        let bytes = await FlowImageCache.shared.totalCacheSizeBytes()
-        let description = bytes > 0
-            ? ByteCountFormatter.string(fromByteCount: bytes, countStyle: .file)
-            : "Empty"
-        await MainActor.run {
-            mediaCacheSizeDescription = description
         }
     }
 }
@@ -1904,12 +2097,11 @@ private struct SettingsMutedContentView: View {
     var body: some View {
         Form {
             Section {
-                Picker("Muted Content", selection: $selectedTab) {
-                    ForEach(MutedContentTab.allCases) { tab in
-                        Text(tab.rawValue).tag(tab)
-                    }
-                }
-                .pickerStyle(.segmented)
+                FlowCapsuleTabBar(
+                    selection: $selectedTab,
+                    items: MutedContentTab.allCases,
+                    title: { $0.rawValue }
+                )
             }
 
             if selectedTab == .words {

@@ -46,12 +46,11 @@ struct HomeFeedView: View {
                     ScrollViewReader { scrollProxy in
                         List {
                             VStack(alignment: .leading, spacing: 8) {
-                                Picker("Feed", selection: $viewModel.mode) {
-                                    ForEach(FeedMode.allCases) { mode in
-                                        Text(mode.title).tag(mode)
-                                    }
-                                }
-                                .pickerStyle(.segmented)
+                                FlowCapsuleTabBar(
+                                    selection: $viewModel.mode,
+                                    items: FeedMode.allCases,
+                                    title: { $0.title }
+                                )
 
                                 if viewModel.mediaOnly {
                                     Label("Media-only filter enabled", systemImage: "line.3.horizontal.decrease.circle.fill")
@@ -127,6 +126,9 @@ struct HomeFeedView: View {
                                         ),
                                         onHashtagTap: { hashtag in
                                             openHashtagFeed(hashtag: hashtag)
+                                        },
+                                        onProfileTap: { pubkey in
+                                            openProfile(pubkey: pubkey)
                                         },
                                         onOpenThread: {
                                             shouldAutoFocusReplyInThread = false
@@ -213,7 +215,14 @@ struct HomeFeedView: View {
                             }
                         }
                         .refreshable {
-                            await viewModel.refresh()
+                            if viewModel.visibleBufferedNewItemsCount > 0 {
+                                withAnimation(.easeInOut(duration: 0.2)) {
+                                    viewModel.showBufferedNewItems()
+                                    scrollProxy.scrollTo(Self.feedTopAnchorID, anchor: .top)
+                                }
+                            } else {
+                                await viewModel.refresh()
+                            }
                         }
                         .task {
                             appSettings.configure(accountPubkey: auth.currentAccount?.pubkey)
@@ -782,6 +791,8 @@ struct HomeFeedView: View {
             return "Network"
         case .following:
             return "Following"
+        case .trending:
+            return "Trending"
         case .interests:
             return "Interests"
         case .news:
@@ -799,6 +810,8 @@ struct HomeFeedView: View {
             return "dot.radiowaves.left.and.right"
         case .following:
             return "person.2"
+        case .trending:
+            return "chart.line.uptrend.xyaxis"
         case .interests:
             return "sparkles"
         case .news:

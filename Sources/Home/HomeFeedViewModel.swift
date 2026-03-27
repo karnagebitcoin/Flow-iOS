@@ -19,6 +19,7 @@ enum FeedMode: String, CaseIterable, Identifiable {
 enum HomePrimaryFeedSource: Identifiable, Hashable {
     case network
     case following
+    case trending
     case interests
     case news
     case custom(String)
@@ -30,6 +31,8 @@ enum HomePrimaryFeedSource: Identifiable, Hashable {
             return "network"
         case .following:
             return "following"
+        case .trending:
+            return "trending"
         case .interests:
             return "interests"
         case .news:
@@ -47,6 +50,8 @@ enum HomePrimaryFeedSource: Identifiable, Hashable {
             return "network"
         case .following:
             return "following"
+        case .trending:
+            return "trending"
         case .interests:
             return "interests"
         case .news:
@@ -69,6 +74,10 @@ enum HomePrimaryFeedSource: Identifiable, Hashable {
         }
         if normalized == "following" {
             self = .following
+            return
+        }
+        if normalized == "trending" {
+            self = .trending
             return
         }
         if normalized == "interests" {
@@ -174,6 +183,7 @@ final class HomeFeedViewModel: ObservableObject {
     private let mutedConversationStoragePrefix = "homeFeedMutedConversations"
     private static let fastHomeFetchTimeout: TimeInterval = 3
     private static let fastHomeRelayFetchMode: RelayFetchMode = .firstNonEmptyRelay
+    private static let trendingRelayURL = URL(string: "wss://trending.relays.land")!
     private static let newsFallbackRelayURL = URL(string: "wss://news.utxo.one")!
     private static let customFeedSupplementalRelayURLs: [URL] = [
         URL(string: "wss://relay.damus.io/"),
@@ -245,7 +255,7 @@ final class HomeFeedViewModel: ObservableObject {
         let hashtagSources = favoriteHashtags.map { HomePrimaryFeedSource.hashtag($0) }
         let interestSources: [HomePrimaryFeedSource] = interestHashtags.isEmpty ? [] : [.interests]
         let customSources = customFeeds.map { HomePrimaryFeedSource.custom($0.id) }
-        return [.network, .following] + interestSources + [.news] + customSources + hashtagSources
+        return [.network, .following, .trending] + interestSources + [.news] + customSources + hashtagSources
     }
 
     var kindFilterOptions: [FeedKindFilterOption] {
@@ -318,10 +328,14 @@ final class HomeFeedViewModel: ObservableObject {
             sourceDescriptor = "network"
         case .following:
             sourceDescriptor = "following:\(currentUserPubkey ?? "anonymous")"
+        case .trending:
+            sourceDescriptor = "trending"
         case .interests:
             sourceDescriptor = "interests"
         case .news:
-            sourceDescriptor = "news"
+            let newsAuthorsSignature = configuredNewsAuthorPubkeys().joined(separator: ",")
+            let newsHashtagsSignature = configuredNewsHashtags().joined(separator: ",")
+            sourceDescriptor = "news:v2:\(newsAuthorsSignature):\(newsHashtagsSignature)"
         case .custom(let feedID):
             if let feed = customFeedDefinition(id: feedID) {
                 sourceDescriptor = "custom:\(feedID):\(feed.cacheSignature)"
@@ -586,6 +600,17 @@ final class HomeFeedViewModel: ObservableObject {
                 fetched = interestPage.items
                 hasReachedEnd = !interestPage.hadMoreAvailable
 
+            case .trending:
+                followingPubkeys = []
+                fetched = try await service.fetchTrendingNotes(
+                    limit: pageSize,
+                    hydrationMode: requestHydrationMode,
+                    fetchTimeout: requestFetchTimeout,
+                    relayFetchMode: requestRelayFetchMode,
+                    moderationSnapshot: muteFilterSnapshot
+                )
+                hasReachedEnd = true
+
             case .news:
                 followingPubkeys = []
                 let newsPage = try await fetchNewsFeedPage(
@@ -689,6 +714,7 @@ final class HomeFeedViewModel: ObservableObject {
             }
 
             if requestSource != .news,
+               requestSource != .trending,
                !FeedKindFilters.isSameSelection(requestKinds, showKinds) {
                 guard latestRefreshRequestID == refreshRequestID else { return }
                 needsRefreshAfterCurrentRequest = true
@@ -789,6 +815,10 @@ final class HomeFeedViewModel: ObservableObject {
                 fetched = interestPage.items
                 hasReachedEnd = !interestPage.hadMoreAvailable
 
+            case .trending:
+                hasReachedEnd = true
+                return
+
             case .news:
                 let newsPage = try await fetchNewsFeedPage(
                     limit: pageSize,
@@ -856,6 +886,7 @@ final class HomeFeedViewModel: ObservableObject {
             }
 
             if requestSource != .news,
+               requestSource != .trending,
                !FeedKindFilters.isSameSelection(requestKinds, showKinds) {
                 return
             }
@@ -1064,6 +1095,9 @@ final class HomeFeedViewModel: ObservableObject {
                 scopeSignature: "network"
             )
 
+        case .trending:
+            return []
+
         case .interests:
             let hashtags = configuredInterestHashtags()
             guard !hashtags.isEmpty else { return [] }
@@ -1083,11 +1117,10 @@ final class HomeFeedViewModel: ObservableObject {
                 scopeSignature: "news-relays"
             ))
 
-            let hydrationTargets = hydrationRelayURLs(for: .news)
             let authors = Array(configuredNewsAuthorPubkeys().prefix(400))
             if !authors.isEmpty {
                 targets.append(contentsOf: subscriptionTargets(
-                    relayURLs: hydrationTargets,
+                    relayURLs: newsRelayTargets,
                     filter: NostrFilter(authors: authors, kinds: [1], limit: 100),
                     scopeSignature: "news-authors:\(authors.joined(separator: ","))"
                 ))
@@ -1096,7 +1129,7 @@ final class HomeFeedViewModel: ObservableObject {
             let hashtags = configuredNewsHashtags()
             if !hashtags.isEmpty {
                 targets.append(contentsOf: subscriptionTargets(
-                    relayURLs: hydrationTargets,
+                    relayURLs: newsRelayTargets,
                     filter: NostrFilter(kinds: [1], limit: 100, tagFilters: ["t": hashtags]),
                     scopeSignature: "news-hashtags:\(hashtags.joined(separator: ","))"
                 ))
@@ -1433,6 +1466,8 @@ final class HomeFeedViewModel: ObservableObject {
 
     private func relayURLs(for source: HomePrimaryFeedSource) -> [URL] {
         switch source {
+        case .trending:
+            return [Self.trendingRelayURL]
         case .news:
             let newsRelays = Self.normalizedRelayURLs(AppSettingsStore.shared.newsRelayURLs)
             return newsRelays.isEmpty ? [Self.newsFallbackRelayURL] : newsRelays
@@ -1446,6 +1481,9 @@ final class HomeFeedViewModel: ObservableObject {
 
     private func hydrationRelayURLs(for source: HomePrimaryFeedSource) -> [URL] {
         switch source {
+        case .trending:
+            let combined = Self.normalizedRelayURLs(readRelayURLs + relayURLs(for: .trending))
+            return combined.isEmpty ? [Self.trendingRelayURL] : combined
         case .news:
             let combined = Self.normalizedRelayURLs(readRelayURLs + relayURLs(for: .news))
             return combined.isEmpty ? [Self.newsFallbackRelayURL] : combined
@@ -1460,6 +1498,8 @@ final class HomeFeedViewModel: ObservableObject {
         switch source {
         case .interests:
             return FeedKindFilters.normalizedKinds(showKinds)
+        case .trending:
+            return [1]
         case .news:
             return [1]
         case .custom:
@@ -1568,7 +1608,7 @@ final class HomeFeedViewModel: ObservableObject {
         async let authorItemsTask = authors.isEmpty
             ? [FeedItem]()
             : service.fetchFollowingFeed(
-                relayURLs: hydrationRelayURLs,
+                relayURLs: newsRelayURLs,
                 authors: authors,
                 kinds: [1],
                 limit: limit,
@@ -1590,7 +1630,7 @@ final class HomeFeedViewModel: ObservableObject {
                 for hashtag in hashtags {
                     group.addTask { [self] in
                         try await self.service.fetchHashtagFeed(
-                            relayURLs: hydrationRelayURLs,
+                            relayURLs: newsRelayURLs,
                             hashtag: hashtag,
                             kinds: [1],
                             limit: perHashtagLimit,
@@ -1685,66 +1725,32 @@ final class HomeFeedViewModel: ObservableObject {
                 relayFetchMode: relayFetchMode,
                 moderationSnapshot: moderationSnapshot
             )
+        async let hashtagItemsTask = fetchCustomFeedHashtagItems(
+            hashtags: hashtags,
+            relayTargets: relayTargets,
+            kinds: kinds,
+            limit: perHashtagLimit,
+            until: until,
+            hydrationMode: hydrationMode,
+            fetchTimeout: fetchTimeout,
+            relayFetchMode: relayFetchMode,
+            moderationSnapshot: moderationSnapshot
+        )
+        async let phraseItemsTask = fetchCustomFeedPhraseItems(
+            phrases: phrases,
+            relayTargets: relayTargets,
+            kinds: kinds,
+            limit: perPhraseLimit,
+            until: until,
+            hydrationMode: hydrationMode,
+            fetchTimeout: fetchTimeout,
+            relayFetchMode: relayFetchMode,
+            moderationSnapshot: moderationSnapshot
+        )
 
         let authorItems = try await authorItemsTask
-
-        let hashtagItems: [[FeedItem]]
-        if hashtags.isEmpty {
-            hashtagItems = []
-        } else {
-            hashtagItems = try await withThrowingTaskGroup(of: [FeedItem].self) { group in
-                for hashtag in hashtags {
-                    group.addTask { [self] in
-                        try await self.service.fetchHashtagFeed(
-                            relayURLs: relayTargets,
-                            hashtag: hashtag,
-                            kinds: kinds,
-                            limit: perHashtagLimit,
-                            until: until,
-                            hydrationMode: hydrationMode,
-                            fetchTimeout: fetchTimeout,
-                            relayFetchMode: relayFetchMode,
-                            moderationSnapshot: moderationSnapshot
-                        )
-                    }
-                }
-
-                var merged: [[FeedItem]] = []
-                for try await items in group {
-                    merged.append(items)
-                }
-                return merged
-            }
-        }
-
-        let phraseItems: [[FeedItem]]
-        if phrases.isEmpty {
-            phraseItems = []
-        } else {
-            phraseItems = try await withThrowingTaskGroup(of: [FeedItem].self) { group in
-                for phrase in phrases {
-                    group.addTask { [self] in
-                        try await self.service.searchNotes(
-                            relayURLs: relayTargets,
-                            query: phrase,
-                            kinds: kinds,
-                            limit: perPhraseLimit,
-                            until: until,
-                            hydrationMode: hydrationMode,
-                            fetchTimeout: fetchTimeout,
-                            relayFetchMode: relayFetchMode,
-                            moderationSnapshot: moderationSnapshot
-                        )
-                    }
-                }
-
-                var merged: [[FeedItem]] = []
-                for try await items in group {
-                    merged.append(items)
-                }
-                return merged
-            }
-        }
+        let hashtagItems = try await hashtagItemsTask
+        let phraseItems = try await phraseItemsTask
 
         let mergedItems = mergeItemArrays(
             primary: authorItems + hashtagItems.flatMap { $0 } + phraseItems.flatMap { $0 },
@@ -1764,6 +1770,82 @@ final class HomeFeedViewModel: ObservableObject {
         )
     }
 
+    private func fetchCustomFeedHashtagItems(
+        hashtags: [String],
+        relayTargets: [URL],
+        kinds: [Int],
+        limit: Int,
+        until: Int?,
+        hydrationMode: FeedItemHydrationMode,
+        fetchTimeout: TimeInterval,
+        relayFetchMode: RelayFetchMode,
+        moderationSnapshot: MuteFilterSnapshot?
+    ) async throws -> [[FeedItem]] {
+        guard !hashtags.isEmpty, limit > 0 else { return [] }
+
+        return try await withThrowingTaskGroup(of: [FeedItem].self) { group in
+            for hashtag in hashtags {
+                group.addTask { [self] in
+                    try await self.service.fetchHashtagFeed(
+                        relayURLs: relayTargets,
+                        hashtag: hashtag,
+                        kinds: kinds,
+                        limit: limit,
+                        until: until,
+                        hydrationMode: hydrationMode,
+                        fetchTimeout: fetchTimeout,
+                        relayFetchMode: relayFetchMode,
+                        moderationSnapshot: moderationSnapshot
+                    )
+                }
+            }
+
+            var merged: [[FeedItem]] = []
+            for try await items in group {
+                merged.append(items)
+            }
+            return merged
+        }
+    }
+
+    private func fetchCustomFeedPhraseItems(
+        phrases: [String],
+        relayTargets: [URL],
+        kinds: [Int],
+        limit: Int,
+        until: Int?,
+        hydrationMode: FeedItemHydrationMode,
+        fetchTimeout: TimeInterval,
+        relayFetchMode: RelayFetchMode,
+        moderationSnapshot: MuteFilterSnapshot?
+    ) async throws -> [[FeedItem]] {
+        guard !phrases.isEmpty, limit > 0 else { return [] }
+
+        return try await withThrowingTaskGroup(of: [FeedItem].self) { group in
+            for phrase in phrases {
+                group.addTask { [self] in
+                    try await self.service.searchNotes(
+                        relayURLs: relayTargets,
+                        query: phrase,
+                        kinds: kinds,
+                        limit: limit,
+                        until: until,
+                        hydrationMode: hydrationMode,
+                        fetchTimeout: fetchTimeout,
+                        relayFetchMode: relayFetchMode,
+                        moderationSnapshot: moderationSnapshot
+                    )
+                }
+            }
+
+            var merged: [[FeedItem]] = []
+            for try await items in group {
+                merged.append(items)
+            }
+            return merged
+        }
+    }
+
     private func scheduleItemHydration(
         for sourceItems: [FeedItem],
         source: HomePrimaryFeedSource,
@@ -1777,14 +1859,41 @@ final class HomeFeedViewModel: ObservableObject {
 
         itemHydrationTask = Task { [weak self] in
             guard let self else { return }
-            let hydrated = await self.service.buildFeedItems(
+
+            let authorHydrated = await self.service.buildAuthorHydratedFeedItems(
+                relayURLs: relayTargets,
+                events: events,
+                fetchTimeout: Self.fastHomeFetchTimeout,
+                relayFetchMode: Self.fastHomeRelayFetchMode,
+                moderationSnapshot: self.muteFilterSnapshot
+            )
+            guard !Task.isCancelled else { return }
+            if !authorHydrated.isEmpty {
+                await MainActor.run {
+                    guard self.feedSource == source, self.currentUserPubkey == userPubkey else {
+                        return
+                    }
+
+                    self.items = self.pruneItemsForSource(
+                        self.pruneMutedItems(
+                            self.mergeItemArrays(primary: authorHydrated, secondary: self.items)
+                        ),
+                        feedSource: source
+                    )
+                    self.scheduleAssetPrefetch(for: self.items)
+                    self.knownEventIDs = Set(self.items.map(\.id))
+                    self.knownEventIDs.formUnion(self.bufferedNewItems.map(\.id))
+                }
+            }
+
+            let fullyHydrated = await self.service.buildFeedItems(
                 relayURLs: relayTargets,
                 events: events,
                 hydrationMode: .full,
                 moderationSnapshot: self.muteFilterSnapshot
             )
             guard !Task.isCancelled else { return }
-            guard !hydrated.isEmpty else { return }
+            guard !fullyHydrated.isEmpty else { return }
 
             await MainActor.run {
                 guard self.feedSource == source, self.currentUserPubkey == userPubkey else {
@@ -1793,7 +1902,7 @@ final class HomeFeedViewModel: ObservableObject {
 
                 self.items = self.pruneItemsForSource(
                     self.pruneMutedItems(
-                        self.mergeItemArrays(primary: hydrated, secondary: self.items)
+                        self.mergeItemArrays(primary: fullyHydrated, secondary: self.items)
                     ),
                     feedSource: source
                 )

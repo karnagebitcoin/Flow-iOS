@@ -13,6 +13,7 @@ struct AuthSheetView: View {
     @EnvironmentObject private var auth: AuthManager
     @EnvironmentObject private var appSettings: AppSettingsStore
     @EnvironmentObject private var relaySettings: RelaySettingsStore
+    @Environment(\.colorScheme) private var colorScheme
     @Environment(\.dismiss) private var dismiss
 
     private let initialTab: AuthSheetTab
@@ -50,12 +51,11 @@ struct AuthSheetView: View {
                 } else {
                     Form {
                         if availableTabs.count > 1 {
-                            Picker("Tab", selection: $selectedTab) {
-                                ForEach(availableTabs) { tab in
-                                    Text(tab.rawValue).tag(tab)
-                                }
-                            }
-                            .pickerStyle(.segmented)
+                            FlowCapsuleTabBar(
+                                selection: $selectedTab,
+                                items: availableTabs,
+                                title: { $0.rawValue }
+                            )
                         }
 
                         switch selectedTab {
@@ -87,10 +87,21 @@ struct AuthSheetView: View {
             }
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button("Close") {
+                    Button {
                         dismiss()
+                    } label: {
+                        Text("Close")
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(closeButtonForeground)
+                            .padding(.horizontal, 14)
+                            .padding(.vertical, 10)
+                            .background(closeButtonBackground, in: Capsule(style: .continuous))
+                            .overlay {
+                                Capsule(style: .continuous)
+                                    .stroke(closeButtonBorder, lineWidth: 1)
+                            }
                     }
-                    .tint(.secondary)
+                    .buttonStyle(.plain)
                 }
             }
             .confirmationDialog(
@@ -159,10 +170,19 @@ struct AuthSheetView: View {
                         .font(.headline.weight(.semibold))
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 17)
-                        .foregroundStyle(Color(red: 0.06, green: 0.10, blue: 0.18))
+                        .foregroundStyle(authPrimaryButtonForeground)
                         .background(
                             Capsule(style: .continuous)
-                                .fill(Color.white.opacity(0.96))
+                                .fill(authPrimaryButtonFill)
+                        )
+                        .overlay {
+                            Capsule(style: .continuous)
+                                .stroke(authPrimaryButtonBorder, lineWidth: 1)
+                        }
+                        .shadow(
+                            color: colorScheme == .light ? Color.black.opacity(0.08) : .clear,
+                            radius: colorScheme == .light ? 10 : 0,
+                            y: colorScheme == .light ? 5 : 0
                         )
                 }
                 .buttonStyle(.plain)
@@ -170,6 +190,34 @@ struct AuthSheetView: View {
         } footer: {
             Text("Use private-key sign in to enable posting, reactions, and replies.")
         }
+    }
+
+    private var authInk: Color {
+        Color(red: 0.06, green: 0.10, blue: 0.18)
+    }
+
+    private var authPrimaryButtonFill: Color {
+        colorScheme == .dark ? Color.white.opacity(0.96) : authInk
+    }
+
+    private var authPrimaryButtonForeground: Color {
+        colorScheme == .dark ? authInk : .white
+    }
+
+    private var authPrimaryButtonBorder: Color {
+        colorScheme == .dark ? Color.white.opacity(0.08) : authInk.opacity(0.16)
+    }
+
+    private var closeButtonForeground: Color {
+        colorScheme == .dark ? .white.opacity(0.92) : authInk
+    }
+
+    private var closeButtonBackground: Color {
+        colorScheme == .dark ? Color.white.opacity(0.12) : Color(.secondarySystemBackground)
+    }
+
+    private var closeButtonBorder: Color {
+        colorScheme == .dark ? Color.white.opacity(0.10) : Color(.separator).opacity(0.20)
     }
 
     @ViewBuilder

@@ -100,7 +100,8 @@ struct ActivityReaction: Hashable, Sendable {
     let customEmojiImageURL: URL?
 
     var displayValue: String {
-        if let shortcode {
+        if let shortcode,
+           customEmojiImageURL != nil || reactionEmojiShortcode(from: content) != nil || content == "+" {
             return ":\(shortcode):"
         }
         return content
@@ -252,6 +253,7 @@ enum ActivityTargetReference: Hashable, Sendable {
 struct ActivityTargetNote: Hashable, Sendable {
     let reference: ActivityTargetReference?
     let event: NostrEvent?
+    let profile: NostrProfile?
     let snippet: String
 
     var eventID: String? {
@@ -367,8 +369,13 @@ extension NostrEvent {
     var activityReaction: ActivityReaction {
         let trimmedContent = content.trimmingCharacters(in: .whitespacesAndNewlines)
         let reactionContent = trimmedContent.isEmpty ? "+" : trimmedContent
-        let shortcode = normalizedEmojiShortcode(from: reactionContent)
+        let contentShortcode = reactionEmojiShortcode(from: trimmedContent)
         let emojiURLs = activityEmojiURLs(from: tags)
+        let shortcodeFromContentValue = normalizedEmojiIdentifier(from: reactionContent)
+        let shortcode =
+            contentShortcode
+            ?? (shortcodeFromContentValue.flatMap { emojiURLs[$0] != nil ? $0 : nil })
+            ?? ((trimmedContent.isEmpty || reactionContent == "+") ? firstActivityEmojiShortcode(from: tags) : nil)
         let emojiURL = shortcode.flatMap {
             emojiURLs[$0] ?? emojiURLs[$0.lowercased()]
         }
@@ -406,7 +413,7 @@ private func activityEmojiURLs(from tags: [[String]]) -> [String: URL] {
         guard tag.count >= 3 else { continue }
         guard tag.first?.lowercased() == "emoji" else { continue }
 
-        guard let shortcode = normalizedEmojiShortcode(from: tag[1]) else { continue }
+        guard let shortcode = normalizedEmojiIdentifier(from: tag[1]) else { continue }
         let urlString = tag[2].trimmingCharacters(in: .whitespacesAndNewlines)
         guard !urlString.isEmpty, let url = URL(string: urlString), url.scheme != nil else {
             continue
@@ -419,7 +426,31 @@ private func activityEmojiURLs(from tags: [[String]]) -> [String: URL] {
     return result
 }
 
-private func normalizedEmojiShortcode(from value: String) -> String? {
+private func firstActivityEmojiShortcode(from tags: [[String]]) -> String? {
+    for tag in tags {
+        guard tag.count >= 2 else { continue }
+        guard tag.first?.lowercased() == "emoji" else { continue }
+        if let shortcode = normalizedEmojiIdentifier(from: tag[1]) {
+            return shortcode
+        }
+    }
+    return nil
+}
+
+private func reactionEmojiShortcode(from value: String) -> String? {
+    let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !trimmed.isEmpty else { return nil }
+
+    if trimmed.hasPrefix(":"), trimmed.hasSuffix(":"), trimmed.count >= 3 {
+        let inner = trimmed.dropFirst().dropLast()
+        let shortcode = String(inner).trimmingCharacters(in: .whitespacesAndNewlines)
+        return shortcode.isEmpty ? nil : shortcode
+    }
+
+    return nil
+}
+
+private func normalizedEmojiIdentifier(from value: String) -> String? {
     let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
     guard !trimmed.isEmpty else { return nil }
 

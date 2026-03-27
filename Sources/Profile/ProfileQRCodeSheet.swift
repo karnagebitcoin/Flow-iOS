@@ -336,44 +336,44 @@ struct PresentedProfileQRCodeView: View {
     let qrCodeImage: UIImage?
     let onDismiss: () -> Void
 
-    @State private var hasAnimatedEntrance = false
+    @State private var automaticEntrancePhase: AutomaticEntrancePhase = .offscreen
+    @State private var automaticEntranceTask: Task<Void, Never>?
 
     var body: some View {
         GeometryReader { proxy in
             let rotationDegrees = presentationRotationDegrees
             let contentSize = presentationContentSize(for: proxy.size, rotationDegrees: rotationDegrees)
-            let presentationHasSettled = trigger != .automatic || hasAnimatedEntrance
-            let contentEntranceOffset = presentationHasSettled ? 0 : -min(220, max(96, proxy.size.height * 0.22))
-            let backgroundEntranceOffset = presentationHasSettled ? 0 : contentEntranceOffset * 0.28
+            let entranceState = automaticEntranceState(for: proxy.size.height)
 
             ZStack {
                 ProfileQRCodePresentationBackground()
                     .frame(width: contentSize.width, height: contentSize.height)
                     .rotationEffect(.degrees(rotationDegrees))
                     .position(x: proxy.size.width / 2, y: proxy.size.height / 2)
-                    .offset(y: backgroundEntranceOffset)
-                    .scaleEffect(presentationHasSettled ? 1 : 1.05)
-                    .opacity(presentationHasSettled ? 1 : 0.84)
+                    .offset(y: entranceState.backgroundOffset)
+                    .scaleEffect(entranceState.backgroundScale)
+                    .opacity(entranceState.backgroundOpacity)
 
                 portraitPresentation(in: contentSize)
                     .frame(width: contentSize.width, height: contentSize.height)
                     .rotationEffect(.degrees(rotationDegrees))
                     .position(x: proxy.size.width / 2, y: proxy.size.height / 2)
-                    .offset(y: contentEntranceOffset)
-                    .scaleEffect(presentationHasSettled ? 1 : 0.95)
-                    .opacity(presentationHasSettled ? 1 : 0)
+                    .offset(y: entranceState.contentOffset)
+                    .scaleEffect(entranceState.contentScale)
+                    .opacity(entranceState.contentOpacity)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .animation(automaticEntranceAnimation, value: hasAnimatedEntrance)
         }
         .ignoresSafeArea()
         .contentShape(Rectangle())
         .onAppear {
-            guard trigger == .automatic, !hasAnimatedEntrance else { return }
-            DispatchQueue.main.async {
-                guard !hasAnimatedEntrance else { return }
-                hasAnimatedEntrance = true
-            }
+            guard trigger == .automatic else { return }
+            startAutomaticEntranceAnimation()
+        }
+        .onDisappear {
+            automaticEntranceTask?.cancel()
+            automaticEntranceTask = nil
+            automaticEntrancePhase = .offscreen
         }
         .onTapGesture {
             onDismiss()
@@ -449,8 +449,72 @@ struct PresentedProfileQRCodeView: View {
         return CGSize(width: size.height, height: size.width)
     }
 
-    private var automaticEntranceAnimation: Animation {
-        .spring(response: 0.72, dampingFraction: 0.82, blendDuration: 0.12)
+    private func automaticEntranceState(for containerHeight: CGFloat) -> AutomaticEntranceState {
+        guard trigger == .automatic else {
+            return AutomaticEntranceState(
+                backgroundOffset: 0,
+                backgroundScale: 1,
+                backgroundOpacity: 1,
+                contentOffset: 0,
+                contentScale: 1,
+                contentOpacity: 1
+            )
+        }
+
+        let dropDistance = min(260, max(116, containerHeight * 0.26))
+        let bounceDistance = min(26, max(12, dropDistance * 0.11))
+
+        switch automaticEntrancePhase {
+        case .offscreen:
+            return AutomaticEntranceState(
+                backgroundOffset: dropDistance * 0.26,
+                backgroundScale: 1.06,
+                backgroundOpacity: 0.86,
+                contentOffset: dropDistance,
+                contentScale: 0.94,
+                contentOpacity: 0
+            )
+        case .impact:
+            return AutomaticEntranceState(
+                backgroundOffset: -bounceDistance * 0.24,
+                backgroundScale: 1,
+                backgroundOpacity: 1,
+                contentOffset: -bounceDistance,
+                contentScale: 1.015,
+                contentOpacity: 1
+            )
+        case .settled:
+            return AutomaticEntranceState(
+                backgroundOffset: 0,
+                backgroundScale: 1,
+                backgroundOpacity: 1,
+                contentOffset: 0,
+                contentScale: 1,
+                contentOpacity: 1
+            )
+        }
+    }
+
+    @MainActor
+    private func startAutomaticEntranceAnimation() {
+        automaticEntranceTask?.cancel()
+        automaticEntrancePhase = .offscreen
+
+        automaticEntranceTask = Task { @MainActor in
+            await Task.yield()
+            guard !Task.isCancelled else { return }
+
+            withAnimation(.easeIn(duration: 0.34)) {
+                automaticEntrancePhase = .impact
+            }
+
+            try? await Task.sleep(nanoseconds: 340_000_000)
+            guard !Task.isCancelled else { return }
+
+            withAnimation(.spring(response: 0.34, dampingFraction: 0.62, blendDuration: 0.08)) {
+                automaticEntrancePhase = .settled
+            }
+        }
     }
 
     private var activeInterfaceOrientation: UIInterfaceOrientation {
@@ -459,6 +523,21 @@ struct PresentedProfileQRCodeView: View {
             .first(where: { $0.activationState == .foregroundActive })?
             .interfaceOrientation ?? .unknown
     }
+}
+
+private struct AutomaticEntranceState {
+    let backgroundOffset: CGFloat
+    let backgroundScale: CGFloat
+    let backgroundOpacity: Double
+    let contentOffset: CGFloat
+    let contentScale: CGFloat
+    let contentOpacity: Double
+}
+
+private enum AutomaticEntrancePhase {
+    case offscreen
+    case impact
+    case settled
 }
 
 struct ProfileQRCodePresentationBackground: View {
