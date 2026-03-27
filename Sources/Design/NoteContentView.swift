@@ -1938,11 +1938,39 @@ private struct NoteVideoPlayerView: View {
         if #available(iOS 26, *) {
             Circle()
                 .fill(.clear)
-                .glassEffect(.regular.tint(.white.opacity(0.06)).interactive(), in: .circle)
+                .glassEffect(.regular.tint(.white.opacity(0.02)).interactive(), in: .circle)
+                .overlay {
+                    Circle()
+                        .fill(
+                            LinearGradient(
+                                colors: [
+                                    .white.opacity(0.18),
+                                    .white.opacity(0.04)
+                                ],
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
+                            )
+                        )
+                        .blendMode(.screen)
+                }
         } else {
             Circle()
-                .fill(.ultraThinMaterial.opacity(0.92))
-                .shadow(color: .black.opacity(0.10), radius: 8, x: 0, y: 3)
+                .fill(.ultraThinMaterial)
+                .overlay {
+                    Circle()
+                        .fill(
+                            LinearGradient(
+                                colors: [
+                                    .white.opacity(0.22),
+                                    .white.opacity(0.05)
+                                ],
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
+                            )
+                        )
+                        .blendMode(.screen)
+                }
+                .shadow(color: .black.opacity(0.05), radius: 6, x: 0, y: 2)
         }
     }
 
