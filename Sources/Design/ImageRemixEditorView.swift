@@ -83,31 +83,24 @@ struct ImageRemixEditorView: View {
                 GeometryReader { geometry in
                     let canvasSize = fittedCanvasSize(in: geometry.size)
 
-                    ZStack {
-                        // Keep the editor feeling immersive while the controls float above it.
-                        Image(uiImage: filteredPreviewImage)
-                            .resizable()
-                            .scaledToFit()
-                            .frame(maxWidth: .infinity, maxHeight: .infinity)
-                            .blur(radius: 42)
-                            .opacity(0.26)
-                            .overlay(Color.black.opacity(colorScheme == .dark ? 0.34 : 0.16))
+                    VStack {
+                        Spacer(minLength: 0)
 
-                        VStack {
-                            Spacer(minLength: 0)
+                        editorCanvas(canvasSize: canvasSize)
+                            .frame(width: canvasSize.width, height: canvasSize.height)
+                            .background(
+                                editorBackgroundColor,
+                                in: RoundedRectangle(cornerRadius: 34, style: .continuous)
+                            )
+                            .clipShape(RoundedRectangle(cornerRadius: 34, style: .continuous))
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 34, style: .continuous)
+                                    .stroke(canvasBorderColor, lineWidth: 1)
+                            )
+                            .offset(y: canvasVerticalOffset)
+                            .animation(.spring(response: 0.34, dampingFraction: 0.86), value: isToolPanelExpanded)
 
-                            editorCanvas(canvasSize: canvasSize)
-                                .frame(width: canvasSize.width, height: canvasSize.height)
-                                .clipShape(RoundedRectangle(cornerRadius: 34, style: .continuous))
-                                .overlay(
-                                    RoundedRectangle(cornerRadius: 34, style: .continuous)
-                                        .stroke(.white.opacity(0.05), lineWidth: 1)
-                                )
-                                .offset(y: canvasVerticalOffset)
-                                .animation(.spring(response: 0.34, dampingFraction: 0.86), value: isToolPanelExpanded)
-
-                            Spacer(minLength: 0)
-                        }
+                        Spacer(minLength: 0)
                     }
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .padding(.horizontal, 22)
@@ -157,27 +150,9 @@ struct ImageRemixEditorView: View {
     }
 
     private var remixBackground: some View {
-        LinearGradient(
-            colors: [
-                Color.black,
-                Color(red: 0.11, green: 0.12, blue: 0.17),
-                Color.black
-            ],
-            startPoint: .topLeading,
-            endPoint: .bottomTrailing
-        )
-        .overlay(
-            RadialGradient(
-                colors: [
-                    appSettings.primaryColor.opacity(0.24),
-                    .clear
-                ],
-                center: .topTrailing,
-                startRadius: 20,
-                endRadius: 420
-            )
-        )
-        .ignoresSafeArea()
+        Rectangle()
+            .fill(editorBackgroundColor)
+            .ignoresSafeArea()
     }
 
     private var topBar: some View {
@@ -187,7 +162,7 @@ struct ImageRemixEditorView: View {
             } label: {
                 Image(systemName: "xmark")
                     .font(.system(size: 15, weight: .bold))
-                    .foregroundStyle(.white)
+                    .foregroundStyle(chromePrimaryColor)
                     .frame(width: 38, height: 38)
                     .background(.ultraThinMaterial, in: Circle())
             }
@@ -197,11 +172,11 @@ struct ImageRemixEditorView: View {
             VStack(alignment: .leading, spacing: 2) {
                 Text("Remix")
                     .font(.headline.weight(.semibold))
-                    .foregroundStyle(.white)
+                    .foregroundStyle(chromePrimaryColor)
 
                 Text(selectedFilter == .original ? "Add some chaos" : selectedFilter.title)
                     .font(.footnote)
-                    .foregroundStyle(.white.opacity(0.72))
+                    .foregroundStyle(chromeSecondaryColor)
             }
 
             Spacer(minLength: 0)
@@ -213,7 +188,7 @@ struct ImageRemixEditorView: View {
             } label: {
                 Image(systemName: "square.and.arrow.down")
                     .font(.system(size: 17, weight: .semibold))
-                    .foregroundStyle(.white)
+                    .foregroundStyle(chromePrimaryColor)
                     .frame(width: 42, height: 42)
                     .background(.ultraThinMaterial, in: Circle())
             }
@@ -278,7 +253,7 @@ struct ImageRemixEditorView: View {
         .padding(10)
         .background(
             RoundedRectangle(cornerRadius: 20, style: .continuous)
-                .fill(Color(red: 0.12, green: 0.12, blue: 0.14).opacity(0.94))
+                .fill(postOptionsBackgroundColor)
                 .background(
                     .ultraThinMaterial,
                     in: RoundedRectangle(cornerRadius: 20, style: .continuous)
@@ -286,7 +261,7 @@ struct ImageRemixEditorView: View {
         )
         .overlay(
             RoundedRectangle(cornerRadius: 20, style: .continuous)
-                .stroke(.white.opacity(0.12), lineWidth: 1)
+                .stroke(controlBorderColor, lineWidth: 1)
         )
         .shadow(color: .black.opacity(0.24), radius: 16, x: 0, y: 10)
     }
@@ -302,11 +277,11 @@ struct ImageRemixEditorView: View {
             VStack(alignment: .leading, spacing: 2) {
                 Text(title)
                     .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(.white)
+                    .foregroundStyle(chromePrimaryColor)
 
                 Text(subtitle)
                     .font(.caption)
-                    .foregroundStyle(.white.opacity(0.7))
+                    .foregroundStyle(chromeSecondaryColor)
                     .lineLimit(2)
             }
 
@@ -317,7 +292,7 @@ struct ImageRemixEditorView: View {
         .padding(.vertical, 10)
         .background(
             RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .fill(.white.opacity(0.04))
+                .fill(controlRowFillColor)
         )
     }
 
@@ -348,9 +323,9 @@ struct ImageRemixEditorView: View {
                 } label: {
                     Image(systemName: isToolPanelExpanded ? "chevron.down" : "chevron.up")
                         .font(.system(size: 14, weight: .bold))
-                        .foregroundStyle(.white.opacity(0.86))
+                        .foregroundStyle(chromePrimaryColor)
                         .frame(width: 40, height: 40)
-                        .background(.white.opacity(0.08), in: Circle())
+                        .background(controlFillColor, in: Circle())
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel(isToolPanelExpanded ? "Minimize tools" : "Expand tools")
@@ -397,7 +372,7 @@ struct ImageRemixEditorView: View {
         VStack(alignment: .leading, spacing: 10) {
             Text("Fun Filters")
                 .font(.subheadline.weight(.semibold))
-                .foregroundStyle(.white)
+                .foregroundStyle(chromePrimaryColor)
 
             ZStack(alignment: .trailing) {
                 ScrollView(.horizontal, showsIndicators: false) {
@@ -421,7 +396,7 @@ struct ImageRemixEditorView: View {
                 HStack(spacing: 0) {
                     Spacer(minLength: 0)
                     LinearGradient(
-                        colors: [.clear, Color.black.opacity(0.22)],
+                        colors: [.clear, edgeFadeColor],
                         startPoint: .leading,
                         endPoint: .trailing
                     )
@@ -429,7 +404,7 @@ struct ImageRemixEditorView: View {
 
                     Image(systemName: "chevron.right")
                         .font(.caption.weight(.bold))
-                        .foregroundStyle(.white.opacity(0.46))
+                        .foregroundStyle(chromeTertiaryColor)
                         .padding(.trailing, 4)
                 }
                 .allowsHitTesting(false)
@@ -442,13 +417,13 @@ struct ImageRemixEditorView: View {
             HStack {
                 Text("Brush")
                     .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(.white)
+                    .foregroundStyle(chromePrimaryColor)
 
                 Spacer(minLength: 0)
 
                 Text("Draw right on the image")
                     .font(.caption)
-                    .foregroundStyle(.white.opacity(0.65))
+                    .foregroundStyle(chromeSecondaryColor)
             }
 
             ImageRemixPaletteStrip(
@@ -460,7 +435,7 @@ struct ImageRemixEditorView: View {
             HStack(spacing: 12) {
                 Text("Width")
                     .font(.caption.weight(.medium))
-                    .foregroundStyle(.white.opacity(0.7))
+                    .foregroundStyle(chromeMutedColor)
                     .frame(width: 44, alignment: .leading)
 
                 Slider(
@@ -508,13 +483,13 @@ struct ImageRemixEditorView: View {
             HStack {
                 Text("Text")
                     .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(.white)
+                    .foregroundStyle(chromePrimaryColor)
 
                 Spacer(minLength: 0)
 
                 Text(selectedTextOverlay == nil ? "Type and drop it in" : "Drag it or snap it below")
                     .font(.caption)
-                    .foregroundStyle(.white.opacity(0.65))
+                    .foregroundStyle(chromeSecondaryColor)
             }
 
             HStack(spacing: 10) {
@@ -523,8 +498,8 @@ struct ImageRemixEditorView: View {
                     .disableAutocorrection(false)
                     .padding(.horizontal, 14)
                     .padding(.vertical, 12)
-                    .background(Color.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-                    .foregroundStyle(.white)
+                    .background(controlFillColor, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+                    .foregroundStyle(chromePrimaryColor)
 
                 Button("Add") {
                     addTextOverlay()
@@ -550,7 +525,7 @@ struct ImageRemixEditorView: View {
             HStack(spacing: 12) {
                 Text("Size")
                     .font(.caption.weight(.medium))
-                    .foregroundStyle(.white.opacity(0.7))
+                    .foregroundStyle(chromeMutedColor)
                     .frame(width: 44, alignment: .leading)
 
                 Slider(
@@ -575,13 +550,13 @@ struct ImageRemixEditorView: View {
                 HStack {
                     Text("Position")
                         .font(.caption.weight(.medium))
-                        .foregroundStyle(.white.opacity(0.7))
+                        .foregroundStyle(chromeMutedColor)
 
                     Spacer(minLength: 0)
 
                     Text(activeTextPlacement?.title ?? "Custom")
                         .font(.caption.weight(.semibold))
-                        .foregroundStyle(.white.opacity(0.82))
+                        .foregroundStyle(chromePrimaryColor.opacity(0.82))
                 }
 
                 HStack(alignment: .bottom, spacing: 12) {
@@ -612,20 +587,20 @@ struct ImageRemixEditorView: View {
             HStack {
                 Text("Emoji Stickers")
                     .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(.white)
+                    .foregroundStyle(chromePrimaryColor)
 
                 Spacer(minLength: 0)
 
                 Text(normalizedStickerSearchQuery.isEmpty ? "Search, type, or tap to drop" : "\(stickerResults.count) result\(stickerResults.count == 1 ? "" : "s")")
                     .font(.caption)
-                    .foregroundStyle(.white.opacity(0.65))
+                    .foregroundStyle(chromeSecondaryColor)
             }
 
             if normalizedStickerSearchQuery.isEmpty {
                 VStack(alignment: .leading, spacing: 8) {
                     Text("Quick Picks")
                         .font(.caption.weight(.medium))
-                        .foregroundStyle(.white.opacity(0.7))
+                        .foregroundStyle(chromeMutedColor)
 
                     ScrollView(.horizontal, showsIndicators: false) {
                         HStack(spacing: 8) {
@@ -646,12 +621,12 @@ struct ImageRemixEditorView: View {
             HStack(spacing: 10) {
                 Image(systemName: "magnifyingglass")
                     .font(.system(size: 14, weight: .semibold))
-                    .foregroundStyle(.white.opacity(0.58))
+                    .foregroundStyle(chromeTertiaryColor)
 
                 TextField("Search emoji or keyword", text: $stickerSearchQuery)
                     .textInputAutocapitalization(.never)
                     .autocorrectionDisabled()
-                    .foregroundStyle(.white)
+                    .foregroundStyle(chromePrimaryColor)
 
                 if !stickerSearchQuery.isEmpty {
                     Button {
@@ -659,7 +634,7 @@ struct ImageRemixEditorView: View {
                     } label: {
                         Image(systemName: "xmark.circle.fill")
                             .font(.system(size: 15, weight: .semibold))
-                            .foregroundStyle(.white.opacity(0.56))
+                            .foregroundStyle(chromeTertiaryColor)
                     }
                     .buttonStyle(.plain)
                     .accessibilityLabel("Clear emoji search")
@@ -667,7 +642,7 @@ struct ImageRemixEditorView: View {
             }
             .padding(.horizontal, 14)
             .padding(.vertical, 11)
-            .background(Color.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+            .background(controlFillColor, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
 
             if let typedStickerCandidate {
                 Button {
@@ -679,11 +654,11 @@ struct ImageRemixEditorView: View {
                         VStack(alignment: .leading, spacing: 2) {
                             Text("Use typed emoji")
                                 .font(.caption.weight(.semibold))
-                                .foregroundStyle(.white)
+                                .foregroundStyle(chromePrimaryColor)
 
                             Text(typedStickerCandidate)
                                 .font(.caption)
-                                .foregroundStyle(.white.opacity(0.68))
+                                .foregroundStyle(chromeSecondaryColor)
                         }
 
                         Spacer(minLength: 0)
@@ -694,7 +669,7 @@ struct ImageRemixEditorView: View {
                     }
                     .padding(.horizontal, 12)
                     .padding(.vertical, 8)
-                    .background(Color.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+                    .background(controlRowFillColor, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
                 }
                 .buttonStyle(.plain)
             }
@@ -702,7 +677,7 @@ struct ImageRemixEditorView: View {
             if stickerResults.isEmpty {
                 Text("No emoji match that search yet.")
                     .font(.caption.weight(.medium))
-                    .foregroundStyle(.white.opacity(0.68))
+                    .foregroundStyle(chromeSecondaryColor)
                     .padding(.vertical, 12)
                     .frame(maxWidth: .infinity, alignment: .center)
             } else {
@@ -725,7 +700,7 @@ struct ImageRemixEditorView: View {
             HStack(spacing: 12) {
                 Text("Size")
                     .font(.caption.weight(.medium))
-                    .foregroundStyle(.white.opacity(0.7))
+                    .foregroundStyle(chromeMutedColor)
                     .frame(width: 44, alignment: .leading)
 
                 Slider(
@@ -773,11 +748,11 @@ struct ImageRemixEditorView: View {
             VStack(spacing: 12) {
                 ProgressView()
                     .controlSize(.large)
-                    .tint(.white)
+                    .tint(chromePrimaryColor)
 
                 Text(progressTitle)
                     .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(.white)
+                    .foregroundStyle(chromePrimaryColor)
             }
             .padding(.horizontal, 24)
             .padding(.vertical, 20)
@@ -788,7 +763,7 @@ struct ImageRemixEditorView: View {
     private var toolSelectionPrompt: some View {
         Text("Pick a tool to start editing.")
             .font(.subheadline.weight(.medium))
-            .foregroundStyle(.white.opacity(0.7))
+            .foregroundStyle(chromeSecondaryColor)
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.vertical, 6)
     }
@@ -894,6 +869,52 @@ struct ImageRemixEditorView: View {
 
     private var canvasVerticalOffset: CGFloat {
         isToolPanelExpanded ? -24 : 0
+    }
+
+    private var editorBackgroundColor: Color {
+        colorScheme == .dark ? .black : .white
+    }
+
+    private var canvasBorderColor: Color {
+        colorScheme == .dark ? .white.opacity(0.05) : .black.opacity(0.06)
+    }
+
+    private var chromePrimaryColor: Color {
+        colorScheme == .dark ? .white : Color.black.opacity(0.92)
+    }
+
+    private var chromeSecondaryColor: Color {
+        colorScheme == .dark ? .white.opacity(0.72) : Color.black.opacity(0.68)
+    }
+
+    private var chromeMutedColor: Color {
+        colorScheme == .dark ? .white.opacity(0.70) : Color.black.opacity(0.62)
+    }
+
+    private var chromeTertiaryColor: Color {
+        colorScheme == .dark ? .white.opacity(0.56) : Color.black.opacity(0.48)
+    }
+
+    private var controlFillColor: Color {
+        colorScheme == .dark ? Color.white.opacity(0.08) : Color.black.opacity(0.06)
+    }
+
+    private var controlRowFillColor: Color {
+        colorScheme == .dark ? Color.white.opacity(0.04) : Color.black.opacity(0.04)
+    }
+
+    private var controlBorderColor: Color {
+        colorScheme == .dark ? Color.white.opacity(0.12) : Color.black.opacity(0.10)
+    }
+
+    private var edgeFadeColor: Color {
+        colorScheme == .dark ? Color.black.opacity(0.22) : Color.white.opacity(0.55)
+    }
+
+    private var postOptionsBackgroundColor: Color {
+        colorScheme == .dark
+            ? Color(red: 0.12, green: 0.12, blue: 0.14).opacity(0.94)
+            : Color(.systemBackground).opacity(0.94)
     }
 
     private var toolPanelTint: Color {
@@ -1721,6 +1742,7 @@ private struct ImageRemixStaticCompositionView: View {
 }
 
 private struct ImageRemixToolButtonLabel: View {
+    @Environment(\.colorScheme) private var colorScheme
     let tool: ImageRemixTool
     let isSelected: Bool
     let showsTitle: Bool
@@ -1737,17 +1759,26 @@ private struct ImageRemixToolButtonLabel: View {
                     .lineLimit(1)
             }
         }
-        .foregroundStyle(isSelected ? .white : .white.opacity(0.86))
+        .foregroundStyle(isSelected ? .white : chromeForegroundColor)
         .frame(maxWidth: .infinity)
         .frame(height: showsTitle ? 54 : 40)
         .background(
             RoundedRectangle(cornerRadius: showsTitle ? 18 : 16, style: .continuous)
-                .fill(isSelected ? accentColor : .white.opacity(0.08))
+                .fill(isSelected ? accentColor : chromeBackgroundColor)
         )
+    }
+
+    private var chromeForegroundColor: Color {
+        colorScheme == .dark ? .white.opacity(0.86) : Color.black.opacity(0.84)
+    }
+
+    private var chromeBackgroundColor: Color {
+        colorScheme == .dark ? .white.opacity(0.08) : Color.black.opacity(0.06)
     }
 }
 
 private struct ImageRemixFilterPresetChip: View {
+    @Environment(\.colorScheme) private var colorScheme
     let preset: ImageRemixFilterPreset
     let isSelected: Bool
     let accentColor: Color
@@ -1760,7 +1791,7 @@ private struct ImageRemixFilterPresetChip: View {
 
             Text(preset.title)
                 .font(.subheadline.weight(.semibold))
-                .foregroundStyle(.white)
+                .foregroundStyle(chipForegroundColor)
                 .lineLimit(1)
         }
         .frame(minHeight: 22)
@@ -1769,35 +1800,49 @@ private struct ImageRemixFilterPresetChip: View {
         .fixedSize(horizontal: true, vertical: false)
         .background(
             RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .fill(isSelected ? .white.opacity(0.12) : .white.opacity(0.06))
+                .fill(isSelected ? selectedFillColor : chipFillColor)
         )
         .overlay(
             RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .stroke(isSelected ? accentColor.opacity(0.78) : .white.opacity(0.08), lineWidth: 1)
+                .stroke(isSelected ? accentColor.opacity(0.78) : chipBorderColor, lineWidth: 1)
         )
+    }
+
+    private var chipForegroundColor: Color {
+        colorScheme == .dark ? .white : Color.black.opacity(0.9)
+    }
+
+    private var chipFillColor: Color {
+        colorScheme == .dark ? .white.opacity(0.06) : Color.black.opacity(0.04)
+    }
+
+    private var selectedFillColor: Color {
+        colorScheme == .dark ? .white.opacity(0.12) : Color.black.opacity(0.10)
+    }
+
+    private var chipBorderColor: Color {
+        colorScheme == .dark ? .white.opacity(0.08) : Color.black.opacity(0.08)
     }
 }
 
 private struct ImageRemixStickerLibraryBadge: View {
+    @Environment(\.colorScheme) private var colorScheme
     let emoji: String
     var size: CGFloat = 54
 
     var body: some View {
-        let circleSize = size * 0.74
-
-        ZStack {
-            RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .fill(Color.white.opacity(0.08))
-
-            Circle()
-                .fill(Color.white.opacity(0.06))
-                .frame(width: circleSize, height: circleSize)
-
-            Text(emoji)
-                .font(.system(size: size * 0.42))
-                .frame(width: circleSize, height: circleSize)
-        }
+        RoundedRectangle(cornerRadius: 18, style: .continuous)
+            .fill(outerFillColor)
+            .overlay {
+                Text(emoji)
+                    .font(.system(size: size * 0.46))
+                    .frame(width: size, height: size)
+            }
         .frame(width: size, height: size)
+    }
+
+    private var outerFillColor: Color {
+        colorScheme == .dark ? Color.white.opacity(0.08) : Color.black.opacity(0.06)
     }
 }
 
@@ -2022,6 +2067,7 @@ private struct ImageRemixStickerOverlayLabel: View {
 }
 
 private struct ImageRemixPaletteStrip: View {
+    @Environment(\.colorScheme) private var colorScheme
     let title: String
     let selected: ImageRemixPalette
     let onSelect: (ImageRemixPalette) -> Void
@@ -2030,7 +2076,7 @@ private struct ImageRemixPaletteStrip: View {
         VStack(alignment: .leading, spacing: 8) {
             Text(title)
                 .font(.caption.weight(.medium))
-                .foregroundStyle(.white.opacity(0.7))
+                .foregroundStyle(titleColor)
 
             HStack(spacing: 10) {
                 ForEach(ImageRemixPalette.allCases) { palette in
@@ -2042,7 +2088,7 @@ private struct ImageRemixPaletteStrip: View {
                             .frame(width: 28, height: 28)
                             .overlay(
                                 Circle()
-                                    .stroke(selected == palette ? .white : .white.opacity(0.16), lineWidth: selected == palette ? 2 : 1)
+                                    .stroke(selected == palette ? selectionStrokeColor : borderColor, lineWidth: selected == palette ? 2 : 1)
                             )
                             .shadow(color: .black.opacity(0.16), radius: 4, x: 0, y: 2)
                     }
@@ -2051,9 +2097,22 @@ private struct ImageRemixPaletteStrip: View {
             }
         }
     }
+
+    private var titleColor: Color {
+        colorScheme == .dark ? .white.opacity(0.7) : Color.black.opacity(0.62)
+    }
+
+    private var selectionStrokeColor: Color {
+        colorScheme == .dark ? .white : Color.black.opacity(0.88)
+    }
+
+    private var borderColor: Color {
+        colorScheme == .dark ? .white.opacity(0.16) : Color.black.opacity(0.14)
+    }
 }
 
 private struct ImageRemixTextPlacementPicker: View {
+    @Environment(\.colorScheme) private var colorScheme
     let selectedPlacement: ImageRemixTextPlacement?
     let accentColor: Color
     let onSelect: (ImageRemixTextPlacement) -> Void
@@ -2061,10 +2120,10 @@ private struct ImageRemixTextPlacementPicker: View {
     var body: some View {
         ZStack {
             RoundedRectangle(cornerRadius: 20, style: .continuous)
-                .fill(Color.white.opacity(0.06))
+                .fill(backgroundFillColor)
 
             RoundedRectangle(cornerRadius: 20, style: .continuous)
-                .stroke(Color.white.opacity(0.10), lineWidth: 1)
+                .stroke(borderColor, lineWidth: 1)
 
             GeometryReader { geometry in
                 ForEach(ImageRemixTextPlacement.allCases) { placement in
@@ -2072,12 +2131,12 @@ private struct ImageRemixTextPlacementPicker: View {
                         onSelect(placement)
                     } label: {
                         RoundedRectangle(cornerRadius: 7, style: .continuous)
-                            .fill(selectedPlacement == placement ? accentColor : Color.white.opacity(0.22))
+                            .fill(selectedPlacement == placement ? accentColor : slotFillColor)
                             .frame(width: placement == .center ? 24 : 18, height: 10)
                             .overlay {
                                 RoundedRectangle(cornerRadius: 7, style: .continuous)
                                     .stroke(
-                                        selectedPlacement == placement ? Color.white.opacity(0.14) : Color.clear,
+                                        selectedPlacement == placement ? selectedStrokeColor : Color.clear,
                                         lineWidth: 1
                                     )
                             }
@@ -2099,6 +2158,22 @@ private struct ImageRemixTextPlacementPicker: View {
         }
         .frame(width: 92, height: 68)
     }
+
+    private var backgroundFillColor: Color {
+        colorScheme == .dark ? Color.white.opacity(0.06) : Color.black.opacity(0.04)
+    }
+
+    private var borderColor: Color {
+        colorScheme == .dark ? Color.white.opacity(0.10) : Color.black.opacity(0.10)
+    }
+
+    private var slotFillColor: Color {
+        colorScheme == .dark ? Color.white.opacity(0.22) : Color.black.opacity(0.18)
+    }
+
+    private var selectedStrokeColor: Color {
+        colorScheme == .dark ? Color.white.opacity(0.14) : Color.white.opacity(0.38)
+    }
 }
 
 private struct ImageRemixAccentButtonStyle: ButtonStyle {
@@ -2115,16 +2190,29 @@ private struct ImageRemixAccentButtonStyle: ButtonStyle {
 }
 
 private struct ImageRemixSecondaryButtonStyle: ButtonStyle {
+    @Environment(\.colorScheme) private var colorScheme
+
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
             .font(.subheadline.weight(.semibold))
-            .foregroundStyle(.white)
+            .foregroundStyle(foregroundColor)
             .padding(.horizontal, 14)
             .padding(.vertical, 10)
             .background(
                 Capsule()
-                    .fill(Color.white.opacity(configuration.isPressed ? 0.12 : 0.08))
+                    .fill(backgroundColor(configuration.isPressed))
             )
+    }
+
+    private var foregroundColor: Color {
+        colorScheme == .dark ? .white : Color.black.opacity(0.88)
+    }
+
+    private func backgroundColor(_ isPressed: Bool) -> Color {
+        if colorScheme == .dark {
+            return Color.white.opacity(isPressed ? 0.12 : 0.08)
+        }
+        return Color.black.opacity(isPressed ? 0.10 : 0.06)
     }
 }
 

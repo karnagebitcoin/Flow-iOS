@@ -1,50 +1,30 @@
-import PhotosUI
 import SwiftUI
-import UniformTypeIdentifiers
 
 struct ThreadDetailView: View {
-    private static let replyComposerAnchorID = "thread-detail-reply-composer"
-    private static let repliesBottomSpacerHeight: CGFloat = 96
-
+    @Environment(\.colorScheme) private var colorScheme
     @EnvironmentObject private var auth: AuthManager
     @EnvironmentObject private var appSettings: AppSettingsStore
     @EnvironmentObject private var relaySettings: RelaySettingsStore
-    @Environment(\.colorScheme) private var colorScheme
     @StateObject private var viewModel: ThreadDetailViewModel
     @ObservedObject private var reactionStats = NoteReactionStatsService.shared
     @ObservedObject private var followStore = FollowStore.shared
     @ObservedObject private var muteStore = MuteStore.shared
 
     @State private var selectedThreadItem: FeedItem?
+    @State private var activeReplyTarget: FeedItem?
     @State private var selectedHashtagRoute: HashtagRoute?
     @State private var selectedProfileRoute: ProfileRoute?
-    @State private var shouldAutoFocusReplyInNestedThread = false
     @State private var hasAppliedInitialReplyFocus = false
     @State private var hasAppliedInitialReplyScroll = false
     @State private var pendingReplyScrollTargetID: String?
-
-    @State private var composerText = ""
-    @FocusState private var isComposerFocused: Bool
-    @StateObject private var speechTranscriber = ComposeSpeechTranscriber()
-    @State private var selectedReplyMediaItems: [PhotosPickerItem] = []
-    @State private var attachedReplyMedia: [ReplyComposerAttachment] = []
-    @State private var isUploadingReplyMedia = false
-    @State private var uploadingReplyMediaCount = 0
-    @State private var composerAvatarURL: URL?
-    @State private var composerAvatarFallback = "U"
-    @State private var isReplyPublishing = false
-    @State private var replyPublishErrorMessage: String?
     @State private var isShowingReshareSheet = false
     @State private var quoteDraft: ReshareQuoteDraft?
     @State private var isPublishingRepost = false
     @State private var repostStatusMessage: String?
     @State private var repostStatusIsError = false
 
-    private let replyPublishService: ThreadReplyPublishService
     private let reactionPublishService: NoteReactionPublishService
     private let reshareService: ResharePublishService
-    private let mediaUploadService: MediaUploadService
-    private let profileService: NostrFeedService
     private let initialReplyScrollTargetID: String?
     private let initiallyFocusReplyComposer: Bool
 
@@ -55,10 +35,8 @@ struct ThreadDetailView: View {
         initialReplyScrollTargetID: String? = nil,
         initiallyFocusReplyComposer: Bool = false,
         service: NostrFeedService = NostrFeedService(),
-        replyPublishService: ThreadReplyPublishService = ThreadReplyPublishService(),
         reactionPublishService: NoteReactionPublishService = NoteReactionPublishService(),
-        reshareService: ResharePublishService = ResharePublishService(),
-        mediaUploadService: MediaUploadService = .shared
+        reshareService: ResharePublishService = ResharePublishService()
     ) {
         _viewModel = StateObject(
             wrappedValue: ThreadDetailViewModel(
@@ -68,11 +46,8 @@ struct ThreadDetailView: View {
                 service: service
             )
         )
-        self.replyPublishService = replyPublishService
         self.reactionPublishService = reactionPublishService
         self.reshareService = reshareService
-        self.mediaUploadService = mediaUploadService
-        self.profileService = service
         self.initialReplyScrollTargetID = initialReplyScrollTargetID?
             .trimmingCharacters(in: .whitespacesAndNewlines)
             .lowercased()
@@ -83,10 +58,7 @@ struct ThreadDetailView: View {
         ScrollViewReader { scrollProxy in
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 0) {
-                    rootNoteCard(scrollProxy: scrollProxy)
-
-                    replyComposerSection
-                        .id(Self.replyComposerAnchorID)
+                    rootNoteCard
 
                     Divider()
                         .padding(.leading, 16)
@@ -101,13 +73,10 @@ struct ThreadDetailView: View {
                             .padding(.horizontal, 16)
                             .padding(.vertical, 10)
                     }
-
-                    Color.clear
-                        .frame(height: Self.repliesBottomSpacerHeight)
                 }
             }
             .background(Color(.systemBackground))
-            .navigationTitle("Thread")
+            .navigationTitle("Note")
             .navigationBarTitleDisplayMode(.inline)
             .refreshable {
                 await viewModel.refresh()
@@ -119,29 +88,14 @@ struct ThreadDetailView: View {
                 }
                 if initiallyFocusReplyComposer {
                     Task { @MainActor in
-                        await applyInitialReplyFocusIfNeeded()
+                        await applyInitialReplyPresentationIfNeeded()
                     }
                 }
                 await viewModel.loadIfNeeded()
-                await refreshComposerAvatar()
                 if initialReplyScrollTargetID != nil {
                     Task { @MainActor in
                         await applyInitialReplyScrollIfNeeded()
                     }
-                }
-            }
-            .onChange(of: isComposerFocused) { _, isFocused in
-                guard isFocused else { return }
-                Task { @MainActor in
-                    await scrollReplyComposerIntoView(using: scrollProxy)
-                }
-            }
-            .onChange(of: selectedReplyMediaItems) { _, newValue in
-                guard !newValue.isEmpty else { return }
-                let items = newValue
-                selectedReplyMediaItems = []
-                Task {
-                    await handleReplyMediaSelection(items)
                 }
             }
             .onChange(of: pendingReplyScrollTargetID) { _, replyID in
@@ -153,9 +107,6 @@ struct ThreadDetailView: View {
             }
             .onChange(of: auth.currentAccount?.pubkey) { _, _ in
                 configureStores()
-                Task {
-                    await refreshComposerAvatar()
-                }
             }
             .onChange(of: auth.currentNsec) { _, _ in
                 configureStores()
@@ -169,19 +120,6 @@ struct ThreadDetailView: View {
             .onChange(of: appSettings.slowConnectionMode) { _, _ in
                 configureStores()
             }
-            .onDisappear {
-                speechTranscriber.stopRecording()
-            }
-            .onReceive(NotificationCenter.default.publisher(for: .profileMetadataUpdated)) { notification in
-                guard let updatedPubkey = (notification.userInfo?["pubkey"] as? String)?.lowercased(),
-                      let currentPubkey = auth.currentAccount?.pubkey.lowercased(),
-                      updatedPubkey == currentPubkey else {
-                    return
-                }
-                Task {
-                    await refreshComposerAvatar()
-                }
-            }
             .navigationDestination(item: $selectedHashtagRoute) { route in
                 HashtagFeedView(
                     hashtag: route.normalizedHashtag,
@@ -194,8 +132,7 @@ struct ThreadDetailView: View {
                 ThreadDetailView(
                     initialItem: item,
                     relayURL: effectiveRelayURL,
-                    readRelayURLs: effectiveReadRelayURLs,
-                    initiallyFocusReplyComposer: shouldAutoFocusReplyInNestedThread
+                    readRelayURLs: effectiveReadRelayURLs
                 )
             }
             .navigationDestination(item: $selectedProfileRoute) { route in
@@ -243,10 +180,29 @@ struct ThreadDetailView: View {
                     }
                 )
             }
+            .sheet(item: $activeReplyTarget) { target in
+                ComposeNoteSheet(
+                    currentAccountPubkey: auth.currentAccount?.pubkey,
+                    currentNsec: auth.currentNsec,
+                    writeRelayURLs: effectiveWriteRelayURLs,
+                    replyTargetEvent: target.displayEvent,
+                    replyTargetDisplayNameHint: target.displayName,
+                    replyTargetHandleHint: target.handle,
+                    replyTargetAvatarURLHint: target.avatarURL,
+                    onPublished: {
+                        Task {
+                            await viewModel.refresh()
+                        }
+                    }
+                )
+            }
+            .safeAreaInset(edge: .bottom) {
+                replyDockBar
+            }
         }
     }
 
-    private func rootNoteCard(scrollProxy: ScrollViewProxy) -> some View {
+    private var rootNoteCard: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack(alignment: rootNip05Label == nil ? .center : .top, spacing: 10) {
                 Menu {
@@ -318,7 +274,6 @@ struct ThreadDetailView: View {
                         openProfile(pubkey: pubkey)
                     },
                     onReferencedEventTap: { referencedItem in
-                        shouldAutoFocusReplyInNestedThread = false
                         selectedThreadItem = referencedItem.threadNavigationItem
                     }
                 )
@@ -327,20 +282,8 @@ struct ThreadDetailView: View {
 
             if appSettings.reactionsVisibleInFeeds {
                 HStack(spacing: 14) {
-                    ReactionButton(
-                        isLiked: isRootLikedByCurrentUser,
-                        count: rootReactionCount,
-                        minHeight: 30
-                    ) {
-                        Task {
-                            await handleRootReactionTap()
-                        }
-                    }
-
                     Button {
-                        Task { @MainActor in
-                            focusReplyComposer(using: scrollProxy)
-                        }
+                        presentReplyComposer(for: viewModel.rootItem.canonicalDisplayItem)
                     } label: {
                         HStack(spacing: 4) {
                             Image(systemName: "bubble.right")
@@ -353,7 +296,7 @@ struct ThreadDetailView: View {
                     }
                     .buttonStyle(.plain)
                     .foregroundStyle(.secondary)
-                    .accessibilityLabel("Comment")
+                    .accessibilityLabel("Reply")
 
                     Button {
                         repostStatusMessage = nil
@@ -366,6 +309,16 @@ struct ThreadDetailView: View {
                     .buttonStyle(.plain)
                     .foregroundStyle(.secondary)
                     .accessibilityLabel("Re-share")
+
+                    ReactionButton(
+                        isLiked: isRootLikedByCurrentUser,
+                        count: rootReactionCount,
+                        minHeight: 30
+                    ) {
+                        Task {
+                            await handleRootReactionTap()
+                        }
+                    }
 
                     ShareLink(item: rootNoteShareLink) {
                         Image(systemName: "paperplane")
@@ -380,17 +333,6 @@ struct ThreadDetailView: View {
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 12)
-    }
-
-    private var replyComposerSection: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            Divider()
-                .padding(.leading, 16)
-
-            replyComposerBar
-                .padding(.horizontal, 16)
-                .padding(.vertical, 12)
-        }
     }
 
     private var rootNoteShareLink: String {
@@ -419,13 +361,40 @@ struct ThreadDetailView: View {
         }
     }
 
-    private var fallbackRootAvatar: some View {
-        ZStack {
-            Circle().fill(Color(.secondarySystemFill))
-            Text(String(viewModel.rootItem.displayName.prefix(1)).uppercased())
-                .font(.headline)
-                .foregroundStyle(.secondary)
+    private var replyDockBar: some View {
+        Button {
+            presentReplyComposer(for: viewModel.rootItem.canonicalDisplayItem)
+        } label: {
+            HStack(spacing: 10) {
+                ZStack {
+                    Circle()
+                        .fill(appSettings.primaryColor.opacity(colorScheme == .dark ? 0.2 : 0.12))
+                        .frame(width: 28, height: 28)
+
+                    Image(systemName: "bubble.right.fill")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(appSettings.primaryColor)
+                }
+
+                Text("Post your reply")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 11)
+            .background(.ultraThinMaterial, in: Capsule())
+            .overlay {
+                Capsule()
+                    .stroke(Color.white.opacity(colorScheme == .dark ? 0.14 : 0.4), lineWidth: 0.9)
+            }
+            .shadow(color: Color.black.opacity(colorScheme == .dark ? 0.2 : 0.08), radius: 14, x: 0, y: 6)
         }
+        .buttonStyle(.plain)
+        .padding(.horizontal, 16)
+        .padding(.top, 8)
+        .padding(.bottom, 6)
     }
 
     private var rootFollowButton: some View {
@@ -510,7 +479,7 @@ struct ThreadDetailView: View {
                 VStack(spacing: 6) {
                     Text("No replies yet")
                         .font(.headline)
-                    Text("Use the reply field below to join this thread.")
+                    Text("Tap below to post the first reply.")
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
                 }
@@ -540,19 +509,16 @@ struct ThreadDetailView: View {
                             openProfile(pubkey: pubkey)
                         },
                         onOpenThread: {
-                            shouldAutoFocusReplyInNestedThread = false
                             selectedThreadItem = reply.threadNavigationItem
                         },
                         onRepostActorTap: { pubkey in
                             openProfile(pubkey: pubkey)
                         },
                         onReferencedEventTap: { referencedItem in
-                            shouldAutoFocusReplyInNestedThread = false
                             selectedThreadItem = referencedItem.threadNavigationItem
                         },
                         onReplyTap: {
-                            shouldAutoFocusReplyInNestedThread = true
-                            selectedThreadItem = reply.threadNavigationItem
+                            presentReplyComposer(for: reply.canonicalDisplayItem)
                         },
                         suppressReplyContextForDirectReplyTargetEventID: viewModel.rootItem.displayEventID
                     )
@@ -568,205 +534,6 @@ struct ThreadDetailView: View {
                         .padding(.leading, 72)
                 }
             }
-        }
-    }
-
-    private var replyComposerBar: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack(alignment: .top, spacing: 12) {
-                replyComposerAvatar
-                    .padding(.top, 6)
-
-                VStack(alignment: .leading, spacing: 12) {
-                    ZStack(alignment: .topLeading) {
-                        if composerText.isEmpty {
-                            Text("Reply to \(viewModel.rootItem.displayName)...")
-                                .foregroundStyle(.secondary)
-                                .padding(.top, 8)
-                                .padding(.leading, 5)
-                        }
-
-                        TextEditor(text: $composerText)
-                            .focused($isComposerFocused)
-                            .frame(minHeight: 104)
-                            .scrollContentBackground(.hidden)
-                            .background(Color.clear)
-                            .accessibilityLabel("Reply text")
-                    }
-
-                    if !attachedReplyMedia.isEmpty {
-                        ScrollView(.horizontal, showsIndicators: false) {
-                            HStack(spacing: 10) {
-                                ForEach(attachedReplyMedia) { attachment in
-                                    ZStack(alignment: .topTrailing) {
-                                        CompactMediaAttachmentPreview(
-                                            url: attachment.url,
-                                            mimeType: attachment.mimeType,
-                                            fileSizeBytes: attachment.fileSizeBytes,
-                                            colorScheme: colorScheme
-                                        )
-
-                                        Button {
-                                            removeReplyAttachment(attachment)
-                                        } label: {
-                                            Image(systemName: "xmark.circle.fill")
-                                                .font(.title3)
-                                                .foregroundStyle(.secondary)
-                                                .padding(6)
-                                        }
-                                        .buttonStyle(.plain)
-                                        .accessibilityLabel("Remove attachment")
-                                    }
-                                }
-                            }
-                            .padding(.horizontal, 4)
-                            .padding(.vertical, 1)
-                        }
-                    }
-
-                    HStack(spacing: 12) {
-                        PhotosPicker(
-                            selection: $selectedReplyMediaItems,
-                            selectionBehavior: .ordered,
-                            matching: .any(of: [.images, .videos])
-                        ) {
-                            Group {
-                                if isUploadingReplyMedia {
-                                    ProgressView()
-                                        .controlSize(.small)
-                                } else {
-                                    Image(systemName: "photo")
-                                        .font(.title3)
-                                }
-                            }
-                        }
-                        .buttonStyle(.plain)
-                        .foregroundStyle(.secondary)
-                        .disabled(isReplyPublishing || isUploadingReplyMedia)
-
-                        Button {
-                            // GIF picker flow is pending.
-                        } label: {
-                            Text("GIF")
-                                .font(.footnote.weight(.semibold))
-                                .padding(.horizontal, 8)
-                                .padding(.vertical, 5)
-                                .background(Color(.tertiarySystemFill))
-                                .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
-                        }
-                        .buttonStyle(.plain)
-                        .foregroundStyle(.secondary)
-
-                        Button {
-                            Task {
-                                await handleReplySpeechToggle()
-                            }
-                        } label: {
-                            Group {
-                                if speechTranscriber.isRecording {
-                                    Image(systemName: "stop.fill")
-                                        .font(.system(size: 15, weight: .semibold))
-                                } else if speechTranscriber.isTranscribing {
-                                    ProgressView()
-                                        .controlSize(.small)
-                                } else {
-                                    Image(systemName: "waveform")
-                                        .font(.system(size: 17, weight: .medium))
-                                }
-                            }
-                            .foregroundStyle(speechTranscriber.isRecording ? Color.white : Color.secondary)
-                            .frame(width: 32, height: 32)
-                            .background(
-                                speechTranscriber.isRecording ? Color.accentColor : Color(.tertiarySystemFill),
-                                in: Circle()
-                            )
-                        }
-                        .buttonStyle(.plain)
-                        .disabled(isReplyPublishing || isUploadingReplyMedia)
-
-                        if speechTranscriber.isRecording {
-                            Text(formatReplyVoiceDuration(milliseconds: speechTranscriber.elapsedMs))
-                                .font(.footnote.monospacedDigit())
-                                .foregroundStyle(.secondary)
-                        }
-
-                        Spacer(minLength: 0)
-
-                        Button {
-                            submitReply()
-                        } label: {
-                            Group {
-                                if isReplyPublishing {
-                                    ProgressView()
-                                        .controlSize(.small)
-                                        .tint(Color.white)
-                                } else {
-                                    Text("Reply")
-                                }
-                            }
-                            .font(.footnote.weight(.semibold))
-                            .foregroundStyle(canSubmitReply ? Color.white : Color.secondary)
-                            .frame(minWidth: 42)
-                            .padding(.horizontal, 10)
-                            .padding(.vertical, 7)
-                            .background(
-                                canSubmitReply
-                                    ? Color.accentColor
-                                    : Color(.tertiarySystemFill),
-                                in: Capsule()
-                            )
-                        }
-                        .buttonStyle(.plain)
-                        .disabled(!canSubmitReply || isReplyPublishing || isUploadingReplyMedia)
-                    }
-
-                    replyComposerStatusSection
-                }
-            }
-        }
-        .padding(.vertical, 10)
-    }
-
-    @ViewBuilder
-    private var replyComposerStatusSection: some View {
-        if isUploadingReplyMedia {
-            HStack(spacing: 10) {
-                ProgressView()
-                    .controlSize(.small)
-
-                Text("Uploading \(uploadingReplyMediaCount) attachment\(uploadingReplyMediaCount == 1 ? "" : "s")...")
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-
-                Spacer(minLength: 0)
-            }
-        } else if speechTranscriber.isTranscribing {
-            HStack(spacing: 10) {
-                Image(systemName: "waveform.badge.magnifyingglass")
-                    .foregroundStyle(.secondary)
-
-                Text("Transcribing speech...")
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-
-                Spacer(minLength: 0)
-            }
-        } else if let replyPublishErrorMessage, !replyPublishErrorMessage.isEmpty {
-            HStack(alignment: .top, spacing: 10) {
-                Image(systemName: "exclamationmark.triangle.fill")
-                    .foregroundStyle(.red)
-
-                Text(replyPublishErrorMessage)
-                    .font(.footnote)
-                    .foregroundStyle(.red)
-
-                Spacer(minLength: 0)
-            }
-            .padding(12)
-            .background(
-                Color.red.opacity(0.08),
-                in: RoundedRectangle(cornerRadius: 14, style: .continuous)
-            )
         }
     }
 
@@ -804,35 +571,12 @@ struct ThreadDetailView: View {
         return nip05
     }
 
-    private var trimmedComposerText: String {
-        composerText.trimmingCharacters(in: .whitespacesAndNewlines)
-    }
-
-    private var canSubmitReply: Bool {
-        (!trimmedComposerText.isEmpty || !attachedReplyMedia.isEmpty)
-            && !speechTranscriber.isRecording
-            && !speechTranscriber.isTranscribing
-    }
-
     @MainActor
-    private func applyInitialReplyFocusIfNeeded() async {
+    private func applyInitialReplyPresentationIfNeeded() async {
         guard initiallyFocusReplyComposer, !hasAppliedInitialReplyFocus else { return }
         hasAppliedInitialReplyFocus = true
-
-        // Focus can race with navigation and ScrollView/TextEditor layout, so
-        // retry a few times while the thread view is settling in.
-        let focusRetryDelays: [UInt64] = [
-            120_000_000,
-            180_000_000,
-            260_000_000
-        ]
-
-        for delay in focusRetryDelays {
-            try? await Task.sleep(nanoseconds: delay)
-            isComposerFocused = false
-            await Task.yield()
-            isComposerFocused = true
-        }
+        try? await Task.sleep(nanoseconds: 220_000_000)
+        presentReplyComposer(for: viewModel.rootItem.canonicalDisplayItem)
     }
 
     @MainActor
@@ -854,36 +598,6 @@ struct ThreadDetailView: View {
     }
 
     @MainActor
-    private func focusReplyComposer(using scrollProxy: ScrollViewProxy) {
-        if isComposerFocused {
-            Task { @MainActor in
-                await scrollReplyComposerIntoView(using: scrollProxy)
-            }
-            return
-        }
-
-        isComposerFocused = true
-    }
-
-    @MainActor
-    private func scrollReplyComposerIntoView(using scrollProxy: ScrollViewProxy) async {
-        let scrollRetryDelays: [UInt64] = [
-            0,
-            140_000_000,
-            280_000_000
-        ]
-
-        for delay in scrollRetryDelays {
-            if delay > 0 {
-                try? await Task.sleep(nanoseconds: delay)
-            }
-            withAnimation(.easeInOut(duration: 0.22)) {
-                scrollProxy.scrollTo(Self.replyComposerAnchorID, anchor: .top)
-            }
-        }
-    }
-
-    @MainActor
     private func scrollReplyIntoView(replyID: String, using scrollProxy: ScrollViewProxy) async {
         let targetID = replyAnchorID(for: replyID)
         let scrollRetryDelays: [UInt64] = [
@@ -900,6 +614,11 @@ struct ThreadDetailView: View {
                 scrollProxy.scrollTo(targetID, anchor: .bottom)
             }
         }
+    }
+
+    @MainActor
+    private func presentReplyComposer(for item: FeedItem) {
+        activeReplyTarget = item
     }
 
     @MainActor
@@ -945,44 +664,6 @@ struct ThreadDetailView: View {
         }
     }
 
-    private func submitReply() {
-        guard !isReplyPublishing else { return }
-        let draft = trimmedComposerText
-        guard canSubmitReply else { return }
-
-        isComposerFocused = false
-        replyPublishErrorMessage = nil
-
-        Task { @MainActor in
-            isReplyPublishing = true
-            defer {
-                isReplyPublishing = false
-            }
-
-            do {
-                let publishedReply = try await replyPublishService.publishReply(
-                    content: draft,
-                    replyingTo: viewModel.rootItem.displayEvent,
-                    currentAccountPubkey: auth.currentAccount?.pubkey,
-                    currentNsec: auth.currentNsec,
-                    writeRelayURLs: effectiveWriteRelayURLs,
-                    additionalTags: attachedReplyMedia.map(\.imetaTag)
-                )
-
-                composerText = ""
-                attachedReplyMedia.removeAll()
-                selectedReplyMediaItems.removeAll()
-                viewModel.appendLocalReply(publishedReply)
-                pendingReplyScrollTargetID = publishedReply.id
-                if appSettings.reactionsVisibleInFeeds {
-                    reactionStats.prefetch(events: [publishedReply.event], relayURLs: effectiveReadRelayURLs)
-                }
-            } catch {
-                replyPublishErrorMessage = (error as? LocalizedError)?.errorDescription ?? "Couldn't send reply right now."
-            }
-        }
-    }
-
     private func openHashtagFeed(hashtag: String) {
         selectedHashtagRoute = HashtagRoute(
             hashtag: hashtag,
@@ -991,41 +672,6 @@ struct ThreadDetailView: View {
                 from: [viewModel.rootItem] + threadReplies
             )
         )
-    }
-
-    private func handleReplySpeechToggle() async {
-        replyPublishErrorMessage = nil
-
-        let errorMessage = await speechTranscriber.toggleRecording { transcript in
-            appendSpeechToReplyDraft(transcript)
-        }
-
-        if let errorMessage {
-            replyPublishErrorMessage = errorMessage
-        }
-    }
-
-    private func appendSpeechToReplyDraft(_ transcript: String) {
-        let normalized = transcript
-            .replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !normalized.isEmpty else { return }
-
-        if composerText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            composerText = normalized
-        } else {
-            let needsSeparator = !(composerText.hasSuffix(" ") || composerText.hasSuffix("\n"))
-            composerText += needsSeparator ? " \(normalized)" : normalized
-        }
-        isComposerFocused = true
-    }
-
-    private func formatReplyVoiceDuration(milliseconds: Int) -> String {
-        let safeMilliseconds = max(milliseconds, 0)
-        let totalSeconds = safeMilliseconds / 1_000
-        let minutes = totalSeconds / 60
-        let seconds = totalSeconds % 60
-        return String(format: "%02d:%02d", minutes, seconds)
     }
 
     private func replyAnchorID(for replyID: String) -> String {
@@ -1118,83 +764,6 @@ struct ThreadDetailView: View {
         )
     }
 
-    private var replyComposerAvatar: some View {
-        Group {
-            if appSettings.textOnlyMode {
-                composerAvatarFallbackView
-            } else if let composerAvatarURL {
-                CachedAsyncImage(url: composerAvatarURL) { phase in
-                    switch phase {
-                    case .success(let image):
-                        image
-                            .resizable()
-                            .scaledToFill()
-                    default:
-                        composerAvatarFallbackView
-                    }
-                }
-            } else {
-                composerAvatarFallbackView
-            }
-        }
-        .frame(width: 30, height: 30)
-        .clipShape(Circle())
-        .overlay {
-            Circle().stroke(Color(.separator), lineWidth: 0.5)
-        }
-    }
-
-    private var composerAvatarFallbackView: some View {
-        ZStack {
-            Circle().fill(Color(.secondarySystemFill))
-            Text(String(composerAvatarFallback.prefix(1)).uppercased())
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(.secondary)
-        }
-    }
-
-    @MainActor
-    private func refreshComposerAvatar() async {
-        guard let currentPubkey = auth.currentAccount?.pubkey.lowercased() else {
-            composerAvatarURL = nil
-            composerAvatarFallback = "U"
-            return
-        }
-
-        let cachedResult = await ProfileCache.shared.resolve(pubkeys: [currentPubkey])
-        if let cachedProfile = cachedResult.hits[currentPubkey] {
-            updateComposerAvatar(using: cachedProfile, fallbackPubkey: currentPubkey)
-            if composerAvatarURL != nil {
-                return
-            }
-        }
-
-        if let fetchedProfile = await profileService.fetchProfile(relayURLs: effectiveReadRelayURLs, pubkey: currentPubkey) {
-            updateComposerAvatar(using: fetchedProfile, fallbackPubkey: currentPubkey)
-        } else if composerAvatarURL == nil {
-            composerAvatarFallback = String(currentPubkey.prefix(1)).uppercased()
-        }
-    }
-
-    @MainActor
-    private func updateComposerAvatar(using profile: NostrProfile, fallbackPubkey: String) {
-        if let picture = profile.picture?.trimmingCharacters(in: .whitespacesAndNewlines),
-           let url = URL(string: picture),
-           !picture.isEmpty {
-            composerAvatarURL = url
-        } else {
-            composerAvatarURL = nil
-        }
-
-        if let displayName = profile.displayName?.trimmingCharacters(in: .whitespacesAndNewlines), !displayName.isEmpty {
-            composerAvatarFallback = String(displayName.prefix(1)).uppercased()
-        } else if let name = profile.name?.trimmingCharacters(in: .whitespacesAndNewlines), !name.isEmpty {
-            composerAvatarFallback = String(name.prefix(1)).uppercased()
-        } else {
-            composerAvatarFallback = String(fallbackPubkey.prefix(1)).uppercased()
-        }
-    }
-
     @MainActor
     private func publishRootRepost() async {
         guard !isPublishingRepost else { return }
@@ -1220,136 +789,4 @@ struct ThreadDetailView: View {
             repostStatusIsError = true
         }
     }
-
-    @MainActor
-    private func handleReplyMediaSelection(_ items: [PhotosPickerItem]) async {
-        guard !isUploadingReplyMedia else { return }
-        replyPublishErrorMessage = nil
-
-        guard let normalizedNsec = auth.currentNsec?.trimmingCharacters(in: .whitespacesAndNewlines),
-              !normalizedNsec.isEmpty else {
-            replyPublishErrorMessage = "Sign in with a private key to upload media."
-            return
-        }
-
-        isUploadingReplyMedia = true
-        uploadingReplyMediaCount = items.count
-        defer {
-            isUploadingReplyMedia = false
-            uploadingReplyMediaCount = 0
-        }
-
-        var failedUploads = 0
-        var firstError: Error?
-
-        for item in items {
-            do {
-                let attachment = try await uploadReplyAttachment(from: item, normalizedNsec: normalizedNsec)
-
-                if !attachedReplyMedia.contains(where: { $0.url == attachment.url }) {
-                    attachedReplyMedia.append(attachment)
-                    removeUploadedMediaURLIfPresent(attachment.url)
-                }
-            } catch {
-                failedUploads += 1
-                if firstError == nil {
-                    firstError = error
-                }
-            }
-        }
-
-        if failedUploads > 0 {
-            let successfulUploads = items.count - failedUploads
-            let detailedMessage = (firstError as? LocalizedError)?.errorDescription ?? firstError?.localizedDescription
-            if successfulUploads > 0 {
-                if let detailedMessage, !detailedMessage.isEmpty {
-                    replyPublishErrorMessage = "Uploaded \(successfulUploads) attachment\(successfulUploads == 1 ? "" : "s"), but \(failedUploads) failed: \(detailedMessage)"
-                } else {
-                    replyPublishErrorMessage = "Uploaded \(successfulUploads) attachment\(successfulUploads == 1 ? "" : "s"), but \(failedUploads) failed."
-                }
-            } else {
-                replyPublishErrorMessage = detailedMessage ?? "Couldn't upload media right now."
-            }
-        }
-
-        if failedUploads < items.count {
-            isComposerFocused = true
-        }
-    }
-
-    private func uploadReplyAttachment(from item: PhotosPickerItem, normalizedNsec: String) async throws -> ReplyComposerAttachment {
-        let preparedMedia = try await MediaUploadPreparation.prepareUploadMedia(from: item)
-        let filename = "reply-\(UUID().uuidString).\(preparedMedia.fileExtension)"
-
-        let result = try await mediaUploadService.uploadMedia(
-            data: preparedMedia.data,
-            mimeType: preparedMedia.mimeType,
-            filename: filename,
-            nsec: normalizedNsec,
-            provider: .blossom
-        )
-
-        return ReplyComposerAttachment(
-            url: result.url,
-            imetaTag: result.imetaTag,
-            mimeType: preparedMedia.mimeType,
-            fileSizeBytes: preparedMedia.data.count
-        )
-    }
-
-    @MainActor
-    private func removeUploadedMediaURLIfPresent(_ url: URL) {
-        let urlString = url.absoluteString
-        guard composerText.contains(urlString) else { return }
-
-        composerText = composerText
-            .replacingOccurrences(of: "\n\(urlString)", with: "")
-            .replacingOccurrences(of: urlString, with: "")
-            .replacingOccurrences(of: "\n{3,}", with: "\n\n", options: .regularExpression)
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-    }
-
-    private func removeReplyAttachment(_ attachment: ReplyComposerAttachment) {
-        attachedReplyMedia.removeAll { $0.id == attachment.id }
-    }
-
-    private func defaultFileExtension(for mimeType: String) -> String {
-        let normalized = mimeType.lowercased()
-        if normalized.contains("jpeg") || normalized.contains("jpg") {
-            return "jpg"
-        }
-        if normalized.contains("png") {
-            return "png"
-        }
-        if normalized.contains("heic") {
-            return "heic"
-        }
-        if normalized.contains("gif") {
-            return "gif"
-        }
-        if normalized.contains("webp") {
-            return "webp"
-        }
-        if normalized.contains("quicktime") || normalized.contains("mov") {
-            return "mov"
-        }
-        if normalized.contains("mp4") {
-            return "mp4"
-        }
-        if normalized.contains("mpeg") || normalized.contains("mp3") {
-            return "mp3"
-        }
-        if normalized.contains("m4a") {
-            return "m4a"
-        }
-        return "bin"
-    }
-}
-
-private struct ReplyComposerAttachment: Identifiable {
-    let id = UUID()
-    let url: URL
-    let imetaTag: [String]
-    let mimeType: String
-    let fileSizeBytes: Int?
 }

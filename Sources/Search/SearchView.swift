@@ -113,10 +113,6 @@ struct SearchView: View {
                                     shouldAutoFocusReplyInThread = false
                                     selectedThreadItem = referencedItem.threadNavigationItem
                                 },
-                                onReplyTap: {
-                                    shouldAutoFocusReplyInThread = true
-                                    selectedThreadItem = item.threadNavigationItem
-                                },
                                 onMuteConversation: { conversationID in
                                     viewModel.muteConversation(conversationID)
                                 }
@@ -184,10 +180,6 @@ struct SearchView: View {
                             onReferencedEventTap: { referencedItem in
                                 shouldAutoFocusReplyInThread = false
                                 selectedThreadItem = referencedItem.threadNavigationItem
-                            },
-                            onReplyTap: {
-                                shouldAutoFocusReplyInThread = true
-                                selectedThreadItem = item.threadNavigationItem
                             },
                             onMuteConversation: { conversationID in
                                 viewModel.muteConversation(conversationID)

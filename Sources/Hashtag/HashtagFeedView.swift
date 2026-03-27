@@ -123,10 +123,6 @@ struct HashtagFeedView: View {
                         onReferencedEventTap: { referencedItem in
                             shouldAutoFocusReplyInThread = false
                             selectedThreadItem = referencedItem.threadNavigationItem
-                        },
-                        onReplyTap: {
-                            shouldAutoFocusReplyInThread = true
-                            selectedThreadItem = item.threadNavigationItem
                         }
                     )
                     .listRowInsets(

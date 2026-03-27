@@ -123,6 +123,31 @@ final class AppComposeSheetCoordinator: ObservableObject {
         )
     }
 
+    func presentReply(
+        to event: NostrEvent,
+        displayNameHint: String? = nil,
+        handleHint: String? = nil,
+        avatarURLHint: URL? = nil
+    ) {
+        draft = AppComposeSheetDraft(
+            replyTargetEvent: event,
+            replyTargetDisplayNameHint: displayNameHint,
+            replyTargetHandleHint: handleHint,
+            replyTargetAvatarURLHint: avatarURLHint
+        )
+    }
+
+    func presentQuote(_ quoteDraft: ReshareQuoteDraft) {
+        draft = AppComposeSheetDraft(
+            initialText: quoteDraft.initialText,
+            initialAdditionalTags: quoteDraft.additionalTags,
+            quotedEvent: quoteDraft.quotedEvent,
+            quotedDisplayNameHint: quoteDraft.quotedDisplayNameHint,
+            quotedHandleHint: quoteDraft.quotedHandleHint,
+            quotedAvatarURLHint: quoteDraft.quotedAvatarURLHint
+        )
+    }
+
     func presentSharedMedia(attachments: [SharedComposeAttachment]) {
         draft = AppComposeSheetDraft(
             initialSharedAttachments: attachments
@@ -141,6 +166,9 @@ struct AppComposeSheetDraft: Identifiable {
     var initialUploadedAttachments: [ComposeMediaAttachment] = []
     var initialSharedAttachments: [SharedComposeAttachment] = []
     var replyTargetEvent: NostrEvent? = nil
+    var replyTargetDisplayNameHint: String? = nil
+    var replyTargetHandleHint: String? = nil
+    var replyTargetAvatarURLHint: URL? = nil
     var quotedEvent: NostrEvent? = nil
     var quotedDisplayNameHint: String? = nil
     var quotedHandleHint: String? = nil

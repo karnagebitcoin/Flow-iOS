@@ -190,8 +190,9 @@ struct ComposeFloatingActionButton: View {
 struct ComposeNoteSheet: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.colorScheme) private var colorScheme
+    @EnvironmentObject private var appSettings: AppSettingsStore
     @EnvironmentObject private var toastCenter: AppToastCenter
-    @FocusState private var isEditorFocused: Bool
+    @State private var isEditorFocused = false
     @StateObject private var viewModel = ComposeNoteViewModel()
     @StateObject private var speechTranscriber = ComposeSpeechTranscriber()
     @State private var selectedMediaItems: [PhotosPickerItem] = []
@@ -205,6 +206,9 @@ struct ComposeNoteSheet: View {
     @State private var profileHandle = "@account"
     @State private var profileAvatarURL: URL?
     @State private var profileFallbackSymbol = "A"
+    @State private var replyTargetDisplayName: String?
+    @State private var replyTargetHandle: String?
+    @State private var replyTargetAvatarURL: URL?
     @State private var quotedDisplayName: String?
     @State private var quotedHandle: String?
     @State private var quotedAvatarURL: URL?
@@ -224,6 +228,9 @@ struct ComposeNoteSheet: View {
     var initialUploadedAttachments: [ComposeMediaAttachment] = []
     var initialSharedAttachments: [SharedComposeAttachment] = []
     var replyTargetEvent: NostrEvent? = nil
+    var replyTargetDisplayNameHint: String? = nil
+    var replyTargetHandleHint: String? = nil
+    var replyTargetAvatarURLHint: URL? = nil
     var quotedEvent: NostrEvent? = nil
     var quotedDisplayNameHint: String? = nil
     var quotedHandleHint: String? = nil
@@ -240,7 +247,7 @@ struct ComposeNoteSheet: View {
                 }
             }
             .background(isQuoteComposer ? Color(.systemBackground) : Color(.systemGroupedBackground))
-            .navigationTitle(isQuoteComposer ? "" : "Compose note")
+            .navigationTitle(composerNavigationTitle)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 if !isQuoteComposer {
@@ -250,30 +257,9 @@ struct ComposeNoteSheet: View {
                         }
                     }
 
-                    ToolbarItem(placement: .confirmationAction) {
-                        Button {
-                            Task {
-                                await publish()
-                            }
-                        } label: {
-                            Group {
-                                if viewModel.isPublishing {
-                                    ProgressView()
-                                        .controlSize(.small)
-                                        .tint(.white)
-                                } else {
-                                    Text("Post")
-                                }
-                            }
-                            .font(.subheadline.weight(.semibold))
-                            .foregroundStyle(.white)
-                            .padding(.horizontal, 16)
-                            .padding(.vertical, 8)
-                            .background(Color.accentColor, in: Capsule())
-                        }
-                        .buttonStyle(.plain)
-                        .disabled(!canPublish)
-                        .opacity(canPublish ? 1 : 0.45)
+                    ToolbarItemGroup(placement: .topBarTrailing) {
+                        composeToolbarAvatar
+                        publishToolbarButton
                     }
                 }
             }
@@ -287,6 +273,7 @@ struct ComposeNoteSheet: View {
             await applyInitialSharedAttachmentsIfNeeded()
             isEditorFocused = true
             await refreshComposeAccountSummary()
+            await refreshReplyTargetAuthorSummaryIfNeeded()
             await refreshQuotedAuthorSummaryIfNeeded()
         }
         .onDisappear {
@@ -383,15 +370,70 @@ struct ComposeNoteSheet: View {
         quotedEvent != nil
     }
 
+    private var isReplyComposer: Bool {
+        replyTargetEvent != nil
+    }
+
+    private var composerNavigationTitle: String {
+        if isQuoteComposer {
+            return ""
+        }
+        if isReplyComposer {
+            return "Reply"
+        }
+        return "Compose note"
+    }
+
+    private var publishButtonTitle: String {
+        isReplyComposer ? "Reply" : "Post"
+    }
+
     private var standardComposerLayout: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
-                accountSummary
+                if isReplyComposer {
+                    replyTargetPreviewCard
+                }
                 composeCard
                 statusSection
             }
             .padding(16)
         }
+    }
+
+    private var publishToolbarButton: some View {
+        Button {
+            Task {
+                await publish()
+            }
+        } label: {
+            Group {
+                if viewModel.isPublishing {
+                    ProgressView()
+                        .controlSize(.small)
+                        .tint(.white)
+                } else {
+                    Text(publishButtonTitle)
+                }
+            }
+            .font(.subheadline.weight(.semibold))
+            .foregroundStyle(.white)
+            .padding(.horizontal, 16)
+            .padding(.vertical, 8)
+            .background(appSettings.primaryColor, in: Capsule())
+        }
+        .buttonStyle(.plain)
+        .disabled(!canPublish)
+        .opacity(canPublish ? 1 : 0.45)
+    }
+
+    private var composeToolbarAvatar: some View {
+        composeAvatar(size: 34)
+            .overlay {
+                Circle()
+                    .stroke(Color(.separator).opacity(0.22), lineWidth: 0.8)
+            }
+            .accessibilityLabel("\(isReplyComposer ? "Replying" : "Posting") as \(profileDisplayName)")
     }
 
     private var quoteComposerLayout: some View {
@@ -446,13 +488,11 @@ struct ComposeNoteSheet: View {
                         .padding(.horizontal, 4)
                 }
 
-                TextEditor(text: $viewModel.text)
-                    .focused($isEditorFocused)
-                    .font(.body)
+                composeTextView(horizontalPadding: 0, verticalPadding: 0)
                     .frame(minHeight: 74)
-                    .scrollContentBackground(.hidden)
             }
 
+            emojiSuggestionRow
             quoteActionRow
 
             if !mediaAttachments.isEmpty {
@@ -528,7 +568,7 @@ struct ComposeNoteSheet: View {
     }
 
     private var quoteBottomBar: some View {
-        let postBackground = Color.accentColor
+        let postBackground = appSettings.primaryColor
         let postForeground = Color.white
 
         return HStack(spacing: 12) {
@@ -573,48 +613,22 @@ struct ComposeNoteSheet: View {
         .background(Color(.systemBackground))
     }
 
-    private var accountSummary: some View {
-        HStack(spacing: 12) {
-            composeAvatar(size: 44)
-
-            VStack(alignment: .leading, spacing: 2) {
-                Text(profileDisplayName)
-                    .font(.headline)
-                    .lineLimit(1)
-                    .truncationMode(.tail)
-
-                Text(profileHandle)
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-                    .truncationMode(.tail)
-            }
-
-            Spacer(minLength: 0)
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(16)
-        .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 20, style: .continuous))
-    }
-
     private var composeCard: some View {
         VStack(alignment: .leading, spacing: 12) {
             ZStack(alignment: .topLeading) {
                 if viewModel.text.isEmpty {
-                    Text("What do you want to share?")
+                    Text(isReplyComposer ? "Post your reply" : "What do you want to share?")
                         .foregroundStyle(.secondary)
                         .padding(.horizontal, 16)
                         .padding(.vertical, 16)
                 }
 
-                TextEditor(text: $viewModel.text)
-                    .focused($isEditorFocused)
+                composeTextView(horizontalPadding: 8, verticalPadding: 8)
                     .frame(minHeight: 180)
-                    .scrollContentBackground(.hidden)
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 8)
             }
             .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+
+            emojiSuggestionRow
 
             if !mediaAttachments.isEmpty {
                 mediaAttachmentPreviewList
@@ -755,6 +769,101 @@ struct ComposeNoteSheet: View {
         }
     }
 
+    @ViewBuilder
+    private func composeTextView(horizontalPadding: CGFloat, verticalPadding: CGFloat) -> some View {
+        ComposeMultilineTextView(
+            text: $viewModel.text,
+            isFocused: $isEditorFocused
+        )
+        .padding(.horizontal, horizontalPadding)
+        .padding(.vertical, verticalPadding)
+    }
+
+    @ViewBuilder
+    private var emojiSuggestionRow: some View {
+        if !emojiSuggestions.isEmpty {
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 8) {
+                    ForEach(emojiSuggestions) { suggestion in
+                        Button {
+                            applyEmojiSuggestion(suggestion)
+                        } label: {
+                            HStack(spacing: 8) {
+                                Text(suggestion.emoji)
+                                    .font(.system(size: 20))
+
+                                Text(suggestion.label)
+                                    .font(.caption.weight(.semibold))
+                            }
+                            .foregroundStyle(suggestionChipForegroundColor)
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 8)
+                            .background(
+                                suggestionChipBackgroundColor,
+                                in: Capsule()
+                            )
+                            .overlay(
+                                Capsule()
+                                    .stroke(suggestionChipBorderColor, lineWidth: 1)
+                            )
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+            }
+            .transition(.opacity)
+        }
+    }
+
+    private var emojiSuggestions: [ComposeEmojiSuggestion] {
+        guard let token = normalizedEmojiSuggestionToken else { return [] }
+        return Array(ComposeEmojiSuggestion.defaultSuggestions.filter { $0.matches(token) }.prefix(5))
+    }
+
+    private var normalizedEmojiSuggestionToken: String? {
+        let trailingToken = viewModel.text.split(whereSeparator: \.isWhitespace).last.map(String.init) ?? ""
+        let normalized = trailingToken
+            .trimmingCharacters(in: .punctuationCharacters.union(.symbols))
+            .lowercased()
+
+        guard normalized.count >= 2 else { return nil }
+        return normalized
+    }
+
+    private var suggestionChipBackgroundColor: Color {
+        colorScheme == .dark ? Color.white.opacity(0.08) : Color.black.opacity(0.05)
+    }
+
+    private var suggestionChipBorderColor: Color {
+        colorScheme == .dark ? Color.white.opacity(0.12) : Color.black.opacity(0.08)
+    }
+
+    private var suggestionChipForegroundColor: Color {
+        colorScheme == .dark ? .white : Color.black.opacity(0.9)
+    }
+
+    private func applyEmojiSuggestion(_ suggestion: ComposeEmojiSuggestion) {
+        viewModel.text = replacingTrailingToken(in: viewModel.text, with: suggestion.emoji)
+        isEditorFocused = true
+    }
+
+    private func replacingTrailingToken(in text: String, with replacement: String) -> String {
+        guard !text.isEmpty else { return replacement + " " }
+
+        var suffixStart = text.endIndex
+        while suffixStart > text.startIndex && text[text.index(before: suffixStart)].isWhitespace {
+            suffixStart = text.index(before: suffixStart)
+        }
+
+        var tokenStart = suffixStart
+        while tokenStart > text.startIndex && !text[text.index(before: tokenStart)].isWhitespace {
+            tokenStart = text.index(before: tokenStart)
+        }
+
+        let prefix = text[..<tokenStart]
+        return String(prefix) + replacement + " "
+    }
+
     private var canPublish: Bool {
         (!viewModel.trimmedText.isEmpty || !mediaAttachments.isEmpty || quotedEvent != nil)
         && currentNsec != nil
@@ -811,6 +920,46 @@ struct ComposeNoteSheet: View {
         }
     }
 
+    private var replyTargetAvatarFallback: some View {
+        ZStack {
+            Circle().fill(Color(.tertiarySystemFill))
+            Text(String(replyTargetDisplayNameResolved.prefix(1)).uppercased())
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    private var renderedReplyTargetEvent: NostrEvent? {
+        guard let replyTargetEvent else { return nil }
+        return Self.renderEventForQuotePreview(replyTargetEvent)
+    }
+
+    private var replyTargetDisplayNameResolved: String {
+        if let replyTargetDisplayName {
+            let trimmed = replyTargetDisplayName.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !trimmed.isEmpty {
+                return trimmed
+            }
+        }
+        if let event = renderedReplyTargetEvent {
+            return String(event.pubkey.prefix(8))
+        }
+        return "Reply target"
+    }
+
+    private var replyTargetHandleResolved: String {
+        if let replyTargetHandle {
+            let trimmed = replyTargetHandle.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !trimmed.isEmpty {
+                return trimmed.hasPrefix("@") ? trimmed : "@\(trimmed)"
+            }
+        }
+        if let event = renderedReplyTargetEvent {
+            return "@\(String(event.pubkey.prefix(8)).lowercased())"
+        }
+        return "@unknown"
+    }
+
     private var quotedDisplayNameResolved: String {
         if let quotedDisplayName {
             let trimmed = quotedDisplayName.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -842,67 +991,157 @@ struct ComposeNoteSheet: View {
         return Self.renderEventForQuotePreview(quotedEvent)
     }
 
+    private var replyTargetPreviewText: String {
+        guard let event = renderedReplyTargetEvent else { return "" }
+        return Self.previewText(for: event)
+    }
+
     private var quotedPreviewText: String {
         guard let event = renderedQuotedEvent else { return "" }
+        return Self.previewText(for: event, maximumLength: 220)
+    }
 
-        let tokens = NoteContentParser.tokenize(event: event)
-        var fragments: [String] = []
-        for token in tokens {
-            switch token.type {
-            case .text:
-                let trimmed = token.value.trimmingCharacters(in: .whitespacesAndNewlines)
-                if !trimmed.isEmpty {
-                    fragments.append(trimmed)
-                }
-            default:
-                continue
-            }
-        }
-
-        let combined = fragments.joined(separator: " ")
-            .replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-        if !combined.isEmpty {
-            return String(combined.prefix(220))
-        }
-
-        let fallback = event.content.trimmingCharacters(in: .whitespacesAndNewlines)
-        if !fallback.isEmpty {
-            return String(fallback.prefix(220))
-        }
-        return "Quoted note"
+    private var replyTargetPreviewImageURLs: [URL] {
+        guard let event = renderedReplyTargetEvent else { return [] }
+        return Self.previewImageURLs(for: event)
     }
 
     private var quotedPreviewImageURLs: [URL] {
         guard let event = renderedQuotedEvent else { return [] }
+        return Self.previewImageURLs(for: event)
+    }
 
-        let tokens = NoteContentParser.tokenize(event: event)
-        var urls: [URL] = []
-        var seen = Set<String>()
-        for token in tokens where token.type == .image {
-            guard let url = URL(string: token.value), url.scheme != nil else { continue }
-            let normalized = url.absoluteString.lowercased()
-            guard seen.insert(normalized).inserted else { continue }
-            urls.append(url)
-            if urls.count == 2 {
-                break
-            }
-        }
-        return urls
+    private var replyTargetHasVideo: Bool {
+        guard let event = renderedReplyTargetEvent else { return false }
+        return Self.previewHasVideo(for: event)
+    }
+
+    private var replyTargetHasAudio: Bool {
+        guard let event = renderedReplyTargetEvent else { return false }
+        return Self.previewHasAudio(for: event)
     }
 
     private var hasQuotedVideo: Bool {
         guard let event = renderedQuotedEvent else { return false }
-        return NoteContentParser
-            .tokenize(event: event)
-            .contains(where: { $0.type == .video })
+        return Self.previewHasVideo(for: event)
     }
 
     private var hasQuotedAudio: Bool {
         guard let event = renderedQuotedEvent else { return false }
-        return NoteContentParser
-            .tokenize(event: event)
-            .contains(where: { $0.type == .audio })
+        return Self.previewHasAudio(for: event)
+    }
+
+    private var replyTargetPreviewCard: some View {
+        Group {
+            if let event = renderedReplyTargetEvent {
+                VStack(alignment: .leading, spacing: 10) {
+                    Text("Replying to")
+                        .font(.footnote.weight(.semibold))
+                        .foregroundStyle(.secondary)
+
+                    HStack(alignment: .top, spacing: 10) {
+                        Group {
+                            if let replyTargetAvatarURL {
+                                AsyncImage(url: replyTargetAvatarURL) { phase in
+                                    switch phase {
+                                    case .success(let image):
+                                        image
+                                            .resizable()
+                                            .scaledToFill()
+                                    default:
+                                        replyTargetAvatarFallback
+                                    }
+                                }
+                            } else {
+                                replyTargetAvatarFallback
+                            }
+                        }
+                        .frame(width: 30, height: 30)
+                        .clipShape(Circle())
+
+                        VStack(alignment: .leading, spacing: 8) {
+                            HStack(alignment: .firstTextBaseline, spacing: 6) {
+                                Text(replyTargetDisplayNameResolved)
+                                    .font(.subheadline.weight(.semibold))
+                                    .lineLimit(1)
+
+                                Text(replyTargetHandleResolved)
+                                    .font(.subheadline)
+                                    .foregroundStyle(.secondary)
+                                    .lineLimit(1)
+
+                                Spacer(minLength: 0)
+
+                                Text(RelativeTimestampFormatter.shortString(from: event.createdAtDate))
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                                    .lineLimit(1)
+                            }
+
+                            Text(replyTargetPreviewText)
+                                .font(.body)
+                                .foregroundStyle(.primary)
+                                .multilineTextAlignment(.leading)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+
+                            if !replyTargetPreviewImageURLs.isEmpty {
+                                HStack(spacing: 8) {
+                                    ForEach(Array(replyTargetPreviewImageURLs.enumerated()), id: \.offset) { _, url in
+                                        AsyncImage(url: url) { phase in
+                                            switch phase {
+                                            case .success(let image):
+                                                image
+                                                    .resizable()
+                                                    .scaledToFill()
+                                            case .failure:
+                                                Color(.tertiarySystemFill)
+                                                    .overlay {
+                                                        Image(systemName: "photo")
+                                                            .foregroundStyle(.secondary)
+                                                    }
+                                            case .empty:
+                                                ProgressView()
+                                                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                                                    .background(Color(.tertiarySystemFill))
+                                            @unknown default:
+                                                Color(.tertiarySystemFill)
+                                            }
+                                        }
+                                        .frame(height: 170)
+                                        .frame(maxWidth: .infinity)
+                                        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                                    }
+                                }
+                            } else if replyTargetHasVideo || replyTargetHasAudio {
+                                HStack(spacing: 8) {
+                                    Image(systemName: replyTargetHasVideo ? "video" : "waveform")
+                                    Text(replyTargetHasVideo ? "Note includes video" : "Note includes audio")
+                                        .lineLimit(1)
+                                    Spacer(minLength: 0)
+                                }
+                                .font(.footnote)
+                                .foregroundStyle(.secondary)
+                                .padding(.horizontal, 10)
+                                .padding(.vertical, 8)
+                                .background(
+                                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                                        .fill(Color(.tertiarySystemFill))
+                                )
+                            }
+                        }
+                    }
+                }
+                .padding(12)
+                .background(
+                    RoundedRectangle(cornerRadius: 18, style: .continuous)
+                        .fill(Color(.secondarySystemBackground))
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 18, style: .continuous)
+                        .stroke(Color(.separator).opacity(0.3), lineWidth: 0.8)
+                )
+            }
+        }
     }
 
     private var quotePreviewCard: some View {
@@ -1122,6 +1361,78 @@ struct ComposeNoteSheet: View {
             profileAvatarURL = url
         } else {
             profileAvatarURL = nil
+        }
+    }
+
+    private func refreshReplyTargetAuthorSummaryIfNeeded() async {
+        guard let replyTargetEvent else { return }
+
+        if let replyTargetDisplayNameHint {
+            let trimmed = replyTargetDisplayNameHint.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !trimmed.isEmpty {
+                replyTargetDisplayName = trimmed
+            }
+        }
+
+        if let replyTargetHandleHint {
+            let trimmed = replyTargetHandleHint.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !trimmed.isEmpty {
+                replyTargetHandle = trimmed.hasPrefix("@") ? trimmed : "@\(trimmed)"
+            }
+        }
+
+        if let replyTargetAvatarURLHint {
+            replyTargetAvatarURL = replyTargetAvatarURLHint
+        }
+
+        let normalizedPubkey = replyTargetEvent.pubkey.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !normalizedPubkey.isEmpty else { return }
+
+        if let cachedProfile = await profileService.cachedProfile(pubkey: normalizedPubkey) {
+            applyReplyTargetProfile(cachedProfile, pubkey: normalizedPubkey)
+        }
+
+        let readRelayURLs = RelaySettingsStore.shared.readRelayURLs
+        let fallbackRelayURLs = RelaySettingsStore.defaultReadRelayURLs.compactMap(URL.init(string:))
+        let relayTargets = readRelayURLs.isEmpty ? fallbackRelayURLs : readRelayURLs
+        guard !relayTargets.isEmpty else { return }
+
+        if let fetchedProfile = await profileService.fetchProfile(relayURLs: relayTargets, pubkey: normalizedPubkey) {
+            applyReplyTargetProfile(fetchedProfile, pubkey: normalizedPubkey)
+        } else {
+            if replyTargetDisplayName == nil {
+                replyTargetDisplayName = String(normalizedPubkey.prefix(8))
+            }
+            if replyTargetHandle == nil {
+                replyTargetHandle = "@\(String(normalizedPubkey.prefix(8)).lowercased())"
+            }
+        }
+    }
+
+    private func applyReplyTargetProfile(_ profile: NostrProfile, pubkey: String) {
+        if let displayName = profile.displayName?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !displayName.isEmpty {
+            replyTargetDisplayName = displayName
+        } else if let name = profile.name?.trimmingCharacters(in: .whitespacesAndNewlines), !name.isEmpty {
+            replyTargetDisplayName = name
+        } else if replyTargetDisplayName == nil {
+            replyTargetDisplayName = String(pubkey.prefix(8))
+        }
+
+        let handleSeed = (profile.name ?? profile.displayName ?? String(pubkey.prefix(8)))
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .replacingOccurrences(of: " ", with: "")
+            .lowercased()
+        if !handleSeed.isEmpty {
+            replyTargetHandle = "@\(handleSeed)"
+        } else if replyTargetHandle == nil {
+            replyTargetHandle = "@\(String(pubkey.prefix(8)).lowercased())"
+        }
+
+        if let picture = profile.picture?.trimmingCharacters(in: .whitespacesAndNewlines),
+           let url = URL(string: picture),
+           url.scheme != nil {
+            replyTargetAvatarURL = url
         }
     }
 
@@ -1689,6 +2000,64 @@ struct ComposeNoteSheet: View {
         return embedded
     }
 
+    private static func previewText(for event: NostrEvent, maximumLength: Int? = nil) -> String {
+        let tokens = NoteContentParser.tokenize(event: event)
+        var fragments: [String] = []
+        for token in tokens {
+            switch token.type {
+            case .text:
+                let trimmed = token.value.trimmingCharacters(in: .whitespacesAndNewlines)
+                if !trimmed.isEmpty {
+                    fragments.append(trimmed)
+                }
+            default:
+                continue
+            }
+        }
+
+        let combined = fragments.joined(separator: " ")
+            .replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let previewSource = combined.isEmpty
+            ? event.content.trimmingCharacters(in: .whitespacesAndNewlines)
+            : combined
+        guard !previewSource.isEmpty else {
+            return "Note"
+        }
+        guard let maximumLength else {
+            return previewSource
+        }
+        return String(previewSource.prefix(maximumLength))
+    }
+
+    private static func previewImageURLs(for event: NostrEvent, limit: Int = 2) -> [URL] {
+        let tokens = NoteContentParser.tokenize(event: event)
+        var urls: [URL] = []
+        var seen = Set<String>()
+        for token in tokens where token.type == .image {
+            guard let url = URL(string: token.value), url.scheme != nil else { continue }
+            let normalized = url.absoluteString.lowercased()
+            guard seen.insert(normalized).inserted else { continue }
+            urls.append(url)
+            if urls.count == limit {
+                break
+            }
+        }
+        return urls
+    }
+
+    private static func previewHasVideo(for event: NostrEvent) -> Bool {
+        NoteContentParser
+            .tokenize(event: event)
+            .contains(where: { $0.type == .video })
+    }
+
+    private static func previewHasAudio(for event: NostrEvent) -> Bool {
+        NoteContentParser
+            .tokenize(event: event)
+            .contains(where: { $0.type == .audio })
+    }
+
     private static func decodeEmbeddedEvent(from content: String) -> NostrEvent? {
         let trimmed = content.trimmingCharacters(in: .whitespacesAndNewlines)
         guard trimmed.hasPrefix("{"), trimmed.hasSuffix("}") else { return nil }
@@ -1881,6 +2250,107 @@ private struct CameraCapturePermissionSheet: View {
             return "To capture photos or videos for your note, \(AppBrand.displayName) needs camera access. Microphone access is used for video capture with sound. You can change this any time later in app settings."
         }
         return "To capture photos or videos for your note, \(AppBrand.displayName) needs access to your camera and microphone. You can change this any time later in app settings."
+    }
+}
+
+private struct ComposeEmojiSuggestion: Identifiable, Hashable {
+    let emoji: String
+    let label: String
+    let keywords: [String]
+
+    var id: String { "\(emoji)-\(label)" }
+
+    func matches(_ token: String) -> Bool {
+        keywords.contains { keyword in
+            keyword.hasPrefix(token) || token.hasPrefix(keyword)
+        }
+    }
+
+    static let defaultSuggestions: [ComposeEmojiSuggestion] = [
+        ComposeEmojiSuggestion(emoji: "👍", label: "OK", keywords: ["ok", "okay", "yes", "sure"]),
+        ComposeEmojiSuggestion(emoji: "✅", label: "Check", keywords: ["check", "done", "complete", "confirm"]),
+        ComposeEmojiSuggestion(emoji: "🔥", label: "Fire", keywords: ["fire", "lit", "hot"]),
+        ComposeEmojiSuggestion(emoji: "❤️", label: "Love", keywords: ["love", "heart", "like"]),
+        ComposeEmojiSuggestion(emoji: "😂", label: "Laugh", keywords: ["lol", "haha", "laugh", "funny"]),
+        ComposeEmojiSuggestion(emoji: "🙏", label: "Thanks", keywords: ["thanks", "thank", "grateful", "pray"]),
+        ComposeEmojiSuggestion(emoji: "🎉", label: "Celebrate", keywords: ["party", "celebrate", "celebration", "yay"]),
+        ComposeEmojiSuggestion(emoji: "👀", label: "Look", keywords: ["look", "watch", "see", "eyes"]),
+        ComposeEmojiSuggestion(emoji: "🤝", label: "Deal", keywords: ["deal", "agree", "handshake"]),
+        ComposeEmojiSuggestion(emoji: "🚀", label: "Launch", keywords: ["launch", "ship", "rocket", "go"]),
+        ComposeEmojiSuggestion(emoji: "💯", label: "Hundred", keywords: ["100", "hundred", "perfect", "agree"]),
+        ComposeEmojiSuggestion(emoji: "✨", label: "Sparkles", keywords: ["sparkle", "sparkles", "magic", "shiny"])
+    ]
+}
+
+private struct ComposeMultilineTextView: UIViewRepresentable {
+    @Binding var text: String
+    @Binding var isFocused: Bool
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(text: $text, isFocused: $isFocused)
+    }
+
+    func makeUIView(context: Context) -> UITextView {
+        let textView = UITextView()
+        textView.delegate = context.coordinator
+        textView.backgroundColor = .clear
+        textView.font = .preferredFont(forTextStyle: .body)
+        textView.adjustsFontForContentSizeCategory = true
+        textView.textColor = .label
+        textView.tintColor = .label
+        textView.autocorrectionType = .yes
+        textView.spellCheckingType = .yes
+        textView.smartQuotesType = .yes
+        textView.smartDashesType = .yes
+        textView.smartInsertDeleteType = .yes
+        textView.keyboardType = .default
+        textView.returnKeyType = .default
+        textView.textContainerInset = UIEdgeInsets(top: 8, left: 4, bottom: 8, right: 4)
+        textView.textContainer.lineFragmentPadding = 0
+        textView.isScrollEnabled = true
+        textView.alwaysBounceVertical = true
+        textView.keyboardDismissMode = .interactive
+        return textView
+    }
+
+    func updateUIView(_ uiView: UITextView, context: Context) {
+        if uiView.text != text {
+            uiView.text = text
+            uiView.selectedRange = NSRange(location: uiView.text.utf16.count, length: 0)
+        }
+
+        if isFocused {
+            guard uiView.window != nil, !uiView.isFirstResponder else { return }
+            DispatchQueue.main.async {
+                if uiView.window != nil && !uiView.isFirstResponder {
+                    uiView.becomeFirstResponder()
+                }
+            }
+        } else if uiView.isFirstResponder {
+            uiView.resignFirstResponder()
+        }
+    }
+
+    final class Coordinator: NSObject, UITextViewDelegate {
+        @Binding private var text: String
+        @Binding private var isFocused: Bool
+
+        init(text: Binding<String>, isFocused: Binding<Bool>) {
+            _text = text
+            _isFocused = isFocused
+        }
+
+        func textViewDidChange(_ textView: UITextView) {
+            text = textView.text
+        }
+
+        func textViewDidBeginEditing(_ textView: UITextView) {
+            isFocused = true
+        }
+
+        func textViewDidEndEditing(_ textView: UITextView) {
+            isFocused = false
+        }
     }
 }
 

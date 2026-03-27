@@ -232,6 +232,8 @@ struct SignupOnboardingView: View {
                         }
 
                         TextEditor(text: $about)
+                            .textInputAutocapitalization(.sentences)
+                            .autocorrectionDisabled(false)
                     }
                     .font(.body)
                     .frame(minHeight: 124)

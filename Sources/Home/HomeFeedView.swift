@@ -2,8 +2,10 @@ import SwiftUI
 
 struct HomeFeedView: View {
     private static let feedTopAnchorID = "home-feed-top-anchor"
+    private static let feedScrollCoordinateSpace = "home-feed-scroll"
     private static let feedHorizontalInset: CGFloat = 14
     private static let bottomScrollClearance: CGFloat = 110
+    private static let autoMergeTopThreshold: CGFloat = 56
 
     @EnvironmentObject private var auth: AuthManager
     @EnvironmentObject private var appSettings: AppSettingsStore
@@ -29,6 +31,7 @@ struct HomeFeedView: View {
     @State private var topNavAvatarURL: URL?
     @State private var topNavAvatarImage: UIImage?
     @State private var shouldAutoFocusReplyInThread = false
+    @State private var feedTopOffset: CGFloat = 0
 
     var body: some View {
         let _ = muteStore.filterRevision
@@ -70,6 +73,7 @@ struct HomeFeedView: View {
                             .listRowSeparator(.hidden)
                             .listRowBackground(Color.clear)
                             .id(Self.feedTopAnchorID)
+                            .background(feedTopOffsetReader)
 
                             if viewModel.isShowingLoadingPlaceholder {
                                 ForEach(0..<6, id: \.self) { _ in
@@ -141,10 +145,6 @@ struct HomeFeedView: View {
                                             shouldAutoFocusReplyInThread = false
                                             selectedThreadItem = referencedItem.threadNavigationItem
                                         },
-                                        onReplyTap: {
-                                            shouldAutoFocusReplyInThread = true
-                                            selectedThreadItem = item.threadNavigationItem
-                                        },
                                         onMuteConversation: { conversationID in
                                             viewModel.muteConversation(conversationID)
                                         }
@@ -196,6 +196,7 @@ struct HomeFeedView: View {
                             }
                         }
                         .listStyle(.plain)
+                        .coordinateSpace(name: Self.feedScrollCoordinateSpace)
                         .simultaneousGesture(
                             DragGesture(minimumDistance: 10, coordinateSpace: .local)
                                 .onChanged { value in
@@ -203,7 +204,7 @@ struct HomeFeedView: View {
                                 }
                         )
                         .overlay(alignment: .top) {
-                            if viewModel.visibleBufferedNewItemsCount > 0 {
+                            if viewModel.visibleBufferedNewItemsCount > 0, !isNearFeedTop {
                                 newNotesPill {
                                     withAnimation(.easeInOut(duration: 0.2)) {
                                         viewModel.showBufferedNewItems()
@@ -213,6 +214,13 @@ struct HomeFeedView: View {
                                 .padding(.top, isTopNavigationVisible ? 8 : 4)
                                 .transition(.move(edge: .top).combined(with: .opacity))
                             }
+                        }
+                        .onPreferenceChange(HomeFeedTopOffsetPreferenceKey.self) { newValue in
+                            feedTopOffset = newValue
+                            autoShowBufferedItemsIfNeeded()
+                        }
+                        .onChange(of: viewModel.visibleBufferedNewItemsCount) { _, _ in
+                            autoShowBufferedItemsIfNeeded()
                         }
                         .refreshable {
                             if viewModel.visibleBufferedNewItemsCount > 0 {
@@ -934,15 +942,16 @@ struct HomeFeedView: View {
 
     private func newNotesPill(action: @escaping () -> Void) -> some View {
         Button(action: action) {
-            HStack(spacing: 4) {
-                Image(systemName: "plus")
-                    .font(.caption2.weight(.bold))
+            HStack(spacing: 10) {
+                newNotesAvatarStack
+
                 Text(newNotesPillLabel)
-                    .font(.caption2.weight(.semibold))
+                    .font(.caption.weight(.semibold))
             }
             .foregroundStyle(.primary)
-            .padding(.horizontal, 10)
-            .padding(.vertical, 5)
+            .padding(.leading, 8)
+            .padding(.trailing, 12)
+            .padding(.vertical, 6)
             .background(
                 Capsule(style: .continuous)
                     .fill(.regularMaterial)
@@ -957,9 +966,65 @@ struct HomeFeedView: View {
         .accessibilityLabel("Show latest notes")
     }
 
+    private var newNotesAvatarStack: some View {
+        let authors = recentBufferedAuthors
+
+        return HStack(spacing: -10) {
+            ForEach(Array(authors.enumerated()), id: \.element.id) { index, item in
+                AvatarView(url: item.avatarURL, fallback: item.displayName, size: 24)
+                    .padding(2)
+                    .background(Circle().fill(Color(.systemBackground)))
+                    .overlay {
+                        Circle()
+                            .stroke(Color(.systemBackground), lineWidth: 1.2)
+                    }
+                    .zIndex(Double(authors.count - index))
+            }
+        }
+        .padding(.trailing, authors.count > 1 ? 4 : 0)
+    }
+
     private var newNotesPillLabel: String {
         let count = viewModel.visibleBufferedNewItemsCount
-        return count == 1 ? "1 new note" : "\(count) new notes"
+        return count == 1 ? "1 note" : "\(count) notes"
+    }
+
+    private var recentBufferedAuthors: [FeedItem] {
+        var seenAuthors = Set<String>()
+        var authors: [FeedItem] = []
+
+        for item in viewModel.visibleBufferedNewItems {
+            let authorKey = item.displayAuthorPubkey.lowercased()
+            guard seenAuthors.insert(authorKey).inserted else { continue }
+            authors.append(item)
+            if authors.count == 3 {
+                break
+            }
+        }
+
+        return authors
+    }
+
+    private var isNearFeedTop: Bool {
+        feedTopOffset >= -Self.autoMergeTopThreshold
+    }
+
+    private var feedTopOffsetReader: some View {
+        GeometryReader { proxy in
+            Color.clear
+                .preference(
+                    key: HomeFeedTopOffsetPreferenceKey.self,
+                    value: proxy.frame(in: .named(Self.feedScrollCoordinateSpace)).minY
+                )
+        }
+    }
+
+    private func autoShowBufferedItemsIfNeeded() {
+        guard isNearFeedTop else { return }
+        guard viewModel.visibleBufferedNewItemsCount > 0 else { return }
+        withAnimation(.easeInOut(duration: 0.2)) {
+            viewModel.showBufferedNewItems()
+        }
     }
 
     private var feedSourcePickerSheet: some View {
@@ -1004,6 +1069,14 @@ struct HomeFeedView: View {
         }
         .presentationDetents([.medium, .large])
         .presentationDragIndicator(.visible)
+    }
+}
+
+private struct HomeFeedTopOffsetPreferenceKey: PreferenceKey {
+    static var defaultValue: CGFloat = 0
+
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = nextValue()
     }
 }
 

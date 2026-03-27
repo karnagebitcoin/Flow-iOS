@@ -35,6 +35,7 @@ struct FeedRowView: View {
 
     @State private var isShowingReshareSheet = false
     @State private var quoteDraft: ReshareQuoteDraft?
+    @State private var isShowingReplyComposer = false
     @State private var isPublishingRepost = false
     @State private var repostStatusMessage: String?
     @State private var repostStatusIsError = false
@@ -113,20 +114,11 @@ struct FeedRowView: View {
 
                     if showReactions {
                         HStack(spacing: 14) {
-                            ReactionButton(
-                                isLiked: isLikedByCurrentUser,
-                                count: visibleReactionCount
-                            ) {
-                                Task {
-                                    await handleReactionTap()
-                                }
-                            }
-
                             Button {
                                 if let onReplyTap {
                                     onReplyTap()
                                 } else {
-                                    onOpenThread?()
+                                    isShowingReplyComposer = true
                                 }
                             } label: {
                                 HStack(spacing: 4) {
@@ -140,6 +132,7 @@ struct FeedRowView: View {
                             }
                             .buttonStyle(.plain)
                             .foregroundStyle(.secondary)
+                            .accessibilityLabel("Reply")
 
                             Button {
                                 repostStatusMessage = nil
@@ -152,6 +145,15 @@ struct FeedRowView: View {
                             .buttonStyle(.plain)
                             .foregroundStyle(.secondary)
                             .accessibilityLabel("Re-share")
+
+                            ReactionButton(
+                                isLiked: isLikedByCurrentUser,
+                                count: visibleReactionCount
+                            ) {
+                                Task {
+                                    await handleReactionTap()
+                                }
+                            }
 
                             ShareLink(item: copyableNoteLink) {
                                 Image(systemName: "paperplane")
@@ -220,6 +222,17 @@ struct FeedRowView: View {
                 quotedDisplayNameHint: draft.quotedDisplayNameHint,
                 quotedHandleHint: draft.quotedHandleHint,
                 quotedAvatarURLHint: draft.quotedAvatarURLHint
+            )
+        }
+        .sheet(isPresented: $isShowingReplyComposer) {
+            ComposeNoteSheet(
+                currentAccountPubkey: auth.currentAccount?.pubkey,
+                currentNsec: auth.currentNsec,
+                writeRelayURLs: effectiveWriteRelayURLs,
+                replyTargetEvent: item.displayEvent,
+                replyTargetDisplayNameHint: item.displayName,
+                replyTargetHandleHint: item.handle,
+                replyTargetAvatarURLHint: item.avatarURL
             )
         }
     }

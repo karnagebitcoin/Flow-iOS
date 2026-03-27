@@ -274,6 +274,10 @@ final class HomeFeedViewModel: ObservableObject {
         filterVisibleItems(bufferedNewItems).count
     }
 
+    var visibleBufferedNewItems: [FeedItem] {
+        filterVisibleItems(bufferedNewItems)
+    }
+
     var isUsingCustomFilters: Bool {
         !FeedKindFilters.isSameSelection(showKinds, FeedKindFilters.allOptionKinds) || mediaOnly
     }

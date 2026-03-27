@@ -203,7 +203,14 @@ enum NoteContentParser {
     static func njumpURL(for nostrURIOrIdentifier: String) -> URL? {
         guard let identifier = nostrIdentifier(from: nostrURIOrIdentifier) else { return nil }
         guard !identifier.isEmpty else { return nil }
-        return URL(string: "https://nlink.to/\(identifier)")
+        let shareableIdentifier: String
+        if let eventID = canonicalEventID(from: identifier),
+           let neventIdentifier = encodedNeventIdentifier(forEventID: eventID) {
+            shareableIdentifier = neventIdentifier
+        } else {
+            shareableIdentifier = identifier
+        }
+        return URL(string: "https://nlink.to/\(shareableIdentifier)")
     }
     
     static func hashtagActionURL(for tokenValue: String) -> URL? {
@@ -565,6 +572,18 @@ enum NoteContentParser {
         return decoded.map { String(format: "%02x", $0) }.joined()
     }
 
+    private static func encodedNeventIdentifier(forEventID eventID: String) -> String? {
+        guard isHex64(eventID), let eventData = dataFromHex(eventID) else { return nil }
+
+        var tlv = Data()
+        tlv.append(0x00)
+        tlv.append(UInt8(eventData.count))
+        tlv.append(eventData)
+
+        let payload = base32FromBase8Data(tlv)
+        return bech32Encode(hrp: "nevent", payload: payload)
+    }
+
     private static func dataFromBase32(_ values: [UInt8]) -> Data? {
         var accumulator: UInt32 = 0
         var bitCount = 0
@@ -587,6 +606,82 @@ enum NoteContentParser {
         return output
     }
 
+    private static func dataFromHex(_ hex: String) -> Data? {
+        guard hex.count.isMultiple(of: 2) else { return nil }
+        var data = Data(capacity: hex.count / 2)
+        var cursor = hex.startIndex
+
+        while cursor < hex.endIndex {
+            let next = hex.index(cursor, offsetBy: 2)
+            guard let byte = UInt8(hex[cursor..<next], radix: 16) else { return nil }
+            data.append(byte)
+            cursor = next
+        }
+
+        return data
+    }
+
+    private static func base32FromBase8Data(_ data: Data) -> [UInt8] {
+        var accumulator: UInt32 = 0
+        var bitCount = 0
+        var output: [UInt8] = []
+
+        for byte in data {
+            accumulator = (accumulator << 8) | UInt32(byte)
+            bitCount += 8
+
+            while bitCount >= 5 {
+                bitCount -= 5
+                output.append(UInt8((accumulator >> UInt32(bitCount)) & 0x1f))
+            }
+        }
+
+        if bitCount > 0 {
+            output.append(UInt8((accumulator << UInt32(5 - bitCount)) & 0x1f))
+        }
+
+        return output
+    }
+
+    private static func bech32Encode(hrp: String, payload: [UInt8]) -> String {
+        let checksum = bech32CreateChecksum(hrp: hrp, payload: payload)
+        let combined = payload + checksum
+        let characters = combined.map { bech32CharacterSet[Int($0)] }
+        return hrp + "1" + String(characters)
+    }
+
+    private static func bech32CreateChecksum(hrp: String, payload: [UInt8]) -> [UInt8] {
+        var values = bech32ExpandHrp(hrp)
+        values.append(contentsOf: payload)
+        values.append(contentsOf: Array(repeating: 0, count: 6))
+
+        let polymod = bech32Polymod(values) ^ 1
+        return (0..<6).map { index in
+            UInt8((polymod >> UInt32(5 * (5 - index))) & 0x1f)
+        }
+    }
+
+    private static func bech32ExpandHrp(_ hrp: String) -> [UInt8] {
+        let bytes = Array(hrp.utf8)
+        return bytes.map { $0 >> 5 } + [0] + bytes.map { $0 & 0x1f }
+    }
+
+    private static func bech32Polymod(_ values: [UInt8]) -> UInt32 {
+        let generators: [UInt32] = [0x3b6a57b2, 0x26508e6d, 0x1ea119fa, 0x3d4233dd, 0x2a1462b3]
+        var checksum: UInt32 = 1
+
+        for value in values {
+            let top = checksum >> 25
+            checksum = ((checksum & 0x1ffffff) << 5) ^ UInt32(value)
+
+            for index in 0..<5 where ((top >> UInt32(index)) & 1) != 0 {
+                checksum ^= generators[index]
+            }
+        }
+
+        return checksum
+    }
+
     private static func isHex64(_ value: String) -> Bool {
         value.range(of: "^[0-9a-f]{64}$", options: .regularExpression) != nil
     }
@@ -595,6 +690,8 @@ enum NoteContentParser {
         let characters = Array("qpzry9x8gf2tvdw0s3jn54khce6mua7l")
         return Dictionary(uniqueKeysWithValues: characters.enumerated().map { ($1, UInt8($0)) })
     }()
+
+    private static let bech32CharacterSet = Array("qpzry9x8gf2tvdw0s3jn54khce6mua7l")
 
     private static func isRenderableReference(_ value: String) -> Bool {
         guard !value.isEmpty else { return false }

@@ -7,6 +7,7 @@ struct SettingsView: View {
     @EnvironmentObject private var appSettings: AppSettingsStore
     @EnvironmentObject private var breakReminderCoordinator: BreakReminderCoordinator
     @EnvironmentObject private var relaySettings: RelaySettingsStore
+    @State private var isShowingPrimaryColorPicker = false
 
     var body: some View {
         NavigationStack {
@@ -17,7 +18,11 @@ struct SettingsView: View {
                     }
 
                     SettingsNavigationRow(title: "Appearance", systemImage: "paintbrush") {
-                        SettingsAppearanceView()
+                        SettingsAppearanceView(
+                            onOpenPrimaryColorPicker: {
+                                isShowingPrimaryColorPicker = true
+                            }
+                        )
                     }
 
                     SettingsNavigationRow(title: "Feeds", systemImage: "newspaper") {
@@ -66,6 +71,18 @@ struct SettingsView: View {
             }
             .task {
                 await appSettings.refreshNotificationAuthorizationStatus()
+            }
+            .sheet(isPresented: $isShowingPrimaryColorPicker) {
+                SettingsNativeColorPicker(
+                    title: "Primary Color",
+                    color: Binding(
+                        get: { appSettings.primaryColor },
+                        set: { appSettings.primaryColor = $0 }
+                    ),
+                    onDismiss: {
+                        isShowingPrimaryColorPicker = false
+                    }
+                )
             }
         }
     }
@@ -219,13 +236,13 @@ private struct NotificationPreferencesToggleRow: View {
 
 private struct SettingsAppearanceView: View {
     @EnvironmentObject private var appSettings: AppSettingsStore
-    @State private var isShowingPrimaryColorPicker = false
+    let onOpenPrimaryColorPicker: () -> Void
 
     var body: some View {
         Form {
             Section("Appearance") {
                 Button {
-                    isShowingPrimaryColorPicker = true
+                    onOpenPrimaryColorPicker()
                 } label: {
                     HStack(spacing: 12) {
                         Text("Primary Color")
@@ -299,18 +316,6 @@ private struct SettingsAppearanceView: View {
         }
         .navigationTitle("Appearance")
         .navigationBarTitleDisplayMode(.large)
-        .sheet(isPresented: $isShowingPrimaryColorPicker) {
-            SettingsNativeColorPicker(
-                title: "Primary Color",
-                color: Binding(
-                    get: { appSettings.primaryColor },
-                    set: { appSettings.primaryColor = $0 }
-                ),
-                onDismiss: {
-                    isShowingPrimaryColorPicker = false
-                }
-            )
-        }
     }
 
     private var notePreviewCard: some View {

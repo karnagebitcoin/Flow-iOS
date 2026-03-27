@@ -64,6 +64,8 @@ struct ProfileEditorSheet: View {
                             .padding(.top, 4)
                         TextField("Bio", text: $fields.about, axis: .vertical)
                             .lineLimit(3...6)
+                            .textInputAutocapitalization(.sentences)
+                            .autocorrectionDisabled(false)
                     }
                 }
 

@@ -12,6 +12,20 @@ private struct ReactionFloatingHeart: Identifiable, Equatable {
     let opacity: Double
 }
 
+private struct ReactionSparkleParticle: Identifiable, Equatable {
+    let id = UUID()
+    let xDrift: CGFloat
+    let yTravel: CGFloat
+    let sway: CGFloat
+    let rotation: Double
+    let startScale: CGFloat
+    let endScale: CGFloat
+    let size: CGFloat
+    let duration: Double
+    let opacity: Double
+    let blur: CGFloat
+}
+
 struct ReactionButton: View {
     @Environment(\.isEnabled) private var isEnabled
 
@@ -227,55 +241,74 @@ private struct ReactionSparkleBurstView: View {
     let trigger: Int
     let tint: Color
 
-    @State private var isAnimating = false
+    @State private var particles: [ReactionSparkleParticle] = []
 
     var body: some View {
         ZStack {
-            sparkle(angle: -120, distance: 32, rotation: -22, delay: 0)
-            sparkle(angle: -35, distance: 36, rotation: 18, delay: 0.03)
-            sparkle(angle: 36, distance: 34, rotation: -10, delay: 0.015)
-            sparkle(angle: 118, distance: 30, rotation: 22, delay: 0.045)
+            ForEach(particles) { particle in
+                ReactionSparkleParticleView(particle: particle, tint: tint)
+            }
         }
-        .frame(width: 68, height: 68)
+        .frame(width: 92, height: 92)
         .allowsHitTesting(false)
         .onChange(of: trigger) { _, _ in
-            playBurst()
+            emitBurst()
         }
-    }
-
-    private func sparkle(angle: Double, distance: CGFloat, rotation: Double, delay: Double) -> some View {
-        let xOffset = CGFloat(cos(angle * .pi / 180)) * distance
-        let yOffset = CGFloat(sin(angle * .pi / 180)) * distance
-
-        return Image(systemName: "sparkle")
-            .font(.system(size: 16, weight: .bold))
-            .foregroundStyle(tint.opacity(isAnimating ? 0.95 : 0))
-            .scaleEffect(isAnimating ? 1 : 0.25)
-            .offset(
-                x: isAnimating ? xOffset : 0,
-                y: isAnimating ? yOffset : 0
-            )
-            .rotationEffect(.degrees(isAnimating ? rotation : 0))
-            .animation(
-                .spring(response: 0.24, dampingFraction: 0.68)
-                    .delay(delay),
-                value: isAnimating
-            )
     }
 
     @MainActor
-    private func playBurst() {
-        Task {
-            isAnimating = false
-            await Task.yield()
-            withAnimation(.spring(response: 0.24, dampingFraction: 0.68)) {
-                isAnimating = true
-            }
-            try? await Task.sleep(nanoseconds: 360_000_000)
-            withAnimation(.easeOut(duration: 0.12)) {
-                isAnimating = false
+    private func emitBurst() {
+        let freshParticles = (0..<7).map { _ in
+            ReactionSparkleParticle(
+                xDrift: CGFloat.random(in: -34...34),
+                yTravel: CGFloat.random(in: 28...64),
+                sway: CGFloat.random(in: -10...10),
+                rotation: Double.random(in: -30...30),
+                startScale: CGFloat.random(in: 0.3...0.55),
+                endScale: CGFloat.random(in: 0.95...1.35),
+                size: CGFloat.random(in: 12...19),
+                duration: Double.random(in: 0.55...0.9),
+                opacity: Double.random(in: 0.65...0.96),
+                blur: CGFloat.random(in: 0.2...1.1)
+            )
+        }
+
+        particles.append(contentsOf: freshParticles)
+
+        for particle in freshParticles {
+            Task {
+                let lifetime = UInt64((particle.duration + 0.2) * 1_000_000_000)
+                try? await Task.sleep(nanoseconds: lifetime)
+                await MainActor.run {
+                    particles.removeAll { $0.id == particle.id }
+                }
             }
         }
+    }
+}
+
+private struct ReactionSparkleParticleView: View {
+    let particle: ReactionSparkleParticle
+    let tint: Color
+
+    @State private var animate = false
+
+    var body: some View {
+        Image(systemName: "sparkle")
+            .font(.system(size: particle.size, weight: .bold))
+            .foregroundStyle(tint.opacity(animate ? 0 : particle.opacity))
+            .scaleEffect(animate ? particle.endScale : particle.startScale)
+            .offset(
+                x: animate ? particle.xDrift + particle.sway : 0,
+                y: animate ? -particle.yTravel : 0
+            )
+            .rotationEffect(.degrees(animate ? particle.rotation : particle.rotation * 0.18))
+            .blur(radius: animate ? particle.blur : 0)
+            .onAppear {
+                withAnimation(.easeOut(duration: particle.duration)) {
+                    animate = true
+                }
+            }
     }
 }
 

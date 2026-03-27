@@ -1204,8 +1204,7 @@ private struct NoteImageFullscreenViewer: View {
     @Environment(\.dismiss) private var dismiss
     @ObservedObject private var reactionStats = NoteReactionStatsService.shared
     @State private var selectedIndex: Int
-    @State private var isShowingReshareSheet = false
-    @State private var quoteDraft: ReshareQuoteDraft?
+    @State private var isShowingInlineResharePanel = false
     @State private var isPublishingRepost = false
     @State private var repostStatusMessage: String?
     @State private var repostStatusIsError = false
@@ -1213,6 +1212,8 @@ private struct NoteImageFullscreenViewer: View {
     @State private var pendingRemixComposeDraft: NoteImageRemixComposeDraft?
     @State private var isShowingRemixEditor = false
     @State private var isPreparingRemixEditor = false
+    @State private var swipeDismissOffset: CGSize = .zero
+    @State private var isCompletingSwipeDismiss = false
     private let reshareService = ResharePublishService()
     private let reactionPublishService = NoteReactionPublishService()
 
@@ -1225,76 +1226,62 @@ private struct NoteImageFullscreenViewer: View {
     }
 
     var body: some View {
-        NavigationStack {
-            TabView(selection: $selectedIndex) {
-                ForEach(Array(urls.enumerated()), id: \.offset) { index, url in
-                    ZStack {
-                        viewerBackgroundColor.ignoresSafeArea()
-                        NoteRemoteMediaView(url: url) { asset in
-                            NoteMediaAssetContentView(asset: asset, scaling: .fit)
-                                .padding(16)
-                        } placeholder: {
-                            ProgressView()
-                                .tint(chromeForegroundColor)
-                        } failure: {
-                            Image(systemName: "photo")
-                                .font(.largeTitle)
-                                .foregroundStyle(chromeForegroundColor.opacity(0.75))
+        GeometryReader { geometry in
+            ZStack(alignment: .bottom) {
+                viewerBackgroundColor
+                    .opacity(viewerBackgroundOpacity(for: geometry.size))
+                    .ignoresSafeArea()
+
+                NavigationStack {
+                    TabView(selection: $selectedIndex) {
+                        ForEach(Array(urls.enumerated()), id: \.offset) { index, url in
+                            ZStack {
+                                viewerBackgroundColor.ignoresSafeArea()
+                                NoteRemoteMediaView(url: url) { asset in
+                                    NoteMediaAssetContentView(asset: asset, scaling: .fit)
+                                        .padding(16)
+                                } placeholder: {
+                                    ProgressView()
+                                        .tint(chromeForegroundColor)
+                                } failure: {
+                                    Image(systemName: "photo")
+                                        .font(.largeTitle)
+                                        .foregroundStyle(chromeForegroundColor.opacity(0.75))
+                                }
+                            }
+                            .tag(index)
                         }
                     }
-                    .tag(index)
-                }
-            }
-            .tabViewStyle(.page(indexDisplayMode: .automatic))
-            .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button {
-                        dismiss()
-                    } label: {
-                        Text("Done")
-                            .font(.subheadline.weight(.semibold))
-                            .foregroundStyle(doneButtonForegroundColor)
+                    .tabViewStyle(.page(indexDisplayMode: .automatic))
+                    .toolbar {
+                        ToolbarItem(placement: .topBarTrailing) {
+                            Button {
+                                dismiss()
+                            } label: {
+                                Text("Done")
+                                    .font(.subheadline.weight(.semibold))
+                                    .foregroundStyle(doneButtonForegroundColor)
+                            }
+                        }
+                    }
+                    .toolbarBackground(.visible, for: .navigationBar)
+                    .toolbarBackground(viewerNavigationBarColor, for: .navigationBar)
+                    .toolbarColorScheme(colorScheme == .dark ? .dark : .light, for: .navigationBar)
+                    .safeAreaInset(edge: .bottom) {
+                        mediaActionBar
                     }
                 }
-            }
-            .toolbarBackground(.visible, for: .navigationBar)
-            .toolbarBackground(viewerNavigationBarColor, for: .navigationBar)
-            .toolbarColorScheme(colorScheme == .dark ? .dark : .light, for: .navigationBar)
-            .safeAreaInset(edge: .bottom) {
-                mediaActionBar
-            }
-        }
-        .sheet(isPresented: $isShowingReshareSheet) {
-            ReshareActionSheetView(
-                isWorking: isPublishingRepost,
-                statusMessage: repostStatusMessage,
-                statusIsError: repostStatusIsError,
-                onRepost: {
-                    Task {
-                        await publishRepost()
-                    }
-                },
-                onQuote: {
-                    quoteDraft = reshareService.buildQuoteDraft(
-                        for: sourceEvent,
-                        relayHintURL: effectiveReadRelayURLs.first
-                    )
-                    isShowingReshareSheet = false
+                .offset(swipeDismissOffset)
+                .scaleEffect(viewerScale(for: geometry.size))
+                .rotationEffect(.degrees(viewerRotationDegrees(for: geometry.size)))
+                .simultaneousGesture(swipeToDismissGesture(containerSize: geometry.size))
+                .allowsHitTesting(!isShowingInlineResharePanel)
+
+                if isShowingInlineResharePanel {
+                    fullscreenReshareOverlay
+                        .transition(.opacity.combined(with: .move(edge: .bottom)))
                 }
-            )
-        }
-        .sheet(item: $quoteDraft) { draft in
-            ComposeNoteSheet(
-                currentAccountPubkey: auth.currentAccount?.pubkey,
-                currentNsec: auth.currentNsec,
-                writeRelayURLs: effectiveWriteRelayURLs,
-                initialText: draft.initialText,
-                initialAdditionalTags: draft.additionalTags,
-                quotedEvent: draft.quotedEvent,
-                quotedDisplayNameHint: draft.quotedDisplayNameHint,
-                quotedHandleHint: draft.quotedHandleHint,
-                quotedAvatarURLHint: draft.quotedAvatarURLHint
-            )
+            }
         }
         .fullScreenCover(
             isPresented: $isShowingRemixEditor,
@@ -1324,19 +1311,8 @@ private struct NoteImageFullscreenViewer: View {
 
     private var mediaActionBar: some View {
         HStack(spacing: 16) {
-            ReactionButton(
-                isLiked: isLikedByCurrentUser,
-                count: visibleReactionCount,
-                inactiveColor: chromeForegroundColor,
-                minWidth: 36
-            ) {
-                Task {
-                    await handleReactionTap()
-                }
-            }
-
             Button {
-                // Thread-comment shortcut can be wired from parent context in a later pass.
+                presentReplyComposer()
             } label: {
                 HStack(spacing: 4) {
                     Image(systemName: "bubble.right")
@@ -1349,12 +1325,14 @@ private struct NoteImageFullscreenViewer: View {
                 .frame(minWidth: 36, minHeight: 28, alignment: .leading)
             }
             .buttonStyle(.plain)
-            .accessibilityLabel("Comment")
+            .accessibilityLabel("Reply")
 
             Button {
                 repostStatusMessage = nil
                 repostStatusIsError = false
-                isShowingReshareSheet = true
+                withAnimation(.spring(response: 0.32, dampingFraction: 0.88)) {
+                    isShowingInlineResharePanel = true
+                }
             } label: {
                 Image(systemName: "arrow.2.squarepath")
                     .foregroundStyle(chromeForegroundColor)
@@ -1362,6 +1340,17 @@ private struct NoteImageFullscreenViewer: View {
             }
             .buttonStyle(.plain)
             .accessibilityLabel("Re-share")
+
+            ReactionButton(
+                isLiked: isLikedByCurrentUser,
+                count: visibleReactionCount,
+                inactiveColor: chromeForegroundColor,
+                minWidth: 36
+            ) {
+                Task {
+                    await handleReactionTap()
+                }
+            }
 
             ShareLink(item: urls[selectedIndex]) {
                 Image(systemName: "paperplane")
@@ -1438,6 +1427,105 @@ private struct NoteImageFullscreenViewer: View {
         colorScheme == .dark ? .white : .black
     }
 
+    private var fullscreenReshareOverlay: some View {
+        ZStack(alignment: .bottom) {
+            Color.black.opacity(colorScheme == .dark ? 0.42 : 0.18)
+                .ignoresSafeArea()
+                .contentShape(Rectangle())
+                .onTapGesture {
+                    withAnimation(.spring(response: 0.3, dampingFraction: 0.9)) {
+                        isShowingInlineResharePanel = false
+                    }
+                }
+
+            VStack(alignment: .leading, spacing: 16) {
+                Capsule()
+                    .fill(Color.white.opacity(colorScheme == .dark ? 0.28 : 0.5))
+                    .frame(width: 42, height: 5)
+                    .frame(maxWidth: .infinity)
+
+                HStack {
+                    Text("Re-share")
+                        .font(.headline.weight(.semibold))
+                        .foregroundStyle(.primary)
+                    Spacer()
+                    Button {
+                        withAnimation(.spring(response: 0.3, dampingFraction: 0.9)) {
+                            isShowingInlineResharePanel = false
+                        }
+                    } label: {
+                        Image(systemName: "xmark")
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                            .frame(width: 30, height: 30)
+                            .background(Color(.tertiarySystemFill), in: Circle())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Close re-share options")
+                }
+
+                VStack(spacing: 0) {
+                    inlineReshareActionRow(
+                        title: "Repost",
+                        systemImage: "arrow.2.squarepath"
+                    ) {
+                        Task {
+                            await publishRepost()
+                        }
+                    }
+
+                    Divider()
+                        .padding(.leading, 18)
+
+                    inlineReshareActionRow(
+                        title: "Quote",
+                        systemImage: "quote.bubble"
+                    ) {
+                        presentQuoteComposer()
+                    }
+                }
+                .background(
+                    RoundedRectangle(cornerRadius: 18, style: .continuous)
+                        .fill(Color(.secondarySystemBackground).opacity(colorScheme == .dark ? 0.9 : 0.94))
+                )
+
+                if let repostStatusMessage, !repostStatusMessage.isEmpty {
+                    HStack(spacing: 8) {
+                        Image(systemName: repostStatusIsError ? "exclamationmark.triangle.fill" : "checkmark.circle.fill")
+                            .foregroundStyle(repostStatusIsError ? .red : .green)
+                        Text(repostStatusMessage)
+                            .font(.footnote)
+                            .foregroundStyle(repostStatusIsError ? .red : .secondary)
+                        Spacer(minLength: 0)
+                    }
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 10)
+                    .background(
+                        RoundedRectangle(cornerRadius: 14, style: .continuous)
+                            .fill((repostStatusIsError ? Color.red : Color.green).opacity(0.1))
+                    )
+                } else {
+                    Text("Share this note as a repost, or add your own context with a quote.")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .padding(.horizontal, 16)
+            .padding(.top, 16)
+            .padding(.bottom, 16)
+            .background(
+                RoundedRectangle(cornerRadius: 28, style: .continuous)
+                    .fill(.ultraThinMaterial)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 28, style: .continuous)
+                            .stroke(Color.white.opacity(colorScheme == .dark ? 0.12 : 0.35), lineWidth: 0.7)
+                    )
+            )
+            .padding(.horizontal, 14)
+            .padding(.bottom, 14)
+        }
+    }
+
     @ViewBuilder
     private var actionBarBackground: some View {
         if colorScheme == .dark {
@@ -1495,6 +1583,39 @@ private struct NoteImageFullscreenViewer: View {
         }
     }
 
+    @ViewBuilder
+    private func inlineReshareActionRow(
+        title: String,
+        systemImage: String,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button {
+            action()
+        } label: {
+            HStack(spacing: 12) {
+                Text(title)
+                    .font(.body.weight(.medium))
+                    .foregroundStyle(.primary)
+
+                Spacer(minLength: 0)
+
+                if isPublishingRepost && title == "Repost" {
+                    ProgressView()
+                        .controlSize(.small)
+                } else {
+                    Image(systemName: systemImage)
+                        .font(.body.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .padding(.horizontal, 18)
+            .padding(.vertical, 16)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .disabled(isPublishingRepost)
+    }
+
     @MainActor
     private func publishRepost() async {
         guard !isPublishingRepost else { return }
@@ -1514,7 +1635,9 @@ private struct NoteImageFullscreenViewer: View {
             repostStatusIsError = false
 
             try? await Task.sleep(nanoseconds: 450_000_000)
-            isShowingReshareSheet = false
+            withAnimation(.spring(response: 0.3, dampingFraction: 0.9)) {
+                isShowingInlineResharePanel = false
+            }
         } catch {
             repostStatusMessage = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
             repostStatusIsError = true
@@ -1557,6 +1680,133 @@ private struct NoteImageFullscreenViewer: View {
                 replyTargetEvent: draft.replyTargetEvent
             )
         }
+    }
+
+    @MainActor
+    private func presentReplyComposer() {
+        Task { @MainActor in
+            dismiss()
+            try? await Task.sleep(nanoseconds: 320_000_000)
+            composeSheetCoordinator.presentReply(to: sourceEvent)
+        }
+    }
+
+    @MainActor
+    private func presentQuoteComposer() {
+        let draft = reshareService.buildQuoteDraft(
+            for: sourceEvent,
+            relayHintURL: effectiveReadRelayURLs.first
+        )
+
+        withAnimation(.spring(response: 0.3, dampingFraction: 0.9)) {
+            isShowingInlineResharePanel = false
+        }
+
+        Task { @MainActor in
+            dismiss()
+            try? await Task.sleep(nanoseconds: 320_000_000)
+            composeSheetCoordinator.presentQuote(draft)
+        }
+    }
+
+    private func swipeToDismissGesture(containerSize: CGSize) -> some Gesture {
+        DragGesture(minimumDistance: 8, coordinateSpace: .local)
+            .onChanged { value in
+                guard !isShowingInlineResharePanel, !isShowingRemixEditor, !isPreparingRemixEditor else { return }
+                guard shouldTrackSwipeDismiss(for: value.translation) else { return }
+                swipeDismissOffset = value.translation
+            }
+            .onEnded { value in
+                guard !isShowingInlineResharePanel, !isShowingRemixEditor else { return }
+                guard shouldTrackSwipeDismiss(for: value.translation) else {
+                    withAnimation(.spring(response: 0.34, dampingFraction: 0.82)) {
+                        swipeDismissOffset = .zero
+                    }
+                    return
+                }
+
+                let finalTranslation = projectedSwipeDismissOffset(for: value)
+                if shouldCompleteSwipeDismiss(with: finalTranslation, in: containerSize) {
+                    completeSwipeDismiss(using: finalTranslation, in: containerSize)
+                } else {
+                    withAnimation(.spring(response: 0.34, dampingFraction: 0.82)) {
+                        swipeDismissOffset = .zero
+                    }
+                }
+            }
+    }
+
+    private func shouldTrackSwipeDismiss(for translation: CGSize) -> Bool {
+        guard !isCompletingSwipeDismiss else { return false }
+        if urls.count <= 1 {
+            return true
+        }
+
+        let horizontal = abs(translation.width)
+        let vertical = abs(translation.height)
+        if vertical >= max(horizontal * 0.7, 20) {
+            return true
+        }
+
+        let isSwipingOutFromLeadingEdge = translation.width > 0 && selectedIndex == 0
+        let isSwipingOutFromTrailingEdge = translation.width < 0 && selectedIndex == urls.count - 1
+        return horizontal >= max(vertical * 1.25, 44) &&
+            (isSwipingOutFromLeadingEdge || isSwipingOutFromTrailingEdge)
+    }
+
+    private func projectedSwipeDismissOffset(for value: DragGesture.Value) -> CGSize {
+        CGSize(
+            width: value.predictedEndTranslation.width,
+            height: value.predictedEndTranslation.height
+        )
+    }
+
+    private func shouldCompleteSwipeDismiss(with translation: CGSize, in size: CGSize) -> Bool {
+        let distance = hypot(translation.width, translation.height)
+        let threshold = max(150, min(size.width, size.height) * 0.18)
+        return distance >= threshold
+    }
+
+    private func completeSwipeDismiss(using translation: CGSize, in size: CGSize) {
+        guard !isCompletingSwipeDismiss else { return }
+        isCompletingSwipeDismiss = true
+
+        let targetOffset = swipeDismissCompletionOffset(for: translation, in: size)
+        withAnimation(.easeOut(duration: 0.2)) {
+            swipeDismissOffset = targetOffset
+        }
+
+        Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 170_000_000)
+            dismiss()
+        }
+    }
+
+    private func swipeDismissCompletionOffset(for translation: CGSize, in size: CGSize) -> CGSize {
+        let distance = max(hypot(translation.width, translation.height), 1)
+        let direction = CGVector(dx: translation.width / distance, dy: translation.height / distance)
+        let exitDistance = max(size.width, size.height) * 1.18
+        return CGSize(
+            width: direction.dx * exitDistance,
+            height: direction.dy * exitDistance
+        )
+    }
+
+    private func viewerBackgroundOpacity(for size: CGSize) -> Double {
+        let distance = hypot(swipeDismissOffset.width, swipeDismissOffset.height)
+        let maxDistance = max(min(size.width, size.height) * 0.75, 1)
+        return max(0.35, 1 - (distance / maxDistance) * 0.75)
+    }
+
+    private func viewerScale(for size: CGSize) -> CGFloat {
+        let distance = hypot(swipeDismissOffset.width, swipeDismissOffset.height)
+        let maxDistance = max(max(size.width, size.height), 1)
+        return max(0.9, 1 - (distance / maxDistance) * 0.09)
+    }
+
+    private func viewerRotationDegrees(for size: CGSize) -> Double {
+        guard size.width > 0 else { return 0 }
+        return Double(swipeDismissOffset.width / size.width) * 8
     }
 }
 
