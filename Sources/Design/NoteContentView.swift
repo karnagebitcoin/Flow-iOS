@@ -37,6 +37,7 @@ struct NoteContentView: View {
     private let onProfileTap: ((String) -> Void)?
     private let onReferencedEventTap: ((FeedItem) -> Void)?
     private let mediaLayout: NoteContentMediaLayout
+    private let videoControlBottomInset: CGFloat?
     private let reactionCount: Int
     private let commentCount: Int
     private let embedDepth: Int
@@ -60,6 +61,7 @@ struct NoteContentView: View {
     init(
         event: NostrEvent,
         mediaLayout: NoteContentMediaLayout = .feed,
+        videoControlBottomInset: CGFloat? = nil,
         reactionCount: Int = 0,
         commentCount: Int = 0,
         embedDepth: Int = 0,
@@ -88,6 +90,7 @@ struct NoteContentView: View {
         self.onProfileTap = onProfileTap
         self.onReferencedEventTap = onReferencedEventTap
         self.mediaLayout = mediaLayout
+        self.videoControlBottomInset = videoControlBottomInset
         self.reactionCount = reactionCount
         self.commentCount = commentCount
         self.embedDepth = embedDepth
@@ -148,6 +151,7 @@ struct NoteContentView: View {
                             NoteVideoPlayerView(
                                 url: url,
                                 layout: mediaLayout,
+                                bottomInsetOverride: videoControlBottomInset,
                                 forceMute: shouldBlurMediaFromUnfollowedAuthors
                             )
                         }
@@ -1848,6 +1852,7 @@ private final class InlineVideoPlaybackCoordinator: ObservableObject {
 private struct NoteVideoPlayerView: View {
     let url: URL
     let layout: NoteContentMediaLayout
+    let bottomInsetOverride: CGFloat?
     let forceMute: Bool
     @EnvironmentObject private var appSettings: AppSettingsStore
     @ObservedObject private var playbackCoordinator = InlineVideoPlaybackCoordinator.shared
@@ -1857,9 +1862,15 @@ private struct NoteVideoPlayerView: View {
     @State private var suppressSharedMuteSync = false
     private let muteSyncTimer = Timer.publish(every: 0.15, on: .main, in: .common).autoconnect()
 
-    init(url: URL, layout: NoteContentMediaLayout, forceMute: Bool = false) {
+    init(
+        url: URL,
+        layout: NoteContentMediaLayout,
+        bottomInsetOverride: CGFloat? = nil,
+        forceMute: Bool = false
+    ) {
         self.url = url
         self.layout = layout
+        self.bottomInsetOverride = bottomInsetOverride
         self.forceMute = forceMute
         _player = State(initialValue: AVPlayer(url: url))
     }
@@ -1872,6 +1883,7 @@ private struct NoteVideoPlayerView: View {
                 muteToggleButton
                     .padding(.trailing, 12)
                     .padding(.bottom, muteButtonBottomInset)
+                    .zIndex(2)
             }
         }
         // Constrain height before aspect-fit so portrait videos shrink to a valid
@@ -1979,7 +1991,10 @@ private struct NoteVideoPlayerView: View {
     }
 
     private var muteButtonBottomInset: CGFloat {
-        layout == .feed ? 54 : 60
+        if let bottomInsetOverride {
+            return bottomInsetOverride
+        }
+        return layout == .feed ? 54 : 60
     }
 
     private func toggleMute() {

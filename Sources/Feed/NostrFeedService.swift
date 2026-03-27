@@ -995,14 +995,12 @@ struct NostrFeedService: Sendable {
                     .filter { !$0.isEmpty }
             )
         )
+        // Keep Activity's first paint fast by using cached target profiles only.
+        // Thread detail now hydrates its own root item, so we no longer need to
+        // block the entire activity list on a second network round-trip here.
         let targetProfiles = targetPubkeys.isEmpty
             ? [:]
-            : await fetchProfiles(
-                relayURLs: relayTargets,
-                pubkeys: targetPubkeys,
-                fetchTimeout: profileFetchTimeout,
-                relayFetchMode: profileRelayFetchMode
-            )
+            : await profileCache.cachedProfiles(pubkeys: targetPubkeys)
 
         return filteredEvents.compactMap { event in
             guard let action = event.activityAction else { return nil }
