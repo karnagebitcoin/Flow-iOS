@@ -23,36 +23,118 @@ enum FlowMediaCache {
     }
 }
 
+struct FlowMediaCacheDiagnostics: Equatable, Sendable {
+    var trackedRequestCount = 0
+    var imageMemoryHitCount = 0
+    var dataMemoryHitCount = 0
+    var diskHitCount = 0
+    var urlCacheHitCount = 0
+    var networkFetchCount = 0
+    var networkFailureCount = 0
+    var cacheServedByteCount: Int64 = 0
+    var networkServedByteCount: Int64 = 0
+
+    var cacheHitCount: Int {
+        imageMemoryHitCount + dataMemoryHitCount + diskHitCount + urlCacheHitCount
+    }
+
+    var cacheMissCount: Int {
+        max(0, trackedRequestCount - cacheHitCount)
+    }
+
+    var cacheHitRate: Double {
+        guard trackedRequestCount > 0 else { return 0 }
+        return Double(cacheHitCount) / Double(trackedRequestCount)
+    }
+}
+
+private enum FlowMediaCacheDiagnosticsTracking {
+    case tracked
+    case untracked
+
+    var shouldRecord: Bool {
+        self == .tracked
+    }
+}
+
+private enum FlowMediaCacheHitSource {
+    case imageMemory
+    case dataMemory
+    case disk
+    case urlCache
+}
+
 actor FlowImageCache {
     static let shared = FlowImageCache()
+    typealias ImageDataFetcher = @Sendable (URLRequest) async -> Data?
+    private static let liveImageDataFetcher: ImageDataFetcher = { request in
+        await fetchImageData(with: request)
+    }
 
     private let fileManager: FileManager
     private let directoryURL: URL
+    private let urlCache: URLCache
+    private let fetchImageData: ImageDataFetcher
     private let memoryCache = NSCache<NSURL, UIImage>()
     private let dataCache = NSCache<NSURL, NSData>()
+    private let encodedByteCounts = NSCache<NSURL, NSNumber>()
     private let maxDiskBytes: Int64 = 384 * 1_024 * 1_024
     private let maxDiskEntries = 12_000
     private let maxEntryAge: TimeInterval = 60 * 60 * 24 * 30
     private var inFlight: [URL: Task<Data?, Never>] = [:]
+    private var diagnostics = FlowMediaCacheDiagnostics()
 
-    init(fileManager: FileManager = .default) {
+    init(
+        fileManager: FileManager = .default,
+        rootDirectoryURL: URL? = nil,
+        urlCache: URLCache = .shared,
+        fetchImageData: @escaping ImageDataFetcher = FlowImageCache.liveImageDataFetcher
+    ) {
         self.fileManager = fileManager
         let root = fileManager.urls(for: .cachesDirectory, in: .userDomainMask).first
             ?? URL(fileURLWithPath: NSTemporaryDirectory())
-        self.directoryURL = root.appendingPathComponent("flow-media-cache", isDirectory: true)
+        self.directoryURL = rootDirectoryURL
+            ?? root.appendingPathComponent("flow-media-cache", isDirectory: true)
+        self.urlCache = urlCache
+        self.fetchImageData = fetchImageData
         memoryCache.totalCostLimit = FlowMediaCache.sharedURLCacheMemoryCapacity
         dataCache.totalCostLimit = FlowMediaCache.sharedURLCacheMemoryCapacity / 2
     }
 
     func image(for url: URL) async -> UIImage? {
+        await image(for: url, tracking: .tracked)
+    }
+
+    func data(for url: URL) async -> Data? {
+        await data(for: url, tracking: .tracked, countsAsRequest: true)
+    }
+
+    func diagnosticsSnapshot() -> FlowMediaCacheDiagnostics {
+        diagnostics
+    }
+
+    func resetDiagnostics() {
+        diagnostics = FlowMediaCacheDiagnostics()
+    }
+
+    private func image(
+        for url: URL,
+        tracking: FlowMediaCacheDiagnosticsTracking
+    ) async -> UIImage? {
         guard isCacheable(url) else { return nil }
 
         let cacheKey = url as NSURL
+        recordRequestIfNeeded(tracking)
         if let cached = memoryCache.object(forKey: cacheKey) {
+            recordCacheHit(
+                .imageMemory,
+                byteCount: encodedByteCount(for: cacheKey),
+                tracking: tracking
+            )
             return cached
         }
 
-        guard let data = await data(for: url),
+        guard let data = await data(for: url, tracking: tracking, countsAsRequest: false),
               let image = preparedImage(from: data) else {
             return nil
         }
@@ -61,15 +143,27 @@ actor FlowImageCache {
         return image
     }
 
-    func data(for url: URL) async -> Data? {
+    private func data(
+        for url: URL,
+        tracking: FlowMediaCacheDiagnosticsTracking,
+        countsAsRequest: Bool
+    ) async -> Data? {
         guard isCacheable(url) else { return nil }
+
+        if countsAsRequest {
+            recordRequestIfNeeded(tracking)
+        }
 
         let cacheKey = url as NSURL
         if let cachedData = dataCache.object(forKey: cacheKey) {
-            return cachedData as Data
+            let data = cachedData as Data
+            storeEncodedByteCount(data.count, for: cacheKey)
+            recordCacheHit(.dataMemory, byteCount: data.count, tracking: tracking)
+            return data
         }
 
         if let diskData = loadDataFromDisk(for: url, cacheKey: cacheKey) {
+            recordCacheHit(.disk, byteCount: diskData.count, tracking: tracking)
             return diskData
         }
 
@@ -79,7 +173,8 @@ actor FlowImageCache {
             timeoutInterval: 30
         )
 
-        if let cachedResponse = URLCache.shared.cachedResponse(for: request) {
+        if let cachedResponse = urlCache.cachedResponse(for: request) {
+            recordCacheHit(.urlCache, byteCount: cachedResponse.data.count, tracking: tracking)
             return storeData(
                 data: cachedResponse.data,
                 for: url,
@@ -90,16 +185,19 @@ actor FlowImageCache {
 
         if let existingTask = inFlight[url] {
             let data = await existingTask.value
+            recordNetworkResult(data, tracking: tracking)
             return storeData(data: data, for: url, cacheKey: cacheKey, persistToDisk: true)
         }
 
+        let fetchImageData = self.fetchImageData
         let task = Task {
-            await Self.fetchImageData(with: request)
+            await fetchImageData(request)
         }
         inFlight[url] = task
 
         let data = await task.value
         inFlight[url] = nil
+        recordNetworkResult(data, tracking: tracking)
         return storeData(data: data, for: url, cacheKey: cacheKey, persistToDisk: true)
     }
 
@@ -110,7 +208,7 @@ actor FlowImageCache {
         await withTaskGroup(of: Void.self) { group in
             for url in deduplicated.prefix(36) {
                 group.addTask {
-                    _ = await self.image(for: url)
+                    _ = await self.image(for: url, tracking: .untracked)
                 }
             }
             await group.waitForAll()
@@ -118,17 +216,18 @@ actor FlowImageCache {
     }
 
     func totalCacheSizeBytes() -> Int64 {
-        localDiskUsageBytes() + Int64(URLCache.shared.currentDiskUsage)
+        localDiskUsageBytes() + Int64(urlCache.currentDiskUsage)
     }
 
     func clearAllCachedImages() async {
         memoryCache.removeAllObjects()
         dataCache.removeAllObjects()
+        encodedByteCounts.removeAllObjects()
         for task in inFlight.values {
             task.cancel()
         }
         inFlight.removeAll()
-        URLCache.shared.removeAllCachedResponses()
+        urlCache.removeAllCachedResponses()
 
         if fileManager.fileExists(atPath: directoryURL.path) {
             try? fileManager.removeItem(at: directoryURL)
@@ -158,6 +257,7 @@ actor FlowImageCache {
             return nil
         }
 
+        storeEncodedByteCount(data.count, for: cacheKey)
         dataCache.setObject(data as NSData, forKey: cacheKey, cost: data.count)
         try? fileManager.setAttributes([.modificationDate: Date()], ofItemAtPath: fileURL.path)
         return data
@@ -171,6 +271,7 @@ actor FlowImageCache {
     ) -> Data? {
         guard let data else { return nil }
 
+        storeEncodedByteCount(data.count, for: cacheKey)
         dataCache.setObject(data as NSData, forKey: cacheKey, cost: data.count)
         if persistToDisk {
             persistImageData(data, for: url)
@@ -288,6 +389,54 @@ actor FlowImageCache {
     private func preparedImage(from data: Data) -> UIImage? {
         guard let image = UIImage(data: data) else { return nil }
         return image.preparingForDisplay() ?? image
+    }
+
+    private func recordRequestIfNeeded(_ tracking: FlowMediaCacheDiagnosticsTracking) {
+        guard tracking.shouldRecord else { return }
+        diagnostics.trackedRequestCount += 1
+    }
+
+    private func recordCacheHit(
+        _ source: FlowMediaCacheHitSource,
+        byteCount: Int,
+        tracking: FlowMediaCacheDiagnosticsTracking
+    ) {
+        guard tracking.shouldRecord else { return }
+
+        switch source {
+        case .imageMemory:
+            diagnostics.imageMemoryHitCount += 1
+        case .dataMemory:
+            diagnostics.dataMemoryHitCount += 1
+        case .disk:
+            diagnostics.diskHitCount += 1
+        case .urlCache:
+            diagnostics.urlCacheHitCount += 1
+        }
+
+        diagnostics.cacheServedByteCount += Int64(max(0, byteCount))
+    }
+
+    private func recordNetworkResult(
+        _ data: Data?,
+        tracking: FlowMediaCacheDiagnosticsTracking
+    ) {
+        guard tracking.shouldRecord else { return }
+
+        if let data {
+            diagnostics.networkFetchCount += 1
+            diagnostics.networkServedByteCount += Int64(data.count)
+        } else {
+            diagnostics.networkFailureCount += 1
+        }
+    }
+
+    private func storeEncodedByteCount(_ byteCount: Int, for cacheKey: NSURL) {
+        encodedByteCounts.setObject(NSNumber(value: byteCount), forKey: cacheKey)
+    }
+
+    private func encodedByteCount(for cacheKey: NSURL) -> Int {
+        encodedByteCounts.object(forKey: cacheKey)?.intValue ?? 0
     }
 
     private static func fetchImageData(with request: URLRequest) async -> Data? {

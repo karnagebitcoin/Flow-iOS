@@ -63,6 +63,7 @@
 		977E112C8E7948939005ADBA /* HomeFeedViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 87F4B84828ED1C578A57652F /* HomeFeedViewModel.swift */; };
 		98F70D48581019050A4D7C4E /* SignupOnboardingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9906B019376E45D30E7BB2EF /* SignupOnboardingView.swift */; };
 		99843C2501BBE53CC7640FA4 /* FeedCaches.swift in Sources */ = {isa = PBXBuildFile; fileRef = 06FF81777B1A43EA5BB4D808 /* FeedCaches.swift */; };
+		9D863BB7629A60AC9BD679EE /* FlowMediaCacheDiagnosticsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D2EE38569BAF46EC577CDF58 /* FlowMediaCacheDiagnosticsTests.swift */; };
 		9E849BD43F01C740E0DAFAD5 /* FlowShareExtension.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = B9BEB6EA4B182422CED31E86 /* FlowShareExtension.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		A9EC7D49DEED0D0FE9A902FB /* ThreadDetailViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2641062789F97E9E85F895EB /* ThreadDetailViewModel.swift */; };
 		B17E68CEA9136EFC8EA69BC0 /* RelayMessageParser.swift in Sources */ = {isa = PBXBuildFile; fileRef = 93F2DE09E60173B3EF41F370 /* RelayMessageParser.swift */; };
@@ -206,6 +207,7 @@
 		BFE1331CC7D26B2FEB4A9096 /* Flow.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = Flow.entitlements; sourceTree = "<group>"; };
 		C3EF20CFB3AC1F3D6ECAE007 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		C54BBAD0B3A458A308239CEB /* NostrModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NostrModels.swift; sourceTree = "<group>"; };
+		D2EE38569BAF46EC577CDF58 /* FlowMediaCacheDiagnosticsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FlowMediaCacheDiagnosticsTests.swift; sourceTree = "<group>"; };
 		D3152920AED2041FDC71354A /* MuteStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MuteStore.swift; sourceTree = "<group>"; };
 		D3535F42ABCFA81A554B26FE /* AppSettingsStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppSettingsStore.swift; sourceTree = "<group>"; };
 		D6D17F2EC311D3203D8950E1 /* NostrRelayClientTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NostrRelayClientTests.swift; sourceTree = "<group>"; };
@@ -310,6 +312,7 @@
 			isa = PBXGroup;
 			children = (
 				FF3A46097B1D78C6E75A1E21 /* ComposeNoteSheetModeTests.swift */,
+				D2EE38569BAF46EC577CDF58 /* FlowMediaCacheDiagnosticsTests.swift */,
 				728E5E9205402D9D0C91D77C /* InlineVideoAutoplayVisibilityPolicyTests.swift */,
 				58C5041AD8041427E01D7B42 /* NostrFeedServiceTests.swift */,
 				D6D17F2EC311D3203D8950E1 /* NostrRelayClientTests.swift */,
@@ -707,6 +710,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				FDEE4E11D51BA0548AB96A5A /* ComposeNoteSheetModeTests.swift in Sources */,
+				9D863BB7629A60AC9BD679EE /* FlowMediaCacheDiagnosticsTests.swift in Sources */,
 				5F015362E1208C0120B5B711 /* InlineVideoAutoplayVisibilityPolicyTests.swift in Sources */,
 				DF564A10D83D14512B25E8FE /* NostrFeedServiceTests.swift in Sources */,
 				52C61C33CE36A6629F3F83C3 /* NostrRelayClientTests.swift in Sources */,

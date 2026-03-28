@@ -685,6 +685,21 @@ private struct SettingsMediaView: View {
                     }
                 }
 
+                NavigationLink {
+                    SettingsMediaDiagnosticsView()
+                } label: {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Diagnostics")
+                            .foregroundStyle(.primary)
+
+                        Text("Cache hit rate, source breakdown, and payload totals.")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    .padding(.vertical, 2)
+                }
+
                 Button(role: .destructive) {
                     isShowingClearMediaCacheConfirmation = true
                 } label: {
@@ -728,10 +743,139 @@ private struct SettingsMediaView: View {
 
         Task {
             await FlowImageCache.shared.clearAllCachedImages()
+            await FlowImageCache.shared.resetDiagnostics()
             await refreshMediaCacheSize()
             await MainActor.run {
                 isClearingMediaCache = false
             }
+        }
+    }
+}
+
+private struct SettingsMediaDiagnosticsView: View {
+    @State private var diagnostics = FlowMediaCacheDiagnostics()
+
+    var body: some View {
+        Form {
+            Section {
+                diagnosticMetricRow(
+                    title: "Cache Hit Rate",
+                    value: cacheHitRateDescription
+                )
+                diagnosticMetricRow(
+                    title: "Tracked Requests",
+                    value: diagnostics.trackedRequestCount.formatted()
+                )
+                diagnosticMetricRow(
+                    title: "Cache Hits",
+                    value: diagnostics.cacheHitCount.formatted()
+                )
+                diagnosticMetricRow(
+                    title: "Network-backed Misses",
+                    value: diagnostics.cacheMissCount.formatted()
+                )
+            } header: {
+                Text("Overview")
+            } footer: {
+                Text("Counts the current app session for on-demand requests that go through the shared Flow media cache. Background prefetch warmups are excluded.")
+            }
+
+            Section {
+                diagnosticMetricRow(
+                    title: "Image Memory Hits",
+                    value: diagnostics.imageMemoryHitCount.formatted()
+                )
+                diagnosticMetricRow(
+                    title: "Data Memory Hits",
+                    value: diagnostics.dataMemoryHitCount.formatted()
+                )
+                diagnosticMetricRow(
+                    title: "Disk Hits",
+                    value: diagnostics.diskHitCount.formatted()
+                )
+                diagnosticMetricRow(
+                    title: "URL Cache Hits",
+                    value: diagnostics.urlCacheHitCount.formatted()
+                )
+                diagnosticMetricRow(
+                    title: "Network Fetches",
+                    value: diagnostics.networkFetchCount.formatted()
+                )
+                diagnosticMetricRow(
+                    title: "Network Failures",
+                    value: diagnostics.networkFailureCount.formatted()
+                )
+            } header: {
+                Text("Request Sources")
+            } footer: {
+                Text("This covers the shared Flow media cache path. Some screens still use system image loading, and video playback has its own pipeline.")
+            }
+
+            Section {
+                diagnosticMetricRow(
+                    title: "Cached Payload",
+                    value: byteDescription(diagnostics.cacheServedByteCount)
+                )
+                diagnosticMetricRow(
+                    title: "Network Payload",
+                    value: byteDescription(diagnostics.networkServedByteCount)
+                )
+            } header: {
+                Text("Payload")
+            } footer: {
+                Text("Payload totals use the encoded media bytes known to the shared cache.")
+            }
+
+            Section {
+                Button("Reset Session Diagnostics", role: .destructive) {
+                    resetDiagnostics()
+                }
+            } footer: {
+                Text("Reset before a fresh troubleshooting pass if you want a clean session baseline.")
+            }
+        }
+        .navigationTitle("Diagnostics")
+        .navigationBarTitleDisplayMode(.inline)
+        .task {
+            await refreshDiagnostics()
+        }
+        .refreshable {
+            await refreshDiagnostics()
+        }
+    }
+
+    private var cacheHitRateDescription: String {
+        guard diagnostics.trackedRequestCount > 0 else { return "No data yet" }
+        return diagnostics.cacheHitRate.formatted(
+            .percent.precision(.fractionLength(1))
+        )
+    }
+
+    @ViewBuilder
+    private func diagnosticMetricRow(title: String, value: String) -> some View {
+        LabeledContent(title) {
+            Text(value)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.trailing)
+        }
+    }
+
+    private func byteDescription(_ byteCount: Int64) -> String {
+        guard byteCount > 0 else { return "0 bytes" }
+        return ByteCountFormatter.string(fromByteCount: byteCount, countStyle: .file)
+    }
+
+    private func refreshDiagnostics() async {
+        let snapshot = await FlowImageCache.shared.diagnosticsSnapshot()
+        await MainActor.run {
+            diagnostics = snapshot
+        }
+    }
+
+    private func resetDiagnostics() {
+        Task {
+            await FlowImageCache.shared.resetDiagnostics()
+            await refreshDiagnostics()
         }
     }
 }
