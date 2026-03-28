@@ -148,8 +148,6 @@ final class BreakReminderCoordinator: ObservableObject {
 }
 
 struct BreakReminderOverlayHost: View {
-    @EnvironmentObject private var appSettings: AppSettingsStore
-
     @ObservedObject var coordinator: BreakReminderCoordinator
 
     var body: some View {
@@ -157,7 +155,6 @@ struct BreakReminderOverlayHost: View {
             if let quote = coordinator.presentedQuote {
                 BreakReminderOverlayPresentation(
                     quote: quote,
-                    accentColor: appSettings.primaryColor,
                     onDismiss: { coordinator.dismissReminder() }
                 )
             } else {
@@ -174,7 +171,6 @@ struct BreakReminderOverlayPresentation: View {
     @Environment(\.colorScheme) private var colorScheme
 
     let quote: BreakReminderQuote
-    let accentColor: Color
     let onDismiss: () -> Void
 
     var body: some View {
@@ -188,7 +184,6 @@ struct BreakReminderOverlayPresentation: View {
 
                 BreakReminderSheet(
                     quote: quote,
-                    accentColor: accentColor,
                     onDismiss: onDismiss
                 )
                 .padding(.horizontal, 12)
@@ -205,83 +200,42 @@ struct BreakReminderSheet: View {
     @Environment(\.colorScheme) private var colorScheme
 
     let quote: BreakReminderQuote
-    let accentColor: Color
     let onDismiss: () -> Void
 
     var body: some View {
-        VStack(spacing: 20) {
-            Capsule(style: .continuous)
-                .fill(accentColor.opacity(colorScheme == .dark ? 0.32 : 0.2))
-                .frame(width: 46, height: 5)
+        ZStack(alignment: .bottom) {
+            RoundedRectangle(cornerRadius: 30, style: .continuous)
+                .fill(reminderBackgroundColor)
 
-            VStack(spacing: 8) {
-                Text("Want to take a quick break?")
-                    .font(.title3.weight(.bold))
-                    .foregroundStyle(.primary)
-            }
-            .frame(maxWidth: .infinity)
-
-            placeholderArtworkCard
-
-            VStack(spacing: 12) {
-                Image(systemName: "quote.opening")
-                    .font(.title3.weight(.bold))
-                    .foregroundStyle(accentColor)
-
-                Text(quote.text)
-                    .font(.system(.title3, design: .rounded, weight: .semibold))
-                    .foregroundStyle(.primary)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .multilineTextAlignment(.center)
-
-                Text(quote.author)
-                    .font(.footnote.weight(.semibold))
-                    .foregroundStyle(.secondary)
-                    .multilineTextAlignment(.center)
-            }
-            .padding(18)
-            .frame(maxWidth: .infinity, alignment: .center)
-            .background(
-                RoundedRectangle(cornerRadius: 24, style: .continuous)
-                    .fill(accentColor.opacity(colorScheme == .dark ? 0.12 : 0.08))
+            UnicornStudioBackgroundView(
+                source: .bundledJSON("aura.json"),
+                backgroundStyle: reminderBackgroundStyle
             )
-            .overlay {
-                RoundedRectangle(cornerRadius: 24, style: .continuous)
-                    .stroke(accentColor.opacity(colorScheme == .dark ? 0.28 : 0.16), lineWidth: 1)
-            }
-        }
-        .padding(.horizontal, 20)
-        .padding(.top, 18)
-        .padding(.bottom, 20)
-        .frame(maxWidth: 540, alignment: .center)
-        .background(
-            ZStack {
-                RoundedRectangle(cornerRadius: 30, style: .continuous)
-                    .fill(.regularMaterial)
+            .scaleEffect(2, anchor: .center)
+            .clipShape(RoundedRectangle(cornerRadius: 30, style: .continuous))
 
-                LinearGradient(
-                    colors: [
-                        accentColor.opacity(colorScheme == .dark ? 0.14 : 0.08),
-                        Color.clear,
-                        Color.black.opacity(colorScheme == .dark ? 0.12 : 0.02)
-                    ],
-                    startPoint: .topLeading,
-                    endPoint: .bottomTrailing
-                )
-                .clipShape(RoundedRectangle(cornerRadius: 30, style: .continuous))
-            }
-        )
+            Text("How about a short break?")
+                .font(.title3.weight(.semibold))
+                .foregroundStyle(reminderTextColor)
+                .multilineTextAlignment(.center)
+                .padding(.horizontal, 28)
+                .padding(.bottom, 24)
+                .shadow(color: reminderTextShadowColor, radius: 8, x: 0, y: 3)
+        }
+        .frame(maxWidth: 540, alignment: .center)
+        .frame(height: 340)
+        .clipShape(RoundedRectangle(cornerRadius: 30, style: .continuous))
         .overlay {
             RoundedRectangle(cornerRadius: 30, style: .continuous)
-                .stroke(accentColor.opacity(colorScheme == .dark ? 0.24 : 0.14), lineWidth: 0.9)
+                .stroke(reminderBorderColor, lineWidth: 0.9)
         }
         .overlay(alignment: .topTrailing) {
             Button(action: onDismiss) {
                 Image(systemName: "xmark")
                     .font(.system(size: 14, weight: .bold))
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(dismissButtonForegroundColor)
                     .frame(width: 34, height: 34)
-                    .background(Color(.secondarySystemFill), in: Circle())
+                    .background(dismissButtonBackgroundColor, in: Circle())
             }
             .buttonStyle(.plain)
             .accessibilityLabel("Dismiss break reminder")
@@ -292,29 +246,41 @@ struct BreakReminderSheet: View {
         .accessibilityElement(children: .contain)
     }
 
-    private var placeholderArtworkCard: some View {
-        RoundedRectangle(cornerRadius: 24, style: .continuous)
-            .fill(accentColor.opacity(colorScheme == .dark ? 0.12 : 0.08))
-            .frame(height: 132)
-            .overlay {
-                VStack(spacing: 10) {
-                    Image(systemName: "person.crop.square.badge.questionmark")
-                        .font(.system(size: 28, weight: .semibold))
-                        .foregroundStyle(accentColor)
+    private var reminderBackgroundStyle: UnicornStudioBackgroundView.BackgroundStyle {
+        .clear
+    }
 
-                    Text("Author artwork placeholder")
-                        .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(.primary)
-                }
-                .multilineTextAlignment(.center)
-                .padding(.horizontal, 20)
-            }
-            .overlay {
-                RoundedRectangle(cornerRadius: 24, style: .continuous)
-                    .stroke(
-                        accentColor.opacity(colorScheme == .dark ? 0.24 : 0.14),
-                        style: StrokeStyle(lineWidth: 1, dash: [7, 6])
-                    )
-            }
+    private var reminderBackgroundColor: Color {
+        colorScheme == .dark ? .black : .white
+    }
+
+    private var reminderBorderColor: Color {
+        colorScheme == .dark
+            ? Color.white.opacity(0.12)
+            : Color.black.opacity(0.08)
+    }
+
+    private var dismissButtonForegroundColor: Color {
+        colorScheme == .dark
+            ? Color.white.opacity(0.82)
+            : Color.black.opacity(0.68)
+    }
+
+    private var dismissButtonBackgroundColor: Color {
+        colorScheme == .dark
+            ? Color.black.opacity(0.26)
+            : Color.white.opacity(0.76)
+    }
+
+    private var reminderTextColor: Color {
+        colorScheme == .dark
+            ? Color.white.opacity(0.76)
+            : Color.black.opacity(0.62)
+    }
+
+    private var reminderTextShadowColor: Color {
+        colorScheme == .dark
+            ? Color.black.opacity(0.28)
+            : Color.white.opacity(0.6)
     }
 }

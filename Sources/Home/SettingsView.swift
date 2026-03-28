@@ -83,8 +83,12 @@ struct SettingsView: View {
                         isShowingPrimaryColorPicker = false
                     }
                 )
+                .preferredColorScheme(appSettings.preferredColorScheme)
             }
         }
+        .background(Color(.systemBackground))
+        .presentationBackground(Color(.systemBackground))
+        .preferredColorScheme(appSettings.preferredColorScheme)
     }
 
     private var connectionSummaryText: String {
@@ -608,7 +612,6 @@ private struct SettingsGeneralView: View {
             if let previewQuote {
                 BreakReminderOverlayPresentation(
                     quote: previewQuote,
-                    accentColor: appSettings.primaryColor,
                     onDismiss: dismissPreviewReminder
                 )
             }

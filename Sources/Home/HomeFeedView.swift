@@ -490,9 +490,6 @@ struct HomeFeedView: View {
             Spacer()
 
             filterButton
-                .frame(width: 34, height: 34)
-                .background(Color(.secondarySystemBackground))
-                .clipShape(Circle())
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 10)
@@ -550,14 +547,15 @@ struct HomeFeedView: View {
         Button {
             isShowingFilterSheet = true
         } label: {
-            Image(
-                systemName: viewModel.isUsingCustomFilters
-                    ? "line.3.horizontal.decrease.circle.fill"
-                    : "line.3.horizontal.decrease.circle"
-            )
+            Image(systemName: "line.3.horizontal.decrease")
+                .font(.system(size: 21, weight: .regular))
+                .foregroundStyle(viewModel.isUsingCustomFilters ? appSettings.primaryColor : .secondary)
+                .frame(width: 46, height: 46)
+                .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .accessibilityLabel("Feed filters")
+        .accessibilityAddTraits(viewModel.isUsingCustomFilters ? [.isSelected] : [])
     }
 
     private var filterGridColumns: [GridItem] {

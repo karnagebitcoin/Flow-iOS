@@ -2,6 +2,38 @@ import SwiftUI
 import WebKit
 
 struct UnicornStudioBackgroundView: View {
+    enum BackgroundStyle: Equatable {
+        case dark
+        case light
+        case clear
+
+        var uiColor: UIColor {
+            switch self {
+            case .dark:
+                return .black
+            case .light:
+                return .white
+            case .clear:
+                return .clear
+            }
+        }
+
+        var cssValue: String {
+            switch self {
+            case .dark:
+                return "#000"
+            case .light:
+                return "#fff"
+            case .clear:
+                return "transparent"
+            }
+        }
+
+        var isOpaque: Bool {
+            self != .clear
+        }
+    }
+
     enum Source: Equatable {
         case projectID(String)
         case bundledJSON(String)
@@ -9,6 +41,7 @@ struct UnicornStudioBackgroundView: View {
 
     let source: Source
     var opacity: Double = 1
+    var backgroundStyle: BackgroundStyle = .dark
 
     var body: some View {
         GeometryReader { proxy in
@@ -19,7 +52,8 @@ struct UnicornStudioBackgroundView: View {
 
             UnicornStudioWebView(
                 source: source,
-                renderSize: renderSize
+                renderSize: renderSize,
+                backgroundStyle: backgroundStyle
             )
             .frame(width: proxy.size.width, height: proxy.size.height)
             .opacity(opacity)
@@ -33,6 +67,7 @@ struct UnicornStudioBackgroundView: View {
 private struct UnicornStudioWebView: UIViewRepresentable {
     let source: UnicornStudioBackgroundView.Source
     let renderSize: CGSize
+    let backgroundStyle: UnicornStudioBackgroundView.BackgroundStyle
 
     func makeCoordinator() -> Coordinator {
         Coordinator()
@@ -45,9 +80,9 @@ private struct UnicornStudioWebView: UIViewRepresentable {
         configuration.defaultWebpagePreferences.allowsContentJavaScript = true
 
         let webView = WKWebView(frame: .zero, configuration: configuration)
-        webView.isOpaque = true
-        webView.backgroundColor = .black
-        webView.scrollView.backgroundColor = .black
+        webView.isOpaque = backgroundStyle.isOpaque
+        webView.backgroundColor = backgroundStyle.uiColor
+        webView.scrollView.backgroundColor = backgroundStyle.uiColor
         webView.scrollView.isScrollEnabled = false
         webView.scrollView.bounces = false
         webView.scrollView.contentInsetAdjustmentBehavior = .never
@@ -61,8 +96,13 @@ private struct UnicornStudioWebView: UIViewRepresentable {
     func updateUIView(_ webView: WKWebView, context: Context) {
         let html = UnicornStudioEmbedHTML.document(
             source: source,
-            renderSize: renderSize
+            renderSize: renderSize,
+            backgroundStyle: backgroundStyle
         )
+
+        webView.isOpaque = backgroundStyle.isOpaque
+        webView.backgroundColor = backgroundStyle.uiColor
+        webView.scrollView.backgroundColor = backgroundStyle.uiColor
 
         guard context.coordinator.lastHTML != html else {
             context.coordinator.applySize(renderSize, to: webView)
@@ -102,11 +142,13 @@ private struct UnicornStudioWebView: UIViewRepresentable {
 private enum UnicornStudioEmbedHTML {
     static func document(
         source: UnicornStudioBackgroundView.Source,
-        renderSize: CGSize
+        renderSize: CGSize,
+        backgroundStyle: UnicornStudioBackgroundView.BackgroundStyle
     ) -> String {
         let sceneBootScript: String
         let initialWidth = Int(renderSize.width.rounded(.up))
         let initialHeight = Int(renderSize.height.rounded(.up))
+        let backgroundColorValue = backgroundStyle.cssValue
 
         switch source {
         case .projectID(let projectID):
@@ -125,7 +167,8 @@ private enum UnicornStudioEmbedHTML {
                 sceneMarkup: #"<div id="scene" data-us-project="\#(projectID)"></div>"#,
                 sceneBootScript: sceneBootScript,
                 initialWidth: initialWidth,
-                initialHeight: initialHeight
+                initialHeight: initialHeight,
+                backgroundColorValue: backgroundColorValue
             )
         case .bundledJSON(let resourceName):
             guard let sceneJSONString = bundledJSONString(named: resourceName),
@@ -134,7 +177,8 @@ private enum UnicornStudioEmbedHTML {
                     sceneMarkup: #"<div id="scene"></div>"#,
                     sceneBootScript: "const startScene = function() {};",
                     initialWidth: initialWidth,
-                    initialHeight: initialHeight
+                    initialHeight: initialHeight,
+                    backgroundColorValue: backgroundColorValue
                 )
             }
 
@@ -166,7 +210,8 @@ private enum UnicornStudioEmbedHTML {
                 sceneMarkup: #"<div id="scene"></div>"#,
                 sceneBootScript: sceneBootScript,
                 initialWidth: initialWidth,
-                initialHeight: initialHeight
+                initialHeight: initialHeight,
+                backgroundColorValue: backgroundColorValue
             )
         }
     }
@@ -175,7 +220,8 @@ private enum UnicornStudioEmbedHTML {
         sceneMarkup: String,
         sceneBootScript: String,
         initialWidth: Int,
-        initialHeight: Int
+        initialHeight: Int,
+        backgroundColorValue: String
     ) -> String {
         return """
         <!doctype html>
@@ -197,11 +243,11 @@ private enum UnicornStudioEmbedHTML {
               width: var(--scene-width);
               height: var(--scene-height);
               overflow: hidden;
-              background: #000;
+              background: \(backgroundColorValue);
             }
 
             body {
-              background: #000 !important;
+              background: \(backgroundColorValue) !important;
               position: fixed;
               inset: 0;
             }
@@ -212,12 +258,12 @@ private enum UnicornStudioEmbedHTML {
               width: var(--scene-width);
               height: var(--scene-height);
               pointer-events: none;
-              background: #000;
+              background: \(backgroundColorValue);
               overflow: hidden;
             }
 
             canvas {
-              background: #000 !important;
+              background: \(backgroundColorValue) !important;
             }
           </style>
         </head>

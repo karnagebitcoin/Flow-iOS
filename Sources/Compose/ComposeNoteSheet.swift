@@ -187,6 +187,64 @@ struct ComposeFloatingActionButton: View {
     }
 }
 
+enum ComposeNoteSheetMode: Equatable {
+    case newNote
+    case reply
+    case quote
+
+    init(hasReplyTarget: Bool, hasQuotedEvent: Bool) {
+        if hasQuotedEvent {
+            self = .quote
+        } else if hasReplyTarget {
+            self = .reply
+        } else {
+            self = .newNote
+        }
+    }
+
+    var navigationTitle: String {
+        switch self {
+        case .newNote:
+            return "Compose note"
+        case .reply:
+            return "Reply"
+        case .quote:
+            return "Quote"
+        }
+    }
+
+    var publishButtonTitle: String {
+        switch self {
+        case .reply:
+            return "Reply"
+        case .newNote, .quote:
+            return "Post"
+        }
+    }
+
+    var placeholderText: String {
+        switch self {
+        case .newNote:
+            return "What do you want to share?"
+        case .reply:
+            return "Post your reply"
+        case .quote:
+            return "Add your thoughts"
+        }
+    }
+
+    var accessibilityActionLabel: String {
+        switch self {
+        case .newNote:
+            return "Posting"
+        case .reply:
+            return "Replying"
+        case .quote:
+            return "Quoting"
+        }
+    }
+}
+
 struct ComposeNoteSheet: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.colorScheme) private var colorScheme
@@ -203,7 +261,6 @@ struct ComposeNoteSheet: View {
     @State private var isRequestingCaptureAccess = false
     @State private var isUploadingMedia = false
     @State private var profileDisplayName = "Account"
-    @State private var profileHandle = "@account"
     @State private var profileAvatarURL: URL?
     @State private var profileFallbackSymbol = "A"
     @State private var replyTargetDisplayName: String?
@@ -239,31 +296,22 @@ struct ComposeNoteSheet: View {
 
     var body: some View {
         NavigationStack {
-            Group {
-                if isQuoteComposer {
-                    quoteComposerContainer
-                } else {
-                    standardComposerLayout
-                }
-            }
-            .background(isQuoteComposer ? Color(.systemBackground) : Color(.systemGroupedBackground))
+            standardComposerLayout
+            .background(Color(.systemGroupedBackground))
             .navigationTitle(composerNavigationTitle)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                if !isQuoteComposer {
-                    ToolbarItem(placement: .cancellationAction) {
-                        Button("Cancel") {
-                            dismiss()
-                        }
-                    }
-
-                    ToolbarItemGroup(placement: .topBarTrailing) {
-                        composeToolbarAvatar
-                        publishToolbarButton
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") {
+                        dismiss()
                     }
                 }
+
+                ToolbarItemGroup(placement: .topBarTrailing) {
+                    composeToolbarAvatar
+                    publishToolbarButton
+                }
             }
-            .toolbar(isQuoteComposer ? .hidden : .visible, for: .navigationBar)
         }
         .presentationDetents([.large])
         .presentationDragIndicator(.visible)
@@ -290,11 +338,6 @@ struct ComposeNoteSheet: View {
         .onChange(of: currentAccountPubkey) { _, _ in
             Task {
                 await refreshComposeAccountSummary()
-            }
-        }
-        .safeAreaInset(edge: .bottom) {
-            if isQuoteComposer {
-                quoteBottomBar
             }
         }
         .sheet(isPresented: $isShowingCapturePermissionSheet) {
@@ -333,59 +376,27 @@ struct ComposeNoteSheet: View {
         }
     }
 
-    private var quoteComposerContainer: some View {
-        VStack(spacing: 0) {
-            quoteTopBar
-
-            Divider()
-                .opacity(0.7)
-
-            quoteComposerLayout
-        }
-    }
-
-    private var quoteTopBar: some View {
-        ZStack {
-            Text("New thread")
-                .font(.headline.weight(.semibold))
-                .foregroundStyle(.primary)
-
-            HStack {
-                Button("Cancel") {
-                    dismiss()
-                }
-                .font(.body)
-                .buttonStyle(.plain)
-
-                Spacer()
-            }
-        }
-        .padding(.horizontal, 16)
-        .padding(.top, 14)
-        .padding(.bottom, 12)
-        .background(Color(.systemBackground))
+    private var mode: ComposeNoteSheetMode {
+        ComposeNoteSheetMode(
+            hasReplyTarget: replyTargetEvent != nil,
+            hasQuotedEvent: quotedEvent != nil
+        )
     }
 
     private var isQuoteComposer: Bool {
-        quotedEvent != nil
+        mode == .quote
     }
 
     private var isReplyComposer: Bool {
-        replyTargetEvent != nil
+        mode == .reply
     }
 
     private var composerNavigationTitle: String {
-        if isQuoteComposer {
-            return ""
-        }
-        if isReplyComposer {
-            return "Reply"
-        }
-        return "Compose note"
+        mode.navigationTitle
     }
 
     private var publishButtonTitle: String {
-        isReplyComposer ? "Reply" : "Post"
+        mode.publishButtonTitle
     }
 
     private var standardComposerLayout: some View {
@@ -393,6 +404,8 @@ struct ComposeNoteSheet: View {
             VStack(alignment: .leading, spacing: 16) {
                 if isReplyComposer {
                     replyTargetPreviewCard
+                } else if isQuoteComposer {
+                    quotePreviewCard
                 }
                 composeCard
                 statusSection
@@ -436,190 +449,14 @@ struct ComposeNoteSheet: View {
                 Circle()
                     .stroke(Color(.separator).opacity(0.22), lineWidth: 0.8)
             }
-            .accessibilityLabel("\(isReplyComposer ? "Replying" : "Posting") as \(profileDisplayName)")
-    }
-
-    private var quoteComposerLayout: some View {
-        ScrollView {
-            HStack(alignment: .top, spacing: 12) {
-                quoteLeadingLane
-                quoteMainComposer
-            }
-            .padding(.horizontal, 16)
-            .padding(.top, 16)
-            .padding(.bottom, 18)
-        }
-    }
-
-    private var quoteLeadingLane: some View {
-        VStack(spacing: 8) {
-            composeAvatar(size: 40)
-
-            Rectangle()
-                .fill(Color(.separator).opacity(0.35))
-                .frame(width: 2)
-                .frame(height: 280)
-        }
-        .frame(width: 40)
-    }
-
-    private var quoteMainComposer: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack(alignment: .firstTextBaseline, spacing: 6) {
-                Text(topicIdentity)
-                    .font(.headline.weight(.semibold))
-                    .lineLimit(1)
-
-                Image(systemName: "chevron.right")
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(.secondary)
-
-                Text("Add a topic")
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-
-                Spacer(minLength: 0)
-            }
-
-            ZStack(alignment: .topLeading) {
-                if viewModel.text.isEmpty {
-                    Text("Share your thoughts...")
-                        .font(.body)
-                        .foregroundStyle(.secondary)
-                        .padding(.top, 8)
-                        .padding(.horizontal, 4)
-                }
-
-                composeTextView(horizontalPadding: 0, verticalPadding: 0)
-                    .frame(minHeight: 74)
-            }
-
-            quoteActionRow
-
-            if !mediaAttachments.isEmpty {
-                mediaAttachmentPreviewList
-            }
-
-            quotePreviewCard
-
-            statusSection
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-    }
-
-    private var quoteActionRow: some View {
-        HStack(spacing: 16) {
-            PhotosPicker(
-                selection: $selectedMediaItems,
-                selectionBehavior: .ordered,
-                matching: .any(of: [.images, .videos])
-            ) {
-                Group {
-                    if isUploadingMedia {
-                        ProgressView()
-                            .controlSize(.small)
-                    } else {
-                        Image(systemName: "photo")
-                            .font(.system(size: 19, weight: .medium))
-                    }
-                }
-            }
-            .buttonStyle(.plain)
-            .foregroundStyle(.secondary)
-            .disabled(isUploadingMedia || viewModel.isPublishing)
-
-            cameraAttachmentButton(symbolFont: .system(size: 19, weight: .medium))
-
-            Button {
-                // GIF picker is intentionally disabled for this iteration.
-            } label: {
-                Text("GIF")
-                    .font(.footnote.weight(.semibold))
-                    .padding(.horizontal, 9)
-                    .padding(.vertical, 5)
-                    .background(Color(.tertiarySystemFill))
-                    .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
-            }
-            .buttonStyle(.plain)
-            .foregroundStyle(.secondary)
-            .disabled(true)
-
-            Button {
-                // Topic and advanced thread options are pending.
-            } label: {
-                Image(systemName: "list.bullet.rectangle.portrait")
-                    .font(.system(size: 19, weight: .medium))
-                    .foregroundStyle(.secondary)
-            }
-            .buttonStyle(.plain)
-            .disabled(true)
-
-            Button {
-                // More thread settings are pending.
-            } label: {
-                Image(systemName: "ellipsis.circle")
-                    .font(.system(size: 19, weight: .medium))
-                    .foregroundStyle(.secondary)
-            }
-            .buttonStyle(.plain)
-            .disabled(true)
-
-            Spacer(minLength: 0)
-        }
-    }
-
-    private var quoteBottomBar: some View {
-        let postBackground = appSettings.primaryColor
-        let postForeground = Color.white
-
-        return HStack(spacing: 12) {
-            HStack(spacing: 8) {
-                Image(systemName: "plus.rectangle.on.folder")
-                    .font(.subheadline.weight(.medium))
-                Text("Reply options")
-                    .font(.subheadline.weight(.semibold))
-                    .lineLimit(1)
-            }
-            .foregroundStyle(.secondary)
-
-            Spacer(minLength: 0)
-
-            Button {
-                Task {
-                    await publish()
-                }
-            } label: {
-                Group {
-                    if viewModel.isPublishing {
-                        ProgressView()
-                            .controlSize(.small)
-                            .tint(postForeground)
-                    } else {
-                        Text("Post")
-                    }
-                }
-                .font(.subheadline.weight(.semibold))
-                .foregroundStyle(postForeground)
-                .padding(.horizontal, 20)
-                .padding(.vertical, 10)
-                .background(postBackground, in: Capsule())
-            }
-            .buttonStyle(.plain)
-            .disabled(!canPublish)
-            .opacity(canPublish ? 1 : 0.45)
-        }
-        .padding(.horizontal, 16)
-        .padding(.top, 8)
-        .padding(.bottom, 12)
-        .background(Color(.systemBackground))
+            .accessibilityLabel("\(mode.accessibilityActionLabel) as \(profileDisplayName)")
     }
 
     private var composeCard: some View {
         VStack(alignment: .leading, spacing: 12) {
             ZStack(alignment: .topLeading) {
                 if viewModel.text.isEmpty {
-                    Text(isReplyComposer ? "Post your reply" : "What do you want to share?")
+                    Text(mode.placeholderText)
                         .foregroundStyle(.secondary)
                         .padding(.horizontal, 16)
                         .padding(.vertical, 16)
@@ -789,14 +626,6 @@ struct ComposeNoteSheet: View {
         && !viewModel.isPublishing
     }
 
-    private var topicIdentity: String {
-        let normalizedHandle = normalizedHandleValue(profileHandle)
-        if !normalizedHandle.isEmpty {
-            return normalizedHandle
-        }
-        return profileDisplayName
-    }
-
     private func composeAvatar(size: CGFloat) -> some View {
         Group {
             if let profileAvatarURL {
@@ -950,113 +779,21 @@ struct ComposeNoteSheet: View {
     private var replyTargetPreviewCard: some View {
         Group {
             if let event = renderedReplyTargetEvent {
-                VStack(alignment: .leading, spacing: 10) {
-                    Text("Replying to")
-                        .font(.footnote.weight(.semibold))
-                        .foregroundStyle(.secondary)
-
-                    HStack(alignment: .top, spacing: 10) {
-                        Group {
-                            if let replyTargetAvatarURL {
-                                AsyncImage(url: replyTargetAvatarURL) { phase in
-                                    switch phase {
-                                    case .success(let image):
-                                        image
-                                            .resizable()
-                                            .scaledToFill()
-                                    default:
-                                        replyTargetAvatarFallback
-                                    }
-                                }
-                            } else {
-                                replyTargetAvatarFallback
-                            }
-                        }
-                        .frame(width: 30, height: 30)
-                        .clipShape(Circle())
-
-                        VStack(alignment: .leading, spacing: 8) {
-                            HStack(alignment: .firstTextBaseline, spacing: 6) {
-                                Text(replyTargetDisplayNameResolved)
-                                    .font(.subheadline.weight(.semibold))
-                                    .lineLimit(1)
-
-                                Text(replyTargetHandleResolved)
-                                    .font(.subheadline)
-                                    .foregroundStyle(.secondary)
-                                    .lineLimit(1)
-
-                                Spacer(minLength: 0)
-
-                                Text(RelativeTimestampFormatter.shortString(from: event.createdAtDate))
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                                    .lineLimit(1)
-                            }
-
-                            Text(replyTargetPreviewText)
-                                .font(.body)
-                                .foregroundStyle(.primary)
-                                .multilineTextAlignment(.leading)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-
-                            if !replyTargetPreviewImageURLs.isEmpty {
-                                HStack(spacing: 8) {
-                                    ForEach(Array(replyTargetPreviewImageURLs.enumerated()), id: \.offset) { _, url in
-                                        AsyncImage(url: url) { phase in
-                                            switch phase {
-                                            case .success(let image):
-                                                image
-                                                    .resizable()
-                                                    .scaledToFill()
-                                            case .failure:
-                                                Color(.tertiarySystemFill)
-                                                    .overlay {
-                                                        Image(systemName: "photo")
-                                                            .foregroundStyle(.secondary)
-                                                    }
-                                            case .empty:
-                                                ProgressView()
-                                                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                                                    .background(Color(.tertiarySystemFill))
-                                            @unknown default:
-                                                Color(.tertiarySystemFill)
-                                            }
-                                        }
-                                        .frame(height: 170)
-                                        .frame(maxWidth: .infinity)
-                                        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-                                    }
-                                }
-                            } else if replyTargetHasVideo || replyTargetHasAudio {
-                                HStack(spacing: 8) {
-                                    Image(systemName: replyTargetHasVideo ? "video" : "waveform")
-                                    Text(replyTargetHasVideo ? "Note includes video" : "Note includes audio")
-                                        .lineLimit(1)
-                                    Spacer(minLength: 0)
-                                }
-                                .font(.footnote)
-                                .foregroundStyle(.secondary)
-                                .padding(.horizontal, 10)
-                                .padding(.vertical, 8)
-                                .background(
-                                    RoundedRectangle(cornerRadius: 10, style: .continuous)
-                                        .fill(Color(.tertiarySystemFill))
-                                )
-                            }
-                        }
-                    }
+                composerContextPreviewCard(
+                    title: "Replying to",
+                    event: event,
+                    displayName: replyTargetDisplayNameResolved,
+                    handle: replyTargetHandleResolved,
+                    avatarURL: replyTargetAvatarURL,
+                    previewText: replyTargetPreviewText,
+                    imageURLs: replyTargetPreviewImageURLs,
+                    hasVideo: replyTargetHasVideo,
+                    hasAudio: replyTargetHasAudio,
+                    videoSummary: "Note includes video",
+                    audioSummary: "Note includes audio"
+                ) {
+                    replyTargetAvatarFallback
                 }
-                .padding(12)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .background(
-                    RoundedRectangle(cornerRadius: 18, style: .continuous)
-                        .fill(Color(.secondarySystemBackground))
-                )
-                .overlay(
-                    RoundedRectangle(cornerRadius: 18, style: .continuous)
-                        .stroke(Color(.separator).opacity(0.3), lineWidth: 0.8)
-                )
             }
         }
     }
@@ -1064,102 +801,171 @@ struct ComposeNoteSheet: View {
     private var quotePreviewCard: some View {
         Group {
             if let event = renderedQuotedEvent {
-                VStack(alignment: .leading, spacing: 8) {
-                    HStack(spacing: 8) {
-                        Group {
-                            if let quotedAvatarURL {
-                                AsyncImage(url: quotedAvatarURL) { phase in
-                                    switch phase {
-                                    case .success(let image):
-                                        image
-                                            .resizable()
-                                            .scaledToFill()
-                                    default:
-                                        quotedAvatarFallback
-                                    }
-                                }
-                            } else {
-                                quotedAvatarFallback
-                            }
-                        }
-                        .frame(width: 22, height: 22)
-                        .clipShape(Circle())
+                composerContextPreviewCard(
+                    title: "Quoting",
+                    event: event,
+                    displayName: quotedDisplayNameResolved,
+                    handle: quotedHandleResolved,
+                    avatarURL: quotedAvatarURL,
+                    previewText: quotedPreviewText,
+                    imageURLs: quotedPreviewImageURLs,
+                    hasVideo: hasQuotedVideo,
+                    hasAudio: hasQuotedAudio,
+                    videoSummary: "Quoted note includes video",
+                    audioSummary: "Quoted note includes audio"
+                ) {
+                    quotedAvatarFallback
+                }
+            }
+        }
+    }
 
-                        Text(quotedDisplayNameResolved)
+    @ViewBuilder
+    private func composerContextPreviewCard<Fallback: View>(
+        title: String,
+        event: NostrEvent,
+        displayName: String,
+        handle: String,
+        avatarURL: URL?,
+        previewText: String,
+        imageURLs: [URL],
+        hasVideo: Bool,
+        hasAudio: Bool,
+        videoSummary: String,
+        audioSummary: String,
+        @ViewBuilder fallback: @escaping () -> Fallback
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text(title)
+                .font(.footnote.weight(.semibold))
+                .foregroundStyle(.secondary)
+
+            HStack(alignment: .top, spacing: 10) {
+                composerContextAvatar(avatarURL: avatarURL, fallback: fallback)
+
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack(alignment: .firstTextBaseline, spacing: 6) {
+                        Text(displayName)
                             .font(.subheadline.weight(.semibold))
                             .lineLimit(1)
+
+                        Text(handle)
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+
+                        Spacer(minLength: 0)
 
                         Text(RelativeTimestampFormatter.shortString(from: event.createdAtDate))
                             .font(.caption)
                             .foregroundStyle(.secondary)
                             .lineLimit(1)
-
-                        Spacer(minLength: 0)
                     }
 
-                    Text(quotedPreviewText)
+                    Text(previewText)
                         .font(.body)
                         .foregroundStyle(.primary)
-                        .lineLimit(4)
                         .multilineTextAlignment(.leading)
                         .frame(maxWidth: .infinity, alignment: .leading)
 
-                    if !quotedPreviewImageURLs.isEmpty {
-                        HStack(spacing: 8) {
-                            ForEach(Array(quotedPreviewImageURLs.enumerated()), id: \.offset) { _, url in
-                                AsyncImage(url: url) { phase in
-                                    switch phase {
-                                    case .success(let image):
-                                        image
-                                            .resizable()
-                                            .scaledToFill()
-                                    case .failure:
-                                        Color(.tertiarySystemFill)
-                                            .overlay {
-                                                Image(systemName: "photo")
-                                                    .foregroundStyle(.secondary)
-                                            }
-                                    case .empty:
-                                        ProgressView()
-                                            .frame(maxWidth: .infinity, maxHeight: .infinity)
-                                            .background(Color(.tertiarySystemFill))
-                                    @unknown default:
-                                        Color(.tertiarySystemFill)
-                                    }
-                                }
-                                .frame(height: 170)
-                                .frame(maxWidth: .infinity)
-                                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-                            }
-                        }
-                    } else if hasQuotedVideo || hasQuotedAudio {
-                        HStack(spacing: 8) {
-                            Image(systemName: hasQuotedVideo ? "video" : "waveform")
-                            Text(hasQuotedVideo ? "Quoted post includes video" : "Quoted post includes audio")
-                                .lineLimit(1)
-                            Spacer(minLength: 0)
-                        }
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
-                        .padding(.horizontal, 10)
-                        .padding(.vertical, 8)
-                        .background(
-                            RoundedRectangle(cornerRadius: 10, style: .continuous)
-                                .fill(Color(.tertiarySystemFill))
-                        )
+                    composerContextPreviewMedia(
+                        imageURLs: imageURLs,
+                        hasVideo: hasVideo,
+                        hasAudio: hasAudio,
+                        videoSummary: videoSummary,
+                        audioSummary: audioSummary
+                    )
+                }
+            }
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .fill(Color(.secondarySystemBackground))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .stroke(Color(.separator).opacity(0.3), lineWidth: 0.8)
+        )
+    }
+
+    @ViewBuilder
+    private func composerContextAvatar<Fallback: View>(
+        avatarURL: URL?,
+        @ViewBuilder fallback: @escaping () -> Fallback
+    ) -> some View {
+        Group {
+            if let avatarURL {
+                AsyncImage(url: avatarURL) { phase in
+                    switch phase {
+                    case .success(let image):
+                        image
+                            .resizable()
+                            .scaledToFill()
+                    default:
+                        fallback()
                     }
                 }
-                .padding(10)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .background(
-                    RoundedRectangle(cornerRadius: 16, style: .continuous)
-                        .fill(Color(.secondarySystemBackground))
-                )
-                .overlay(
-                    RoundedRectangle(cornerRadius: 16, style: .continuous)
-                        .stroke(Color(.separator).opacity(0.3), lineWidth: 0.8)
-                )
+            } else {
+                fallback()
             }
+        }
+        .frame(width: 30, height: 30)
+        .clipShape(Circle())
+    }
+
+    @ViewBuilder
+    private func composerContextPreviewMedia(
+        imageURLs: [URL],
+        hasVideo: Bool,
+        hasAudio: Bool,
+        videoSummary: String,
+        audioSummary: String
+    ) -> some View {
+        if !imageURLs.isEmpty {
+            HStack(spacing: 8) {
+                ForEach(Array(imageURLs.enumerated()), id: \.offset) { _, url in
+                    AsyncImage(url: url) { phase in
+                        switch phase {
+                        case .success(let image):
+                            image
+                                .resizable()
+                                .scaledToFill()
+                        case .failure:
+                            Color(.tertiarySystemFill)
+                                .overlay {
+                                    Image(systemName: "photo")
+                                        .foregroundStyle(.secondary)
+                                }
+                        case .empty:
+                            ProgressView()
+                                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                                .background(Color(.tertiarySystemFill))
+                        @unknown default:
+                            Color(.tertiarySystemFill)
+                        }
+                    }
+                    .frame(height: 170)
+                    .frame(maxWidth: .infinity)
+                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                }
+            }
+        } else if hasVideo || hasAudio {
+            HStack(spacing: 8) {
+                Image(systemName: hasVideo ? "video" : "waveform")
+                Text(hasVideo ? videoSummary : audioSummary)
+                    .lineLimit(1)
+                Spacer(minLength: 0)
+            }
+            .font(.footnote)
+            .foregroundStyle(.secondary)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 8)
+            .background(
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .fill(Color(.tertiarySystemFill))
+            )
         }
     }
 
@@ -1227,7 +1033,6 @@ struct ComposeNoteSheet: View {
     private func refreshComposeAccountSummary() async {
         guard let currentAccountPubkey else {
             profileDisplayName = "Account"
-            profileHandle = "@account"
             profileAvatarURL = nil
             profileFallbackSymbol = "A"
             return
@@ -1238,7 +1043,6 @@ struct ComposeNoteSheet: View {
 
         let fallbackIdentifier = shortNostrIdentifier(normalizedPubkey)
         profileDisplayName = fallbackIdentifier
-        profileHandle = "@\(fallbackIdentifier.lowercased())"
         profileAvatarURL = nil
         profileFallbackSymbol = String(fallbackIdentifier.prefix(1)).uppercased()
 
@@ -1266,11 +1070,6 @@ struct ComposeNoteSheet: View {
             profileDisplayName = String(pubkey.prefix(8))
         }
 
-        let handleSeed = (profile.name ?? profile.displayName ?? String(pubkey.prefix(8)))
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-            .replacingOccurrences(of: " ", with: "")
-            .lowercased()
-        profileHandle = handleSeed.isEmpty ? "@\(String(pubkey.prefix(8)).lowercased())" : "@\(handleSeed)"
         profileFallbackSymbol = String(profileDisplayName.prefix(1)).uppercased()
 
         if let picture = profile.picture?.trimmingCharacters(in: .whitespacesAndNewlines),
@@ -1900,15 +1699,6 @@ struct ComposeNoteSheet: View {
             mimeType: mimeType,
             fileExtension: normalizedFileExtension
         )
-    }
-
-    private func normalizedHandleValue(_ value: String) -> String {
-        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return "" }
-        if trimmed.hasPrefix("@") {
-            return String(trimmed.dropFirst())
-        }
-        return trimmed
     }
 
     private static func renderEventForQuotePreview(_ event: NostrEvent) -> NostrEvent {
