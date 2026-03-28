@@ -43,6 +43,7 @@
 		58B77DB29944D82D60054441 /* ActivityView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4C415B7E3F07575507ED1F2B /* ActivityView.swift */; };
 		5CE21FBD402B779884AC8EC8 /* SearchView.swift in Sources */ = {isa = PBXBuildFile; fileRef = EADAAC1F003B015CDB20E50F /* SearchView.swift */; };
 		5EAF61B91665BD4813E38368 /* NostrSDK in Frameworks */ = {isa = PBXBuildFile; productRef = 5F7308D9FA71E781FAE528E2 /* NostrSDK */; };
+		5F015362E1208C0120B5B711 /* InlineVideoAutoplayVisibilityPolicyTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 728E5E9205402D9D0C91D77C /* InlineVideoAutoplayVisibilityPolicyTests.swift */; };
 		5F992FBFE1651B29293B6234 /* NostrRelayClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = FB5DA9CD86A2BCCAA2A6947D /* NostrRelayClient.swift */; };
 		6569AD819B9B491AAFB8F0C6 /* ProfileRoute.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7EDAF1E82A260C359E4D827B /* ProfileRoute.swift */; };
 		69D6CF9F7B4C78BCD3BC892F /* NoteReactionPublishService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 89B43C2C1C0220AB508839B1 /* NoteReactionPublishService.swift */; };
@@ -167,6 +168,7 @@
 		68066ED3E7B3C65784C9C487 /* DMsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DMsView.swift; sourceTree = "<group>"; };
 		6A51B97E5090644118AB3149 /* UnicornStudioBackgroundView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UnicornStudioBackgroundView.swift; sourceTree = "<group>"; };
 		6EA07E7BA1105A303737FC2A /* FollowingListView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FollowingListView.swift; sourceTree = "<group>"; };
+		728E5E9205402D9D0C91D77C /* InlineVideoAutoplayVisibilityPolicyTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InlineVideoAutoplayVisibilityPolicyTests.swift; sourceTree = "<group>"; };
 		73524C099B08853D1740EFED /* ComposeSpeechTranscriber.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ComposeSpeechTranscriber.swift; sourceTree = "<group>"; };
 		73A09E5C5DEB394F9F612B36 /* ThreadReplyPublishService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ThreadReplyPublishService.swift; sourceTree = "<group>"; };
 		77DB1D6F0859F5EFA6F7D3B6 /* ProfileView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProfileView.swift; sourceTree = "<group>"; };
@@ -302,6 +304,7 @@
 		6DE6489C90F78047C579C068 /* Tests */ = {
 			isa = PBXGroup;
 			children = (
+				728E5E9205402D9D0C91D77C /* InlineVideoAutoplayVisibilityPolicyTests.swift */,
 				58C5041AD8041427E01D7B42 /* NostrFeedServiceTests.swift */,
 				D6D17F2EC311D3203D8950E1 /* NostrRelayClientTests.swift */,
 			);
@@ -696,6 +699,7 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				5F015362E1208C0120B5B711 /* InlineVideoAutoplayVisibilityPolicyTests.swift in Sources */,
 				DF564A10D83D14512B25E8FE /* NostrFeedServiceTests.swift in Sources */,
 				52C61C33CE36A6629F3F83C3 /* NostrRelayClientTests.swift in Sources */,
 			);

@@ -1806,32 +1806,76 @@ private struct NoteImageRemixComposeDraft: Identifiable {
     let replyTargetEvent: NostrEvent?
 }
 
+struct InlineVideoAutoplayVisibilityPolicy {
+    static func autoplayScore(for frame: CGRect, viewportHeight: CGFloat) -> CGFloat? {
+        guard viewportHeight > 0, frame.height > 0 else { return nil }
+
+        let viewportRect = CGRect(
+            x: frame.minX,
+            y: 0,
+            width: max(frame.width, 1),
+            height: viewportHeight
+        )
+        let visibleFrame = viewportRect.intersection(frame)
+        guard !visibleFrame.isNull, visibleFrame.height > 0 else { return nil }
+
+        let visibleRatio = visibleFrame.height / max(frame.height, 1)
+        guard visibleRatio >= 0.4 else { return nil }
+
+        let centerBandStart = viewportHeight * 0.4
+        let centerBandEnd = viewportHeight * 0.6
+        let frameMidY = frame.midY
+        guard (centerBandStart...centerBandEnd).contains(frameMidY) else { return nil }
+
+        let bandRadius = max(viewportHeight * 0.1, 1)
+        let centerDistance = abs(frameMidY - (viewportHeight * 0.5))
+        let centerScore = max(0, 1 - (centerDistance / bandRadius))
+        return visibleRatio + centerScore
+    }
+}
+
 @MainActor
 private final class InlineVideoPlaybackCoordinator: ObservableObject {
     static let shared = InlineVideoPlaybackCoordinator()
 
     @Published private(set) var activeVideoID: UUID?
 
-    private var visibleVideoOrder: [UUID: Int] = [:]
-    private var sequence = 0
+    private var autoplayEligibleScores: [UUID: CGFloat] = [:]
+    private var manuallyActivatedVideoID: UUID?
 
-    func videoDidAppear(_ id: UUID) {
-        sequence += 1
-        visibleVideoOrder[id] = sequence
-        activeVideoID = id
+    func updateAutoplayEligibility(_ id: UUID, score: CGFloat?) {
+        if let score {
+            autoplayEligibleScores[id] = score
+        } else {
+            autoplayEligibleScores.removeValue(forKey: id)
+            if manuallyActivatedVideoID == id {
+                manuallyActivatedVideoID = nil
+            }
+        }
+        updateActiveVideoID()
     }
 
     func videoDidDisappear(_ id: UUID) {
-        visibleVideoOrder.removeValue(forKey: id)
-        guard activeVideoID == id else { return }
-        activeVideoID = visibleVideoOrder.max(by: { $0.value < $1.value })?.key
+        autoplayEligibleScores.removeValue(forKey: id)
+        if manuallyActivatedVideoID == id {
+            manuallyActivatedVideoID = nil
+        }
+        updateActiveVideoID()
     }
 
     func requestPlayback(_ id: UUID) {
-        sequence += 1
-        visibleVideoOrder[id] = sequence
-        guard activeVideoID != id else { return }
-        activeVideoID = id
+        manuallyActivatedVideoID = id
+        updateActiveVideoID()
+    }
+
+    private func updateActiveVideoID() {
+        if let manuallyActivatedVideoID, autoplayEligibleScores[manuallyActivatedVideoID] != nil {
+            activeVideoID = manuallyActivatedVideoID
+            return
+        }
+
+        manuallyActivatedVideoID = nil
+        activeVideoID = autoplayEligibleScores.max(by: { $0.value < $1.value })?.key
     }
 }
 
@@ -1846,6 +1890,7 @@ private struct NoteVideoPlayerView: View {
     @State private var playbackID = UUID()
     @State private var videoAspectRatio: CGFloat = 16.0 / 9.0
     @State private var suppressSharedMuteSync = false
+    @State private var globalFrame: CGRect = .zero
     private let muteSyncTimer = Timer.publish(every: 0.15, on: .main, in: .common).autoconnect()
 
     init(
@@ -1884,11 +1929,12 @@ private struct NoteVideoPlayerView: View {
             RoundedRectangle(cornerRadius: mediaCornerRadius, style: .continuous)
         )
         .frame(maxWidth: .infinity, alignment: .leading)
+        .background(videoViewportObserver)
         .task(id: url) {
             await loadVideoAspectRatio()
         }
         .onAppear {
-            playbackCoordinator.videoDidAppear(playbackID)
+            updateAutoplayEligibility(using: globalFrame)
             applyPlaybackPolicy()
         }
         .onChange(of: appSettings.autoplayVideos) { _, _ in
@@ -1911,6 +1957,18 @@ private struct NoteVideoPlayerView: View {
             playbackCoordinator.videoDidDisappear(playbackID)
             syncMutePreferenceFromPlayer()
             player.pause()
+        }
+    }
+
+    private var videoViewportObserver: some View {
+        GeometryReader { proxy in
+            Color.clear
+                .preference(key: InlineVideoFramePreferenceKey.self, value: proxy.frame(in: .global))
+        }
+        .onPreferenceChange(InlineVideoFramePreferenceKey.self) { frame in
+            guard frame != globalFrame else { return }
+            globalFrame = frame
+            updateAutoplayEligibility(using: frame)
         }
     }
 
@@ -2047,6 +2105,15 @@ private struct NoteVideoPlayerView: View {
     }
 
     @MainActor
+    private func updateAutoplayEligibility(using frame: CGRect) {
+        let score = InlineVideoAutoplayVisibilityPolicy.autoplayScore(
+            for: frame,
+            viewportHeight: UIScreen.main.bounds.height
+        )
+        playbackCoordinator.updateAutoplayEligibility(playbackID, score: score)
+    }
+
+    @MainActor
     private func syncMutePreferenceFromPlayer() {
         guard !forceMute else { return }
         guard !suppressSharedMuteSync else { return }
@@ -2066,6 +2133,14 @@ private struct NoteVideoPlayerView: View {
         guard isAlreadyPlaying else { return }
         guard playbackCoordinator.activeVideoID != playbackID else { return }
         playbackCoordinator.requestPlayback(playbackID)
+    }
+}
+
+private struct InlineVideoFramePreferenceKey: PreferenceKey {
+    static var defaultValue: CGRect = .zero
+
+    static func reduce(value: inout CGRect, nextValue: () -> CGRect) {
+        value = nextValue()
     }
 }
 
