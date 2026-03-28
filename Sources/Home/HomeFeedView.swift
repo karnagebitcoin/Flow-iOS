@@ -549,7 +549,7 @@ struct HomeFeedView: View {
         } label: {
             Image(systemName: "line.3.horizontal.decrease")
                 .font(.system(size: 21, weight: .regular))
-                .foregroundStyle(viewModel.isUsingCustomFilters ? appSettings.primaryColor : .secondary)
+                .foregroundStyle(.secondary)
                 .frame(width: 46, height: 46)
                 .contentShape(Rectangle())
         }
