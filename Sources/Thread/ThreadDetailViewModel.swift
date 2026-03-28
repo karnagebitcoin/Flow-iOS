@@ -4,18 +4,23 @@ import Foundation
 final class ThreadDetailViewModel: ObservableObject {
     @Published private(set) var rootItem: FeedItem
     @Published private(set) var replies: [FeedItem] = []
+    @Published private(set) var noteActivityRows: [ActivityRow] = []
     @Published private(set) var isLoading = false
+    @Published private(set) var isLoadingNoteActivity = false
     @Published var errorMessage: String?
+    @Published var noteActivityErrorMessage: String?
 
     let relayURL: URL
     let readRelayURLs: [URL]
 
     private let service: NostrFeedService
     private var hasLoadedInitialState = false
+    private var hasLoadedNoteActivityState = false
     private var rootHydrationTask: Task<Void, Never>?
     private var itemHydrationTask: Task<Void, Never>?
     private static let fastThreadFetchTimeout: TimeInterval = 3
     private static let fastThreadRelayFetchMode: RelayFetchMode = .firstNonEmptyRelay
+    private static let noteActivityFetchTimeout: TimeInterval = 8
 
     init(
         rootItem: FeedItem,
@@ -42,6 +47,10 @@ final class ThreadDetailViewModel: ObservableObject {
         return "Replies (\(replies.count))"
     }
 
+    var hasLoadedNoteActivity: Bool {
+        hasLoadedNoteActivityState
+    }
+
     private var muteFilterSnapshot: MuteFilterSnapshot {
         MuteStore.shared.filterSnapshot
     }
@@ -52,7 +61,13 @@ final class ThreadDetailViewModel: ObservableObject {
         await refresh()
     }
 
-    func refresh() async {
+    func loadNoteActivityIfNeeded() async {
+        guard !hasLoadedNoteActivityState else { return }
+        hasLoadedNoteActivityState = true
+        await refreshNoteActivity()
+    }
+
+    func refresh(includeNoteActivity: Bool = false) async {
         guard !isLoading else { return }
         isLoading = true
         errorMessage = nil
@@ -82,6 +97,37 @@ final class ThreadDetailViewModel: ObservableObject {
                 errorMessage = "Couldn't load replies right now."
             } else {
                 errorMessage = "Couldn't refresh replies."
+            }
+        }
+
+        if includeNoteActivity || hasLoadedNoteActivityState {
+            await refreshNoteActivity()
+        }
+    }
+
+    func refreshNoteActivity() async {
+        guard !isLoadingNoteActivity else { return }
+        isLoadingNoteActivity = true
+        noteActivityErrorMessage = nil
+
+        defer {
+            isLoadingNoteActivity = false
+        }
+
+        do {
+            noteActivityRows = try await service.fetchNoteActivityRows(
+                relayURLs: readRelayURLs,
+                rootEventID: rootItem.displayEventID,
+                fetchTimeout: Self.noteActivityFetchTimeout,
+                relayFetchMode: .allRelays,
+                profileFetchTimeout: Self.noteActivityFetchTimeout,
+                profileRelayFetchMode: .allRelays
+            )
+        } catch {
+            if noteActivityRows.isEmpty {
+                noteActivityErrorMessage = "Couldn't load reactions right now."
+            } else {
+                noteActivityErrorMessage = "Couldn't refresh reactions."
             }
         }
     }

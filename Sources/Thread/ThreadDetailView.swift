@@ -14,6 +14,7 @@ struct ThreadDetailView: View {
     @State private var activeReplyTarget: FeedItem?
     @State private var selectedHashtagRoute: HashtagRoute?
     @State private var selectedProfileRoute: ProfileRoute?
+    @State private var selectedContentTab: ThreadDetailContentTab = .replies
     @State private var hasAppliedInitialReplyFocus = false
     @State private var hasAppliedInitialReplyScroll = false
     @State private var pendingReplyScrollTargetID: String?
@@ -63,23 +64,16 @@ struct ThreadDetailView: View {
                     Divider()
                         .padding(.leading, 16)
 
-                    repliesSection
-
-                    if let errorMessage = viewModel.errorMessage {
-                        Text(errorMessage)
-                            .font(.footnote)
-                            .foregroundStyle(.secondary)
-                            .frame(maxWidth: .infinity, alignment: .center)
-                            .padding(.horizontal, 16)
-                            .padding(.vertical, 10)
-                    }
+                    threadDetailContentSection
                 }
             }
             .background(Color(.systemBackground))
             .navigationTitle("Note")
             .navigationBarTitleDisplayMode(.inline)
             .refreshable {
-                await viewModel.refresh()
+                await viewModel.refresh(
+                    includeNoteActivity: selectedContentTab == .reactions || viewModel.hasLoadedNoteActivity
+                )
             }
             .task {
                 configureStores()
@@ -103,6 +97,12 @@ struct ThreadDetailView: View {
                 Task { @MainActor in
                     await scrollReplyIntoView(replyID: replyID, using: scrollProxy)
                     pendingReplyScrollTargetID = nil
+                }
+            }
+            .onChange(of: selectedContentTab) { _, newValue in
+                guard newValue == .reactions else { return }
+                Task {
+                    await viewModel.loadNoteActivityIfNeeded()
                 }
             }
             .onChange(of: auth.currentAccount?.pubkey) { _, _ in
@@ -442,33 +442,7 @@ struct ThreadDetailView: View {
     }
 
     private var repliesSection: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            HStack(spacing: 8) {
-                Text("Replies")
-                    .font(.headline)
-
-                if !threadReplies.isEmpty {
-                    Text("\(threadReplies.count)")
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(.secondary)
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 4)
-                        .background(
-                            Capsule(style: .continuous)
-                                .fill(Color(.secondarySystemBackground))
-                        )
-                        .overlay {
-                            Capsule(style: .continuous)
-                                .stroke(Color(.separator).opacity(0.3), lineWidth: 0.6)
-                        }
-                }
-
-                Spacer(minLength: 0)
-            }
-            .padding(.horizontal, 16)
-            .padding(.top, 12)
-            .padding(.bottom, 6)
-
+        Group {
             if viewModel.isLoading && threadReplies.isEmpty {
                 HStack {
                     Spacer()
@@ -533,6 +507,78 @@ struct ThreadDetailView: View {
 
                     Divider()
                         .padding(.leading, 72)
+                }
+            }
+        }
+    }
+
+    private var reactionsSection: some View {
+        Group {
+            if viewModel.isLoadingNoteActivity && noteActivityRows.isEmpty {
+                HStack {
+                    Spacer()
+                    ProgressView()
+                    Spacer()
+                }
+                .padding(.vertical, 16)
+            } else if noteActivityRows.isEmpty {
+                VStack(spacing: 6) {
+                    Text("No reactions yet")
+                        .font(.headline)
+                    Text("Likes, reposts, and quote shares will appear here.")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.center)
+                }
+                .frame(maxWidth: .infinity)
+                .padding(.horizontal, 16)
+                .padding(.vertical, 18)
+            } else {
+                ForEach(noteActivityRows) { activity in
+                    ActivityRowCell(item: activity)
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 10)
+
+                    Divider()
+                        .padding(.leading, 56)
+                }
+            }
+        }
+    }
+
+    private var threadDetailContentSection: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            FlowCapsuleTabBar(
+                selection: $selectedContentTab,
+                items: ThreadDetailContentTab.allCases,
+                title: { $0.title }
+            )
+            .padding(.horizontal, 16)
+            .padding(.top, 12)
+            .padding(.bottom, 10)
+
+            switch selectedContentTab {
+            case .replies:
+                repliesSection
+
+                if let errorMessage = viewModel.errorMessage {
+                    Text(errorMessage)
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity, alignment: .center)
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 10)
+                }
+            case .reactions:
+                reactionsSection
+
+                if let errorMessage = viewModel.noteActivityErrorMessage {
+                    Text(errorMessage)
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity, alignment: .center)
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 10)
                 }
             }
         }
@@ -707,6 +753,10 @@ struct ThreadDetailView: View {
         }
     }
 
+    private var noteActivityRows: [ActivityRow] {
+        viewModel.noteActivityRows.filter { !muteStore.isMuted($0.actorPubkey) }
+    }
+
     private var nsfwHiddenCard: some View {
         HStack(spacing: 10) {
             Image(systemName: "eye.slash")
@@ -788,6 +838,20 @@ struct ThreadDetailView: View {
         } catch {
             repostStatusMessage = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
             repostStatusIsError = true
+        }
+    }
+}
+
+private enum ThreadDetailContentTab: String, CaseIterable, Hashable {
+    case replies
+    case reactions
+
+    var title: String {
+        switch self {
+        case .replies:
+            return "Replies"
+        case .reactions:
+            return "Reactions"
         }
     }
 }

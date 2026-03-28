@@ -971,17 +971,115 @@ struct NostrFeedService: Sendable {
             from: events,
             currentUserPubkey: normalizedPubkey
         )
-        guard !filteredEvents.isEmpty else { return [] }
+        return await buildResolvedActivityRows(
+            relayURLs: relayTargets,
+            events: filteredEvents,
+            fetchTimeout: fetchTimeout,
+            relayFetchMode: relayFetchMode,
+            profileFetchTimeout: profileFetchTimeout,
+            profileRelayFetchMode: profileRelayFetchMode
+        )
+    }
+
+    func fetchNoteActivityRows(
+        relayURLs: [URL],
+        rootEventID: String,
+        limit: Int = 100,
+        fetchTimeout: TimeInterval = 12,
+        relayFetchMode: RelayFetchMode = .allRelays,
+        profileFetchTimeout: TimeInterval = 8,
+        profileRelayFetchMode: RelayFetchMode = .allRelays
+    ) async throws -> [ActivityRow] {
+        guard limit > 0 else { return [] }
+        guard let normalizedRootEventID = normalizedEventID(rootEventID) else { return [] }
+
+        let relayTargets = normalizedRelayURLs(relayURLs)
+        guard !relayTargets.isEmpty else { return [] }
+
+        async let reactionAndRepostEventsTask = fetchTimelineEvents(
+            relayURLs: relayTargets,
+            filter: NostrFilter(
+                kinds: [6, 7, 16],
+                limit: limit,
+                tagFilters: ["e": [normalizedRootEventID]]
+            ),
+            timeout: fetchTimeout,
+            relayFetchMode: relayFetchMode
+        )
+        async let quoteEventsTask = fetchTimelineEvents(
+            relayURLs: relayTargets,
+            filter: NostrFilter(
+                kinds: [1, 1111, 1244],
+                limit: limit,
+                tagFilters: ["q": [normalizedRootEventID]]
+            ),
+            timeout: fetchTimeout,
+            relayFetchMode: relayFetchMode
+        )
+
+        let mergedEvents = deduplicateEvents(try await reactionAndRepostEventsTask + quoteEventsTask)
+
+        return await buildNoteActivityRows(
+            relayURLs: relayTargets,
+            rootEventID: normalizedRootEventID,
+            events: mergedEvents,
+            fetchTimeout: fetchTimeout,
+            relayFetchMode: relayFetchMode,
+            profileFetchTimeout: profileFetchTimeout,
+            profileRelayFetchMode: profileRelayFetchMode
+        )
+    }
+
+    func buildNoteActivityRows(
+        relayURLs: [URL],
+        rootEventID: String,
+        events: [NostrEvent],
+        fetchTimeout: TimeInterval = 12,
+        relayFetchMode: RelayFetchMode = .allRelays,
+        profileFetchTimeout: TimeInterval = 8,
+        profileRelayFetchMode: RelayFetchMode = .allRelays
+    ) async -> [ActivityRow] {
+        guard let normalizedRootEventID = normalizedEventID(rootEventID) else { return [] }
+
+        let relayTargets = normalizedRelayURLs(relayURLs)
+        guard !relayTargets.isEmpty else { return [] }
+
+        let filteredEvents = filteredNoteActivityEvents(
+            from: events,
+            rootEventID: normalizedRootEventID
+        )
+
+        return await buildResolvedActivityRows(
+            relayURLs: relayTargets,
+            events: filteredEvents,
+            fetchTimeout: fetchTimeout,
+            relayFetchMode: relayFetchMode,
+            profileFetchTimeout: profileFetchTimeout,
+            profileRelayFetchMode: profileRelayFetchMode
+        )
+    }
+
+    private func buildResolvedActivityRows(
+        relayURLs: [URL],
+        events: [NostrEvent],
+        fetchTimeout: TimeInterval,
+        relayFetchMode: RelayFetchMode,
+        profileFetchTimeout: TimeInterval,
+        profileRelayFetchMode: RelayFetchMode
+    ) async -> [ActivityRow] {
+        let relayTargets = normalizedRelayURLs(relayURLs)
+        guard !relayTargets.isEmpty else { return [] }
+        guard !events.isEmpty else { return [] }
 
         async let actorProfilesTask = hydrateActorProfiles(
-            for: filteredEvents,
+            for: events,
             relayURLs: relayTargets,
             fetchTimeout: profileFetchTimeout,
             relayFetchMode: profileRelayFetchMode
         )
         async let targetEventsTask = resolveActivityTargetEvents(
             relayURLs: relayTargets,
-            sourceEvents: filteredEvents,
+            sourceEvents: events,
             fetchTimeout: fetchTimeout,
             relayFetchMode: relayFetchMode
         )
@@ -1002,12 +1100,12 @@ struct NostrFeedService: Sendable {
             ? [:]
             : await profileCache.cachedProfiles(pubkeys: targetPubkeys)
 
-        return filteredEvents.compactMap { event in
+        return events.compactMap { event in
             guard let action = event.activityAction else { return nil }
 
             let normalizedActorPubkey = normalizePubkey(event.pubkey)
             let actor = ActivityActor(pubkey: event.pubkey, profile: actorProfiles[normalizedActorPubkey])
-            let targetReference = event.activityTargetReference
+            let targetReference = resolvedActivityTargetReference(for: event)
             let resolvedTargetEvent = targetReference.flatMap { targetEventsByReference[$0] }
             let targetProfile = resolvedTargetEvent.flatMap {
                 targetProfiles[normalizePubkey($0.pubkey)]
@@ -1843,7 +1941,7 @@ struct NostrFeedService: Sendable {
         let eventsByID = Dictionary(uniqueKeysWithValues: sourceEvents.map { ($0.id.lowercased(), $0) })
 
         var resolved: [ActivityTargetReference: NostrEvent] = [:]
-        let uniqueReferences = Array(Set(sourceEvents.compactMap { $0.activityTargetReference }))
+        let uniqueReferences = Array(Set(sourceEvents.compactMap { resolvedActivityTargetReference(for: $0) }))
         guard !uniqueReferences.isEmpty else { return resolved }
 
         var missingEventIDs = Set<String>()
@@ -1997,6 +2095,49 @@ struct NostrFeedService: Sendable {
                     return lhs.createdAt > rhs.createdAt
                 })
         )
+    }
+
+    private func filteredNoteActivityEvents(
+        from events: [NostrEvent],
+        rootEventID: String
+    ) -> [NostrEvent] {
+        deduplicateEvents(
+            events
+                .filter { event in
+                    guard let action = event.activityAction else { return false }
+                    guard resolvedActivityTargetReference(for: event)?.eventID?.lowercased() == rootEventID else {
+                        return false
+                    }
+
+                    switch action {
+                    case .reaction, .reshare, .quoteShare:
+                        return true
+                    case .mention, .reply:
+                        return false
+                    }
+                }
+                .sorted(by: { lhs, rhs in
+                    if lhs.createdAt == rhs.createdAt {
+                        return lhs.id > rhs.id
+                    }
+                    return lhs.createdAt > rhs.createdAt
+                })
+        )
+    }
+
+    private func resolvedActivityTargetReference(for event: NostrEvent) -> ActivityTargetReference? {
+        if let activityTargetReference = event.activityTargetReference {
+            return activityTargetReference
+        }
+
+        guard let action = event.activityAction else { return nil }
+        switch action {
+        case .reaction, .reshare:
+            guard let eventID = normalizedEventID(event.lastEventReferenceID) else { return nil }
+            return .eventID(eventID)
+        case .mention, .reply, .quoteShare:
+            return nil
+        }
     }
 
     private func normalizedEventID(_ value: String?) -> String? {

@@ -2,6 +2,74 @@ import XCTest
 @testable import Flow
 
 final class NostrFeedServiceTests: XCTestCase {
+    func testBuildNoteActivityRowsIncludesReactionsResharesAndQuotesForTargetNoteOnly() async throws {
+        var harnessBox: TestHarness? = try TestHarness()
+        let rootURL = try XCTUnwrap(harnessBox?.rootURL)
+        defer {
+            harnessBox = nil
+            try? FileManager.default.removeItem(at: rootURL)
+        }
+        let harness = try XCTUnwrap(harnessBox)
+
+        let rootEventID = hex("9")
+        let rootAuthorPubkey = hex("8")
+        let reactionActorPubkey = hex("1")
+        let repostActorPubkey = hex("2")
+        let quoteActorPubkey = hex("3")
+
+        let rootEvent = makeEvent(
+            id: rootEventID,
+            pubkey: rootAuthorPubkey,
+            kind: 1,
+            tags: [],
+            content: "Root note"
+        )
+        let reactionEvent = makeEvent(
+            id: hex("a"),
+            pubkey: reactionActorPubkey,
+            kind: 7,
+            tags: [["e", rootEventID, "", "reply"]],
+            content: "+"
+        )
+        let repostEvent = makeEvent(
+            id: hex("b"),
+            pubkey: repostActorPubkey,
+            kind: 6,
+            tags: [["e", rootEventID, "", "mention"]],
+            content: ""
+        )
+        let quoteEvent = makeEvent(
+            id: hex("c"),
+            pubkey: quoteActorPubkey,
+            kind: 1,
+            tags: [["q", rootEventID]],
+            content: "Quoting this"
+        )
+        let unrelatedReply = makeEvent(
+            id: hex("d"),
+            pubkey: hex("4"),
+            kind: 1,
+            tags: [["e", rootEventID, "", "reply"]],
+            content: "A reply should stay out of reactions"
+        )
+
+        await harness.seenEventStore.store(events: [rootEvent])
+
+        let rows = await harness.service.buildNoteActivityRows(
+            relayURLs: [relayURL],
+            rootEventID: rootEventID,
+            events: [reactionEvent, repostEvent, quoteEvent, unrelatedReply],
+            fetchTimeout: 0.01,
+            relayFetchMode: .firstNonEmptyRelay,
+            profileFetchTimeout: 0.01,
+            profileRelayFetchMode: .firstNonEmptyRelay
+        )
+
+        XCTAssertEqual(rows.map(\.id), [quoteEvent.id, repostEvent.id, reactionEvent.id])
+        XCTAssertEqual(rows.map(\.action.title), ["Quote share", "Reshare", "Reaction"])
+        XCTAssertTrue(rows.allSatisfy { $0.target.event?.id.lowercased() == rootEventID })
+    }
+
     func testBuildActivityRowsUsesCachedActorAndTargetProfilesWithoutRelayFetch() async throws {
         var harnessBox: TestHarness? = try TestHarness()
         let rootURL = try XCTUnwrap(harnessBox?.rootURL)

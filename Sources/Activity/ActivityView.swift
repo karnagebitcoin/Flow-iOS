@@ -489,7 +489,7 @@ struct ActivityView: View {
     }
 }
 
-private struct ActivityRowCell: View {
+struct ActivityRowCell: View {
     let item: ActivityRow
 
     var body: some View {
