@@ -332,7 +332,7 @@ enum RelayFetchMode: Sendable {
 }
 
 struct NostrFeedService: Sendable {
-    private let relayClient: NostrRelayClient
+    private let relayClient: any NostrRelayEventFetching
     private let timelineCache: TimelineEventCache
     private let profileCache: ProfileCache
     private let relayHintCache: ProfileRelayHintCache
@@ -350,7 +350,7 @@ struct NostrFeedService: Sendable {
     ]
 
     init(
-        relayClient: NostrRelayClient = NostrRelayClient(),
+        relayClient: any NostrRelayEventFetching = NostrRelayClient(),
         timelineCache: TimelineEventCache = .shared,
         profileCache: ProfileCache = .shared,
         relayHintCache: ProfileRelayHintCache = .shared,

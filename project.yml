@@ -53,10 +53,26 @@ targets:
         CURRENT_PROJECT_VERSION: 1
         MARKETING_VERSION: 0.1.0
         CODE_SIGN_STYLE: Automatic
+  FlowTests:
+    type: bundle.unit-test
+    platform: iOS
+    deploymentTarget: "17.0"
+    sources:
+      - path: Tests
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: YES
+        SWIFT_VERSION: 5.0
+    dependencies:
+      - target: Flow
 schemes:
   Flow:
     build:
       targets:
         Flow: all
+    test:
+      config: Debug
+      targets:
+        - name: FlowTests
     run:
       config: Debug

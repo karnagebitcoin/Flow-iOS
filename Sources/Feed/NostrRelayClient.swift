@@ -1,5 +1,13 @@
 import Foundation
 
+protocol NostrRelayEventFetching: Sendable {
+    func fetchEvents(
+        relayURL: URL,
+        filter: NostrFilter,
+        timeout: TimeInterval
+    ) async throws -> [NostrEvent]
+}
+
 enum RelayClientError: LocalizedError {
     case invalidRelayURL(String)
     case closed(String)
@@ -198,3 +206,5 @@ actor NostrRelayClient {
         return String(decoding: data, as: UTF8.self)
     }
 }
+
+extension NostrRelayClient: NostrRelayEventFetching {}

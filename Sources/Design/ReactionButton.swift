@@ -44,9 +44,12 @@ struct ReactionButton: View {
     @State private var isPressing = false
     @State private var longHoldActivated = false
     @State private var floatingHearts: [ReactionFloatingHeart] = []
+    @State private var longHoldBurstCount = 0
+    @State private var displayedBurstCount: Int?
     @State private var holdActivationTask: Task<Void, Never>?
     @State private var holdChargeTask: Task<Void, Never>?
     @State private var floatingHeartTask: Task<Void, Never>?
+    @State private var burstDisplayResetTask: Task<Void, Never>?
 
     private let longHoldDurationNanos: UInt64 = 420_000_000
     private let maxTapTranslation: CGFloat = 24
@@ -62,7 +65,16 @@ struct ReactionButton: View {
             }
             .frame(width: 20, height: 20)
 
-            if count > 0 {
+            if let visibleBurstCount = displayedBurstCount, visibleBurstCount > 0 {
+                Text("+\(visibleBurstCount)")
+                    .font(.footnote.monospacedDigit())
+                    .fontWeight(.semibold)
+                    .foregroundStyle(activeColor)
+                    .transition(.asymmetric(
+                        insertion: .scale(scale: 0.82).combined(with: .opacity),
+                        removal: .opacity
+                    ))
+            } else if count > 0 {
                 Text("\(count)")
                     .font(.footnote)
             }
@@ -107,6 +119,8 @@ struct ReactionButton: View {
         )
         .onDisappear {
             resetPressState()
+            burstDisplayResetTask?.cancel()
+            burstDisplayResetTask = nil
         }
     }
 
@@ -141,6 +155,10 @@ struct ReactionButton: View {
         guard !isPressing else { return }
         isPressing = true
         longHoldActivated = false
+        longHoldBurstCount = 0
+        displayedBurstCount = nil
+        burstDisplayResetTask?.cancel()
+        burstDisplayResetTask = nil
         startHoldActivationTask()
         startHoldChargeTask()
     }
@@ -203,6 +221,13 @@ struct ReactionButton: View {
     private func spawnFloatingHeart() {
         guard isPressing, longHoldActivated else { return }
 
+        longHoldBurstCount += 1
+        withAnimation(.spring(response: 0.22, dampingFraction: 0.85)) {
+            // Keep burst count local to the button so the user sees the held stream
+            // without implying extra protocol-level reactions.
+            displayedBurstCount = longHoldBurstCount
+        }
+
         let heart = ReactionFloatingHeart(
             xDrift: CGFloat.random(in: -60...60),
             yTravel: CGFloat.random(in: 84...176),
@@ -226,6 +251,8 @@ struct ReactionButton: View {
 
     @MainActor
     private func resetPressState() {
+        let finalBurstCount = longHoldBurstCount
+
         isPressing = false
         longHoldActivated = false
         holdActivationTask?.cancel()
@@ -234,6 +261,24 @@ struct ReactionButton: View {
         holdChargeTask = nil
         floatingHeartTask?.cancel()
         floatingHeartTask = nil
+        longHoldBurstCount = 0
+
+        burstDisplayResetTask?.cancel()
+        if finalBurstCount > 0 {
+            burstDisplayResetTask = Task {
+                try? await Task.sleep(nanoseconds: 900_000_000)
+                guard !Task.isCancelled else { return }
+                await MainActor.run {
+                    guard !isPressing else { return }
+                    withAnimation(.easeOut(duration: 0.2)) {
+                        displayedBurstCount = nil
+                    }
+                }
+            }
+        } else {
+            displayedBurstCount = nil
+            burstDisplayResetTask = nil
+        }
     }
 }
 

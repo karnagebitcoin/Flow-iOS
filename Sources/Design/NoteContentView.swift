@@ -996,10 +996,10 @@ private struct NoteImageGalleryView: View {
 
     var body: some View {
         Group {
-            if layout == .feed {
-                feedGallery
-            } else if imageURLs.count == 1 {
+            if imageURLs.count == 1 {
                 singleImageCell(url: imageURLs[0], index: 0)
+            } else if layout == .feed {
+                feedGallery
             } else {
                 pagedGallery
             }
@@ -1014,10 +1014,6 @@ private struct NoteImageGalleryView: View {
                 commentCount: commentCount
             )
         }
-    }
-
-    private var singleImageMaxHeight: CGFloat {
-        layout == .detailCarousel ? 620 : 520
     }
 
     private var multiImageHeight: CGFloat {
@@ -1092,7 +1088,6 @@ private struct NoteImageGalleryView: View {
                 ForEach(Array(imageURLs.enumerated()), id: \.offset) { index, url in
                     NoteSingleImageCellView(
                         url: url,
-                        maxHeight: multiImageHeight,
                         cornerRadius: mediaCornerRadius,
                         onTap: {
                             selectedImage = SelectedImage(id: index)
@@ -1112,7 +1107,6 @@ private struct NoteImageGalleryView: View {
     private func singleImageCell(url: URL, index: Int) -> some View {
         NoteSingleImageCellView(
             url: url,
-            maxHeight: singleImageMaxHeight,
             cornerRadius: mediaCornerRadius,
             onTap: {
                 selectedImage = SelectedImage(id: index)
@@ -1161,7 +1155,6 @@ private struct NoteFeedImageTileView: View {
 
 private struct NoteSingleImageCellView: View {
     let url: URL
-    let maxHeight: CGFloat
     let cornerRadius: CGFloat
     let onTap: () -> Void
 
@@ -1169,12 +1162,9 @@ private struct NoteSingleImageCellView: View {
         Button(action: onTap) {
             NoteRemoteMediaView(url: url) { asset in
                 NoteMediaAssetContentView(asset: asset, scaling: .fit)
-                    .frame(
-                        maxWidth: preferredMaxWidth(for: asset),
-                        maxHeight: maxHeight,
-                        alignment: .center
-                    )
+                    .frame(maxWidth: .infinity, alignment: .center)
                     .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
+                    .contentShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
             } placeholder: {
                 ProgressView()
                     .frame(maxWidth: .infinity, minHeight: 180, alignment: .center)
@@ -1187,10 +1177,6 @@ private struct NoteSingleImageCellView: View {
         }
         .buttonStyle(.plain)
         .frame(maxWidth: .infinity, alignment: .leading)
-    }
-
-    private func preferredMaxWidth(for asset: NoteMediaAsset) -> CGFloat {
-        asset.size.width > 0 ? asset.size.width : .infinity
     }
 }
 
