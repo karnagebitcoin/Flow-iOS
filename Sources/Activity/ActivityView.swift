@@ -15,6 +15,7 @@ struct ActivityView: View {
     @State private var selectedProfileRoute: ProfileRoute?
     @State private var topNavAvatarURL: URL?
     @State private var topNavAvatarImage: UIImage?
+    @StateObject private var settingsSheetState = SettingsSheetState()
     @Binding private var isRootVisible: Bool
 
     init(
@@ -118,8 +119,10 @@ struct ActivityView: View {
                     await viewModel.refresh()
                 }
             }
-            .sheet(isPresented: $isShowingSettings) {
-                SettingsView()
+            .sheet(isPresented: $isShowingSettings, onDismiss: {
+                settingsSheetState.reset()
+            }) {
+                SettingsView(sheetState: settingsSheetState)
                     .environmentObject(relaySettings)
             }
             .sheet(isPresented: $isShowingNotificationSettings) {

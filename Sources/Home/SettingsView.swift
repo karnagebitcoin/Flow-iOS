@@ -7,11 +7,10 @@ struct SettingsView: View {
     @EnvironmentObject private var appSettings: AppSettingsStore
     @EnvironmentObject private var breakReminderCoordinator: BreakReminderCoordinator
     @EnvironmentObject private var relaySettings: RelaySettingsStore
-    @State private var isShowingPrimaryColorPicker = false
-    @State private var navigationPath: [SettingsDestination] = []
+    @ObservedObject var sheetState: SettingsSheetState
 
     var body: some View {
-        NavigationStack(path: $navigationPath) {
+        NavigationStack(path: navigationPathBinding) {
             Form {
                 Section {
                     SettingsValueNavigationRow(
@@ -82,7 +81,7 @@ struct SettingsView: View {
             .task {
                 await appSettings.refreshNotificationAuthorizationStatus()
             }
-            .sheet(isPresented: $isShowingPrimaryColorPicker) {
+            .sheet(isPresented: isShowingPrimaryColorPickerBinding) {
                 SettingsNativeColorPicker(
                     title: "Primary Color",
                     color: Binding(
@@ -90,7 +89,7 @@ struct SettingsView: View {
                         set: { appSettings.primaryColor = $0 }
                     ),
                     onDismiss: {
-                        isShowingPrimaryColorPicker = false
+                        sheetState.isShowingPrimaryColorPicker = false
                     }
                 )
                 .preferredColorScheme(appSettings.preferredColorScheme)
@@ -106,6 +105,20 @@ struct SettingsView: View {
         return "Connected to \(count) \(count == 1 ? "source" : "sources")"
     }
 
+    private var navigationPathBinding: Binding<[SettingsDestination]> {
+        Binding(
+            get: { sheetState.navigationPath },
+            set: { sheetState.navigationPath = $0 }
+        )
+    }
+
+    private var isShowingPrimaryColorPickerBinding: Binding<Bool> {
+        Binding(
+            get: { sheetState.isShowingPrimaryColorPicker },
+            set: { sheetState.isShowingPrimaryColorPicker = $0 }
+        )
+    }
+
     @ViewBuilder
     private func settingsDestinationView(for destination: SettingsDestination) -> some View {
         switch destination {
@@ -114,7 +127,7 @@ struct SettingsView: View {
         case .appearance:
             SettingsAppearanceView(
                 onOpenPrimaryColorPicker: {
-                    isShowingPrimaryColorPicker = true
+                    sheetState.isShowingPrimaryColorPicker = true
                 }
             )
         case .feeds:
@@ -130,6 +143,17 @@ struct SettingsView: View {
         case .connection:
             RelaySettingsView()
         }
+    }
+}
+
+@MainActor
+final class SettingsSheetState: ObservableObject {
+    @Published var navigationPath: [SettingsDestination] = []
+    @Published var isShowingPrimaryColorPicker = false
+
+    func reset() {
+        navigationPath.removeAll()
+        isShowingPrimaryColorPicker = false
     }
 }
 

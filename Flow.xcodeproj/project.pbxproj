@@ -62,6 +62,7 @@
 		8EDED286A4DEBE2CB6B23BC0 /* FlowSharedComposeDraft.swift in Sources */ = {isa = PBXBuildFile; fileRef = 27A9DD4BD8B693E635A934B8 /* FlowSharedComposeDraft.swift */; };
 		977E112C8E7948939005ADBA /* HomeFeedViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 87F4B84828ED1C578A57652F /* HomeFeedViewModel.swift */; };
 		98F70D48581019050A4D7C4E /* SignupOnboardingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9906B019376E45D30E7BB2EF /* SignupOnboardingView.swift */; };
+		9978BCF463A6136B01576C5A /* SettingsSheetStateTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E1F6836BDC0C280FB41674C1 /* SettingsSheetStateTests.swift */; };
 		99843C2501BBE53CC7640FA4 /* FeedCaches.swift in Sources */ = {isa = PBXBuildFile; fileRef = 06FF81777B1A43EA5BB4D808 /* FeedCaches.swift */; };
 		9D863BB7629A60AC9BD679EE /* FlowMediaCacheDiagnosticsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D2EE38569BAF46EC577CDF58 /* FlowMediaCacheDiagnosticsTests.swift */; };
 		9E849BD43F01C740E0DAFAD5 /* FlowShareExtension.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = B9BEB6EA4B182422CED31E86 /* FlowShareExtension.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
@@ -214,6 +215,7 @@
 		DAD56D1E53FBA71CADBC7443 /* NoteContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NoteContentView.swift; sourceTree = "<group>"; };
 		DB9619AA2B74AE8DE02E11D9 /* ComposeNotePublishService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ComposeNotePublishService.swift; sourceTree = "<group>"; };
 		DC4B8630B0EC755F3A8BF84E /* NoteReactionStatsService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NoteReactionStatsService.swift; sourceTree = "<group>"; };
+		E1F6836BDC0C280FB41674C1 /* SettingsSheetStateTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsSheetStateTests.swift; sourceTree = "<group>"; };
 		E695E0883CD0CDEE151E004B /* ShareViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShareViewController.swift; sourceTree = "<group>"; };
 		E6BDD5E9DEFAD0D257ED53A2 /* RelaySettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RelaySettingsView.swift; sourceTree = "<group>"; };
 		E8D296822B861C00CC436CE9 /* FlowTests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = FlowTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -316,6 +318,7 @@
 				728E5E9205402D9D0C91D77C /* InlineVideoAutoplayVisibilityPolicyTests.swift */,
 				58C5041AD8041427E01D7B42 /* NostrFeedServiceTests.swift */,
 				D6D17F2EC311D3203D8950E1 /* NostrRelayClientTests.swift */,
+				E1F6836BDC0C280FB41674C1 /* SettingsSheetStateTests.swift */,
 			);
 			path = Tests;
 			sourceTree = "<group>";
@@ -714,6 +717,7 @@
 				5F015362E1208C0120B5B711 /* InlineVideoAutoplayVisibilityPolicyTests.swift in Sources */,
 				DF564A10D83D14512B25E8FE /* NostrFeedServiceTests.swift in Sources */,
 				52C61C33CE36A6629F3F83C3 /* NostrRelayClientTests.swift in Sources */,
+				9978BCF463A6136B01576C5A /* SettingsSheetStateTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

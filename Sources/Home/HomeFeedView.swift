@@ -24,6 +24,7 @@ struct HomeFeedView: View {
     @State private var isShowingFilterSheet = false
     @State private var isShowingSettings = false
     @State private var isTopNavigationVisible = true
+    @StateObject private var settingsSheetState = SettingsSheetState()
 
     @State private var selectedThreadItem: FeedItem?
     @State private var selectedHashtagRoute: HashtagRoute?
@@ -284,8 +285,10 @@ struct HomeFeedView: View {
             .sheet(isPresented: $isShowingFilterSheet) {
                 filterSheet
             }
-            .sheet(isPresented: $isShowingSettings) {
-                SettingsView()
+            .sheet(isPresented: $isShowingSettings, onDismiss: {
+                settingsSheetState.reset()
+            }) {
+                SettingsView(sheetState: settingsSheetState)
                     .environmentObject(relaySettings)
             }
             .navigationDestination(item: $selectedThreadItem) { item in
