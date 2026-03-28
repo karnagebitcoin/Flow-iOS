@@ -397,8 +397,11 @@ struct ComposeNoteSheet: View {
                 composeCard
                 statusSection
             }
-            .padding(16)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 16)
+            .padding(.vertical, 16)
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private var publishToolbarButton: some View {
@@ -717,6 +720,7 @@ struct ComposeNoteSheet: View {
                 }
             }
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private var statusSection: some View {
@@ -1044,6 +1048,7 @@ struct ComposeNoteSheet: View {
                     }
                 }
                 .padding(12)
+                .frame(maxWidth: .infinity, alignment: .leading)
                 .background(
                     RoundedRectangle(cornerRadius: 18, style: .continuous)
                         .fill(Color(.secondarySystemBackground))
@@ -1145,6 +1150,7 @@ struct ComposeNoteSheet: View {
                     }
                 }
                 .padding(10)
+                .frame(maxWidth: .infinity, alignment: .leading)
                 .background(
                     RoundedRectangle(cornerRadius: 16, style: .continuous)
                         .fill(Color(.secondarySystemBackground))
