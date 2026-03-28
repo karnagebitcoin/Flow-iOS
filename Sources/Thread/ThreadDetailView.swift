@@ -780,7 +780,7 @@ struct ThreadDetailView: View {
                 writeRelayURLs: effectiveWriteRelayURLs,
                 relayHintURL: effectiveReadRelayURLs.first
             )
-            repostStatusMessage = "Reposted to \(relayCount) relay\(relayCount == 1 ? "" : "s")."
+            repostStatusMessage = "Reposted to \(relayCount) source\(relayCount == 1 ? "" : "s")."
             repostStatusIsError = false
 
             try? await Task.sleep(nanoseconds: 450_000_000)

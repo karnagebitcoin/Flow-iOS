@@ -23,7 +23,7 @@ enum ResharePublishError: LocalizedError {
         case .missingPrivateKey:
             return "Sign in with a private key to repost."
         case .missingWriteRelays:
-            return "No write relays are configured."
+            return "No publish sources are configured."
         case .malformedTargetEvent:
             return "Couldn't prepare this event for reposting."
         case .malformedRepost:
@@ -35,9 +35,9 @@ enum ResharePublishError: LocalizedError {
 }
 
 final class ResharePublishService {
-    private let relayClient: NostrRelayClient
+    private let relayClient: any NostrRelayEventPublishing
 
-    init(relayClient: NostrRelayClient = NostrRelayClient()) {
+    init(relayClient: any NostrRelayEventPublishing = NostrRelayClient()) {
         self.relayClient = relayClient
     }
 
@@ -137,35 +137,20 @@ final class ResharePublishService {
             .build(signedBy: keypair)
 
         let repostData = try JSONEncoder().encode(repostEvent)
-        guard let repostObject = try JSONSerialization.jsonObject(with: repostData) as? [String: Any] else {
-            throw ResharePublishError.malformedRepost
-        }
+        let publishOutcome = await relayClient.publishEvent(
+            to: targets,
+            eventData: repostData,
+            eventID: repostEvent.id
+        )
 
-        var successfulPublishes = 0
-        var firstError: Error?
-        for relayURL in targets {
-            do {
-                try await relayClient.publishEvent(
-                    relayURL: relayURL,
-                    eventObject: repostObject,
-                    eventID: repostEvent.id
-                )
-                successfulPublishes += 1
-            } catch {
-                if firstError == nil {
-                    firstError = error
-                }
-            }
-        }
-
-        if successfulPublishes == 0 {
-            if let firstError {
-                throw firstError
+        if publishOutcome.successfulSourceCount == 0 {
+            if let firstFailureMessage = publishOutcome.firstFailureMessage {
+                throw SourcePublishTransportError(message: firstFailureMessage)
             }
             throw ResharePublishError.publishFailed
         }
 
-        return successfulPublishes
+        return publishOutcome.successfulSourceCount
     }
 
     private func serializedTargetEventContent(_ event: NostrEvent) throws -> String {

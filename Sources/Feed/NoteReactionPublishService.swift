@@ -19,7 +19,7 @@ enum NoteReactionPublishError: LocalizedError {
         case .missingPrivateKey:
             return "Sign in with a private key to react to notes."
         case .missingWriteRelays:
-            return "No write relays are configured."
+            return "No publish sources are configured."
         case .malformedTargetEvent:
             return "Couldn't prepare this note for reacting."
         case .malformedReaction:
@@ -33,9 +33,9 @@ enum NoteReactionPublishError: LocalizedError {
 }
 
 final class NoteReactionPublishService {
-    private let relayClient: NostrRelayClient
+    private let relayClient: any NostrRelayEventPublishing
 
-    init(relayClient: NostrRelayClient = NostrRelayClient()) {
+    init(relayClient: any NostrRelayEventPublishing = NostrRelayClient()) {
         self.relayClient = relayClient
     }
 
@@ -129,31 +129,15 @@ final class NoteReactionPublishService {
 
     private func publish(event: NostrSDK.NostrEvent, to relayURLs: [URL]) async throws {
         let eventData = try JSONEncoder().encode(event)
-        guard let eventObject = try JSONSerialization.jsonObject(with: eventData) as? [String: Any] else {
-            throw NoteReactionPublishError.publishFailed
-        }
+        let publishOutcome = await relayClient.publishEvent(
+            to: relayURLs,
+            eventData: eventData,
+            eventID: event.id
+        )
 
-        var successfulPublishes = 0
-        var firstError: Error?
-
-        for relayURL in relayURLs {
-            do {
-                try await relayClient.publishEvent(
-                    relayURL: relayURL,
-                    eventObject: eventObject,
-                    eventID: event.id
-                )
-                successfulPublishes += 1
-            } catch {
-                if firstError == nil {
-                    firstError = error
-                }
-            }
-        }
-
-        if successfulPublishes == 0 {
-            if let firstError {
-                throw firstError
+        if publishOutcome.successfulSourceCount == 0 {
+            if let firstFailureMessage = publishOutcome.firstFailureMessage {
+                throw SourcePublishTransportError(message: firstFailureMessage)
             }
             throw NoteReactionPublishError.publishFailed
         }

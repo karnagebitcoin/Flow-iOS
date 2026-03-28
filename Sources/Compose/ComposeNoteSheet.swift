@@ -72,7 +72,7 @@ final class ComposeNoteViewModel: ObservableObject {
                 )
 
                 text = ""
-                feedbackMessage = "Posted to \(successfulRelayCount) relay\(successfulRelayCount == 1 ? "" : "s")."
+                feedbackMessage = "Posted to \(successfulRelayCount) source\(successfulRelayCount == 1 ? "" : "s")."
                 feedbackIsError = false
                 return true
             }
@@ -711,7 +711,7 @@ struct ComposeNoteSheet: View {
                         .font(.footnote.weight(.semibold))
                         .foregroundStyle(.secondary)
                 } else if writeRelayURLs.isEmpty {
-                    Label("No write relays", systemImage: "wifi.slash")
+                    Label("No publish sources", systemImage: "wifi.slash")
                         .font(.footnote.weight(.semibold))
                         .foregroundStyle(.secondary)
                 }
@@ -725,7 +725,7 @@ struct ComposeNoteSheet: View {
                 HStack(spacing: 10) {
                     ProgressView()
                         .controlSize(.small)
-                    Text("Publishing to \(writeRelayURLs.count) relay\(writeRelayURLs.count == 1 ? "" : "s")...")
+                    Text("Publishing to \(writeRelayURLs.count) source\(writeRelayURLs.count == 1 ? "" : "s")...")
                         .font(.footnote)
                         .foregroundStyle(.secondary)
                     Spacer()
@@ -760,7 +760,7 @@ struct ComposeNoteSheet: View {
             } else if writeRelayURLs.isEmpty {
                 infoBanner(
                     systemImage: "wifi.slash",
-                    text: "Add at least one write relay to publish notes."
+                    text: "Add at least one publish source to post notes."
                 )
             }
         }
@@ -1750,7 +1750,7 @@ struct ComposeNoteSheet: View {
             viewModel.feedbackMessage = currentNsec == nil
                 ? "This account needs an nsec to publish notes."
                 : writeRelayURLs.isEmpty
-                    ? "No write relays are configured."
+                    ? "No publish sources are configured."
                     : "Write a note or attach media before posting."
             viewModel.feedbackIsError = true
             return

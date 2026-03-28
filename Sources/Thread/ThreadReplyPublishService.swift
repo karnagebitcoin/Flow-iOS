@@ -15,7 +15,7 @@ enum ThreadReplyPublishError: LocalizedError {
         case .missingPrivateKey:
             return "Sign in with a private key to reply."
         case .missingWriteRelays:
-            return "No write relays are configured."
+            return "No publish sources are configured."
         case .malformedEvent:
             return "Couldn't build reply event."
         case .publishFailed:
@@ -25,9 +25,9 @@ enum ThreadReplyPublishError: LocalizedError {
 }
 
 final class ThreadReplyPublishService {
-    private let relayClient: NostrRelayClient
+    private let relayClient: any NostrRelayEventPublishing
 
-    init(relayClient: NostrRelayClient = NostrRelayClient()) {
+    init(relayClient: any NostrRelayEventPublishing = NostrRelayClient()) {
         self.relayClient = relayClient
     }
 
@@ -108,30 +108,15 @@ final class ThreadReplyPublishService {
             .build(signedBy: keypair)
 
         let eventData = try JSONEncoder().encode(event)
-        guard let eventObject = try JSONSerialization.jsonObject(with: eventData) as? [String: Any] else {
-            throw ThreadReplyPublishError.malformedEvent
-        }
+        let publishOutcome = await relayClient.publishEvent(
+            to: targets,
+            eventData: eventData,
+            eventID: event.id
+        )
 
-        var successfulPublishes = 0
-        var firstError: Error?
-        for relayURL in targets {
-            do {
-                try await relayClient.publishEvent(
-                    relayURL: relayURL,
-                    eventObject: eventObject,
-                    eventID: event.id
-                )
-                successfulPublishes += 1
-            } catch {
-                if firstError == nil {
-                    firstError = error
-                }
-            }
-        }
-
-        if successfulPublishes == 0 {
-            if let firstError {
-                throw firstError
+        if publishOutcome.successfulSourceCount == 0 {
+            if let firstFailureMessage = publishOutcome.firstFailureMessage {
+                throw SourcePublishTransportError(message: firstFailureMessage)
             }
             throw ThreadReplyPublishError.publishFailed
         }

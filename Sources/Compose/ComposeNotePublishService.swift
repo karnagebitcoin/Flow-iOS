@@ -15,7 +15,7 @@ enum ComposeNotePublishError: LocalizedError {
         case .missingPrivateKey:
             return "This account can read posts, but it needs an nsec to publish."
         case .missingWriteRelays:
-            return "No write relays are configured."
+            return "No publish sources are configured."
         case .malformedEvent:
             return "Couldn't build the note to publish."
         case .publishFailed:
@@ -25,9 +25,9 @@ enum ComposeNotePublishError: LocalizedError {
 }
 
 final class ComposeNotePublishService {
-    private let relayClient: NostrRelayClient
+    private let relayClient: any NostrRelayEventPublishing
 
-    init(relayClient: NostrRelayClient = NostrRelayClient()) {
+    init(relayClient: any NostrRelayEventPublishing = NostrRelayClient()) {
         self.relayClient = relayClient
     }
 
@@ -67,36 +67,20 @@ final class ComposeNotePublishService {
             .build(signedBy: keypair)
 
         let eventData = try JSONEncoder().encode(event)
-        guard let eventObject = try JSONSerialization.jsonObject(with: eventData) as? [String: Any] else {
-            throw ComposeNotePublishError.malformedEvent
-        }
+        let publishOutcome = await relayClient.publishEvent(
+            to: targets,
+            eventData: eventData,
+            eventID: event.id
+        )
 
-        var successfulPublishes = 0
-        var firstPublishError: Error?
-
-        for relayURL in targets {
-            do {
-                try await relayClient.publishEvent(
-                    relayURL: relayURL,
-                    eventObject: eventObject,
-                    eventID: event.id
-                )
-                successfulPublishes += 1
-            } catch {
-                if firstPublishError == nil {
-                    firstPublishError = error
-                }
-            }
-        }
-
-        if successfulPublishes == 0 {
-            if let firstPublishError {
-                throw firstPublishError
+        if publishOutcome.successfulSourceCount == 0 {
+            if let firstFailureMessage = publishOutcome.firstFailureMessage {
+                throw SourcePublishTransportError(message: firstFailureMessage)
             }
             throw ComposeNotePublishError.publishFailed
         }
 
-        return successfulPublishes
+        return publishOutcome.successfulSourceCount
     }
 
     private func normalizedRelayURLs(_ relayURLs: [URL]) -> [URL] {

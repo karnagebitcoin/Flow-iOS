@@ -1149,7 +1149,7 @@ struct ImageRemixEditorView: View {
         }
 
         guard !writeRelayURLs.isEmpty else {
-            toastCenter.show("Add a write relay before posting.", style: .error, duration: 2.8)
+            toastCenter.show("Add a publish source before posting.", style: .error, duration: 2.8)
             return
         }
 

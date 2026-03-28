@@ -8,6 +8,28 @@ protocol NostrRelayEventFetching: Sendable {
     ) async throws -> [NostrEvent]
 }
 
+protocol NostrRelayEventPublishing: Sendable {
+    func publishEvent(
+        relayURL: URL,
+        eventData: Data,
+        eventID: String,
+        timeout: TimeInterval
+    ) async throws
+}
+
+struct SourcePublishOutcome: Sendable {
+    let successfulSourceCount: Int
+    let firstFailureMessage: String?
+}
+
+struct SourcePublishTransportError: LocalizedError, Sendable {
+    let message: String
+
+    var errorDescription: String? {
+        message
+    }
+}
+
 enum RelayClientError: LocalizedError {
     case invalidRelayURL(String)
     case closed(String)
@@ -17,18 +39,18 @@ enum RelayClientError: LocalizedError {
     var errorDescription: String? {
         switch self {
         case .invalidRelayURL(let value):
-            return "Invalid relay URL: \(value)"
+            return "Invalid source URL: \(value)"
         case .closed(let reason):
-            return "Relay closed the subscription: \(reason)"
+            return "Source closed the subscription: \(reason)"
         case .publishRejected(let reason):
-            return "Relay rejected the event: \(reason)"
+            return "Source rejected the event: \(reason)"
         case .publishTimedOut:
-            return "Relay publish timed out."
+            return "Source publish timed out."
         }
     }
 }
 
-actor NostrRelayClient {
+final class NostrRelayClient: @unchecked Sendable {
     private let session: URLSession
 
     init(session: URLSession = .shared) {
@@ -208,3 +230,56 @@ actor NostrRelayClient {
 }
 
 extension NostrRelayClient: NostrRelayEventFetching {}
+extension NostrRelayClient: NostrRelayEventPublishing {}
+
+private enum SourcePublishAttempt: Sendable {
+    case success
+    case failure(String)
+}
+
+extension NostrRelayEventPublishing {
+    func publishEvent(
+        to sourceURLs: [URL],
+        eventData: Data,
+        eventID: String,
+        timeout: TimeInterval = 10
+    ) async -> SourcePublishOutcome {
+        await withTaskGroup(of: SourcePublishAttempt.self, returning: SourcePublishOutcome.self) { group in
+            for sourceURL in sourceURLs {
+                group.addTask {
+                    do {
+                        try await publishEvent(
+                            relayURL: sourceURL,
+                            eventData: eventData,
+                            eventID: eventID,
+                            timeout: timeout
+                        )
+                        return .success
+                    } catch {
+                        let message = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+                        return .failure(message)
+                    }
+                }
+            }
+
+            var successfulSourceCount = 0
+            var firstFailureMessage: String?
+
+            for await attempt in group {
+                switch attempt {
+                case .success:
+                    successfulSourceCount += 1
+                case .failure(let message):
+                    if firstFailureMessage == nil {
+                        firstFailureMessage = message
+                    }
+                }
+            }
+
+            return SourcePublishOutcome(
+                successfulSourceCount: successfulSourceCount,
+                firstFailureMessage: firstFailureMessage
+            )
+        }
+    }
+}
