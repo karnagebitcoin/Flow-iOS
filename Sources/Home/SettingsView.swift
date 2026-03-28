@@ -8,57 +8,67 @@ struct SettingsView: View {
     @EnvironmentObject private var breakReminderCoordinator: BreakReminderCoordinator
     @EnvironmentObject private var relaySettings: RelaySettingsStore
     @State private var isShowingPrimaryColorPicker = false
+    @State private var navigationPath: [SettingsDestination] = []
 
     var body: some View {
-        NavigationStack {
+        NavigationStack(path: $navigationPath) {
             Form {
                 Section {
-                    SettingsNavigationRow(title: "General", systemImage: "slider.horizontal.3") {
-                        SettingsGeneralView()
-                    }
+                    SettingsValueNavigationRow(
+                        title: "General",
+                        systemImage: "slider.horizontal.3",
+                        value: .general
+                    )
 
-                    SettingsNavigationRow(title: "Appearance", systemImage: "paintbrush") {
-                        SettingsAppearanceView(
-                            onOpenPrimaryColorPicker: {
-                                isShowingPrimaryColorPicker = true
-                            }
-                        )
-                    }
+                    SettingsValueNavigationRow(
+                        title: "Appearance",
+                        systemImage: "paintbrush",
+                        value: .appearance
+                    )
 
-                    SettingsNavigationRow(title: "Feeds", systemImage: "newspaper") {
-                        SettingsFeedsView()
-                    }
+                    SettingsValueNavigationRow(
+                        title: "Feeds",
+                        systemImage: "newspaper",
+                        value: .feeds
+                    )
 
-                    SettingsNavigationRow(title: "Notifications", systemImage: "bell.badge") {
-                        SettingsNotificationsView()
-                    }
+                    SettingsValueNavigationRow(
+                        title: "Notifications",
+                        systemImage: "bell.badge",
+                        value: .notifications
+                    )
 
-                    SettingsNavigationRow(title: "Media", systemImage: "photo.on.rectangle.angled") {
-                        SettingsMediaView()
-                    }
+                    SettingsValueNavigationRow(
+                        title: "Media",
+                        systemImage: "photo.on.rectangle.angled",
+                        value: .media
+                    )
 
-                    SettingsNavigationRow(
+                    SettingsValueNavigationRow(
                         title: "Muted Content",
-                        systemImage: "speaker.slash"
-                    ) {
-                        SettingsMutedContentView()
-                    }
+                        systemImage: "speaker.slash",
+                        value: .mutedContent
+                    )
 
-                    SettingsNavigationRow(title: "Keys", systemImage: "key") {
-                        KeysView()
-                    }
+                    SettingsValueNavigationRow(
+                        title: "Keys",
+                        systemImage: "key",
+                        value: .keys
+                    )
 
-                    SettingsNavigationRow(
+                    SettingsValueNavigationRow(
                         title: "Connection",
                         subtitle: connectionSummaryText,
-                        systemImage: "dot.radiowaves.left.and.right"
-                    ) {
-                        RelaySettingsView()
-                    }
+                        systemImage: "dot.radiowaves.left.and.right",
+                        value: .connection
+                    )
                 }
             }
             .navigationTitle("Settings")
             .navigationBarTitleDisplayMode(.large)
+            .navigationDestination(for: SettingsDestination.self) { destination in
+                settingsDestinationView(for: destination)
+            }
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button("Done") {
@@ -95,6 +105,43 @@ struct SettingsView: View {
         let count = Set(relaySettings.readRelays + relaySettings.writeRelays).count
         return "Connected to \(count) \(count == 1 ? "source" : "sources")"
     }
+
+    @ViewBuilder
+    private func settingsDestinationView(for destination: SettingsDestination) -> some View {
+        switch destination {
+        case .general:
+            SettingsGeneralView()
+        case .appearance:
+            SettingsAppearanceView(
+                onOpenPrimaryColorPicker: {
+                    isShowingPrimaryColorPicker = true
+                }
+            )
+        case .feeds:
+            SettingsFeedsView()
+        case .notifications:
+            SettingsNotificationsView()
+        case .media:
+            SettingsMediaView()
+        case .mutedContent:
+            SettingsMutedContentView()
+        case .keys:
+            KeysView()
+        case .connection:
+            RelaySettingsView()
+        }
+    }
+}
+
+enum SettingsDestination: Hashable {
+    case general
+    case appearance
+    case feeds
+    case notifications
+    case media
+    case mutedContent
+    case keys
+    case connection
 }
 
 private struct SettingsNavigationRow<Destination: View>: View {
@@ -121,6 +168,51 @@ private struct SettingsNavigationRow<Destination: View>: View {
         NavigationLink {
             destination
         } label: {
+            HStack(spacing: 12) {
+                Image(systemName: systemImage)
+                    .font(.title3.weight(.semibold))
+                    .foregroundStyle(appSettings.primaryColor)
+                    .frame(width: 28, height: 28)
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(title)
+                        .foregroundStyle(.primary)
+
+                    if let subtitle, !subtitle.isEmpty {
+                        Text(subtitle)
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+
+                Spacer(minLength: 8)
+            }
+        }
+    }
+}
+
+private struct SettingsValueNavigationRow: View {
+    @EnvironmentObject private var appSettings: AppSettingsStore
+
+    let title: String
+    let subtitle: String?
+    let systemImage: String
+    let value: SettingsDestination
+
+    init(
+        title: String,
+        subtitle: String? = nil,
+        systemImage: String,
+        value: SettingsDestination
+    ) {
+        self.title = title
+        self.subtitle = subtitle
+        self.systemImage = systemImage
+        self.value = value
+    }
+
+    var body: some View {
+        NavigationLink(value: value) {
             HStack(spacing: 12) {
                 Image(systemName: systemImage)
                     .font(.title3.weight(.semibold))
