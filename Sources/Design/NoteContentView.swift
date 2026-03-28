@@ -1884,6 +1884,7 @@ private struct NoteVideoPlayerView: View {
     let layout: NoteContentMediaLayout
     let bottomInsetOverride: CGFloat?
     let forceMute: Bool
+    @Environment(\.colorScheme) private var colorScheme
     @EnvironmentObject private var appSettings: AppSettingsStore
     @ObservedObject private var playbackCoordinator = InlineVideoPlaybackCoordinator.shared
     @State private var player: AVPlayer
@@ -1993,45 +1994,72 @@ private struct NoteVideoPlayerView: View {
     private var muteButtonBackground: some View {
         if #available(iOS 26, *) {
             Circle()
-                .fill(.clear)
-                .glassEffect(.regular.tint(.white.opacity(0.02)).interactive(), in: .circle)
+                .fill(muteButtonBaseFill)
+                .glassEffect(.regular.tint(muteButtonGlassTint).interactive(), in: .circle)
                 .overlay {
                     Circle()
-                        .fill(
-                            LinearGradient(
-                                colors: [
-                                    .white.opacity(0.18),
-                                    .white.opacity(0.04)
-                                ],
-                                startPoint: .topLeading,
-                                endPoint: .bottomTrailing
-                            )
-                        )
+                        .fill(muteButtonHighlightGradient)
                         .blendMode(.screen)
                 }
+                .overlay {
+                    Circle()
+                        .strokeBorder(muteButtonStrokeColor, lineWidth: 0.8)
+                }
+                .shadow(color: muteButtonShadowColor, radius: 8, x: 0, y: 2)
         } else {
             Circle()
-                .fill(.ultraThinMaterial)
+                .fill(.thinMaterial)
                 .overlay {
                     Circle()
-                        .fill(
-                            LinearGradient(
-                                colors: [
-                                    .white.opacity(0.22),
-                                    .white.opacity(0.05)
-                                ],
-                                startPoint: .topLeading,
-                                endPoint: .bottomTrailing
-                            )
-                        )
+                        .fill(muteButtonBaseFill)
+                }
+                .overlay {
+                    Circle()
+                        .fill(muteButtonHighlightGradient)
                         .blendMode(.screen)
                 }
-                .shadow(color: .black.opacity(0.05), radius: 6, x: 0, y: 2)
+                .overlay {
+                    Circle()
+                        .strokeBorder(muteButtonStrokeColor, lineWidth: 0.8)
+                }
+                .shadow(color: muteButtonShadowColor, radius: 8, x: 0, y: 2)
         }
     }
 
     private var muteButtonForegroundColor: Color {
-        .white.opacity(0.86)
+        colorScheme == .light ? .black.opacity(0.72) : .white.opacity(0.88)
+    }
+
+    private var muteButtonBaseFill: Color {
+        colorScheme == .light ? .black.opacity(0.10) : .black.opacity(0.22)
+    }
+
+    private var muteButtonGlassTint: Color {
+        colorScheme == .light ? .gray.opacity(0.18) : .black.opacity(0.18)
+    }
+
+    private var muteButtonStrokeColor: Color {
+        colorScheme == .light ? .white.opacity(0.34) : .white.opacity(0.16)
+    }
+
+    private var muteButtonShadowColor: Color {
+        .black.opacity(colorScheme == .light ? 0.10 : 0.18)
+    }
+
+    private var muteButtonHighlightGradient: LinearGradient {
+        LinearGradient(
+            colors: colorScheme == .light
+                ? [
+                    .white.opacity(0.20),
+                    .white.opacity(0.04)
+                ]
+                : [
+                    .white.opacity(0.12),
+                    .white.opacity(0.02)
+                ],
+            startPoint: .topLeading,
+            endPoint: .bottomTrailing
+        )
     }
 
     private var muteButtonBottomInset: CGFloat {
