@@ -683,8 +683,12 @@ final class HomeFeedViewModel: ObservableObject {
                 }
 
                 followingPubkeys = followings
+                let followingFeedAuthors = Self.followingAuthorPubkeys(
+                    followingPubkeys: followings,
+                    currentUserPubkey: requestUserPubkey
+                )
 
-                if followings.isEmpty {
+                if followingFeedAuthors.isEmpty {
                     guard latestRefreshRequestID == refreshRequestID else { return }
                     items = []
                     bufferedNewItems = []
@@ -700,7 +704,7 @@ final class HomeFeedViewModel: ObservableObject {
 
                 fetched = try await service.fetchFollowingFeed(
                     relayURLs: requestRelayURLs,
-                    authors: followings,
+                    authors: followingFeedAuthors,
                     kinds: requestKinds,
                     limit: pageSize,
                     until: nil,
@@ -867,14 +871,18 @@ final class HomeFeedViewModel: ObservableObject {
                 )
 
             case .following:
-                guard !followingPubkeys.isEmpty else {
+                let followingFeedAuthors = Self.followingAuthorPubkeys(
+                    followingPubkeys: followingPubkeys,
+                    currentUserPubkey: currentUserPubkey
+                )
+                guard !followingFeedAuthors.isEmpty else {
                     hasReachedEnd = true
                     return
                 }
 
                 fetched = try await service.fetchFollowingFeed(
                     relayURLs: requestRelayURLs,
-                    authors: followingPubkeys,
+                    authors: followingFeedAuthors,
                     kinds: requestKinds,
                     limit: pageSize,
                     until: until,
@@ -1054,8 +1062,9 @@ final class HomeFeedViewModel: ObservableObject {
     }
 
     private func handleLiveEvent(_ event: NostrEvent) async {
+        let normalizedEventID = event.id.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         guard feedKinds(for: feedSource).contains(event.kind) else { return }
-        guard !knownEventIDs.contains(event.id) else { return }
+        guard !normalizedEventID.isEmpty, !knownEventIDs.contains(normalizedEventID) else { return }
 
         let hydrated = await service.buildFeedItems(
             relayURLs: hydrationRelayURLs(for: feedSource),
@@ -1177,7 +1186,14 @@ final class HomeFeedViewModel: ObservableObject {
             )
 
         case .following:
-            let liveAuthors = Array(followingPubkeys.prefix(400)).sorted()
+            let liveAuthors = Array(
+                Self.followingAuthorPubkeys(
+                    followingPubkeys: followingPubkeys,
+                    currentUserPubkey: currentUserPubkey
+                )
+                .prefix(400)
+            )
+            .sorted()
             guard !liveAuthors.isEmpty else { return [] }
             return subscriptionTargets(
                 relayURLs: relayURLs(for: .following),
@@ -1217,7 +1233,11 @@ final class HomeFeedViewModel: ObservableObject {
         var byID: [String: FeedItem] = Dictionary(uniqueKeysWithValues: secondary.map { ($0.id, $0) })
 
         for item in primary {
-            byID[item.id] = item
+            if let existing = byID[item.id] {
+                byID[item.id] = existing.merged(with: item)
+            } else {
+                byID[item.id] = item
+            }
         }
 
         return byID.values.sorted {
@@ -1311,7 +1331,12 @@ final class HomeFeedViewModel: ObservableObject {
 
     private func allowedFollowingAuthors(followingPubkeys: [String]? = nil) -> Set<String> {
         let followings = followingPubkeys ?? (self.followingPubkeys.isEmpty ? localFollowings() : self.followingPubkeys)
-        return Set(normalizedOrderedPubkeys(followings))
+        return Set(
+            Self.followingAuthorPubkeys(
+                followingPubkeys: followings,
+                currentUserPubkey: currentUserPubkey
+            )
+        )
     }
 
     private func filteredMainItems(ignoreMediaOnly: Bool = false) -> [FeedItem] {
@@ -1422,6 +1447,26 @@ final class HomeFeedViewModel: ObservableObject {
         (value ?? "")
             .trimmingCharacters(in: .whitespacesAndNewlines)
             .lowercased()
+    }
+
+    static func followingAuthorPubkeys(
+        followingPubkeys: [String],
+        currentUserPubkey: String?
+    ) -> [String] {
+        var ordered: [String] = []
+        if let currentUserPubkey {
+            ordered.append(currentUserPubkey)
+        }
+        ordered.append(contentsOf: followingPubkeys)
+
+        var seen = Set<String>()
+        return ordered.compactMap { rawPubkey in
+            let normalized = rawPubkey
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+                .lowercased()
+            guard !normalized.isEmpty, seen.insert(normalized).inserted else { return nil }
+            return normalized
+        }
     }
 
     private static func normalizedRelayURLs(_ relayURLs: [URL]) -> [URL] {
@@ -1666,7 +1711,7 @@ final class HomeFeedViewModel: ObservableObject {
                     return lhs.createdAt > rhs.createdAt
                 })
                 .filter { event in
-                    seenEventIDs.insert(event.id).inserted
+                    seenEventIDs.insert(event.id.lowercased()).inserted
                 }
         )
 

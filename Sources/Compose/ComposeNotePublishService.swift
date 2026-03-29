@@ -3,6 +3,7 @@ import NostrSDK
 
 enum ComposeNotePublishError: LocalizedError {
     case emptyContent
+    case invalidPoll
     case missingPrivateKey
     case missingWriteRelays
     case malformedEvent
@@ -12,6 +13,8 @@ enum ComposeNotePublishError: LocalizedError {
         switch self {
         case .emptyContent:
             return "Write something or attach media before posting."
+        case .invalidPoll:
+            return "Polls need a question and at least two options."
         case .missingPrivateKey:
             return "This account can read posts, but it needs an nsec to publish."
         case .missingWriteRelays:
@@ -45,6 +48,69 @@ final class ComposeNotePublishService {
             throw ComposeNotePublishError.emptyContent
         }
 
+        return try await publishEvent(
+            kind: .textNote,
+            content: publishedContent,
+            currentNsec: currentNsec,
+            writeRelayURLs: writeRelayURLs,
+            additionalTags: additionalTags
+        )
+    }
+
+    func publishPoll(
+        content: String,
+        poll: ComposePollDraft,
+        currentNsec: String?,
+        writeRelayURLs: [URL],
+        additionalTags: [[String]] = []
+    ) async throws -> Int {
+        let publishedContent = ComposePublishedMediaContentBuilder.content(
+            baseText: content,
+            additionalTags: additionalTags
+        )
+        guard !content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            throw ComposeNotePublishError.emptyContent
+        }
+        guard poll.hasMinimumOptions else {
+            throw ComposeNotePublishError.invalidPoll
+        }
+
+        var pollTags = additionalTags
+        pollTags.append(contentsOf: poll.validOptions.map { option in
+            ["option", option.id, option.text]
+        })
+        pollTags.append([
+            "polltype",
+            poll.allowsMultipleChoice ? NostrPollType.multipleChoice.rawValue : NostrPollType.singleChoice.rawValue
+        ])
+
+        if let endsAt = poll.endsAt {
+            pollTags.append([
+                "endsAt",
+                String(Int(ComposePollDraft.roundToMinute(endsAt).timeIntervalSince1970))
+            ])
+        }
+
+        for relayURL in normalizedRelayURLs(writeRelayURLs).prefix(4) {
+            pollTags.append(["relay", relayURL.absoluteString])
+        }
+
+        return try await publishEvent(
+            kind: .unknown(NostrPollKind.poll),
+            content: publishedContent,
+            currentNsec: currentNsec,
+            writeRelayURLs: writeRelayURLs,
+            additionalTags: pollTags
+        )
+    }
+
+    private func publishEvent(
+        kind: NostrSDK.EventKind,
+        content: String,
+        currentNsec: String?,
+        writeRelayURLs: [URL],
+        additionalTags: [[String]]
+    ) async throws -> Int {
         guard let normalizedNsec = normalizeNsec(currentNsec),
               let keypair = Keypair(nsec: normalizedNsec.lowercased()) else {
             throw ComposeNotePublishError.missingPrivateKey
@@ -61,8 +127,8 @@ final class ComposeNotePublishService {
             sdkTags.append(tag)
         }
 
-        let event = try NostrSDK.NostrEvent.Builder<NostrSDK.NostrEvent>(kind: .textNote)
-            .content(publishedContent)
+        let event = try NostrSDK.NostrEvent.Builder<NostrSDK.NostrEvent>(kind: kind)
+            .content(content)
             .appendTags(contentsOf: sdkTags)
             .build(signedBy: keypair)
 

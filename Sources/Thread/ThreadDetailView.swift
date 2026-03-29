@@ -56,6 +56,113 @@ struct ThreadDetailView: View {
     }
 
     var body: some View {
+        Group {
+            if let articleMetadata {
+                articleDetailBody(articleMetadata: articleMetadata)
+            } else {
+                noteDetailBody
+            }
+        }
+        .background(Color(.systemBackground))
+        .navigationTitle(articleMetadata == nil ? "Note" : "Article")
+        .navigationBarTitleDisplayMode(.inline)
+        .onChange(of: auth.currentAccount?.pubkey) { _, _ in
+            configureStores()
+        }
+        .onChange(of: auth.currentNsec) { _, _ in
+            configureStores()
+        }
+        .onChange(of: relaySettings.readRelays) { _, _ in
+            configureStores()
+        }
+        .onChange(of: relaySettings.writeRelays) { _, _ in
+            configureStores()
+        }
+        .onChange(of: appSettings.slowConnectionMode) { _, _ in
+            configureStores()
+        }
+        .navigationDestination(item: $selectedHashtagRoute) { route in
+            HashtagFeedView(
+                hashtag: route.normalizedHashtag,
+                relayURL: effectiveRelayURL,
+                readRelayURLs: effectiveReadRelayURLs,
+                seedItems: route.seedItems
+            )
+        }
+        .navigationDestination(item: $selectedThreadItem) { item in
+            ThreadDetailView(
+                initialItem: item,
+                relayURL: effectiveRelayURL,
+                readRelayURLs: effectiveReadRelayURLs
+            )
+        }
+        .navigationDestination(item: $selectedProfileRoute) { route in
+            ProfileView(
+                pubkey: route.pubkey,
+                relayURL: effectiveRelayURL,
+                readRelayURLs: effectiveReadRelayURLs,
+                writeRelayURLs: effectiveWriteRelayURLs
+            )
+        }
+        .sheet(isPresented: $isShowingReshareSheet) {
+            ReshareActionSheetView(
+                isWorking: isPublishingRepost,
+                statusMessage: repostStatusMessage,
+                statusIsError: repostStatusIsError,
+                onRepost: {
+                    Task {
+                        await publishRootRepost()
+                    }
+                },
+                onQuote: {
+                    quoteDraft = reshareService.buildQuoteDraft(
+                        for: viewModel.rootItem,
+                        relayHintURL: effectiveReadRelayURLs.first
+                    )
+                    isShowingReshareSheet = false
+                }
+            )
+        }
+        .sheet(item: $quoteDraft) { draft in
+            ComposeNoteSheet(
+                currentAccountPubkey: auth.currentAccount?.pubkey,
+                currentNsec: auth.currentNsec,
+                writeRelayURLs: effectiveWriteRelayURLs,
+                initialText: draft.initialText,
+                initialAdditionalTags: draft.additionalTags,
+                quotedEvent: draft.quotedEvent,
+                quotedDisplayNameHint: draft.quotedDisplayNameHint,
+                quotedHandleHint: draft.quotedHandleHint,
+                quotedAvatarURLHint: draft.quotedAvatarURLHint,
+                onPublished: {
+                    Task {
+                        await viewModel.refresh()
+                    }
+                }
+            )
+        }
+        .sheet(item: $activeReplyTarget) { target in
+            ComposeNoteSheet(
+                currentAccountPubkey: auth.currentAccount?.pubkey,
+                currentNsec: auth.currentNsec,
+                writeRelayURLs: effectiveWriteRelayURLs,
+                replyTargetEvent: target.displayEvent,
+                replyTargetDisplayNameHint: target.displayName,
+                replyTargetHandleHint: target.handle,
+                replyTargetAvatarURLHint: target.avatarURL,
+                onPublished: {
+                    Task {
+                        await viewModel.refresh()
+                    }
+                }
+            )
+        }
+        .safeAreaInset(edge: .bottom) {
+            replyDockBar
+        }
+    }
+
+    private var noteDetailBody: some View {
         ScrollViewReader { scrollProxy in
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 0) {
@@ -67,30 +174,13 @@ struct ThreadDetailView: View {
                     threadDetailContentSection
                 }
             }
-            .background(Color(.systemBackground))
-            .navigationTitle("Note")
-            .navigationBarTitleDisplayMode(.inline)
             .refreshable {
                 await viewModel.refresh(
                     includeNoteActivity: selectedContentTab == .reactions || viewModel.hasLoadedNoteActivity
                 )
             }
             .task {
-                configureStores()
-                if appSettings.reactionsVisibleInFeeds {
-                    reactionStats.prefetch(events: [viewModel.rootItem.displayEvent], relayURLs: effectiveReadRelayURLs)
-                }
-                if initiallyFocusReplyComposer {
-                    Task { @MainActor in
-                        await applyInitialReplyPresentationIfNeeded()
-                    }
-                }
-                await viewModel.loadIfNeeded()
-                if initialReplyScrollTargetID != nil {
-                    Task { @MainActor in
-                        await applyInitialReplyScrollIfNeeded()
-                    }
-                }
+                await performInitialLoad(isArticle: false)
             }
             .onChange(of: pendingReplyScrollTargetID) { _, replyID in
                 guard let replyID else { return }
@@ -105,100 +195,57 @@ struct ThreadDetailView: View {
                     await viewModel.loadNoteActivityIfNeeded()
                 }
             }
-            .onChange(of: auth.currentAccount?.pubkey) { _, _ in
-                configureStores()
-            }
-            .onChange(of: auth.currentNsec) { _, _ in
-                configureStores()
-            }
-            .onChange(of: relaySettings.readRelays) { _, _ in
-                configureStores()
-            }
-            .onChange(of: relaySettings.writeRelays) { _, _ in
-                configureStores()
-            }
-            .onChange(of: appSettings.slowConnectionMode) { _, _ in
-                configureStores()
-            }
-            .navigationDestination(item: $selectedHashtagRoute) { route in
-                HashtagFeedView(
-                    hashtag: route.normalizedHashtag,
-                    relayURL: effectiveRelayURL,
-                    readRelayURLs: effectiveReadRelayURLs,
-                    seedItems: route.seedItems
-                )
-            }
-            .navigationDestination(item: $selectedThreadItem) { item in
-                ThreadDetailView(
-                    initialItem: item,
-                    relayURL: effectiveRelayURL,
-                    readRelayURLs: effectiveReadRelayURLs
-                )
-            }
-            .navigationDestination(item: $selectedProfileRoute) { route in
-                ProfileView(
-                    pubkey: route.pubkey,
-                    relayURL: effectiveRelayURL,
-                    readRelayURLs: effectiveReadRelayURLs,
-                    writeRelayURLs: effectiveWriteRelayURLs
-                )
-            }
-            .sheet(isPresented: $isShowingReshareSheet) {
-                ReshareActionSheetView(
-                    isWorking: isPublishingRepost,
-                    statusMessage: repostStatusMessage,
-                    statusIsError: repostStatusIsError,
-                    onRepost: {
-                        Task {
-                            await publishRootRepost()
+        }
+    }
+
+    private func articleDetailBody(articleMetadata: NostrLongFormArticleMetadata) -> some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 28) {
+                if hideNSFWEnabled && viewModel.rootItem.moderationEvents.contains(where: { $0.containsNSFWHashtag }) {
+                    nsfwHiddenCard
+                } else {
+                    LongFormArticleReaderView(
+                        item: viewModel.rootItem,
+                        article: articleMetadata,
+                        isOwnedByCurrentUser: isRootOwnedByCurrentAccount,
+                        isFollowingAuthor: followStore.isFollowing(viewModel.rootItem.displayAuthorPubkey),
+                        onFollowToggle: {
+                            followStore.toggleFollow(viewModel.rootItem.displayAuthorPubkey)
+                        },
+                        onProfileTap: { pubkey in
+                            openProfile(pubkey: pubkey)
+                        },
+                        onHashtagTap: { hashtag in
+                            openHashtagFeed(hashtag: hashtag)
                         }
-                    },
-                    onQuote: {
-                        quoteDraft = reshareService.buildQuoteDraft(
-                            for: viewModel.rootItem,
-                            relayHintURL: effectiveReadRelayURLs.first
-                        )
-                        isShowingReshareSheet = false
-                    }
-                )
-            }
-            .sheet(item: $quoteDraft) { draft in
-                ComposeNoteSheet(
-                    currentAccountPubkey: auth.currentAccount?.pubkey,
-                    currentNsec: auth.currentNsec,
-                    writeRelayURLs: effectiveWriteRelayURLs,
-                    initialText: draft.initialText,
-                    initialAdditionalTags: draft.additionalTags,
-                    quotedEvent: draft.quotedEvent,
-                    quotedDisplayNameHint: draft.quotedDisplayNameHint,
-                    quotedHandleHint: draft.quotedHandleHint,
-                    quotedAvatarURLHint: draft.quotedAvatarURLHint,
-                    onPublished: {
-                        Task {
-                            await viewModel.refresh()
+                    )
+
+                    if appSettings.reactionsVisibleInFeeds {
+                        VStack(alignment: .leading, spacing: 18) {
+                            Divider()
+                            rootInteractionRow
                         }
                     }
-                )
-            }
-            .sheet(item: $activeReplyTarget) { target in
-                ComposeNoteSheet(
-                    currentAccountPubkey: auth.currentAccount?.pubkey,
-                    currentNsec: auth.currentNsec,
-                    writeRelayURLs: effectiveWriteRelayURLs,
-                    replyTargetEvent: target.displayEvent,
-                    replyTargetDisplayNameHint: target.displayName,
-                    replyTargetHandleHint: target.handle,
-                    replyTargetAvatarURLHint: target.avatarURL,
-                    onPublished: {
-                        Task {
-                            await viewModel.refresh()
-                        }
+
+                    if let errorMessage = viewModel.errorMessage {
+                        Text(errorMessage)
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                            .frame(maxWidth: .infinity, alignment: .center)
                     }
-                )
+                }
             }
-            .safeAreaInset(edge: .bottom) {
-                replyDockBar
-            }
+            .padding(.horizontal, 20)
+            .padding(.top, 18)
+            .padding(.bottom, 24)
+            .frame(maxWidth: 820, alignment: .leading)
+            .frame(maxWidth: .infinity, alignment: .center)
+        }
+        .refreshable {
+            await viewModel.refresh(includeNoteActivity: viewModel.hasLoadedNoteActivity)
+        }
+        .task {
+            await performInitialLoad(isArticle: true)
         }
     }
 
@@ -282,58 +329,62 @@ struct ThreadDetailView: View {
             }
 
             if appSettings.reactionsVisibleInFeeds {
-                HStack(spacing: 14) {
-                    Button {
-                        presentReplyComposer(for: viewModel.rootItem.canonicalDisplayItem)
-                    } label: {
-                        HStack(spacing: 4) {
-                            Image(systemName: "bubble.right")
-                            if !threadReplies.isEmpty {
-                                Text("\(threadReplies.count)")
-                                    .font(.footnote)
-                            }
-                        }
-                        .frame(minWidth: 34, minHeight: 30, alignment: .leading)
-                    }
-                    .buttonStyle(.plain)
-                    .foregroundStyle(.secondary)
-                    .accessibilityLabel("Reply")
-
-                    Button {
-                        repostStatusMessage = nil
-                        repostStatusIsError = false
-                        isShowingReshareSheet = true
-                    } label: {
-                        Image(systemName: "arrow.2.squarepath")
-                            .frame(minWidth: 34, minHeight: 30, alignment: .leading)
-                    }
-                    .buttonStyle(.plain)
-                    .foregroundStyle(.secondary)
-                    .accessibilityLabel("Re-share")
-
-                    ReactionButton(
-                        isLiked: isRootLikedByCurrentUser,
-                        count: rootReactionCount,
-                        minHeight: 30
-                    ) {
-                        Task {
-                            await handleRootReactionTap()
-                        }
-                    }
-
-                    ShareLink(item: rootNoteShareLink) {
-                        Image(systemName: "paperplane")
-                            .frame(minWidth: 34, minHeight: 30, alignment: .leading)
-                    }
-                    .buttonStyle(.plain)
-                    .foregroundStyle(.secondary)
-                    .accessibilityLabel("Share")
-                }
-                .font(.headline)
+                rootInteractionRow
             }
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 12)
+    }
+
+    private var rootInteractionRow: some View {
+        HStack(spacing: 14) {
+            Button {
+                presentReplyComposer(for: viewModel.rootItem.canonicalDisplayItem)
+            } label: {
+                HStack(spacing: 4) {
+                    Image(systemName: "bubble.right")
+                    if !threadReplies.isEmpty {
+                        Text("\(threadReplies.count)")
+                            .font(.footnote)
+                    }
+                }
+                .frame(minWidth: 34, minHeight: 30, alignment: .leading)
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(.secondary)
+            .accessibilityLabel("Reply")
+
+            Button {
+                repostStatusMessage = nil
+                repostStatusIsError = false
+                isShowingReshareSheet = true
+            } label: {
+                Image(systemName: "arrow.2.squarepath")
+                    .frame(minWidth: 34, minHeight: 30, alignment: .leading)
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(.secondary)
+            .accessibilityLabel("Re-share")
+
+            ReactionButton(
+                isLiked: isRootLikedByCurrentUser,
+                count: rootReactionCount,
+                minHeight: 30
+            ) {
+                Task {
+                    await handleRootReactionTap()
+                }
+            }
+
+            ShareLink(item: rootNoteShareLink) {
+                Image(systemName: "paperplane")
+                    .frame(minWidth: 34, minHeight: 30, alignment: .leading)
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(.secondary)
+            .accessibilityLabel("Share")
+        }
+        .font(.headline)
     }
 
     private var rootNoteShareLink: String {
@@ -588,6 +639,10 @@ struct ThreadDetailView: View {
         reactionStats.reactionCount(for: viewModel.rootItem.displayEventID)
     }
 
+    private var articleMetadata: NostrLongFormArticleMetadata? {
+        viewModel.rootItem.displayEvent.longFormArticleMetadata
+    }
+
     private var isRootLikedByCurrentUser: Bool {
         reactionStats.isReactedByCurrentUser(
             for: viewModel.rootItem.displayEventID,
@@ -813,6 +868,28 @@ struct ThreadDetailView: View {
             readRelayURLs: effectiveReadRelayURLs,
             writeRelayURLs: effectiveWriteRelayURLs
         )
+    }
+
+    private func performInitialLoad(isArticle: Bool) async {
+        configureStores()
+
+        if appSettings.reactionsVisibleInFeeds {
+            reactionStats.prefetch(events: [viewModel.rootItem.displayEvent], relayURLs: effectiveReadRelayURLs)
+        }
+
+        if !isArticle, initiallyFocusReplyComposer {
+            Task { @MainActor in
+                await applyInitialReplyPresentationIfNeeded()
+            }
+        }
+
+        await viewModel.loadIfNeeded()
+
+        if !isArticle, initialReplyScrollTargetID != nil {
+            Task { @MainActor in
+                await applyInitialReplyScrollIfNeeded()
+            }
+        }
     }
 
     @MainActor

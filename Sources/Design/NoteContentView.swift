@@ -12,6 +12,20 @@ enum NoteContentMediaLayout {
     case detailCarousel
 }
 
+enum NoteContentPollPlacement {
+    static func insertionOffsets(
+        partCount: Int,
+        insertionIndex: Int,
+        includesPoll: Bool
+    ) -> Set<Int> {
+        guard includesPoll else { return [] }
+
+        let normalizedPartCount = max(partCount, 0)
+        let normalizedInsertionIndex = min(max(insertionIndex, 0), normalizedPartCount)
+        return [normalizedInsertionIndex]
+    }
+}
+
 struct NoteContentView: View {
     private enum RenderPart {
         case inlineTokens([NoteContentToken])
@@ -33,6 +47,9 @@ struct NoteContentView: View {
     private let parts: [RenderPart]
     private let websitePreviewURL: URL?
     private let sourceEvent: NostrEvent
+    private let articleMetadata: NostrLongFormArticleMetadata?
+    private let pollEvent: NostrEvent
+    private let pollMetadata: NostrPollMetadata?
     private let onHashtagTap: ((String) -> Void)?
     private let onProfileTap: ((String) -> Void)?
     private let onReferencedEventTap: ((FeedItem) -> Void)?
@@ -70,8 +87,11 @@ struct NoteContentView: View {
         onReferencedEventTap: ((FeedItem) -> Void)? = nil
     ) {
         sourceEvent = event
+        let renderEvent = Self.renderEvent(for: event)
+        articleMetadata = renderEvent.longFormArticleMetadata
+        pollEvent = renderEvent
+        pollMetadata = renderEvent.pollMetadata
         let parsedContent = Self.parsedContentCache.parsedContent(for: event) {
-            let renderEvent = Self.renderEvent(for: event)
             let parsedTokens = NoteContentParser.tokenize(event: renderEvent)
             return ParsedContent(
                 tokens: parsedTokens,
@@ -97,94 +117,117 @@ struct NoteContentView: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            ForEach(Array(renderedParts.enumerated()), id: \.offset) { _, part in
-                switch part {
-                case .inlineTokens(let inlineTokens):
-                    if mediaLayout == .detailCarousel {
-                        inlineText(from: inlineTokens)
-                            .font(.body)
-                            .lineLimit(isCollapsedPreviewActive ? Self.collapsedPreviewLineLimit : nil)
-                            .multilineTextAlignment(.leading)
-                            .fixedSize(horizontal: false, vertical: true)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .layoutPriority(1)
-                            .textSelection(.enabled)
-                    } else {
-                        inlineText(from: inlineTokens)
-                            .font(.body)
-                            .lineLimit(isCollapsedPreviewActive ? Self.collapsedPreviewLineLimit : nil)
-                            .multilineTextAlignment(.leading)
-                            .fixedSize(horizontal: false, vertical: true)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .layoutPriority(1)
-                            .textSelection(.disabled)
+        Group {
+            if let articleMetadata {
+                LongFormArticlePreviewView(
+                    article: articleMetadata,
+                    onHashtagTap: onHashtagTap
+                )
+            } else {
+                let pollInsertionOffsets = NoteContentPollPlacement.insertionOffsets(
+                    partCount: renderedParts.count,
+                    insertionIndex: pollInsertionIndex,
+                    includesPoll: pollMetadata != nil
+                )
+
+                VStack(alignment: .leading, spacing: 10) {
+                    if let pollMetadata, pollInsertionOffsets.contains(0) {
+                        pollCard(for: pollMetadata)
                     }
-                case .imageGallery(let imageURLs):
-                    if appSettings.textOnlyMode && !revealsMediaInTextOnlyMode {
-                        NoteMediaPlaceholderView(
-                            systemImage: "photo.on.rectangle.angled",
-                            text: imageURLs.count == 1 ? "Tap to load image" : "Tap to load \(imageURLs.count) images",
-                            action: {
-                                revealsMediaInTextOnlyMode = true
+
+                    ForEach(Array(renderedParts.enumerated()), id: \.offset) { index, part in
+                        switch part {
+                        case .inlineTokens(let inlineTokens):
+                            if mediaLayout == .detailCarousel {
+                                inlineText(from: inlineTokens)
+                                    .font(.body)
+                                    .lineLimit(isCollapsedPreviewActive ? Self.collapsedPreviewLineLimit : nil)
+                                    .multilineTextAlignment(.leading)
+                                    .fixedSize(horizontal: false, vertical: true)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                    .layoutPriority(1)
+                                    .textSelection(.enabled)
+                            } else {
+                                inlineText(from: inlineTokens)
+                                    .font(.body)
+                                    .lineLimit(isCollapsedPreviewActive ? Self.collapsedPreviewLineLimit : nil)
+                                    .multilineTextAlignment(.leading)
+                                    .fixedSize(horizontal: false, vertical: true)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                    .layoutPriority(1)
+                                    .textSelection(.disabled)
                             }
-                        )
-                    } else {
-                        restrictedMediaView {
-                            NoteImageGalleryView(
-                                imageURLs: imageURLs,
-                                layout: mediaLayout,
-                                sourceEvent: sourceEvent,
-                                reactionCount: reactionCount,
-                                commentCount: commentCount
-                            )
+                        case .imageGallery(let imageURLs):
+                            if appSettings.textOnlyMode && !revealsMediaInTextOnlyMode {
+                                NoteMediaPlaceholderView(
+                                    systemImage: "photo.on.rectangle.angled",
+                                    text: imageURLs.count == 1 ? "Tap to load image" : "Tap to load \(imageURLs.count) images",
+                                    action: {
+                                        revealsMediaInTextOnlyMode = true
+                                    }
+                                )
+                            } else {
+                                restrictedMediaView {
+                                    NoteImageGalleryView(
+                                        imageURLs: imageURLs,
+                                        layout: mediaLayout,
+                                        sourceEvent: sourceEvent,
+                                        reactionCount: reactionCount,
+                                        commentCount: commentCount
+                                    )
+                                }
+                            }
+                        case .video(let url):
+                            if appSettings.textOnlyMode {
+                                NoteMediaPlaceholderView(
+                                    systemImage: "video.slash",
+                                    text: "Video hidden in Text Only Mode"
+                                )
+                            } else {
+                                restrictedMediaView {
+                                    NoteVideoPlayerView(
+                                        url: url,
+                                        layout: mediaLayout,
+                                        bottomInsetOverride: videoControlBottomInset,
+                                        forceMute: shouldBlurMediaFromUnfollowedAuthors
+                                    )
+                                }
+                            }
+                        case .audio(let url):
+                            if appSettings.textOnlyMode {
+                                NoteMediaPlaceholderView(
+                                    systemImage: "speaker.slash",
+                                    text: "Audio hidden in Text Only Mode"
+                                )
+                            } else {
+                                NoteAudioPlayerView(url: url)
+                            }
+                        case .nostrEventReference(let nostrURI):
+                            if embedDepth < Self.maxEmbeddedReferenceDepth {
+                                NostrEventReferenceCardView(
+                                    nostrURI: nostrURI,
+                                    embedDepth: embedDepth + 1,
+                                    onHashtagTap: onHashtagTap,
+                                    onOpenThread: onReferencedEventTap
+                                )
+                            } else {
+                                NostrEventReferenceFallbackView(nostrURI: nostrURI)
+                            }
+                        }
+
+                        if let pollMetadata, pollInsertionOffsets.contains(index + 1) {
+                            pollCard(for: pollMetadata)
                         }
                     }
-                case .video(let url):
-                    if appSettings.textOnlyMode {
-                        NoteMediaPlaceholderView(
-                            systemImage: "video.slash",
-                            text: "Video hidden in Text Only Mode"
-                        )
-                    } else {
-                        restrictedMediaView {
-                            NoteVideoPlayerView(
-                                url: url,
-                                layout: mediaLayout,
-                                bottomInsetOverride: videoControlBottomInset,
-                                forceMute: shouldBlurMediaFromUnfollowedAuthors
-                            )
-                        }
+
+                    if !isCollapsedPreviewActive, let websitePreviewURL, !appSettings.textOnlyMode {
+                        WebsiteLinkCardView(url: websitePreviewURL)
                     }
-                case .audio(let url):
-                    if appSettings.textOnlyMode {
-                        NoteMediaPlaceholderView(
-                            systemImage: "speaker.slash",
-                            text: "Audio hidden in Text Only Mode"
-                        )
-                    } else {
-                        NoteAudioPlayerView(url: url)
-                    }
-                case .nostrEventReference(let nostrURI):
-                    if embedDepth < Self.maxEmbeddedReferenceDepth {
-                        NostrEventReferenceCardView(
-                            nostrURI: nostrURI,
-                            embedDepth: embedDepth + 1,
-                            onHashtagTap: onHashtagTap,
-                            onOpenThread: onReferencedEventTap
-                        )
-                    } else {
-                        NostrEventReferenceFallbackView(nostrURI: nostrURI)
+
+                    if isCollapsedPreviewActive {
+                        collapseMoreOverlay
                     }
                 }
-            }
-
-            if !isCollapsedPreviewActive, let websitePreviewURL, !appSettings.textOnlyMode {
-                WebsiteLinkCardView(url: websitePreviewURL)
-            }
-
-            if isCollapsedPreviewActive {
-                collapseMoreOverlay
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -280,6 +323,10 @@ struct NoteContentView: View {
         mediaLayout == .feed ? 18 : 12
     }
 
+    private var pollInsertionIndex: Int {
+        Self.pollInsertionIndex(in: renderedParts)
+    }
+
     private var shouldBlurMediaFromUnfollowedAuthors: Bool {
         guard appSettings.blurMediaFromUnfollowedAuthors else { return false }
         guard !revealsBlurredMedia else { return false }
@@ -307,6 +354,10 @@ struct NoteContentView: View {
                 partialResult += token.value.count
             }
         }
+    }
+
+    private func pollCard(for metadata: NostrPollMetadata) -> some View {
+        PollNoteView(event: pollEvent, poll: metadata)
     }
 
     private var renderedParts: [RenderPart] {
@@ -385,6 +436,17 @@ struct NoteContentView: View {
         }
 
         return (output, used, false)
+    }
+
+    private static func pollInsertionIndex(in parts: [RenderPart]) -> Int {
+        var index = 0
+
+        while index < parts.count {
+            guard case .inlineTokens = parts[index] else { break }
+            index += 1
+        }
+
+        return index
     }
 
     private static func buildRenderParts(tokens: [NoteContentToken]) -> [RenderPart] {
@@ -1202,6 +1264,7 @@ private struct NoteImageFullscreenViewer: View {
     @State private var pendingRemixComposeDraft: NoteImageRemixComposeDraft?
     @State private var isShowingRemixEditor = false
     @State private var isPreparingRemixEditor = false
+    @State private var zoomedImageIndices = Set<Int>()
     @State private var swipeDismissOffset: CGSize = .zero
     @State private var isCompletingSwipeDismiss = false
     private let reshareService = ResharePublishService()
@@ -1227,17 +1290,13 @@ private struct NoteImageFullscreenViewer: View {
                         ForEach(Array(urls.enumerated()), id: \.offset) { index, url in
                             ZStack {
                                 viewerBackgroundColor.ignoresSafeArea()
-                                NoteRemoteMediaView(url: url) { asset in
-                                    NoteMediaAssetContentView(asset: asset, scaling: .fit)
-                                        .padding(16)
-                                } placeholder: {
-                                    ProgressView()
-                                        .tint(chromeForegroundColor)
-                                } failure: {
-                                    Image(systemName: "photo")
-                                        .font(.largeTitle)
-                                        .foregroundStyle(chromeForegroundColor.opacity(0.75))
-                                }
+                                NoteZoomableFullscreenImageView(
+                                    url: url,
+                                    chromeForegroundColor: chromeForegroundColor,
+                                    onZoomStateChange: { isZoomed in
+                                        updateZoomState(isZoomed, for: index)
+                                    }
+                                )
                             }
                             .tag(index)
                         }
@@ -1703,11 +1762,16 @@ private struct NoteImageFullscreenViewer: View {
         DragGesture(minimumDistance: 8, coordinateSpace: .local)
             .onChanged { value in
                 guard !isShowingInlineResharePanel, !isShowingRemixEditor, !isPreparingRemixEditor else { return }
+                guard !isCurrentImageZoomed else { return }
                 guard shouldTrackSwipeDismiss(for: value.translation) else { return }
                 swipeDismissOffset = value.translation
             }
             .onEnded { value in
                 guard !isShowingInlineResharePanel, !isShowingRemixEditor else { return }
+                guard !isCurrentImageZoomed else {
+                    swipeDismissOffset = .zero
+                    return
+                }
                 guard shouldTrackSwipeDismiss(for: value.translation) else {
                     withAnimation(.spring(response: 0.34, dampingFraction: 0.82)) {
                         swipeDismissOffset = .zero
@@ -1797,6 +1861,18 @@ private struct NoteImageFullscreenViewer: View {
     private func viewerRotationDegrees(for size: CGSize) -> Double {
         guard size.width > 0 else { return 0 }
         return Double(swipeDismissOffset.width / size.width) * 8
+    }
+
+    private var isCurrentImageZoomed: Bool {
+        zoomedImageIndices.contains(selectedIndex)
+    }
+
+    private func updateZoomState(_ isZoomed: Bool, for index: Int) {
+        if isZoomed {
+            zoomedImageIndices.insert(index)
+        } else {
+            zoomedImageIndices.remove(index)
+        }
     }
 }
 
@@ -2961,6 +3037,35 @@ private struct NoteMediaAssetContentView: View {
     }
 }
 
+private struct NoteZoomableFullscreenImageView: View {
+    let url: URL
+    let chromeForegroundColor: Color
+    let onZoomStateChange: (Bool) -> Void
+
+    var body: some View {
+        NoteRemoteMediaView(url: url) { asset in
+            NoteZoomableImageView(
+                asset: asset,
+                onZoomStateChange: onZoomStateChange
+            )
+            .padding(16)
+        } placeholder: {
+            ProgressView()
+                .tint(chromeForegroundColor)
+        } failure: {
+            Image(systemName: "photo")
+                .font(.largeTitle)
+                .foregroundStyle(chromeForegroundColor.opacity(0.75))
+                .onAppear {
+                    onZoomStateChange(false)
+                }
+        }
+        .onDisappear {
+            onZoomStateChange(false)
+        }
+    }
+}
+
 private struct NoteRemoteMediaView<Content: View, Placeholder: View, Failure: View>: View {
     let url: URL
     @ViewBuilder let content: (NoteMediaAsset) -> Content
@@ -3001,6 +3106,190 @@ private struct NoteRemoteMediaView<Content: View, Placeholder: View, Failure: Vi
             didFailLoading = false
         } else {
             didFailLoading = true
+        }
+    }
+}
+
+private struct NoteZoomableImageView: UIViewRepresentable {
+    let asset: NoteMediaAsset
+    let onZoomStateChange: (Bool) -> Void
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(onZoomStateChange: onZoomStateChange)
+    }
+
+    func makeUIView(context: Context) -> UIScrollView {
+        let scrollView = UIScrollView()
+        scrollView.backgroundColor = .clear
+        scrollView.delegate = context.coordinator
+        scrollView.minimumZoomScale = 1
+        scrollView.maximumZoomScale = 4
+        scrollView.bouncesZoom = true
+        scrollView.showsHorizontalScrollIndicator = false
+        scrollView.showsVerticalScrollIndicator = false
+        scrollView.decelerationRate = .fast
+        scrollView.contentInsetAdjustmentBehavior = .never
+
+        let imageView = context.coordinator.imageView
+        imageView.backgroundColor = .clear
+        imageView.clipsToBounds = false
+        imageView.contentMode = .scaleAspectFit
+        imageView.isUserInteractionEnabled = true
+        scrollView.addSubview(imageView)
+
+        let doubleTap = UITapGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.handleDoubleTap(_:)))
+        doubleTap.numberOfTapsRequired = 2
+        doubleTap.delegate = context.coordinator
+        scrollView.addGestureRecognizer(doubleTap)
+        context.coordinator.doubleTapRecognizer = doubleTap
+        context.coordinator.scrollView = scrollView
+
+        return scrollView
+    }
+
+    func updateUIView(_ scrollView: UIScrollView, context: Context) {
+        context.coordinator.onZoomStateChange = onZoomStateChange
+        context.coordinator.updateAsset(asset, in: scrollView)
+    }
+
+    static func dismantleUIView(_ scrollView: UIScrollView, coordinator: Coordinator) {
+        coordinator.onZoomStateChange(false)
+        coordinator.imageView.stopAnimating()
+        coordinator.imageView.image = nil
+        coordinator.scrollView = nil
+        coordinator.doubleTapRecognizer = nil
+    }
+
+    final class Coordinator: NSObject, UIScrollViewDelegate, UIGestureRecognizerDelegate {
+        let imageView = UIImageView()
+        weak var scrollView: UIScrollView?
+        weak var doubleTapRecognizer: UITapGestureRecognizer?
+        var onZoomStateChange: (Bool) -> Void
+
+        private var currentAssetIdentifier: ObjectIdentifier?
+        private var lastReportedZoomedState = false
+        private var lastBoundsSize: CGSize = .zero
+
+        init(onZoomStateChange: @escaping (Bool) -> Void) {
+            self.onZoomStateChange = onZoomStateChange
+        }
+
+        func updateAsset(_ asset: NoteMediaAsset, in scrollView: UIScrollView) {
+            self.scrollView = scrollView
+
+            let assetIdentifier = Self.assetIdentifier(for: asset)
+            let boundsSize = scrollView.bounds.size
+            let assetChanged = currentAssetIdentifier != assetIdentifier
+            if assetChanged {
+                currentAssetIdentifier = assetIdentifier
+                configureImageView(for: asset)
+                scrollView.zoomScale = 1
+                reportZoomState(false)
+            }
+
+            if assetChanged ||
+                lastBoundsSize != boundsSize ||
+                scrollView.zoomScale <= scrollView.minimumZoomScale + 0.01 {
+                imageView.frame = scrollView.bounds
+                scrollView.contentSize = scrollView.bounds.size
+                lastBoundsSize = boundsSize
+            }
+
+            centerImage(in: scrollView)
+            updatePanGestureState(for: scrollView)
+        }
+
+        func viewForZooming(in scrollView: UIScrollView) -> UIView? {
+            imageView
+        }
+
+        func scrollViewDidZoom(_ scrollView: UIScrollView) {
+            centerImage(in: scrollView)
+            updatePanGestureState(for: scrollView)
+            reportZoomState(scrollView.zoomScale > scrollView.minimumZoomScale + 0.01)
+        }
+
+        func scrollViewDidEndZooming(_ scrollView: UIScrollView, with view: UIView?, atScale scale: CGFloat) {
+            reportZoomState(scale > scrollView.minimumZoomScale + 0.01)
+        }
+
+        @objc
+        func handleDoubleTap(_ gesture: UITapGestureRecognizer) {
+            guard let scrollView else { return }
+
+            if scrollView.zoomScale > scrollView.minimumZoomScale + 0.01 {
+                scrollView.setZoomScale(scrollView.minimumZoomScale, animated: true)
+                return
+            }
+
+            let tapPoint = gesture.location(in: imageView)
+            let targetScale = min(scrollView.maximumZoomScale, 2.5)
+            let zoomRect = zoomRect(
+                for: targetScale,
+                centeredAt: tapPoint,
+                in: scrollView
+            )
+            scrollView.zoom(to: zoomRect, animated: true)
+        }
+
+        func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldRecognizeSimultaneouslyWith otherGestureRecognizer: UIGestureRecognizer) -> Bool {
+            true
+        }
+
+        private func configureImageView(for asset: NoteMediaAsset) {
+            imageView.stopAnimating()
+            imageView.image = nil
+
+            switch asset {
+            case .still(let image), .animated(let image):
+                imageView.image = image
+                if image.images != nil {
+                    imageView.startAnimating()
+                }
+            }
+        }
+
+        private func centerImage(in scrollView: UIScrollView) {
+            let boundsSize = scrollView.bounds.size
+            var frameToCenter = imageView.frame
+
+            frameToCenter.origin.x = frameToCenter.size.width < boundsSize.width
+                ? (boundsSize.width - frameToCenter.size.width) / 2
+                : 0
+            frameToCenter.origin.y = frameToCenter.size.height < boundsSize.height
+                ? (boundsSize.height - frameToCenter.size.height) / 2
+                : 0
+
+            imageView.frame = frameToCenter
+        }
+
+        private func updatePanGestureState(for scrollView: UIScrollView) {
+            scrollView.panGestureRecognizer.isEnabled = scrollView.zoomScale > scrollView.minimumZoomScale + 0.01
+        }
+
+        private func reportZoomState(_ isZoomed: Bool) {
+            guard lastReportedZoomedState != isZoomed else { return }
+            lastReportedZoomedState = isZoomed
+            onZoomStateChange(isZoomed)
+        }
+
+        private func zoomRect(for scale: CGFloat, centeredAt center: CGPoint, in scrollView: UIScrollView) -> CGRect {
+            let bounds = scrollView.bounds
+            let width = bounds.width / scale
+            let height = bounds.height / scale
+            return CGRect(
+                x: center.x - (width / 2),
+                y: center.y - (height / 2),
+                width: width,
+                height: height
+            )
+        }
+
+        private static func assetIdentifier(for asset: NoteMediaAsset) -> ObjectIdentifier {
+            switch asset {
+            case .still(let image), .animated(let image):
+                return ObjectIdentifier(image)
+            }
         }
     }
 }

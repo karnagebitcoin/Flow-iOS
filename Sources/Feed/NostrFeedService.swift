@@ -1267,15 +1267,22 @@ struct NostrFeedService: Sendable {
     func fetchThreadReplies(
         relayURL: URL,
         rootEventID: String,
-        limit: Int = 150
+        limit: Int = 150,
+        includeNestedReplies: Bool = true
     ) async throws -> [FeedItem] {
-        try await fetchThreadReplies(relayURLs: [relayURL], rootEventID: rootEventID, limit: limit)
+        try await fetchThreadReplies(
+            relayURLs: [relayURL],
+            rootEventID: rootEventID,
+            limit: limit,
+            includeNestedReplies: includeNestedReplies
+        )
     }
 
     func fetchThreadReplies(
         relayURLs: [URL],
         rootEventID: String,
         limit: Int = 150,
+        includeNestedReplies: Bool = true,
         hydrationMode: FeedItemHydrationMode = .full,
         fetchTimeout: TimeInterval = 12,
         relayFetchMode: RelayFetchMode = .allRelays,
@@ -1299,7 +1306,7 @@ struct NostrFeedService: Sendable {
         let directReplyIDs = Set(directReplies.map(\.id))
 
         var allReplies = directReplies
-        if !directReplyIDs.isEmpty {
+        if includeNestedReplies, !directReplyIDs.isEmpty {
             let nestedFilter = NostrFilter(
                 kinds: [1, 1111, 1244],
                 limit: fetchLimit,
@@ -2196,9 +2203,11 @@ struct NostrFeedService: Sendable {
     private func deduplicateEvents(_ events: [NostrEvent]) -> [NostrEvent] {
         var uniqueEvents: [NostrEvent] = []
         var seen = Set<String>()
-        for event in events where !seen.contains(event.id) {
+        for event in events {
+            let normalizedID = event.id.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+            guard !normalizedID.isEmpty, !seen.contains(normalizedID) else { continue }
             uniqueEvents.append(event)
-            seen.insert(event.id)
+            seen.insert(normalizedID)
         }
         return uniqueEvents
     }

@@ -18,9 +18,16 @@ final class ThreadDetailViewModel: ObservableObject {
     private var hasLoadedNoteActivityState = false
     private var rootHydrationTask: Task<Void, Never>?
     private var itemHydrationTask: Task<Void, Never>?
+    private var replyRefreshTask: Task<Void, Never>?
+    private var noteActivityRefreshTask: Task<Void, Never>?
     private static let fastThreadFetchTimeout: TimeInterval = 3
     private static let fastThreadRelayFetchMode: RelayFetchMode = .firstNonEmptyRelay
-    private static let noteActivityFetchTimeout: TimeInterval = 8
+    private static let fullThreadFetchTimeout: TimeInterval = 8
+    private static let fullThreadRelayFetchMode: RelayFetchMode = .allRelays
+    private static let fastNoteActivityFetchTimeout: TimeInterval = 3
+    private static let fastNoteActivityRelayFetchMode: RelayFetchMode = .firstNonEmptyRelay
+    private static let fullNoteActivityFetchTimeout: TimeInterval = 8
+    private static let fullNoteActivityRelayFetchMode: RelayFetchMode = .allRelays
 
     init(
         rootItem: FeedItem,
@@ -38,6 +45,8 @@ final class ThreadDetailViewModel: ObservableObject {
     deinit {
         rootHydrationTask?.cancel()
         itemHydrationTask?.cancel()
+        replyRefreshTask?.cancel()
+        noteActivityRefreshTask?.cancel()
     }
 
     var repliesHeaderText: String {
@@ -73,6 +82,7 @@ final class ThreadDetailViewModel: ObservableObject {
         errorMessage = nil
         rootHydrationTask?.cancel()
         itemHydrationTask?.cancel()
+        replyRefreshTask?.cancel()
         rootHydrationTask = nil
         itemHydrationTask = nil
 
@@ -86,6 +96,7 @@ final class ThreadDetailViewModel: ObservableObject {
             replies = pruneMutedItems(try await service.fetchThreadReplies(
                 relayURLs: readRelayURLs,
                 rootEventID: rootItem.displayEventID,
+                includeNestedReplies: false,
                 hydrationMode: .cachedProfilesOnly,
                 fetchTimeout: Self.fastThreadFetchTimeout,
                 relayFetchMode: Self.fastThreadRelayFetchMode,
@@ -99,6 +110,7 @@ final class ThreadDetailViewModel: ObservableObject {
                 errorMessage = "Couldn't refresh replies."
             }
         }
+        scheduleReplyRefresh()
 
         if includeNoteActivity || hasLoadedNoteActivityState {
             await refreshNoteActivity()
@@ -109,6 +121,7 @@ final class ThreadDetailViewModel: ObservableObject {
         guard !isLoadingNoteActivity else { return }
         isLoadingNoteActivity = true
         noteActivityErrorMessage = nil
+        noteActivityRefreshTask?.cancel()
 
         defer {
             isLoadingNoteActivity = false
@@ -118,10 +131,10 @@ final class ThreadDetailViewModel: ObservableObject {
             noteActivityRows = try await service.fetchNoteActivityRows(
                 relayURLs: readRelayURLs,
                 rootEventID: rootItem.displayEventID,
-                fetchTimeout: Self.noteActivityFetchTimeout,
-                relayFetchMode: .allRelays,
-                profileFetchTimeout: Self.noteActivityFetchTimeout,
-                profileRelayFetchMode: .allRelays
+                fetchTimeout: Self.fastNoteActivityFetchTimeout,
+                relayFetchMode: Self.fastNoteActivityRelayFetchMode,
+                profileFetchTimeout: Self.fastNoteActivityFetchTimeout,
+                profileRelayFetchMode: Self.fastNoteActivityRelayFetchMode
             )
         } catch {
             if noteActivityRows.isEmpty {
@@ -130,6 +143,8 @@ final class ThreadDetailViewModel: ObservableObject {
                 noteActivityErrorMessage = "Couldn't refresh reactions."
             }
         }
+
+        scheduleNoteActivityRefresh()
     }
 
     func appendLocalReply(_ item: FeedItem) {
@@ -182,6 +197,73 @@ final class ThreadDetailViewModel: ObservableObject {
 
             await MainActor.run {
                 self.mergeKeepingThreadOrder(itemsToMerge: hydrated)
+            }
+        }
+    }
+
+    private func scheduleReplyRefresh() {
+        replyRefreshTask?.cancel()
+
+        let relayTargets = readRelayURLs
+        let rootEventID = rootItem.displayEventID
+        let moderationSnapshot = muteFilterSnapshot
+
+        replyRefreshTask = Task { [weak self] in
+            guard let self else { return }
+
+            do {
+                let refreshedReplies = try await self.service.fetchThreadReplies(
+                    relayURLs: relayTargets,
+                    rootEventID: rootEventID,
+                    hydrationMode: .cachedProfilesOnly,
+                    fetchTimeout: Self.fullThreadFetchTimeout,
+                    relayFetchMode: Self.fullThreadRelayFetchMode,
+                    moderationSnapshot: moderationSnapshot
+                )
+                guard !Task.isCancelled else { return }
+
+                await MainActor.run {
+                    guard self.rootItem.displayEventID.lowercased() == rootEventID.lowercased() else { return }
+                    let visibleReplies = self.pruneMutedItems(refreshedReplies, snapshot: moderationSnapshot)
+                    guard !visibleReplies.isEmpty || self.replies.isEmpty else { return }
+                    self.errorMessage = nil
+                    self.replies = visibleReplies
+                    self.scheduleItemHydration(for: visibleReplies)
+                }
+            } catch {
+                return
+            }
+        }
+    }
+
+    private func scheduleNoteActivityRefresh() {
+        noteActivityRefreshTask?.cancel()
+
+        let relayTargets = readRelayURLs
+        let rootEventID = rootItem.displayEventID
+
+        noteActivityRefreshTask = Task { [weak self] in
+            guard let self else { return }
+
+            do {
+                let refreshedRows = try await self.service.fetchNoteActivityRows(
+                    relayURLs: relayTargets,
+                    rootEventID: rootEventID,
+                    fetchTimeout: Self.fullNoteActivityFetchTimeout,
+                    relayFetchMode: Self.fullNoteActivityRelayFetchMode,
+                    profileFetchTimeout: Self.fullNoteActivityFetchTimeout,
+                    profileRelayFetchMode: Self.fullNoteActivityRelayFetchMode
+                )
+                guard !Task.isCancelled else { return }
+
+                await MainActor.run {
+                    guard self.rootItem.displayEventID.lowercased() == rootEventID.lowercased() else { return }
+                    guard !refreshedRows.isEmpty || self.noteActivityRows.isEmpty else { return }
+                    self.noteActivityRows = refreshedRows
+                    self.noteActivityErrorMessage = nil
+                }
+            } catch {
+                return
             }
         }
     }

@@ -17,24 +17,27 @@ final class NoteReactionStatsService: ObservableObject {
         let relayURL: URL
     }
 
-    private let relayClient: NostrRelayClient
+    private let relayClient: any NostrRelayEventFetching
     private let store: NoteReactionStatsStore
 
     private let fetchDebounceNanos: UInt64 = 40_000_000
     private let persistDebounceNanos: UInt64 = 80_000_000
     private let batchMaxNotes = 60
     private let optimisticReactionPrefix = "optimistic-reaction-"
+    private let statsFreshnessInterval: TimeInterval = 45
+    private let fetchRetryCooldownInterval: TimeInterval = 15
 
     private var hydratedEventIDs = Set<String>()
     private var pendingRequests: [String: PendingRequest] = [:]
     private var pendingPersistEventIDs = Set<String>()
     private var suppressedReactionIDs = Set<String>()
+    private var lastFetchAttemptByRequestKey: [String: Date] = [:]
 
     private var fetchTask: Task<Void, Never>?
     private var persistTask: Task<Void, Never>?
 
     init(
-        relayClient: NostrRelayClient = NostrRelayClient(),
+        relayClient: any NostrRelayEventFetching = NostrRelayClient(),
         store: NoteReactionStatsStore = .shared
     ) {
         self.relayClient = relayClient
@@ -193,10 +196,13 @@ final class NoteReactionStatsService: ObservableObject {
     private func prepareAndQueue(noteIDs: [String], relayURL: URL) async {
         await hydrateFromStoreIfNeeded(noteIDs: noteIDs)
 
+        let now = Date()
         let uniqueIDs = Set(noteIDs.map { normalizedEventID($0) }.filter { !$0.isEmpty })
         for noteID in uniqueIDs {
+            guard shouldQueueFetch(for: noteID, relayURL: relayURL, now: now) else { continue }
             let key = pendingKey(eventID: noteID, relayURL: relayURL)
             pendingRequests[key] = PendingRequest(eventID: noteID, relayURL: relayURL)
+            lastFetchAttemptByRequestKey[key] = now
         }
 
         scheduleBatchFetch()
@@ -258,7 +264,7 @@ final class NoteReactionStatsService: ObservableObject {
             guard !eventIDs.isEmpty else { continue }
 
             let since = eventIDs.compactMap { statsByEventID[$0]?.updatedAt }.min()
-            let reactionLimit = min(3_000, max(600, eventIDs.count * 80))
+            let reactionLimit = min(1_200, max(160, eventIDs.count * 24))
             plans.append(
                 RelayReactionFetchPlan(
                     relayURL: relayURL,
@@ -426,6 +432,27 @@ final class NoteReactionStatsService: ObservableObject {
         }
 
         return ordered
+    }
+
+    private func shouldQueueFetch(for eventID: String, relayURL: URL, now: Date) -> Bool {
+        let key = pendingKey(eventID: eventID, relayURL: relayURL)
+        if pendingRequests[key] != nil {
+            return false
+        }
+
+        if let updatedAt = statsByEventID[eventID]?.updatedAt {
+            let updatedDate = Date(timeIntervalSince1970: TimeInterval(updatedAt))
+            if now.timeIntervalSince(updatedDate) < statsFreshnessInterval {
+                return false
+            }
+        }
+
+        if let lastAttempt = lastFetchAttemptByRequestKey[key],
+           now.timeIntervalSince(lastAttempt) < fetchRetryCooldownInterval {
+            return false
+        }
+
+        return true
     }
 
     private func removeReaction(id reactionID: String, from stats: inout NoteReactionStats) {

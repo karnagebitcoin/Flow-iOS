@@ -2,6 +2,151 @@ import XCTest
 @testable import Flow
 
 final class NostrFeedServiceTests: XCTestCase {
+    func testReactionStatsPrefetchSkipsFreshNetworkRefetch() async throws {
+        var rootURLBox: URL? = FileManager.default.temporaryDirectory
+            .appendingPathComponent("FlowReactionStatsTests-\(UUID().uuidString)", isDirectory: true)
+        let rootURL = try XCTUnwrap(rootURLBox)
+        try FileManager.default.createDirectory(at: rootURL, withIntermediateDirectories: true)
+        defer {
+            rootURLBox = nil
+            try? FileManager.default.removeItem(at: rootURL)
+        }
+
+        let relayClient = SpyRelayClient()
+        let fileManager = TestFileManager(rootURL: rootURL)
+        let store = NoteReactionStatsStore(fileManager: fileManager)
+        let service = await MainActor.run {
+            NoteReactionStatsService(relayClient: relayClient, store: store)
+        }
+        let note = makeEvent(
+            id: hex("e"),
+            pubkey: hex("f"),
+            kind: 1,
+            tags: [],
+            content: "Hello"
+        )
+
+        await MainActor.run {
+            service.prefetch(events: [note], relayURLs: [relayURL])
+        }
+        try await Task.sleep(nanoseconds: 350_000_000)
+
+        await MainActor.run {
+            service.prefetch(events: [note], relayURLs: [relayURL])
+        }
+        try await Task.sleep(nanoseconds: 350_000_000)
+
+        let fetchCount = await relayClient.fetchCount()
+        XCTAssertEqual(fetchCount, 1)
+    }
+
+    func testFetchThreadRepliesCanSkipNestedRepliesOnFastPath() async throws {
+        var rootURLBox: URL? = FileManager.default.temporaryDirectory
+            .appendingPathComponent("FlowThreadReplyTests-\(UUID().uuidString)", isDirectory: true)
+        let rootURL = try XCTUnwrap(rootURLBox)
+        try FileManager.default.createDirectory(at: rootURL, withIntermediateDirectories: true)
+        defer {
+            rootURLBox = nil
+            try? FileManager.default.removeItem(at: rootURL)
+        }
+
+        let rootEventID = hex("1")
+        let directReply = makeEvent(
+            id: hex("2"),
+            pubkey: hex("3"),
+            kind: 1,
+            tags: [["e", rootEventID, "", "reply"]],
+            content: "Direct reply",
+            createdAt: 1_700_000_001
+        )
+        let nestedReply = makeEvent(
+            id: hex("4"),
+            pubkey: hex("5"),
+            kind: 1,
+            tags: [
+                ["e", rootEventID, "", "root"],
+                ["e", directReply.id, "", "reply"]
+            ],
+            content: "Nested reply",
+            createdAt: 1_700_000_002
+        )
+
+        let relayClient = ThreadReplyRelayClient(
+            rootEventID: rootEventID,
+            directReply: directReply,
+            nestedReply: nestedReply
+        )
+        let fileManager = TestFileManager(rootURL: rootURL)
+        let profileSnapshotStore = ProfileSnapshotStore(fileManager: fileManager)
+        let service = NostrFeedService(
+            relayClient: relayClient,
+            timelineCache: TimelineEventCache(),
+            profileCache: ProfileCache(snapshotStore: profileSnapshotStore),
+            relayHintCache: ProfileRelayHintCache(),
+            followListCache: FollowListSnapshotCache(fileManager: fileManager),
+            seenEventStore: SeenEventStore(fileManager: fileManager)
+        )
+
+        let fastReplies = try await service.fetchThreadReplies(
+            relayURLs: [relayURL],
+            rootEventID: rootEventID,
+            includeNestedReplies: false,
+            hydrationMode: .cachedProfilesOnly,
+            fetchTimeout: 0.01,
+            relayFetchMode: .firstNonEmptyRelay
+        )
+        let fullReplies = try await service.fetchThreadReplies(
+            relayURLs: [relayURL],
+            rootEventID: rootEventID,
+            includeNestedReplies: true,
+            hydrationMode: .cachedProfilesOnly,
+            fetchTimeout: 0.01,
+            relayFetchMode: .firstNonEmptyRelay
+        )
+
+        let fetchCount = await relayClient.fetchCount()
+
+        XCTAssertEqual(fastReplies.map(\.id), [directReply.id])
+        XCTAssertEqual(fullReplies.map(\.id), [directReply.id, nestedReply.id])
+        XCTAssertEqual(fetchCount, 2)
+    }
+
+    func testFeedItemMergePreservesRepostDisplayContextAcrossActorOnlyHydration() {
+        let originalAuthorPubkey = hex("1")
+        let repostActorPubkey = hex("2")
+        let originalEvent = makeEvent(
+            id: hex("a"),
+            pubkey: originalAuthorPubkey,
+            kind: 1,
+            tags: [],
+            content: "Alice note"
+        )
+        let repostEvent = makeEvent(
+            id: hex("b"),
+            pubkey: repostActorPubkey,
+            kind: 6,
+            tags: [["e", originalEvent.id]],
+            content: originalEventJSON(for: originalEvent)
+        )
+
+        let cachedItem = FeedItem(
+            event: repostEvent,
+            profile: makeProfile(name: "bob", displayName: "Bob"),
+            displayEventOverride: originalEvent,
+            displayProfileOverride: makeProfile(name: "alice", displayName: "Alice")
+        )
+        let actorOnlyHydratedItem = FeedItem(
+            event: repostEvent,
+            profile: makeProfile(name: "bob", displayName: "Bob")
+        )
+
+        let merged = cachedItem.merged(with: actorOnlyHydratedItem)
+
+        XCTAssertEqual(merged.actorDisplayName, "Bob")
+        XCTAssertEqual(merged.displayEvent.id, originalEvent.id)
+        XCTAssertEqual(merged.displayName, "Alice")
+    }
+
     func testBuildNoteActivityRowsIncludesReactionsResharesAndQuotesForTargetNoteOnly() async throws {
         var harnessBox: TestHarness? = try TestHarness()
         let rootURL = try XCTUnwrap(harnessBox?.rootURL)
@@ -211,6 +356,41 @@ private actor SpyRelayClient: NostrRelayEventFetching {
     }
 }
 
+private actor ThreadReplyRelayClient: NostrRelayEventFetching {
+    private let rootEventID: String
+    private let directReply: NostrEvent
+    private let nestedReply: NostrEvent
+    private var fetchCallCount = 0
+
+    init(rootEventID: String, directReply: NostrEvent, nestedReply: NostrEvent) {
+        self.rootEventID = rootEventID
+        self.directReply = directReply
+        self.nestedReply = nestedReply
+    }
+
+    func fetchEvents(
+        relayURL: URL,
+        filter: NostrFilter,
+        timeout: TimeInterval
+    ) async throws -> [NostrEvent] {
+        fetchCallCount += 1
+
+        let referencedEventIDs = Set(filter.tagFilters?["e"] ?? [])
+        if referencedEventIDs.contains(rootEventID) {
+            return [directReply]
+        }
+        if referencedEventIDs.contains(directReply.id) {
+            return [nestedReply]
+        }
+
+        return []
+    }
+
+    func fetchCount() -> Int {
+        fetchCallCount
+    }
+}
+
 private final class TestHarness {
     let rootURL: URL
     let relayClient: SpyRelayClient
@@ -286,6 +466,13 @@ private func makeEvent(
         content: content,
         sig: String(repeating: "f", count: 128)
     )
+}
+
+private func originalEventJSON(for event: NostrEvent) -> String {
+    let encoder = JSONEncoder()
+    encoder.outputFormatting = [.sortedKeys]
+    let data = try? encoder.encode(event)
+    return data.flatMap { String(data: $0, encoding: .utf8) } ?? ""
 }
 
 private func hex(_ character: Character) -> String {

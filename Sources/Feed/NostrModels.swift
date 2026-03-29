@@ -494,7 +494,7 @@ struct FeedItem: Identifiable, Hashable, Sendable {
     }
 
     var id: String {
-        event.id
+        event.id.lowercased()
     }
 
     var displayEvent: NostrEvent {
@@ -597,6 +597,32 @@ struct FeedItem: Identifiable, Hashable, Sendable {
         return ordered
     }
 
+    func merged(with incoming: FeedItem) -> FeedItem {
+        let mergedDisplayEvent = incoming.displayEventOverride ?? displayEventOverride
+        let mergedReplyTargetEvent = incoming.replyTargetEvent ?? replyTargetEvent
+
+        return FeedItem(
+            event: incoming.event,
+            profile: incoming.profile ?? profile,
+            displayEventOverride: mergedDisplayEvent,
+            displayProfileOverride: Self.mergedAssociatedProfile(
+                selectedEvent: mergedDisplayEvent,
+                preferredEvent: incoming.displayEventOverride,
+                preferredProfile: incoming.displayProfileOverride,
+                fallbackEvent: displayEventOverride,
+                fallbackProfile: displayProfileOverride
+            ),
+            replyTargetEvent: mergedReplyTargetEvent,
+            replyTargetProfile: Self.mergedAssociatedProfile(
+                selectedEvent: mergedReplyTargetEvent,
+                preferredEvent: incoming.replyTargetEvent,
+                preferredProfile: incoming.replyTargetProfile,
+                fallbackEvent: replyTargetEvent,
+                fallbackProfile: replyTargetProfile
+            )
+        )
+    }
+
     private static func displayName(for event: NostrEvent, profile: NostrProfile?) -> String {
         if let displayName = profile?.displayName?.trimmed, !displayName.isEmpty {
             return displayName
@@ -620,6 +646,35 @@ struct FeedItem: Identifiable, Hashable, Sendable {
             return nil
         }
         return url
+    }
+
+    private static func mergedAssociatedProfile(
+        selectedEvent: NostrEvent?,
+        preferredEvent: NostrEvent?,
+        preferredProfile: NostrProfile?,
+        fallbackEvent: NostrEvent?,
+        fallbackProfile: NostrProfile?
+    ) -> NostrProfile? {
+        guard let selectedEvent else { return nil }
+        let selectedEventID = normalizedEventID(selectedEvent)
+
+        if let preferredProfile,
+           normalizedEventID(preferredEvent) == selectedEventID {
+            return preferredProfile
+        }
+
+        if let fallbackProfile,
+           normalizedEventID(fallbackEvent) == selectedEventID {
+            return fallbackProfile
+        }
+
+        return nil
+    }
+
+    private static func normalizedEventID(_ event: NostrEvent?) -> String? {
+        guard let event else { return nil }
+        let normalized = event.id.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        return normalized.isEmpty ? nil : normalized
     }
 }
 

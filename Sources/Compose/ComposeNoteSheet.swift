@@ -37,6 +37,7 @@ final class ComposeNoteViewModel: ObservableObject {
         currentNsec: String?,
         writeRelayURLs: [URL],
         additionalTags: [[String]] = [],
+        pollDraft: ComposePollDraft? = nil,
         replyTargetEvent: NostrEvent? = nil
     ) async -> Bool {
         guard !isPublishing else { return false }
@@ -63,6 +64,19 @@ final class ComposeNoteViewModel: ObservableObject {
                 feedbackMessage = "Reply posted."
                 feedbackIsError = false
                 return true
+            } else if let pollDraft {
+                let successfulRelayCount = try await publishingService.publishPoll(
+                    content: text,
+                    poll: pollDraft,
+                    currentNsec: currentNsec,
+                    writeRelayURLs: writeRelayURLs,
+                    additionalTags: additionalTags
+                )
+
+                text = ""
+                feedbackMessage = "Poll posted to \(successfulRelayCount) relay\(successfulRelayCount == 1 ? "" : "s")."
+                feedbackIsError = false
+                return true
             } else {
                 let successfulRelayCount = try await publishingService.publishNote(
                     content: text,
@@ -72,7 +86,7 @@ final class ComposeNoteViewModel: ObservableObject {
                 )
 
                 text = ""
-                feedbackMessage = "Posted to \(successfulRelayCount) source\(successfulRelayCount == 1 ? "" : "s")."
+                feedbackMessage = "Posted to \(successfulRelayCount) relay\(successfulRelayCount == 1 ? "" : "s")."
                 feedbackIsError = false
                 return true
             }
@@ -260,6 +274,7 @@ struct ComposeNoteSheet: View {
     @State private var isShowingCameraCapture = false
     @State private var isRequestingCaptureAccess = false
     @State private var isUploadingMedia = false
+    @State private var pollDraft: ComposePollDraft?
     @State private var profileDisplayName = "Account"
     @State private var profileAvatarURL: URL?
     @State private var profileFallbackSymbol = "A"
@@ -471,6 +486,17 @@ struct ComposeNoteSheet: View {
                 mediaAttachmentPreviewList
             }
 
+            if let _ = pollDraft, canAttachPoll {
+                ComposePollEditorView(
+                    draft: pollDraftBinding,
+                    onRemove: {
+                        withAnimation(.easeInOut(duration: 0.18)) {
+                            pollDraft = nil
+                        }
+                    }
+                )
+            }
+
             HStack {
                 PhotosPicker(
                     selection: $selectedMediaItems,
@@ -534,6 +560,24 @@ struct ComposeNoteSheet: View {
                 .buttonStyle(.plain)
                 .disabled(viewModel.isPublishing || isUploadingMedia)
 
+                if canAttachPoll {
+                    Button {
+                        togglePollDraft()
+                    } label: {
+                        Image(systemName: pollDraft == nil ? "chart.bar.xaxis" : "chart.bar.fill")
+                            .font(.system(size: 17, weight: .medium))
+                            .foregroundStyle(pollDraft == nil ? Color.secondary : Color.white)
+                            .frame(width: 32, height: 32)
+                            .background(
+                                pollDraft == nil ? Color(.tertiarySystemFill) : appSettings.primaryColor,
+                                in: RoundedRectangle(cornerRadius: 10, style: .continuous)
+                            )
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(viewModel.isPublishing || isUploadingMedia)
+                    .accessibilityLabel(pollDraft == nil ? "Add poll" : "Edit poll")
+                }
+
                 if speechTranscriber.isRecording {
                     Text(formatVoiceDuration(milliseconds: speechTranscriber.elapsedMs))
                         .font(.footnote.monospacedDigit())
@@ -551,7 +595,7 @@ struct ComposeNoteSheet: View {
                         .font(.footnote.weight(.semibold))
                         .foregroundStyle(.secondary)
                 } else if writeRelayURLs.isEmpty {
-                    Label("No publish sources", systemImage: "wifi.slash")
+                    Label("No publish relays", systemImage: "wifi.slash")
                         .font(.footnote.weight(.semibold))
                         .foregroundStyle(.secondary)
                 }
@@ -566,7 +610,7 @@ struct ComposeNoteSheet: View {
                 HStack(spacing: 10) {
                     ProgressView()
                         .controlSize(.small)
-                    Text("Publishing to \(writeRelayURLs.count) source\(writeRelayURLs.count == 1 ? "" : "s")...")
+                    Text("Publishing to \(writeRelayURLs.count) relay\(writeRelayURLs.count == 1 ? "" : "s")...")
                         .font(.footnote)
                         .foregroundStyle(.secondary)
                     Spacer()
@@ -601,7 +645,12 @@ struct ComposeNoteSheet: View {
             } else if writeRelayURLs.isEmpty {
                 infoBanner(
                     systemImage: "wifi.slash",
-                    text: "Add at least one publish source to post notes."
+                    text: "Add at least one publish relay to post notes."
+                )
+            } else if let pollValidationMessage {
+                infoBanner(
+                    systemImage: "chart.bar.xaxis",
+                    text: pollValidationMessage
                 )
             }
         }
@@ -618,12 +667,42 @@ struct ComposeNoteSheet: View {
     }
 
     private var canPublish: Bool {
-        (!viewModel.trimmedText.isEmpty || !mediaAttachments.isEmpty || quotedEvent != nil)
-        && currentNsec != nil
-        && !writeRelayURLs.isEmpty
-        && !speechTranscriber.isRecording
-        && !speechTranscriber.isTranscribing
-        && !viewModel.isPublishing
+        let baseIsReadyToPublish =
+            currentNsec != nil &&
+            !writeRelayURLs.isEmpty &&
+            !speechTranscriber.isRecording &&
+            !speechTranscriber.isTranscribing &&
+            !viewModel.isPublishing
+
+        guard baseIsReadyToPublish else { return false }
+
+        if let pollDraft {
+            return !viewModel.trimmedText.isEmpty && pollDraft.hasMinimumOptions
+        }
+
+        return !viewModel.trimmedText.isEmpty || !mediaAttachments.isEmpty || quotedEvent != nil
+    }
+
+    private var canAttachPoll: Bool {
+        mode == .newNote
+    }
+
+    private var pollDraftBinding: Binding<ComposePollDraft> {
+        Binding(
+            get: { pollDraft ?? .defaultDraft() },
+            set: { pollDraft = $0 }
+        )
+    }
+
+    private var pollValidationMessage: String? {
+        guard let pollDraft else { return nil }
+        if viewModel.trimmedText.isEmpty {
+            return "Polls need a question."
+        }
+        if !pollDraft.hasMinimumOptions {
+            return "Add at least two option labels before posting."
+        }
+        return nil
     }
 
     private func composeAvatar(size: CGFloat) -> some View {
@@ -1550,31 +1629,56 @@ struct ComposeNoteSheet: View {
         UIApplication.shared.open(settingsURL)
     }
 
+    private func togglePollDraft() {
+        withAnimation(.easeInOut(duration: 0.18)) {
+            if pollDraft == nil {
+                pollDraft = .defaultDraft()
+            } else {
+                pollDraft = nil
+            }
+        }
+    }
+
     private func publish() async {
         guard canPublish else {
-            viewModel.feedbackMessage = currentNsec == nil
-                ? "This account needs an nsec to publish notes."
-                : writeRelayURLs.isEmpty
-                    ? "No publish sources are configured."
-                    : "Write a note or attach media before posting."
+            if currentNsec == nil {
+                viewModel.feedbackMessage = "This account needs an nsec to publish notes."
+            } else if writeRelayURLs.isEmpty {
+                viewModel.feedbackMessage = "No publish relays are configured."
+            } else if let pollValidationMessage {
+                viewModel.feedbackMessage = pollValidationMessage
+            } else {
+                viewModel.feedbackMessage = currentNsec == nil
+                    ? "This account needs an nsec to publish notes."
+                    : writeRelayURLs.isEmpty
+                        ? "No publish relays are configured."
+                        : "Write a note or attach media before posting."
+            }
             viewModel.feedbackIsError = true
             return
         }
 
         let publishTags = mediaAttachments.map(\.imetaTag) + initialAdditionalTags
+        let isPublishingPoll = pollDraft != nil
         let didPublish = await viewModel.publish(
             currentAccountPubkey: currentAccountPubkey,
             currentNsec: currentNsec,
             writeRelayURLs: writeRelayURLs,
             additionalTags: publishTags,
+            pollDraft: pollDraft,
             replyTargetEvent: replyTargetEvent
         )
 
         guard didPublish else { return }
 
         mediaAttachments.removeAll()
+        pollDraft = nil
         onPublished?()
-        toastCenter.show(replyTargetEvent == nil ? "Note posted" : "Reply posted")
+        if isPublishingPoll {
+            toastCenter.show("Poll posted")
+        } else {
+            toastCenter.show(replyTargetEvent == nil ? "Note posted" : "Reply posted")
+        }
         dismiss()
     }
 

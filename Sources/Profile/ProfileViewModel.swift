@@ -40,7 +40,9 @@ final class ProfileViewModel: ObservableObject {
     private let profileEventService: ProfileEventService
     private let relayClient: NostrRelayClient
     private let mediaUploadService: ProfileMediaUploadService
-    private let requestKinds = [1, 6, 16, 1111, 1244]
+    static let requestedFeedKinds = [1, 6, 16, 1068, 6969, 1111, 1244]
+
+    private let requestKinds = ProfileViewModel.requestedFeedKinds
     private static let fastProfileFetchTimeout: TimeInterval = 3
     private static let fastProfileRelayFetchMode: RelayFetchMode = .firstNonEmptyRelay
     private var oldestCreatedAt: Int?
