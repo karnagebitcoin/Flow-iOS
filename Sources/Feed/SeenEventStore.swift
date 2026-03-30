@@ -3,16 +3,21 @@ import SQLite3
 
 private let SQLITE_TRANSIENT = unsafeBitCast(-1, to: sqlite3_destructor_type.self)
 
-actor SeenEventStore {
+actor SeenEventStore: SeenEventStoring {
     static let shared = SeenEventStore()
 
     private let databaseURL: URL
+    private let nostrDatabase: FlowNostrDB
     private let encoder = JSONEncoder()
     private let decoder = JSONDecoder()
     private let maxEventCount = 40_000
     private var database: OpaquePointer?
 
-    init(fileManager: FileManager = .default) {
+    init(
+        fileManager: FileManager = .default,
+        nostrDatabase: FlowNostrDB = .shared
+    ) {
+        self.nostrDatabase = nostrDatabase
         let root = fileManager.urls(for: .cachesDirectory, in: .userDomainMask).first
             ?? URL(fileURLWithPath: NSTemporaryDirectory())
         self.databaseURL = root.appendingPathComponent("x21-seen-events.sqlite", isDirectory: false)
@@ -27,7 +32,13 @@ actor SeenEventStore {
     }
 
     func store(events: [NostrEvent]) {
-        guard !events.isEmpty, database != nil else { return }
+        guard !events.isEmpty else { return }
+
+        if nostrDatabase.ingest(events: events) {
+            return
+        }
+
+        guard database != nil else { return }
 
         withTransaction {
             guard let statement = prepareStatement(
@@ -118,11 +129,10 @@ actor SeenEventStore {
     func recentFeed(key: String) -> [NostrEvent]? {
         guard let statement = prepareStatement(
             """
-            SELECT e.event_json
-            FROM recent_feed_events AS r
-            JOIN seen_events AS e ON e.id = r.event_id
-            WHERE r.feed_key = ?
-            ORDER BY r.position ASC;
+            SELECT event_id
+            FROM recent_feed_events
+            WHERE feed_key = ?
+            ORDER BY position ASC;
             """
         ) else {
             return nil
@@ -131,12 +141,16 @@ actor SeenEventStore {
 
         bindText(key, to: statement, index: 1)
 
-        var events: [NostrEvent] = []
+        var orderedIDs: [String] = []
         while sqlite3_step(statement) == SQLITE_ROW {
-            guard let event = decodeEvent(from: statement, column: 0) else { continue }
-            events.append(event)
+            guard let eventID = columnText(statement, column: 0) else { continue }
+            orderedIDs.append(eventID)
         }
 
+        guard !orderedIDs.isEmpty else { return nil }
+
+        let eventsByID = events(ids: orderedIDs)
+        let events = orderedIDs.compactMap { eventsByID[$0.lowercased()] }
         return events.isEmpty ? nil : events
     }
 
@@ -150,8 +164,26 @@ actor SeenEventStore {
         )
         guard !normalizedIDs.isEmpty else { return [:] }
 
+        if let resolvedByNostrDB = nostrDatabase.events(ids: normalizedIDs) {
+            let missingIDs = normalizedIDs.filter { resolvedByNostrDB[$0] == nil }
+            guard !missingIDs.isEmpty else {
+                return resolvedByNostrDB
+            }
+
+            var merged = resolvedByNostrDB
+            let legacyResolved = legacyEvents(ids: missingIDs)
+            for (eventID, event) in legacyResolved {
+                merged[eventID] = event
+            }
+            return merged
+        }
+
+        return legacyEvents(ids: normalizedIDs)
+    }
+
+    private func legacyEvents(ids: [String]) -> [String: NostrEvent] {
         var decoded: [String: NostrEvent] = [:]
-        for chunk in normalizedIDs.chunked(into: 250) {
+        for chunk in ids.chunked(into: 250) {
             guard let statement = prepareStatement(
                 """
                 SELECT id, event_json

@@ -921,6 +921,7 @@ private struct SettingsMediaView: View {
 
 private struct SettingsMediaDiagnosticsView: View {
     @State private var diagnostics = FlowMediaCacheDiagnostics()
+    @State private var flowDBDiagnostics = FlowNostrDBDiagnostics()
 
     var body: some View {
         Form {
@@ -994,6 +995,41 @@ private struct SettingsMediaDiagnosticsView: View {
             }
 
             Section {
+                diagnosticMetricRow(
+                    title: "Persisted Events",
+                    value: flowDBDiagnostics.persistedEventCount.formatted()
+                )
+                diagnosticMetricRow(
+                    title: "Persisted Profiles",
+                    value: flowDBDiagnostics.persistedProfileCount.formatted()
+                )
+                diagnosticMetricRow(
+                    title: "Session Ingested Events",
+                    value: flowDBDiagnostics.sessionIngestedEventCount.formatted()
+                )
+                diagnosticMetricRow(
+                    title: "Session Ingested Profiles",
+                    value: flowDBDiagnostics.sessionIngestedProfileCount.formatted()
+                )
+                diagnosticMetricRow(
+                    title: "Recent Event Overlay",
+                    value: flowDBDiagnostics.recentOverlayEventCount.formatted()
+                )
+                diagnosticMetricRow(
+                    title: "Replaceable Overlay",
+                    value: flowDBDiagnostics.recentReplaceableOverlayCount.formatted()
+                )
+                diagnosticMetricRow(
+                    title: "On-Device Size",
+                    value: byteDescription(flowDBDiagnostics.diskUsageBytes)
+                )
+            } header: {
+                Text("Flow DB")
+            } footer: {
+                Text("Persisted values reflect what is already committed into the local nostrdb store. Session ingested values reflect what the current app run has pushed through the ingester, even if writer threads have not finished compacting everything yet.")
+            }
+
+            Section {
                 Button("Reset Session Diagnostics", role: .destructive) {
                     resetDiagnostics()
                 }
@@ -1034,8 +1070,10 @@ private struct SettingsMediaDiagnosticsView: View {
 
     private func refreshDiagnostics() async {
         let snapshot = await FlowImageCache.shared.diagnosticsSnapshot()
+        let flowDBSnapshot = FlowNostrDB.shared.diagnosticsSnapshot()
         await MainActor.run {
             diagnostics = snapshot
+            flowDBDiagnostics = flowDBSnapshot
         }
     }
 

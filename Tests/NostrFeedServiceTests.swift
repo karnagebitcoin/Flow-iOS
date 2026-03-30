@@ -96,14 +96,11 @@ final class NostrFeedServiceTests: XCTestCase {
             nestedReply: nestedReply
         )
         let fileManager = TestFileManager(rootURL: rootURL)
-        let profileSnapshotStore = ProfileSnapshotStore(fileManager: fileManager)
-        let service = NostrFeedService(
+        let nostrDatabase = FlowNostrDB(fileManager: fileManager)
+        let service = makeFeedService(
             relayClient: relayClient,
-            timelineCache: TimelineEventCache(),
-            profileCache: ProfileCache(snapshotStore: profileSnapshotStore),
-            relayHintCache: ProfileRelayHintCache(),
-            followListCache: FollowListSnapshotCache(fileManager: fileManager),
-            seenEventStore: SeenEventStore(fileManager: fileManager)
+            fileManager: fileManager,
+            nostrDatabase: nostrDatabase
         )
 
         let fastReplies = try await service.fetchThreadReplies(
@@ -354,6 +351,108 @@ final class NostrFeedServiceTests: XCTestCase {
         XCTAssertNil(rows.first?.target.profile)
         XCTAssertEqual(fetchCount, 0)
     }
+
+    func testFetchAuthorFeedUsesNostrDBForPaginatedQueriesWithoutRelayFetch() async throws {
+        let rootURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("FlowAuthorFeedLocal-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: rootURL, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: rootURL) }
+
+        let fileManager = TestFileManager(rootURL: rootURL)
+        let database = FlowNostrDB(fileManager: fileManager)
+        let relayClient = SpyRelayClient()
+        let service = makeFeedService(
+            relayClient: relayClient,
+            fileManager: fileManager,
+            nostrDatabase: database
+        )
+        let authorPubkey = hex("a")
+        let newest = makeEvent(
+            id: hex("b"),
+            pubkey: authorPubkey,
+            kind: 1,
+            tags: [],
+            content: "newest",
+            createdAt: 1_700_000_300
+        )
+        let middle = makeEvent(
+            id: hex("c"),
+            pubkey: authorPubkey,
+            kind: 1,
+            tags: [],
+            content: "middle",
+            createdAt: 1_700_000_200
+        )
+        let oldest = makeEvent(
+            id: hex("d"),
+            pubkey: authorPubkey,
+            kind: 1,
+            tags: [],
+            content: "oldest",
+            createdAt: 1_700_000_100
+        )
+
+        XCTAssertTrue(database.ingest(events: [newest, middle, oldest]))
+
+        let items = try await service.fetchAuthorFeed(
+            relayURLs: [relayURL],
+            authorPubkey: authorPubkey,
+            kinds: [1],
+            limit: 2,
+            until: newest.createdAt - 1,
+            hydrationMode: .cachedProfilesOnly,
+            fetchTimeout: 0.01,
+            relayFetchMode: .firstNonEmptyRelay
+        )
+
+        let fetchCount = await relayClient.fetchCount()
+
+        XCTAssertEqual(items.map(\.id), [middle.id, oldest.id])
+        XCTAssertEqual(fetchCount, 0)
+    }
+
+    func testFetchAuthorFeedReturnsLocalNostrDBResultsWhenRelayRefreshFails() async throws {
+        let rootURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("FlowAuthorFeedFallback-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: rootURL, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: rootURL) }
+
+        let fileManager = TestFileManager(rootURL: rootURL)
+        let database = FlowNostrDB(fileManager: fileManager)
+        let relayClient = FailingRelayClient()
+        let service = makeFeedService(
+            relayClient: relayClient,
+            fileManager: fileManager,
+            nostrDatabase: database
+        )
+        let authorPubkey = hex("e")
+        let localEvent = makeEvent(
+            id: hex("f"),
+            pubkey: authorPubkey,
+            kind: 1,
+            tags: [],
+            content: "local only",
+            createdAt: 1_700_000_500
+        )
+
+        XCTAssertTrue(database.ingest(events: [localEvent]))
+
+        let items = try await service.fetchAuthorFeed(
+            relayURLs: [relayURL],
+            authorPubkey: authorPubkey,
+            kinds: [1],
+            limit: 1,
+            until: nil,
+            hydrationMode: .cachedProfilesOnly,
+            fetchTimeout: 0.01,
+            relayFetchMode: .firstNonEmptyRelay
+        )
+
+        let fetchCount = await relayClient.fetchCount()
+
+        XCTAssertEqual(items.map(\.id), [localEvent.id])
+        XCTAssertEqual(fetchCount, 1)
+    }
 }
 
 private let relayURL = URL(string: "wss://relay.example.com")!
@@ -410,6 +509,23 @@ private actor ThreadReplyRelayClient: NostrRelayEventFetching {
     }
 }
 
+private actor FailingRelayClient: NostrRelayEventFetching {
+    private var fetchCallCount = 0
+
+    func fetchEvents(
+        relayURL: URL,
+        filter: NostrFilter,
+        timeout: TimeInterval
+    ) async throws -> [NostrEvent] {
+        fetchCallCount += 1
+        throw RelayClientError.closed("test failure")
+    }
+
+    func fetchCount() -> Int {
+        fetchCallCount
+    }
+}
+
 private final class TestHarness {
     let rootURL: URL
     let relayClient: SpyRelayClient
@@ -425,20 +541,43 @@ private final class TestHarness {
         let fileManager = TestFileManager(rootURL: rootURL)
         let profileSnapshotStore = ProfileSnapshotStore(fileManager: fileManager)
         let relayHintCache = ProfileRelayHintCache()
-        let followListCache = FollowListSnapshotCache(fileManager: fileManager)
+        let nostrDatabase = FlowNostrDB(fileManager: fileManager)
+        let followListCache = FollowListSnapshotCache(fileManager: fileManager, nostrDatabase: nostrDatabase)
 
         relayClient = SpyRelayClient()
-        profileCache = ProfileCache(snapshotStore: profileSnapshotStore)
-        seenEventStore = SeenEventStore(fileManager: fileManager)
+        profileCache = ProfileCache(snapshotStore: profileSnapshotStore, nostrDatabase: nostrDatabase)
+        seenEventStore = SeenEventStore(fileManager: fileManager, nostrDatabase: nostrDatabase)
         service = NostrFeedService(
             relayClient: relayClient,
             timelineCache: TimelineEventCache(),
             profileCache: profileCache,
             relayHintCache: relayHintCache,
             followListCache: followListCache,
-            seenEventStore: seenEventStore
+            seenEventStore: seenEventStore,
+            nostrDatabase: nostrDatabase
         )
     }
+}
+
+private func makeFeedService(
+    relayClient: any NostrRelayEventFetching,
+    fileManager: TestFileManager,
+    nostrDatabase: FlowNostrDB
+) -> NostrFeedService {
+    let profileSnapshotStore = ProfileSnapshotStore(fileManager: fileManager)
+    let profileCache = ProfileCache(snapshotStore: profileSnapshotStore, nostrDatabase: nostrDatabase)
+    let followListCache = FollowListSnapshotCache(fileManager: fileManager, nostrDatabase: nostrDatabase)
+    let seenEventStore = SeenEventStore(fileManager: fileManager, nostrDatabase: nostrDatabase)
+
+    return NostrFeedService(
+        relayClient: relayClient,
+        timelineCache: TimelineEventCache(),
+        profileCache: profileCache,
+        relayHintCache: ProfileRelayHintCache(),
+        followListCache: followListCache,
+        seenEventStore: seenEventStore,
+        nostrDatabase: nostrDatabase
+    )
 }
 
 private final class TestFileManager: FileManager, @unchecked Sendable {

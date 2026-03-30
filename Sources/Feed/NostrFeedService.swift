@@ -333,11 +333,12 @@ enum RelayFetchMode: Sendable, Equatable {
 
 struct NostrFeedService: Sendable {
     private let relayClient: any NostrRelayEventFetching
-    private let timelineCache: TimelineEventCache
-    private let profileCache: ProfileCache
-    private let relayHintCache: ProfileRelayHintCache
-    private let followListCache: FollowListSnapshotCache
-    private let seenEventStore: SeenEventStore
+    private let timelineCache: any TimelineEventCaching
+    private let profileCache: any ProfileCaching
+    private let relayHintCache: any ProfileRelayHintCaching
+    private let followListCache: any FollowListSnapshotStoring
+    private let seenEventStore: any SeenEventStoring
+    private let nostrDatabase: FlowNostrDB
     private static let trendingRelayURL = URL(string: "wss://trending.relays.land")!
     private static let followListFreshCacheAge: TimeInterval = 60 * 5
     private static let metadataFallbackRelayURLs: [URL] = [
@@ -351,11 +352,12 @@ struct NostrFeedService: Sendable {
 
     init(
         relayClient: any NostrRelayEventFetching = NostrRelayClient(),
-        timelineCache: TimelineEventCache = .shared,
-        profileCache: ProfileCache = .shared,
-        relayHintCache: ProfileRelayHintCache = .shared,
-        followListCache: FollowListSnapshotCache = .shared,
-        seenEventStore: SeenEventStore = .shared
+        timelineCache: any TimelineEventCaching = TimelineEventCache.shared,
+        profileCache: any ProfileCaching = ProfileCache.shared,
+        relayHintCache: any ProfileRelayHintCaching = ProfileRelayHintCache.shared,
+        followListCache: any FollowListSnapshotStoring = FollowListSnapshotCache.shared,
+        seenEventStore: any SeenEventStoring = SeenEventStore.shared,
+        nostrDatabase: FlowNostrDB = .shared
     ) {
         self.relayClient = relayClient
         self.timelineCache = timelineCache
@@ -363,6 +365,7 @@ struct NostrFeedService: Sendable {
         self.relayHintCache = relayHintCache
         self.followListCache = followListCache
         self.seenEventStore = seenEventStore
+        self.nostrDatabase = nostrDatabase
     }
 
     func fetchFeed(relayURL: URL, kinds: [Int], limit: Int, until: Int?) async throws -> [FeedItem] {
@@ -2307,14 +2310,12 @@ struct NostrFeedService: Sendable {
         relayFetchMode: RelayFetchMode = .allRelays
     ) async throws -> [NostrEvent] {
         let targets = normalizedRelayURLs(relayURLs)
-        guard !targets.isEmpty else { return [] }
-        if targets.count == 1, let onlyRelay = targets.first {
-            return try await fetchTimelineEvents(
-                relayURL: onlyRelay,
-                filter: filter,
-                timeout: timeout,
-                useCache: useCache
-            )
+        let localEvents = localTimelineEvents(relayURLs: targets, filter: filter)
+
+        guard !targets.isEmpty else { return localEvents }
+        if localTimelineEventsSatisfyRequest(localEvents, filter: filter),
+           !shouldRefillFromRelays(relayURLs: targets, filter: filter) {
+            return localEvents
         }
 
         let result: (mergedEvents: [NostrEvent], successfulFetches: Int, firstError: Error?) = await withTaskGroup(
@@ -2362,10 +2363,79 @@ struct NostrFeedService: Sendable {
             return (mergedEvents, successfulFetches, firstError)
         }
 
+        if result.successfulFetches > 0 {
+            return mergedTimelineEvents(localEvents + result.mergedEvents, filter: filter)
+        }
+
+        if !localEvents.isEmpty {
+            return localEvents
+        }
+
         if result.successfulFetches == 0, let firstError = result.firstError {
             throw firstError
         }
-        return result.mergedEvents
+        return []
+    }
+
+    private func localTimelineEvents(
+        relayURLs: [URL],
+        filter: NostrFilter
+    ) -> [NostrEvent] {
+        guard shouldUseLocalTimelineQuery(relayURLs: relayURLs, filter: filter) else {
+            return []
+        }
+
+        return nostrDatabase.queryEvents(filter: filter) ?? []
+    }
+
+    private func shouldUseLocalTimelineQuery(
+        relayURLs: [URL],
+        filter: NostrFilter
+    ) -> Bool {
+        guard !filter.jsonObject.isEmpty else { return false }
+        if relayURLs.count == 1, relayURLs.first == Self.trendingRelayURL {
+            return false
+        }
+        return true
+    }
+
+    private func shouldRefillFromRelays(
+        relayURLs: [URL],
+        filter: NostrFilter
+    ) -> Bool {
+        guard !relayURLs.isEmpty else { return false }
+        if relayURLs.count == 1, relayURLs.first == Self.trendingRelayURL {
+            return true
+        }
+
+        let normalizedSearch = filter.search?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        if !normalizedSearch.isEmpty {
+            return false
+        }
+
+        return filter.until == nil && filter.since == nil
+    }
+
+    private func localTimelineEventsSatisfyRequest(
+        _ localEvents: [NostrEvent],
+        filter: NostrFilter
+    ) -> Bool {
+        let requestedLimit = max(filter.limit ?? 0, 1)
+        return localEvents.count >= requestedLimit
+    }
+
+    private func mergedTimelineEvents(_ events: [NostrEvent], filter: NostrFilter) -> [NostrEvent] {
+        let merged = deduplicateEvents(events).sorted { lhs, rhs in
+            if lhs.createdAt == rhs.createdAt {
+                return lhs.id > rhs.id
+            }
+            return lhs.createdAt > rhs.createdAt
+        }
+
+        if let limit = filter.limit {
+            return Array(merged.prefix(limit))
+        }
+        return merged
     }
 
     private func extractFollowListSnapshot(from events: [NostrEvent]) -> FollowListSnapshot? {

@@ -1,7 +1,7 @@
 import CryptoKit
 import Foundation
 
-actor TimelineEventCache {
+actor TimelineEventCache: TimelineEventCaching {
     static let shared = TimelineEventCache()
 
     private struct Entry {
@@ -173,7 +173,7 @@ actor ProfileSnapshotStore {
     }
 }
 
-actor FollowListSnapshotCache {
+actor FollowListSnapshotCache: FollowListSnapshotStoring {
     static let shared = FollowListSnapshotCache()
 
     private struct Payload: Codable {
@@ -183,21 +183,34 @@ actor FollowListSnapshotCache {
 
     private let fileManager: FileManager
     private let directoryURL: URL
+    private let nostrDatabase: FlowNostrDB
     private let encoder = JSONEncoder()
     private let decoder = JSONDecoder()
     private let maxSnapshots = 1_500
     private let maxAge: TimeInterval = 60 * 60 * 24 * 7
 
-    init(fileManager: FileManager = .default) {
+    init(
+        fileManager: FileManager = .default,
+        nostrDatabase: FlowNostrDB = .shared
+    ) {
         self.fileManager = fileManager
+        self.nostrDatabase = nostrDatabase
         let root = fileManager.urls(for: .cachesDirectory, in: .userDomainMask).first
             ?? URL(fileURLWithPath: NSTemporaryDirectory())
         self.directoryURL = root.appendingPathComponent("x21-follow-list-cache", isDirectory: true)
     }
 
     func cachedSnapshot(pubkey: String, maxAge overrideMaxAge: TimeInterval? = nil) async -> FollowListSnapshot? {
+        let normalizedPubkey = normalizePubkey(pubkey)
+        guard !normalizedPubkey.isEmpty else { return nil }
+
+        if overrideMaxAge == nil,
+           let snapshot = nostrDatabase.followListSnapshot(pubkey: normalizedPubkey) {
+            return snapshot
+        }
+
         ensureDirectory()
-        guard let payload = readPayload(pubkey: pubkey) else { return nil }
+        guard let payload = readPayload(pubkey: normalizedPubkey) else { return nil }
 
         let allowedAge = overrideMaxAge ?? maxAge
         if Date().timeIntervalSince(payload.storedAt) > allowedAge {
@@ -208,10 +221,13 @@ actor FollowListSnapshotCache {
     }
 
     func storeSnapshot(_ snapshot: FollowListSnapshot, for pubkey: String) async {
+        let normalizedPubkey = normalizePubkey(pubkey)
+        guard !normalizedPubkey.isEmpty else { return }
+
         ensureDirectory()
         let payload = Payload(storedAt: Date(), snapshot: snapshot)
         guard let data = try? encoder.encode(payload) else { return }
-        let url = fileURL(for: pubkey)
+        let url = fileURL(for: normalizedPubkey)
         try? data.write(to: url, options: .atomic)
         pruneIfNeeded()
     }
@@ -247,6 +263,10 @@ actor FollowListSnapshotCache {
         let digest = SHA256.hash(data: Data(key.utf8))
         let hashed = digest.map { String(format: "%02x", $0) }.joined()
         return directoryURL.appendingPathComponent("\(hashed).json", isDirectory: false)
+    }
+
+    private func normalizePubkey(_ value: String) -> String {
+        value.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
     }
 
     private func pruneIfNeeded() {
@@ -375,7 +395,7 @@ actor WebOfTrustGraphCache {
     }
 }
 
-actor ProfileRelayHintCache {
+actor ProfileRelayHintCache: ProfileRelayHintCaching {
     static let shared = ProfileRelayHintCache()
 
     private let maxEntries = 8_000
@@ -469,19 +489,24 @@ actor ProfileRelayHintCache {
     }
 }
 
-actor ProfileCache {
+actor ProfileCache: ProfileCaching {
     static let shared = ProfileCache()
 
     private let maxEntries = 4_000
     private let missTTL: TimeInterval = 60 * 20
     private let snapshotStore: ProfileSnapshotStore
+    private let nostrDatabase: FlowNostrDB
     private var profiles: [String: PersistedProfileSnapshot] = [:]
     private var knownMisses: [String: Date] = [:]
     private var recency: [String] = []
     private var priorityPubkeys: Set<String> = []
 
-    init(snapshotStore: ProfileSnapshotStore = .shared) {
+    init(
+        snapshotStore: ProfileSnapshotStore = .shared,
+        nostrDatabase: FlowNostrDB = .shared
+    ) {
         self.snapshotStore = snapshotStore
+        self.nostrDatabase = nostrDatabase
     }
 
     func resolve(
@@ -509,6 +534,22 @@ actor ProfileCache {
             }
         }
 
+        var snapshotsToPersist: [String: PersistedProfileSnapshot] = [:]
+
+        if !unresolved.isEmpty {
+            if let nostrProfiles = nostrDatabase.profiles(pubkeys: unresolved), !nostrProfiles.isEmpty {
+                for (pubkey, profile) in nostrProfiles {
+                    let snapshot = PersistedProfileSnapshot(profile: profile, fetchedAt: now)
+                    profiles[pubkey] = snapshot
+                    hits[pubkey] = profile
+                    snapshotsToPersist[pubkey] = snapshot
+                    knownMisses.removeValue(forKey: pubkey)
+                    touch(pubkey)
+                }
+                unresolved.removeAll(where: { nostrProfiles[$0] != nil })
+            }
+        }
+
         if !unresolved.isEmpty {
             let persisted = await snapshotStore.getMany(pubkeys: unresolved)
             for (pubkey, snapshot) in persisted {
@@ -518,6 +559,10 @@ actor ProfileCache {
                 touch(pubkey)
             }
             pruneOverflowIfNeeded()
+        }
+
+        if !snapshotsToPersist.isEmpty {
+            await snapshotStore.putMany(entries: snapshotsToPersist)
         }
 
         let missing = unresolved.filter { pubkey in
