@@ -2004,6 +2004,24 @@ private actor NoteVideoAspectRatioCache {
     }
 }
 
+private final class NoteVideoThumbnailCache {
+    static let shared = NoteVideoThumbnailCache()
+
+    private let cache = NSCache<NSURL, UIImage>()
+
+    private init() {
+        cache.countLimit = 96
+    }
+
+    func image(for url: URL) -> UIImage? {
+        cache.object(forKey: url as NSURL)
+    }
+
+    func insert(_ image: UIImage, for url: URL) {
+        cache.setObject(image, forKey: url as NSURL)
+    }
+}
+
 private struct NoteVideoPlayerView: View {
     let url: URL
     let layout: NoteContentMediaLayout
@@ -2012,12 +2030,14 @@ private struct NoteVideoPlayerView: View {
     @Environment(\.colorScheme) private var colorScheme
     @EnvironmentObject private var appSettings: AppSettingsStore
     @ObservedObject private var playbackCoordinator = InlineVideoPlaybackCoordinator.shared
-    @State private var player: AVPlayer
+    @State private var player = AVPlayer()
     @State private var playbackID = UUID()
     @State private var videoAspectRatio: CGFloat = 16.0 / 9.0
+    @State private var videoThumbnail: UIImage?
     @State private var suppressSharedMuteSync = false
     @State private var globalFrame: CGRect = .zero
     @State private var pendingAutoplayTask: Task<Void, Never>?
+    @State private var isPlayerPrepared = false
 
     init(
         url: URL,
@@ -2029,14 +2049,24 @@ private struct NoteVideoPlayerView: View {
         self.layout = layout
         self.bottomInsetOverride = bottomInsetOverride
         self.forceMute = forceMute
-        _player = State(initialValue: AVPlayer(url: url))
     }
 
     var body: some View {
         ZStack(alignment: .bottomTrailing) {
-            VideoPlayer(player: player)
+            if layout == .feed {
+                feedThumbnailLayer
+            }
 
-            if !forceMute {
+            if shouldRenderVideoPlayer {
+                VideoPlayer(player: player)
+            }
+
+            if showsFeedPlayOverlay {
+                feedPlayOverlayButton
+                    .zIndex(1)
+            }
+
+            if !forceMute && isPlayerPrepared {
                 muteToggleButton
                     .padding(.trailing, 12)
                     .padding(.bottom, muteButtonBottomInset)
@@ -2058,8 +2088,12 @@ private struct NoteVideoPlayerView: View {
         .background(videoViewportObserver)
         .task(id: url, priority: .utility) {
             await loadVideoAspectRatio()
+            await loadVideoThumbnailIfNeeded()
         }
         .onAppear {
+            if layout == .detailCarousel {
+                preparePlayerIfNeeded()
+            }
             updateAutoplayEligibility(using: globalFrame)
             applyPlaybackPolicy()
         }
@@ -2086,7 +2120,7 @@ private struct NoteVideoPlayerView: View {
             pendingAutoplayTask = nil
             playbackCoordinator.videoDidDisappear(playbackID)
             syncMutePreferenceFromPlayer()
-            player.pause()
+            releasePlayerResources()
         }
     }
 
@@ -2105,6 +2139,52 @@ private struct NoteVideoPlayerView: View {
             globalFrame = frame
             updateAutoplayEligibility(using: frame)
         }
+    }
+
+    @ViewBuilder
+    private var feedThumbnailLayer: some View {
+        if let videoThumbnail {
+            Image(uiImage: videoThumbnail)
+                .resizable()
+                .scaledToFill()
+        } else {
+            ZStack {
+                LinearGradient(
+                    colors: [
+                        Color(.secondarySystemFill),
+                        Color(.tertiarySystemFill)
+                    ],
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing
+                )
+
+                ProgressView()
+                    .controlSize(.small)
+            }
+        }
+    }
+
+    private var feedPlayOverlayButton: some View {
+        Button {
+            handleManualPlaybackRequest()
+        } label: {
+            Circle()
+                .fill(.ultraThinMaterial)
+                .frame(width: 54, height: 54)
+                .overlay {
+                    Image(systemName: "play.fill")
+                        .font(.system(size: 18, weight: .semibold))
+                        .foregroundStyle(.primary)
+                        .offset(x: 1)
+                }
+                .overlay {
+                    Circle()
+                        .strokeBorder(Color.white.opacity(colorScheme == .dark ? 0.16 : 0.24), lineWidth: 0.8)
+                }
+                .shadow(color: .black.opacity(0.16), radius: 14, x: 0, y: 6)
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Play video")
     }
 
     private var muteToggleButton: some View {
@@ -2197,6 +2277,14 @@ private struct NoteVideoPlayerView: View {
         min(UIScreen.main.bounds.height * 0.72, 620)
     }
 
+    private var shouldRenderVideoPlayer: Bool {
+        layout == .detailCarousel || isPlayerPrepared
+    }
+
+    private var showsFeedPlayOverlay: Bool {
+        layout == .feed && !isPlayerPrepared
+    }
+
     private var mediaCornerRadius: CGFloat {
         layout == .feed ? 18 : 12
     }
@@ -2216,6 +2304,46 @@ private struct NoteVideoPlayerView: View {
         }
     }
 
+    private func loadVideoThumbnailIfNeeded() async {
+        guard layout == .feed else { return }
+
+        if let cached = NoteVideoThumbnailCache.shared.image(for: url) {
+            await MainActor.run {
+                videoThumbnail = cached
+            }
+            return
+        }
+
+        let thumbnailPixelSize = await MainActor.run {
+            CGSize(
+                width: max(UIScreen.main.bounds.width - 28, 1) * UIScreen.main.scale,
+                height: max(maxVideoHeight, 1) * UIScreen.main.scale
+            )
+        }
+
+        let generatedThumbnail: UIImage? = await Task.detached(priority: .utility) {
+            let asset = AVURLAsset(url: url)
+            let generator = AVAssetImageGenerator(asset: asset)
+            generator.appliesPreferredTrackTransform = true
+            generator.maximumSize = thumbnailPixelSize
+
+            let time = CMTime(seconds: 0.15, preferredTimescale: 600)
+            guard let cgImage = try? generator.copyCGImage(at: time, actualTime: nil) else {
+                return nil
+            }
+            return UIImage(cgImage: cgImage)
+        }.value
+
+        guard let generatedThumbnail else { return }
+        guard !Task.isCancelled else { return }
+
+        NoteVideoThumbnailCache.shared.insert(generatedThumbnail, for: url)
+
+        await MainActor.run {
+            videoThumbnail = generatedThumbnail
+        }
+    }
+
     private func applyPlaybackPolicy() {
         let shouldMute = forceMute || !appSettings.autoplayVideoSoundEnabled
         if player.isMuted != shouldMute {
@@ -2230,6 +2358,7 @@ private struct NoteVideoPlayerView: View {
         let isAlreadyPlaying = player.timeControlStatus == .playing || player.rate > 0
 
         if isActiveVideo {
+            preparePlayerIfNeeded()
             if appSettings.autoplayVideos && !isAlreadyPlaying {
                 scheduleAutoplayStart()
             }
@@ -2238,6 +2367,9 @@ private struct NoteVideoPlayerView: View {
             pendingAutoplayTask = nil
             if isAlreadyPlaying {
                 player.pause()
+            }
+            if layout == .feed {
+                releasePlayerResources()
             }
         }
     }
@@ -2256,8 +2388,31 @@ private struct NoteVideoPlayerView: View {
             let isAlreadyPlaying = player.timeControlStatus == .playing || player.rate > 0
             guard !isAlreadyPlaying else { return }
 
+            preparePlayerIfNeeded()
             player.play()
         }
+    }
+
+    @MainActor
+    private func preparePlayerIfNeeded() {
+        guard !isPlayerPrepared else { return }
+        player.replaceCurrentItem(with: AVPlayerItem(url: url))
+        player.isMuted = forceMute || !appSettings.autoplayVideoSoundEnabled
+        isPlayerPrepared = true
+    }
+
+    @MainActor
+    private func releasePlayerResources() {
+        pendingAutoplayTask?.cancel()
+        pendingAutoplayTask = nil
+        guard isPlayerPrepared else {
+            player.pause()
+            return
+        }
+
+        player.pause()
+        player.replaceCurrentItem(with: nil)
+        isPlayerPrepared = false
     }
 
     @MainActor
@@ -2289,6 +2444,13 @@ private struct NoteVideoPlayerView: View {
         guard isAlreadyPlaying else { return }
         guard playbackCoordinator.activeVideoID != playbackID else { return }
         playbackCoordinator.requestPlayback(playbackID)
+    }
+
+    @MainActor
+    private func handleManualPlaybackRequest() {
+        preparePlayerIfNeeded()
+        playbackCoordinator.requestPlayback(playbackID)
+        player.play()
     }
 }
 

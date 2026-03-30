@@ -9,8 +9,8 @@ struct FeedRowView: View {
     @EnvironmentObject private var appSettings: AppSettingsStore
     @EnvironmentObject private var relaySettings: RelaySettingsStore
     @EnvironmentObject private var toastCenter: AppToastCenter
-    @ObservedObject private var reactionStats = NoteReactionStatsService.shared
-    @ObservedObject private var muteStore = MuteStore.shared
+    private let reactionStats = NoteReactionStatsService.shared
+    private let muteStore = MuteStore.shared
 
     struct AvatarMenuActions {
         let followLabel: String
@@ -20,6 +20,7 @@ struct FeedRowView: View {
 
     let item: FeedItem
     var reactionCount: Int = 0
+    var isLikedByCurrentUser: Bool = false
     var commentCount: Int = 0
     var showReactions: Bool = true
     var onAvatarTap: (() -> Void)? = nil
@@ -244,13 +245,6 @@ struct FeedRowView: View {
 
     private var mutedChromeColor: Color {
         appSettings.themePalette.mutedForeground
-    }
-
-    private var isLikedByCurrentUser: Bool {
-        reactionStats.isReactedByCurrentUser(
-            for: item.displayEventID,
-            currentPubkey: auth.currentAccount?.pubkey
-        )
     }
 
     private var followBadgeIconName: String? {

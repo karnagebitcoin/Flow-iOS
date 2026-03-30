@@ -115,6 +115,10 @@ struct ProfileView: View {
                     FeedRowView(
                         item: item,
                         reactionCount: reactionStats.reactionCount(for: item.displayEventID),
+                        isLikedByCurrentUser: reactionStats.isReactedByCurrentUser(
+                            for: item.displayEventID,
+                            currentPubkey: auth.currentAccount?.pubkey
+                        ),
                         commentCount: visibleReplyCounts[item.displayEventID.lowercased()] ?? 0,
                         showReactions: appSettings.reactionsVisibleInFeeds,
                         avatarMenuActions: .init(

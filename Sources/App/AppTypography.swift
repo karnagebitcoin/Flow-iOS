@@ -1,3 +1,4 @@
+import CoreText
 import SwiftUI
 import UIKit
 
@@ -59,6 +60,8 @@ extension AppFontOption {
             return UIFont.monospacedSystemFont(ofSize: size, weight: weight)
         }
 
+        AppFontRegistry.registerIfNeeded(for: self)
+
         guard let familyName else {
             return UIFont.systemFont(ofSize: size, weight: weight)
         }
@@ -74,6 +77,63 @@ extension AppFontOption {
         }
 
         return UIFont.systemFont(ofSize: size, weight: weight)
+    }
+}
+
+private enum AppFontRegistry {
+    private static let lock = NSLock()
+    private static var registeredResourceNames = Set<String>()
+
+    static func registerIfNeeded(for option: AppFontOption, bundle: Bundle = .main) {
+        for resourceFileName in option.resourceFileNames {
+            register(resourceFileName: resourceFileName, bundle: bundle)
+        }
+    }
+
+    private static func register(resourceFileName: String, bundle: Bundle) {
+        lock.lock()
+        if registeredResourceNames.contains(resourceFileName) {
+            lock.unlock()
+            return
+        }
+        lock.unlock()
+
+        let resourceURL = bundle.url(
+            forResource: resourceFileName.resourceNameWithoutExtension,
+            withExtension: resourceFileName.resourceFileExtension
+        )
+        guard let resourceURL else { return }
+
+        var registrationError: Unmanaged<CFError>?
+        let didRegister = CTFontManagerRegisterFontsForURL(
+            resourceURL as CFURL,
+            .process,
+            &registrationError
+        )
+
+        if didRegister || isAlreadyRegisteredError(registrationError?.takeRetainedValue()) {
+            lock.lock()
+            registeredResourceNames.insert(resourceFileName)
+            lock.unlock()
+        }
+    }
+
+    private static func isAlreadyRegisteredError(_ error: CFError?) -> Bool {
+        guard let error else { return false }
+        let domain = CFErrorGetDomain(error) as String
+        let code = CFErrorGetCode(error)
+        return domain == (kCTFontManagerErrorDomain as String)
+            && code == CTFontManagerError.alreadyRegistered.rawValue
+    }
+}
+
+private extension String {
+    var resourceNameWithoutExtension: String {
+        (self as NSString).deletingPathExtension
+    }
+
+    var resourceFileExtension: String {
+        (self as NSString).pathExtension
     }
 }
 

@@ -170,6 +170,40 @@ enum AppFontOption: String, CaseIterable, Codable, Identifiable, Hashable, Senda
         }
     }
 
+    var resourceFileNames: [String] {
+        switch self {
+        case .system, .mono:
+            return []
+        case .ebGaramond:
+            return ["EBGaramond.ttf"]
+        case .dmSans:
+            return ["DMSans.ttf"]
+        case .inter:
+            return ["Inter.ttf"]
+        case .monaSans:
+            return ["MonaSans.ttf"]
+        case .hubotSans:
+            return ["HubotSans.ttf"]
+        case .publicSans:
+            return ["PublicSans.ttf"]
+        case .spaceGrotesk:
+            return ["SpaceGrotesk.ttf"]
+        case .geistSans:
+            return ["GeistSans.ttf"]
+        case .nacelle:
+            return [
+                "Nacelle-Bold.otf",
+                "Nacelle-Italic.otf",
+                "Nacelle-Regular.otf",
+                "Nacelle-SemiBold.otf"
+            ]
+        case .elmsSans:
+            return ["ElmsSans.ttf"]
+        case .nunito:
+            return ["Nunito.ttf"]
+        }
+    }
+
     var requiresFlowPlus: Bool {
         switch self {
         case .system:

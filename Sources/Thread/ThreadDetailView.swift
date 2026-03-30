@@ -517,6 +517,10 @@ struct ThreadDetailView: View {
                     FeedRowView(
                         item: reply,
                         reactionCount: reactionStats.reactionCount(for: reply.displayEventID),
+                        isLikedByCurrentUser: reactionStats.isReactedByCurrentUser(
+                            for: reply.displayEventID,
+                            currentPubkey: auth.currentAccount?.pubkey
+                        ),
                         commentCount: replyCountsByTarget[reply.displayEventID.lowercased()] ?? 0,
                         showReactions: appSettings.reactionsVisibleInFeeds,
                         avatarMenuActions: .init(
