@@ -1,6 +1,8 @@
 import SwiftUI
 
 struct DMsView: View {
+    @EnvironmentObject private var appSettings: AppSettingsStore
+
     var body: some View {
         NavigationStack {
             VStack(spacing: 12) {
@@ -19,7 +21,7 @@ struct DMsView: View {
             }
             .padding(.horizontal, 24)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .background(Color(.systemBackground))
+            .background(appSettings.themePalette.background)
             .navigationTitle("Messages")
         }
     }

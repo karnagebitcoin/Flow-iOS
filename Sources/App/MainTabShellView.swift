@@ -48,27 +48,32 @@ struct MainTabShellView: View {
     @StateObject private var liveReactsCoordinator = LiveReactsCoordinator()
 
     var body: some View {
-        TabView(selection: $selectedTab) {
-            HomeFeedView(viewModel: homeViewModel)
-                .id(homeRootResetID)
-                .tag(Tab.home)
-                .toolbar(.hidden, for: .tabBar)
+        ZStack {
+            AppThemeBackgroundView()
+                .ignoresSafeArea()
 
-            SearchView(viewModel: searchViewModel)
-                .tag(Tab.search)
-                .toolbar(.hidden, for: .tabBar)
+            TabView(selection: $selectedTab) {
+                HomeFeedView(viewModel: homeViewModel)
+                    .id(homeRootResetID)
+                    .tag(Tab.home)
+                    .toolbar(.hidden, for: .tabBar)
 
-            DMsView()
-                .tag(Tab.dms)
-                .toolbar(.hidden, for: .tabBar)
+                SearchView(viewModel: searchViewModel)
+                    .tag(Tab.search)
+                    .toolbar(.hidden, for: .tabBar)
 
-            ActivityView(
-                viewModel: activityViewModel,
-                isRootVisible: $isActivityRootVisible
-            )
-                .id(activityRootResetID)
-                .tag(Tab.activity)
-                .toolbar(.hidden, for: .tabBar)
+                DMsView()
+                    .tag(Tab.dms)
+                    .toolbar(.hidden, for: .tabBar)
+
+                ActivityView(
+                    viewModel: activityViewModel,
+                    isRootVisible: $isActivityRootVisible
+                )
+                    .id(activityRootResetID)
+                    .tag(Tab.activity)
+                    .toolbar(.hidden, for: .tabBar)
+            }
         }
         .safeAreaInset(edge: .bottom, spacing: 0) {
             bottomTabBar
@@ -170,9 +175,21 @@ struct MainTabShellView: View {
             .padding(.horizontal, 10)
             .padding(.top, 8)
             .padding(.bottom, 10)
-            .background(Color(.systemBackground))
+            .background(bottomTabBarBackground)
         }
-        .background(Color(.systemBackground))
+        .background(bottomTabBarBackground)
+    }
+
+    @ViewBuilder
+    private var bottomTabBarBackground: some View {
+        if appSettings.activeTheme == .sakura {
+            ZStack {
+                appSettings.themePalette.chromeBackground.opacity(0.78)
+                appSettings.primaryGradient.opacity(0.14)
+            }
+        } else {
+            appSettings.themePalette.chromeBackground
+        }
     }
 
     private func tabBarButton(for tab: Tab) -> some View {
@@ -211,7 +228,7 @@ struct MainTabShellView: View {
                 .font(.system(size: 24, weight: .semibold))
                 .foregroundStyle(.white)
                 .frame(width: 54, height: 54)
-                .background(appSettings.primaryColor, in: Circle())
+                .background(appSettings.primaryGradient, in: Circle())
                 .shadow(color: .black.opacity(0.14), radius: 10, x: 0, y: 4)
         }
         .buttonStyle(.plain)

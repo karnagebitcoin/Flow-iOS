@@ -8,6 +8,7 @@ enum AppThemeOption: String, CaseIterable, Codable, Identifiable, Hashable, Send
     case system
     case black
     case white
+    case sakura
     case dark
     case light
 
@@ -21,6 +22,8 @@ enum AppThemeOption: String, CaseIterable, Codable, Identifiable, Hashable, Send
             return "Black"
         case .white:
             return "White"
+        case .sakura:
+            return "Sakura"
         case .dark:
             return "Dark"
         case .light:
@@ -36,6 +39,8 @@ enum AppThemeOption: String, CaseIterable, Codable, Identifiable, Hashable, Send
             return "moon.fill"
         case .white:
             return "sun.max.fill"
+        case .sakura:
+            return "leaf.fill"
         case .dark:
             return "sparkles"
         case .light:
@@ -51,6 +56,8 @@ enum AppThemeOption: String, CaseIterable, Codable, Identifiable, Hashable, Send
             return "Dark appearance"
         case .white:
             return "Light appearance"
+        case .sakura:
+            return "Paper whites with gradient blossom pinks"
         case .dark:
             return "Coming soon"
         case .light:
@@ -60,9 +67,18 @@ enum AppThemeOption: String, CaseIterable, Codable, Identifiable, Hashable, Send
 
     var isEnabled: Bool {
         switch self {
-        case .system, .black, .white:
+        case .system, .black, .white, .sakura:
             return true
         case .dark, .light:
+            return false
+        }
+    }
+
+    var requiresFlowPlus: Bool {
+        switch self {
+        case .sakura:
+            return true
+        case .system, .black, .white, .dark, .light:
             return false
         }
     }
@@ -73,9 +89,55 @@ enum AppThemeOption: String, CaseIterable, Codable, Identifiable, Hashable, Send
             return nil
         case .black, .dark:
             return .dark
-        case .white, .light:
+        case .white, .light, .sakura:
             return .light
         }
+    }
+
+    var fixedPrimaryColor: Color? {
+        switch self {
+        case .sakura:
+            return Color(red: 1.0, green: 0.404, blue: 0.941)
+        case .system, .black, .white, .dark, .light:
+            return nil
+        }
+    }
+
+    var fixedPrimaryGradient: LinearGradient? {
+        switch self {
+        case .sakura:
+            return LinearGradient(
+                colors: [
+                    Color(red: 0.976, green: 0.659, blue: 1.0),
+                    Color(red: 1.0, green: 0.404, blue: 0.941)
+                ],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
+        case .system, .black, .white, .dark, .light:
+            return nil
+        }
+    }
+
+    var palette: AppThemePalette {
+        switch self {
+        case .system:
+            return .system
+        case .black:
+            return .black
+        case .white:
+            return .white
+        case .sakura:
+            return .sakura
+        case .dark:
+            return .black
+        case .light:
+            return .white
+        }
+    }
+
+    func isSelectable(with hasFlowPlus: Bool) -> Bool {
+        isEnabled && (!requiresFlowPlus || hasFlowPlus)
     }
 }
 
@@ -279,6 +341,8 @@ final class AppSettingsStore: ObservableObject {
 
     @Published private var persistedSettings: PersistedSettings
     @Published private(set) var notificationAuthorizationStatus: UNAuthorizationStatus = .notDetermined
+    @Published private(set) var premiumThemesUnlocked = false
+    @Published private(set) var previewTheme: AppThemeOption?
 
     private let defaults: UserDefaults
     private let authStore: AuthStore
@@ -482,16 +546,30 @@ final class AppSettingsStore: ObservableObject {
     }
 
     var primaryColor: Color {
-        get { persistedSettings.primaryColor?.color ?? Self.defaultPrimaryColor }
+        get { activeTheme.fixedPrimaryColor ?? persistedSettings.primaryColor?.color ?? Self.defaultPrimaryColor }
         set {
             persistedSettings.primaryColor = StoredColor(color: newValue)
             persist()
         }
     }
 
+    var primaryGradient: LinearGradient {
+        if let fixedPrimaryGradient = activeTheme.fixedPrimaryGradient {
+            return fixedPrimaryGradient
+        }
+
+        let color = primaryColor
+        return LinearGradient(
+            colors: [color, color],
+            startPoint: .topLeading,
+            endPoint: .bottomTrailing
+        )
+    }
+
     var theme: AppThemeOption {
         get { persistedSettings.theme }
         set {
+            previewTheme = nil
             persistedSettings.theme = newValue
             persist()
         }
@@ -757,8 +835,44 @@ final class AppSettingsStore: ObservableObject {
         return customFeeds.first { $0.id == normalizedID }
     }
 
+    var activeTheme: AppThemeOption {
+        if let previewTheme, previewTheme.isEnabled {
+            return previewTheme
+        }
+        let requestedTheme = persistedSettings.theme
+        return requestedTheme.isSelectable(with: premiumThemesUnlocked) ? requestedTheme : .system
+    }
+
+    var themePalette: AppThemePalette {
+        activeTheme.palette
+    }
+
+    var canCustomizePrimaryColor: Bool {
+        activeTheme.fixedPrimaryColor == nil
+    }
+
+    func beginThemePreview(_ theme: AppThemeOption) {
+        guard theme.isEnabled else { return }
+        previewTheme = theme
+    }
+
+    func endThemePreview() {
+        previewTheme = nil
+    }
+
+    func updatePremiumThemesUnlocked(_ unlocked: Bool) {
+        guard premiumThemesUnlocked != unlocked else { return }
+        premiumThemesUnlocked = unlocked
+
+        if unlocked, let previewTheme, previewTheme.requiresFlowPlus {
+            persistedSettings.theme = previewTheme
+            self.previewTheme = nil
+            persist()
+        }
+    }
+
     var preferredColorScheme: ColorScheme? {
-        theme.preferredColorScheme
+        activeTheme.preferredColorScheme
     }
 
     var dynamicTypeSize: DynamicTypeSize {

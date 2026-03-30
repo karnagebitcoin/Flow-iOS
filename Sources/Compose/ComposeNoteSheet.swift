@@ -312,7 +312,7 @@ struct ComposeNoteSheet: View {
     var body: some View {
         NavigationStack {
             standardComposerLayout
-            .background(Color(.systemGroupedBackground))
+                .background(appSettings.themePalette.groupedBackground)
             .navigationTitle(composerNavigationTitle)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -330,6 +330,7 @@ struct ComposeNoteSheet: View {
         }
         .presentationDetents([.large])
         .presentationDragIndicator(.visible)
+        .presentationBackground(appSettings.themePalette.groupedBackground)
         .task {
             applyInitialDraftIfNeeded()
             applyInitialAttachmentsIfNeeded()
@@ -451,7 +452,7 @@ struct ComposeNoteSheet: View {
             .foregroundStyle(.white)
             .padding(.horizontal, 16)
             .padding(.vertical, 8)
-            .background(appSettings.primaryColor, in: Capsule())
+            .background(appSettings.primaryGradient, in: Capsule())
         }
         .buttonStyle(.plain)
         .disabled(!canPublish)
@@ -462,7 +463,7 @@ struct ComposeNoteSheet: View {
         composeAvatar(size: 34)
             .overlay {
                 Circle()
-                    .stroke(Color(.separator).opacity(0.22), lineWidth: 0.8)
+                    .stroke(appSettings.themePalette.separator.opacity(0.22), lineWidth: 0.8)
             }
             .accessibilityLabel("\(mode.accessibilityActionLabel) as \(profileDisplayName)")
     }
@@ -480,7 +481,7 @@ struct ComposeNoteSheet: View {
                 composeTextView(horizontalPadding: 8, verticalPadding: 8)
                     .frame(minHeight: 180)
             }
-            .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+            .background(appSettings.themePalette.secondaryGroupedBackground, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
 
             if !mediaAttachments.isEmpty {
                 mediaAttachmentPreviewList
@@ -526,7 +527,7 @@ struct ComposeNoteSheet: View {
                         .font(.footnote.weight(.semibold))
                         .padding(.horizontal, 9)
                         .padding(.vertical, 5)
-                        .background(Color(.tertiarySystemFill))
+                        .background(appSettings.themePalette.tertiaryFill)
                         .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
                 }
                 .buttonStyle(.plain)
@@ -553,7 +554,7 @@ struct ComposeNoteSheet: View {
                     .foregroundStyle(speechTranscriber.isRecording ? Color.white : Color.secondary)
                     .frame(width: 32, height: 32)
                     .background(
-                        speechTranscriber.isRecording ? Color.accentColor : Color(.tertiarySystemFill),
+                        speechTranscriber.isRecording ? Color.accentColor : appSettings.themePalette.tertiaryFill,
                         in: Circle()
                     )
                 }
@@ -569,7 +570,7 @@ struct ComposeNoteSheet: View {
                             .foregroundStyle(pollDraft == nil ? Color.secondary : Color.white)
                             .frame(width: 32, height: 32)
                             .background(
-                                pollDraft == nil ? Color(.tertiarySystemFill) : appSettings.primaryColor,
+                                pollDraft == nil ? appSettings.themePalette.tertiaryFill : appSettings.primaryColor,
                                 in: RoundedRectangle(cornerRadius: 10, style: .continuous)
                             )
                     }
@@ -728,7 +729,7 @@ struct ComposeNoteSheet: View {
 
     private var composeAvatarFallback: some View {
         ZStack {
-            Circle().fill(Color(.tertiarySystemFill))
+            Circle().fill(appSettings.themePalette.secondaryFill)
             Text(String(profileFallbackSymbol.prefix(1)).uppercased())
                 .font(.subheadline.weight(.semibold))
                 .foregroundStyle(.secondary)
@@ -737,7 +738,7 @@ struct ComposeNoteSheet: View {
 
     private var quotedAvatarFallback: some View {
         ZStack {
-            Circle().fill(Color(.tertiarySystemFill))
+            Circle().fill(appSettings.themePalette.secondaryFill)
             Text(String(quotedDisplayNameResolved.prefix(1)).uppercased())
                 .font(.caption.weight(.semibold))
                 .foregroundStyle(.secondary)
@@ -746,7 +747,7 @@ struct ComposeNoteSheet: View {
 
     private var replyTargetAvatarFallback: some View {
         ZStack {
-            Circle().fill(Color(.tertiarySystemFill))
+            Circle().fill(appSettings.themePalette.secondaryFill)
             Text(String(replyTargetDisplayNameResolved.prefix(1)).uppercased())
                 .font(.caption.weight(.semibold))
                 .foregroundStyle(.secondary)
@@ -961,11 +962,11 @@ struct ComposeNoteSheet: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(
             RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .fill(Color(.secondarySystemBackground))
+                .fill(appSettings.themePalette.secondaryBackground)
         )
         .overlay(
             RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .stroke(Color(.separator).opacity(0.3), lineWidth: 0.8)
+                .stroke(appSettings.themePalette.separator.opacity(0.3), lineWidth: 0.8)
         )
     }
 
@@ -1012,7 +1013,7 @@ struct ComposeNoteSheet: View {
                                 .resizable()
                                 .scaledToFill()
                         case .failure:
-                            Color(.tertiarySystemFill)
+                            appSettings.themePalette.tertiaryFill
                                 .overlay {
                                     Image(systemName: "photo")
                                         .foregroundStyle(.secondary)
@@ -1020,9 +1021,9 @@ struct ComposeNoteSheet: View {
                         case .empty:
                             ProgressView()
                                 .frame(maxWidth: .infinity, maxHeight: .infinity)
-                                .background(Color(.tertiarySystemFill))
+                                .background(appSettings.themePalette.tertiaryFill)
                         @unknown default:
-                            Color(.tertiarySystemFill)
+                            appSettings.themePalette.tertiaryFill
                         }
                     }
                     .frame(height: 170)
@@ -1043,7 +1044,7 @@ struct ComposeNoteSheet: View {
             .padding(.vertical, 8)
             .background(
                 RoundedRectangle(cornerRadius: 10, style: .continuous)
-                    .fill(Color(.tertiarySystemFill))
+                    .fill(appSettings.themePalette.tertiaryFill)
             )
         }
     }
@@ -1106,7 +1107,7 @@ struct ComposeNoteSheet: View {
             Spacer()
         }
         .padding(12)
-        .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .background(appSettings.themePalette.secondaryGroupedBackground, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
     }
 
     private func refreshComposeAccountSummary() async {

@@ -31,6 +31,9 @@ struct ActivityView: View {
 
         NavigationStack {
             ZStack(alignment: .leading) {
+                AppThemeBackgroundView()
+                    .ignoresSafeArea()
+
                 VStack(spacing: 0) {
                     topNavigationBar
 
@@ -50,14 +53,17 @@ struct ActivityView: View {
                             ForEach(0..<5, id: \.self) { _ in
                                 loadingRow
                                     .listRowSeparator(.hidden)
+                                    .listRowBackground(Color.clear)
                             }
                         } else if viewModel.visibleItems.isEmpty {
                             emptyStateRow
                                 .listRowSeparator(.hidden)
+                                .listRowBackground(Color.clear)
                         } else {
                             ForEach(viewModel.visibleItems) { item in
                                 ActivityRowCell(item: item)
                                     .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16))
+                                    .listRowBackground(Color.clear)
                                     .contentShape(Rectangle())
                                     .onTapGesture {
                                         selectedThreadRoute = threadRoute(for: item)
@@ -66,6 +72,8 @@ struct ActivityView: View {
                         }
                     }
                     .listStyle(.plain)
+                    .scrollContentBackground(.hidden)
+                    .background(Color.clear)
                     .refreshable {
                         relaySettings.configure(
                             accountPubkey: auth.currentAccount?.pubkey,
@@ -210,7 +218,7 @@ struct ActivityView: View {
                         .font(.system(size: 16, weight: .semibold))
                         .foregroundStyle(.primary)
                         .frame(width: 34, height: 34)
-                        .background(Color(.secondarySystemBackground))
+                        .background(topNavigationControlFill)
                         .clipShape(Circle())
                 }
                 .buttonStyle(.plain)
@@ -219,10 +227,29 @@ struct ActivityView: View {
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 10)
-        .background(Color(.systemBackground))
+        .background(topNavigationBackground)
         .overlay(alignment: .bottom) {
             Divider()
         }
+    }
+
+    @ViewBuilder
+    private var topNavigationBackground: some View {
+        if appSettings.activeTheme == .sakura {
+            ZStack {
+                appSettings.themePalette.chromeBackground.opacity(0.78)
+                appSettings.primaryGradient.opacity(0.14)
+            }
+        } else {
+            appSettings.themePalette.chromeBackground
+        }
+    }
+
+    private var topNavigationControlFill: Color {
+        if appSettings.activeTheme == .sakura {
+            return Color.white.opacity(0.72)
+        }
+        return appSettings.themePalette.secondaryBackground
     }
 
     private var topNavAccountIcon: some View {
@@ -241,14 +268,14 @@ struct ActivityView: View {
         .clipShape(Circle())
         .overlay {
             Circle()
-                .stroke(Color(.separator).opacity(0.35), lineWidth: 0.7)
+                .stroke(appSettings.themePalette.separator.opacity(0.35), lineWidth: 0.7)
         }
     }
 
     private var topNavAccountFallback: some View {
         ZStack {
             Circle()
-                .fill(Color(.secondarySystemBackground))
+                .fill(topNavigationControlFill)
             Image(systemName: "person.fill")
                 .font(.system(size: 14, weight: .semibold))
                 .foregroundStyle(.secondary)
@@ -312,7 +339,7 @@ struct ActivityView: View {
         }
         .presentationDetents([.medium, .large])
         .presentationDragIndicator(.visible)
-        .presentationBackground(Color(.systemBackground))
+        .presentationBackground(appSettings.themePalette.background)
     }
 
     private var emptyStateRow: some View {
@@ -338,19 +365,19 @@ struct ActivityView: View {
     private var loadingRow: some View {
         HStack(spacing: 10) {
             Circle()
-                .fill(Color(.secondarySystemFill))
+                .fill(appSettings.themePalette.secondaryFill)
                 .frame(width: 30, height: 30)
 
             Circle()
-                .fill(Color(.secondarySystemFill))
+                .fill(appSettings.themePalette.secondaryFill)
                 .frame(width: 20, height: 20)
 
             RoundedRectangle(cornerRadius: 4)
-                .fill(Color(.secondarySystemFill))
+                .fill(appSettings.themePalette.secondaryFill)
                 .frame(height: 14)
 
             RoundedRectangle(cornerRadius: 4)
-                .fill(Color(.secondarySystemFill))
+                .fill(appSettings.themePalette.secondaryFill)
                 .frame(width: 42, height: 12)
         }
         .padding(.vertical, 2)
@@ -493,6 +520,7 @@ struct ActivityView: View {
 }
 
 struct ActivityRowCell: View {
+    @EnvironmentObject private var appSettings: AppSettingsStore
     let item: ActivityRow
 
     var body: some View {
@@ -576,7 +604,7 @@ struct ActivityRowCell: View {
                 .foregroundStyle(.secondary)
                 .padding(.horizontal, 10)
                 .padding(.vertical, 5)
-                .background(Color(.tertiarySystemFill), in: Capsule())
+                .background(appSettings.themePalette.tertiaryFill, in: Capsule())
         } else {
             EmptyView()
         }
@@ -700,13 +728,13 @@ private struct ActivityAvatarView: View {
         .frame(width: 30, height: 30)
         .clipShape(Circle())
         .overlay {
-            Circle().stroke(Color(.separator), lineWidth: 0.5)
+            Circle().stroke(appSettings.themePalette.separator, lineWidth: 0.5)
         }
     }
 
     private var fallbackAvatar: some View {
         ZStack {
-            Circle().fill(Color(.secondarySystemFill))
+            Circle().fill(appSettings.themePalette.secondaryFill)
             Text(String(fallback.prefix(1)))
                 .font(.caption.weight(.semibold))
                 .foregroundStyle(.secondary)

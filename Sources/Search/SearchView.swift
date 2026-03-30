@@ -32,43 +32,117 @@ struct SearchView: View {
         let visibleReplyCounts = ReplyCountEstimator.counts(for: visibleItems)
 
         NavigationStack {
-            List {
-                if viewModel.isLoading && !viewModel.hasAnySearchResults {
-                    ForEach(0..<6, id: \.self) { _ in
-                        loadingRow
-                            .listRowInsets(
-                                EdgeInsets(
-                                    top: 0,
-                                    leading: Self.feedHorizontalInset,
-                                    bottom: 0,
-                                    trailing: Self.feedHorizontalInset
-                                )
-                            )
-                            .listRowSeparator(.hidden)
-                            .listRowBackground(Color.clear)
-                    }
-                } else if viewModel.isSearching && !viewModel.profileMatches.isEmpty {
-                    Section {
-                        ForEach(viewModel.profileMatches) { profile in
-                            profileResultRow(profile)
+            ZStack {
+                AppThemeBackgroundView()
+                    .ignoresSafeArea()
+
+                List {
+                    if viewModel.isLoading && !viewModel.hasAnySearchResults {
+                        ForEach(0..<6, id: \.self) { _ in
+                            loadingRow
                                 .listRowInsets(
                                     EdgeInsets(
-                                        top: 8,
+                                        top: 0,
                                         leading: Self.feedHorizontalInset,
-                                        bottom: 8,
+                                        bottom: 0,
+                                        trailing: Self.feedHorizontalInset
+                                    )
+                                )
+                                .listRowSeparator(.hidden)
+                                .listRowBackground(Color.clear)
+                        }
+                    } else if viewModel.isSearching && !viewModel.profileMatches.isEmpty {
+                        Section {
+                            ForEach(viewModel.profileMatches) { profile in
+                                profileResultRow(profile)
+                                    .listRowInsets(
+                                        EdgeInsets(
+                                            top: 8,
+                                            leading: Self.feedHorizontalInset,
+                                            bottom: 8,
+                                            trailing: Self.feedHorizontalInset
+                                        )
+                                    )
+                                    .listRowSeparator(.visible)
+                                    .listRowBackground(Color.clear)
+                            }
+                        } header: {
+                            Text("Profiles")
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(.secondary)
+                                .textCase(nil)
+                        }
+
+                        if visibleItems.isEmpty {
+                            emptyState
+                                .listRowInsets(
+                                    EdgeInsets(
+                                        top: 0,
+                                        leading: Self.feedHorizontalInset,
+                                        bottom: 0,
+                                        trailing: Self.feedHorizontalInset
+                                    )
+                                )
+                                .listRowSeparator(.hidden)
+                                .listRowBackground(Color.clear)
+                        } else {
+                            ForEach(visibleItems) { item in
+                                FeedRowView(
+                                    item: item,
+                                    reactionCount: reactionStats.reactionCount(for: item.displayEventID),
+                                    commentCount: visibleReplyCounts[item.displayEventID.lowercased()] ?? 0,
+                                    showReactions: appSettings.reactionsVisibleInFeeds,
+                                    avatarMenuActions: .init(
+                                        followLabel: followStore.isFollowing(item.displayAuthorPubkey) ? "Unfollow" : "Follow",
+                                        onFollowToggle: {
+                                            followStore.toggleFollow(item.displayAuthorPubkey)
+                                        },
+                                        onViewProfile: {
+                                            openProfile(pubkey: item.displayAuthorPubkey)
+                                        }
+                                    ),
+                                    onHashtagTap: { hashtag in
+                                        openHashtagFeed(hashtag: hashtag)
+                                    },
+                                    onProfileTap: { pubkey in
+                                        openProfile(pubkey: pubkey)
+                                    },
+                                    onOpenThread: {
+                                        shouldAutoFocusReplyInThread = false
+                                        selectedThreadItem = item.threadNavigationItem
+                                    },
+                                    onRepostActorTap: { pubkey in
+                                        openProfile(pubkey: pubkey)
+                                    },
+                                    onReferencedEventTap: { referencedItem in
+                                        shouldAutoFocusReplyInThread = false
+                                        selectedThreadItem = referencedItem.threadNavigationItem
+                                    },
+                                    onMuteConversation: { conversationID in
+                                        viewModel.muteConversation(conversationID)
+                                    }
+                                )
+                                .listRowInsets(
+                                    EdgeInsets(
+                                        top: 0,
+                                        leading: Self.feedHorizontalInset,
+                                        bottom: 0,
                                         trailing: Self.feedHorizontalInset
                                     )
                                 )
                                 .listRowSeparator(.visible)
+                                .listRowBackground(Color.clear)
+                                .onAppear {
+                                    if appSettings.reactionsVisibleInFeeds {
+                                        reactionStats.prefetch(events: [item.displayEvent], relayURLs: effectiveReadRelayURLs)
+                                    }
+                                    Task {
+                                        await viewModel.loadMoreIfNeeded(currentItem: item)
+                                    }
+                                }
+                            }
                         }
-                    } header: {
-                        Text("Profiles")
-                            .font(.caption.weight(.semibold))
-                            .foregroundStyle(.secondary)
-                            .textCase(nil)
-                    }
-
-                    if visibleItems.isEmpty {
+                    } else if visibleItems.isEmpty {
                         emptyState
                             .listRowInsets(
                                 EdgeInsets(
@@ -126,6 +200,7 @@ struct SearchView: View {
                                 )
                             )
                             .listRowSeparator(.visible)
+                            .listRowBackground(Color.clear)
                             .onAppear {
                                 if appSettings.reactionsVisibleInFeeds {
                                     reactionStats.prefetch(events: [item.displayEvent], relayURLs: effectiveReadRelayURLs)
@@ -136,8 +211,14 @@ struct SearchView: View {
                             }
                         }
                     }
-                } else if visibleItems.isEmpty {
-                    emptyState
+
+                    if viewModel.isLoadingMore {
+                        HStack {
+                            Spacer()
+                            ProgressView()
+                            Spacer()
+                        }
+                        .padding(.vertical, 8)
                         .listRowInsets(
                             EdgeInsets(
                                 top: 0,
@@ -148,158 +229,87 @@ struct SearchView: View {
                         )
                         .listRowSeparator(.hidden)
                         .listRowBackground(Color.clear)
-                } else {
-                    ForEach(visibleItems) { item in
-                        FeedRowView(
-                            item: item,
-                            reactionCount: reactionStats.reactionCount(for: item.displayEventID),
-                            commentCount: visibleReplyCounts[item.displayEventID.lowercased()] ?? 0,
-                            showReactions: appSettings.reactionsVisibleInFeeds,
-                            avatarMenuActions: .init(
-                                followLabel: followStore.isFollowing(item.displayAuthorPubkey) ? "Unfollow" : "Follow",
-                                onFollowToggle: {
-                                    followStore.toggleFollow(item.displayAuthorPubkey)
-                                },
-                                onViewProfile: {
-                                    openProfile(pubkey: item.displayAuthorPubkey)
-                                }
-                            ),
-                            onHashtagTap: { hashtag in
-                                openHashtagFeed(hashtag: hashtag)
-                            },
-                            onProfileTap: { pubkey in
-                                openProfile(pubkey: pubkey)
-                            },
-                            onOpenThread: {
-                                shouldAutoFocusReplyInThread = false
-                                selectedThreadItem = item.threadNavigationItem
-                            },
-                            onRepostActorTap: { pubkey in
-                                openProfile(pubkey: pubkey)
-                            },
-                            onReferencedEventTap: { referencedItem in
-                                shouldAutoFocusReplyInThread = false
-                                selectedThreadItem = referencedItem.threadNavigationItem
-                            },
-                            onMuteConversation: { conversationID in
-                                viewModel.muteConversation(conversationID)
-                            }
-                        )
-                        .listRowInsets(
-                            EdgeInsets(
-                                top: 0,
-                                leading: Self.feedHorizontalInset,
-                                bottom: 0,
-                                trailing: Self.feedHorizontalInset
-                            )
-                        )
-                        .listRowSeparator(.visible)
-                        .onAppear {
-                            if appSettings.reactionsVisibleInFeeds {
-                                reactionStats.prefetch(events: [item.displayEvent], relayURLs: effectiveReadRelayURLs)
-                            }
-                            Task {
-                                await viewModel.loadMoreIfNeeded(currentItem: item)
-                            }
+                    }
+
+                    if !visibleItems.isEmpty || viewModel.isLoadingMore {
+                        Color.clear
+                            .frame(height: Self.bottomScrollClearance)
+                            .listRowInsets(EdgeInsets())
+                            .listRowSeparator(.hidden)
+                            .listRowBackground(Color.clear)
+                    }
+                }
+                .listStyle(.plain)
+                .scrollContentBackground(.hidden)
+                .background(Color.clear)
+                .safeAreaInset(edge: .top, spacing: 0) {
+                    searchBar
+                }
+                .toolbar(.hidden, for: .navigationBar)
+                .refreshable {
+                    configureStores()
+                    viewModel.updateReadRelayURLs(effectiveReadRelayURLs)
+                    await viewModel.refresh()
+                    MuteStore.shared.refreshFromRelay()
+                }
+                .task {
+                    configureStores()
+                    viewModel.updateReadRelayURLs(effectiveReadRelayURLs)
+                    await viewModel.loadIfNeeded()
+                }
+                .onChange(of: viewModel.searchText) { _, _ in
+                    viewModel.handleSearchTextChanged()
+                    if viewModel.searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                        Task {
+                            await viewModel.loadIfNeeded()
                         }
                     }
                 }
-
-                if viewModel.isLoadingMore {
-                    HStack {
-                        Spacer()
-                        ProgressView()
-                        Spacer()
-                    }
-                    .padding(.vertical, 8)
-                    .listRowInsets(
-                        EdgeInsets(
-                            top: 0,
-                            leading: Self.feedHorizontalInset,
-                            bottom: 0,
-                            trailing: Self.feedHorizontalInset
-                        )
+                .navigationDestination(item: $selectedThreadItem) { item in
+                    ThreadDetailView(
+                        initialItem: item,
+                        relayURL: effectivePrimaryRelayURL,
+                        readRelayURLs: effectiveReadRelayURLs,
+                        initiallyFocusReplyComposer: shouldAutoFocusReplyInThread
                     )
-                    .listRowSeparator(.hidden)
-                    .listRowBackground(Color.clear)
                 }
-
-                if !visibleItems.isEmpty || viewModel.isLoadingMore {
-                    Color.clear
-                        .frame(height: Self.bottomScrollClearance)
-                        .listRowInsets(EdgeInsets())
-                        .listRowSeparator(.hidden)
-                        .listRowBackground(Color.clear)
+                .navigationDestination(item: $selectedHashtagRoute) { route in
+                    HashtagFeedView(
+                        hashtag: route.normalizedHashtag,
+                        relayURL: effectivePrimaryRelayURL,
+                        readRelayURLs: effectiveReadRelayURLs,
+                        seedItems: route.seedItems
+                    )
                 }
-            }
-            .listStyle(.plain)
-            .safeAreaInset(edge: .top, spacing: 0) {
-                searchBar
-            }
-            .toolbar(.hidden, for: .navigationBar)
-            .refreshable {
-                configureStores()
-                viewModel.updateReadRelayURLs(effectiveReadRelayURLs)
-                await viewModel.refresh()
-                MuteStore.shared.refreshFromRelay()
-            }
-            .task {
-                configureStores()
-                viewModel.updateReadRelayURLs(effectiveReadRelayURLs)
-                await viewModel.loadIfNeeded()
-            }
-            .onChange(of: viewModel.searchText) { _, _ in
-                viewModel.handleSearchTextChanged()
-                if viewModel.searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                .navigationDestination(item: $selectedProfileRoute) { route in
+                    ProfileView(
+                        pubkey: route.pubkey,
+                        relayURL: effectivePrimaryRelayURL,
+                        readRelayURLs: effectiveReadRelayURLs,
+                        writeRelayURLs: effectiveWriteRelayURLs
+                    )
+                }
+                .onChange(of: auth.currentAccount?.pubkey) { _, _ in
+                    configureStores()
+                }
+                .onChange(of: auth.currentNsec) { _, _ in
+                    configureStores()
+                }
+                .onChange(of: relaySettings.readRelays) { _, _ in
+                    viewModel.updateReadRelayURLs(effectiveReadRelayURLs)
                     Task {
                         await viewModel.loadIfNeeded()
                     }
                 }
-            }
-            .navigationDestination(item: $selectedThreadItem) { item in
-                ThreadDetailView(
-                    initialItem: item,
-                    relayURL: effectivePrimaryRelayURL,
-                    readRelayURLs: effectiveReadRelayURLs,
-                    initiallyFocusReplyComposer: shouldAutoFocusReplyInThread
-                )
-            }
-            .navigationDestination(item: $selectedHashtagRoute) { route in
-                HashtagFeedView(
-                    hashtag: route.normalizedHashtag,
-                    relayURL: effectivePrimaryRelayURL,
-                    readRelayURLs: effectiveReadRelayURLs,
-                    seedItems: route.seedItems
-                )
-            }
-            .navigationDestination(item: $selectedProfileRoute) { route in
-                ProfileView(
-                    pubkey: route.pubkey,
-                    relayURL: effectivePrimaryRelayURL,
-                    readRelayURLs: effectiveReadRelayURLs,
-                    writeRelayURLs: effectiveWriteRelayURLs
-                )
-            }
-            .onChange(of: auth.currentAccount?.pubkey) { _, _ in
-                configureStores()
-            }
-            .onChange(of: auth.currentNsec) { _, _ in
-                configureStores()
-            }
-            .onChange(of: relaySettings.readRelays) { _, _ in
-                viewModel.updateReadRelayURLs(effectiveReadRelayURLs)
-                Task {
-                    await viewModel.loadIfNeeded()
+                .onChange(of: relaySettings.writeRelays) { _, _ in
+                    configureStores()
                 }
-            }
-            .onChange(of: relaySettings.writeRelays) { _, _ in
-                configureStores()
-            }
-            .onChange(of: appSettings.slowConnectionMode) { _, _ in
-                configureStores()
-                viewModel.updateReadRelayURLs(effectiveReadRelayURLs)
-                Task {
-                    await viewModel.refresh()
+                .onChange(of: appSettings.slowConnectionMode) { _, _ in
+                    configureStores()
+                    viewModel.updateReadRelayURLs(effectiveReadRelayURLs)
+                    Task {
+                        await viewModel.refresh()
+                    }
                 }
             }
         }
@@ -330,14 +340,33 @@ struct SearchView: View {
             }
             .padding(.horizontal, 14)
             .padding(.vertical, 12)
-            .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+            .background(searchFieldFill, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
             .padding(.horizontal, 16)
             .padding(.top, 8)
             .padding(.bottom, 10)
 
             Divider()
         }
-        .background(Color(.systemBackground))
+        .background(searchBarBackground)
+    }
+
+    @ViewBuilder
+    private var searchBarBackground: some View {
+        if appSettings.activeTheme == .sakura {
+            ZStack {
+                appSettings.themePalette.chromeBackground.opacity(0.78)
+                appSettings.primaryGradient.opacity(0.14)
+            }
+        } else {
+            appSettings.themePalette.chromeBackground
+        }
+    }
+
+    private var searchFieldFill: Color {
+        if appSettings.activeTheme == .sakura {
+            return Color.white.opacity(0.72)
+        }
+        return appSettings.themePalette.secondaryBackground
     }
 
     private var emptyState: some View {
@@ -373,20 +402,20 @@ struct SearchView: View {
     private var loadingRow: some View {
         HStack(alignment: .top, spacing: 12) {
             Circle()
-                .fill(Color(.secondarySystemFill))
+                .fill(appSettings.themePalette.secondaryFill)
                 .frame(width: 44, height: 44)
 
             VStack(alignment: .leading, spacing: 8) {
                 RoundedRectangle(cornerRadius: 4)
-                    .fill(Color(.secondarySystemFill))
+                    .fill(appSettings.themePalette.secondaryFill)
                     .frame(width: 150, height: 14)
 
                 RoundedRectangle(cornerRadius: 4)
-                    .fill(Color(.secondarySystemFill))
+                    .fill(appSettings.themePalette.secondaryFill)
                     .frame(height: 14)
 
                 RoundedRectangle(cornerRadius: 4)
-                    .fill(Color(.secondarySystemFill))
+                    .fill(appSettings.themePalette.secondaryFill)
                     .frame(width: 180, height: 14)
             }
         }
@@ -421,7 +450,7 @@ struct SearchView: View {
     private func fallbackAvatar(for displayName: String) -> some View {
         ZStack {
             Circle()
-                .fill(Color(.secondarySystemFill))
+                .fill(appSettings.themePalette.secondaryFill)
             Text(String(displayName.prefix(1)).uppercased())
                 .font(.caption.weight(.semibold))
                 .foregroundStyle(.secondary)

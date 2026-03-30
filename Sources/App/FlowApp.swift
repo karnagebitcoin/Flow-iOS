@@ -10,6 +10,7 @@ struct FlowApp: App {
     @Environment(\.scenePhase) private var scenePhase
     @StateObject private var authManager = AuthManager()
     @StateObject private var appSettings = AppSettingsStore.shared
+    @StateObject private var premiumStore = FlowPremiumStore()
     @StateObject private var relaySettings = RelaySettingsStore.shared
     @StateObject private var toastCenter = AppToastCenter()
     @StateObject private var composeSheetCoordinator = AppComposeSheetCoordinator()
@@ -39,6 +40,7 @@ struct FlowApp: App {
             }
             .environmentObject(authManager)
             .environmentObject(appSettings)
+            .environmentObject(premiumStore)
             .environmentObject(relaySettings)
             .environmentObject(toastCenter)
             .environmentObject(composeSheetCoordinator)
@@ -48,6 +50,7 @@ struct FlowApp: App {
             .environment(\.dynamicTypeSize, appSettings.dynamicTypeSize)
             .task {
                 appSettings.configure(accountPubkey: authManager.currentAccount?.pubkey)
+                await premiumStore.refreshEntitlements()
                 updateBreakReminderMonitoring()
                 await appSettings.refreshNotificationAuthorizationStatus()
                 await presentPendingSharedComposeDraftIfPossible()
@@ -72,6 +75,7 @@ struct FlowApp: App {
                 updateBreakReminderMonitoring()
                 guard newValue == .active else { return }
                 Task {
+                    await premiumStore.refreshEntitlements()
                     await presentPendingSharedComposeDraftIfPossible()
                 }
             }

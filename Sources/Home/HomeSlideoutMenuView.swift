@@ -2,6 +2,7 @@ import SwiftUI
 
 struct HomeSlideoutMenuView: View {
     @EnvironmentObject private var auth: AuthManager
+    @EnvironmentObject private var appSettings: AppSettingsStore
     @EnvironmentObject private var relaySettings: RelaySettingsStore
     @State private var accountHeaderName: String?
     @State private var accountHeaderHandle: String?
@@ -27,7 +28,7 @@ struct HomeSlideoutMenuView: View {
                     Image(systemName: "xmark")
                         .font(.system(size: 16, weight: .semibold))
                         .frame(width: 32, height: 32)
-                        .background(Color(.secondarySystemBackground))
+                        .background(appSettings.themePalette.secondaryBackground)
                         .clipShape(Circle())
                 }
                 .buttonStyle(.plain)
@@ -80,7 +81,7 @@ struct HomeSlideoutMenuView: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .background(Color(.systemBackground))
+        .background(appSettings.themePalette.background)
         .sheet(isPresented: $isShowingProfileQR) {
             if let currentAccount = auth.currentAccount {
                 ProfileQRCodeSheet(
@@ -92,6 +93,7 @@ struct HomeSlideoutMenuView: View {
                         onOpenScannedProfile(pubkey)
                     }
                 )
+                .presentationBackground(appSettings.themePalette.background)
             }
         }
         .task(id: accountHeaderLookupID) {
@@ -134,7 +136,7 @@ struct HomeSlideoutMenuView: View {
                     .font(.system(size: 17, weight: .semibold))
                     .foregroundStyle(.primary)
                     .frame(width: 36, height: 36)
-                    .background(Color(.secondarySystemBackground), in: Circle())
+                    .background(appSettings.themePalette.secondaryBackground, in: Circle())
             }
             .buttonStyle(.plain)
             .accessibilityLabel("Show profile QR")

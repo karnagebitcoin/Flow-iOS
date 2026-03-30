@@ -1,6 +1,9 @@
 name: Flow
 options:
   minimumXcodeGenVersion: 2.45.0
+fileGroups:
+  - StoreKit/FlowPlus.storekit
+  - STOREKIT_TESTING.md
 packages:
   NostrSDK:
     url: https://github.com/nostr-sdk/nostr-sdk-ios.git
@@ -16,7 +19,7 @@ targets:
           - ShareExtension/**
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: social.x21.ios
+        PRODUCT_BUNDLE_IDENTIFIER: com.21media.flow
         PRODUCT_NAME: Flow
         INFOPLIST_KEY_CFBundleDisplayName: Flow
         INFOPLIST_FILE: Sources/Resources/Info.plist
@@ -43,7 +46,7 @@ targets:
       - Sources/ShareSupport
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: social.x21.ios.ShareExtension
+        PRODUCT_BUNDLE_IDENTIFIER: com.21media.flow.ShareExtension
         PRODUCT_NAME: FlowShareExtension
         INFOPLIST_KEY_CFBundleDisplayName: Flow
         INFOPLIST_FILE: Sources/ShareExtension/Info.plist
@@ -76,3 +79,4 @@ schemes:
         - name: FlowTests
     run:
       config: Debug
+      storeKitConfiguration: StoreKit/FlowPlus.storekit

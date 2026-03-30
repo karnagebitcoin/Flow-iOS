@@ -63,7 +63,7 @@ struct ThreadDetailView: View {
                 noteDetailBody
             }
         }
-        .background(Color(.systemBackground))
+        .background(appSettings.themePalette.background)
         .navigationTitle(articleMetadata == nil ? "Note" : "Article")
         .navigationBarTitleDisplayMode(.inline)
         .onChange(of: auth.currentAccount?.pubkey) { _, _ in
@@ -400,7 +400,7 @@ struct ThreadDetailView: View {
             if let rootFollowStatusIconName {
                 ZStack {
                     Circle()
-                        .fill(Color(.systemBackground))
+                        .fill(appSettings.themePalette.background)
                         .frame(width: 18, height: 18)
 
                     Image(systemName: rootFollowStatusIconName)
@@ -456,7 +456,7 @@ struct ThreadDetailView: View {
                     .font(.footnote.weight(.semibold))
                     .padding(.horizontal, 10)
                     .padding(.vertical, 6)
-                    .background(Color(.secondarySystemFill))
+                    .background(appSettings.themePalette.secondaryFill)
                     .clipShape(Capsule())
             } else {
                 let isFollowing = followStore.isFollowing(viewModel.rootItem.displayAuthorPubkey)
@@ -474,7 +474,7 @@ struct ThreadDetailView: View {
                 .padding(.vertical, 7)
                 .background(
                     isFollowing
-                        ? Color(.secondarySystemFill)
+                        ? appSettings.themePalette.secondaryFill
                         : Color.accentColor,
                     in: Capsule()
                 )
@@ -482,7 +482,7 @@ struct ThreadDetailView: View {
                     Capsule()
                         .stroke(
                             isFollowing
-                                ? Color(.separator).opacity(0.45)
+                                ? appSettings.themePalette.separator.opacity(0.45)
                                 : Color.accentColor.opacity(0.85),
                             lineWidth: 0.9
                         )
@@ -825,11 +825,11 @@ struct ThreadDetailView: View {
         .padding(.vertical, 10)
         .background(
             RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .fill(Color(.secondarySystemBackground))
+                .fill(appSettings.themePalette.secondaryBackground)
         )
         .overlay(
             RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .stroke(Color(.separator).opacity(0.35), lineWidth: 0.5)
+                .stroke(appSettings.themePalette.separator.opacity(0.35), lineWidth: 0.5)
         )
     }
 

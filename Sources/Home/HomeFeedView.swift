@@ -41,6 +41,9 @@ struct HomeFeedView: View {
 
         NavigationStack {
             ZStack(alignment: .leading) {
+                AppThemeBackgroundView()
+                    .ignoresSafeArea()
+
                 VStack(spacing: 0) {
                     if isTopNavigationVisible || isShowingSideMenu {
                         topNavigationBar
@@ -87,7 +90,8 @@ struct HomeFeedView: View {
                                                 trailing: Self.feedHorizontalInset
                                             )
                                         )
-                                        .listRowSeparator(.hidden)
+                                    .listRowSeparator(.hidden)
+                                    .listRowBackground(Color.clear)
                                 }
                             } else if visibleItems.isEmpty {
                                 if viewModel.shouldShowFilteredOutState {
@@ -101,6 +105,7 @@ struct HomeFeedView: View {
                                             )
                                         )
                                         .listRowSeparator(.hidden)
+                                        .listRowBackground(Color.clear)
                                 } else {
                                     emptyState
                                         .listRowInsets(
@@ -112,6 +117,7 @@ struct HomeFeedView: View {
                                             )
                                         )
                                         .listRowSeparator(.hidden)
+                                        .listRowBackground(Color.clear)
                                 }
                             } else {
                                 ForEach(visibleItems) { item in
@@ -159,6 +165,7 @@ struct HomeFeedView: View {
                                         )
                                     )
                                     .listRowSeparator(.visible)
+                                    .listRowBackground(Color.clear)
                                     .onAppear {
                                         if appSettings.reactionsVisibleInFeeds {
                                             reactionStats.prefetch(events: [item.displayEvent], relayURLs: effectiveReadRelayURLs)
@@ -186,6 +193,7 @@ struct HomeFeedView: View {
                                     )
                                 )
                                 .listRowSeparator(.hidden)
+                                .listRowBackground(Color.clear)
                             }
 
                             if !visibleItems.isEmpty || viewModel.isLoadingMore {
@@ -197,6 +205,8 @@ struct HomeFeedView: View {
                             }
                         }
                         .listStyle(.plain)
+                        .scrollContentBackground(.hidden)
+                        .background(Color.clear)
                         .coordinateSpace(name: Self.feedScrollCoordinateSpace)
                         .simultaneousGesture(
                             DragGesture(minimumDistance: 10, coordinateSpace: .local)
@@ -484,8 +494,10 @@ struct HomeFeedView: View {
                 }
                 .padding(.horizontal, 10)
                 .padding(.vertical, 7)
-                .background(Color(.secondarySystemBackground))
-                .clipShape(Capsule())
+                .background(
+                    Capsule(style: .continuous)
+                        .fill(topNavigationControlFill)
+                )
             }
             .buttonStyle(.plain)
             .accessibilityLabel("Choose feed source")
@@ -496,10 +508,29 @@ struct HomeFeedView: View {
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 10)
-        .background(Color(.systemBackground))
+        .background(topNavigationBackground)
         .overlay(alignment: .bottom) {
             Divider()
         }
+    }
+
+    @ViewBuilder
+    private var topNavigationBackground: some View {
+        if appSettings.activeTheme == .sakura {
+            ZStack {
+                appSettings.themePalette.chromeBackground.opacity(0.78)
+                appSettings.primaryGradient.opacity(0.14)
+            }
+        } else {
+            appSettings.themePalette.chromeBackground
+        }
+    }
+
+    private var topNavigationControlFill: Color {
+        if appSettings.activeTheme == .sakura {
+            return Color.white.opacity(0.72)
+        }
+        return appSettings.themePalette.secondaryBackground
     }
 
     private var sideMenuOverlay: some View {
@@ -588,11 +619,11 @@ struct HomeFeedView: View {
                     }
                 }
             }
-            .background(Color(.systemBackground))
+            .background(appSettings.themePalette.background)
         }
         .presentationDetents([.fraction(0.7), .large])
         .presentationDragIndicator(.visible)
-        .presentationBackground(Color(.systemBackground))
+        .presentationBackground(appSettings.themePalette.background)
     }
 
     private var kindsFilterSection: some View {
@@ -648,7 +679,7 @@ struct HomeFeedView: View {
                         .fill(
                             mediaOnlyEnabled
                                 ? appSettings.primaryColor.opacity(0.14)
-                                : Color(.secondarySystemBackground)
+                                : appSettings.themePalette.secondaryBackground
                         )
                 )
             }
@@ -732,20 +763,20 @@ struct HomeFeedView: View {
     private var loadingRow: some View {
         HStack(alignment: .top, spacing: 12) {
             Circle()
-                .fill(Color(.secondarySystemFill))
+                .fill(appSettings.themePalette.secondaryFill)
                 .frame(width: 44, height: 44)
 
             VStack(alignment: .leading, spacing: 8) {
                 RoundedRectangle(cornerRadius: 4)
-                    .fill(Color(.secondarySystemFill))
+                    .fill(appSettings.themePalette.secondaryFill)
                     .frame(width: 150, height: 14)
 
                 RoundedRectangle(cornerRadius: 4)
-                    .fill(Color(.secondarySystemFill))
+                    .fill(appSettings.themePalette.secondaryFill)
                     .frame(height: 14)
 
                 RoundedRectangle(cornerRadius: 4)
-                    .fill(Color(.secondarySystemFill))
+                    .fill(appSettings.themePalette.secondaryFill)
                     .frame(width: 180, height: 14)
             }
         }
@@ -863,14 +894,14 @@ struct HomeFeedView: View {
         .clipShape(Circle())
         .overlay {
             Circle()
-                .stroke(Color(.separator).opacity(0.35), lineWidth: 0.7)
+                .stroke(appSettings.themePalette.separator.opacity(0.35), lineWidth: 0.7)
         }
     }
 
     private var topNavAccountFallback: some View {
         ZStack {
             Circle()
-                .fill(Color(.secondarySystemBackground))
+                .fill(topNavigationControlFill)
             Image(systemName: "person.fill")
                 .font(.system(size: 14, weight: .semibold))
                 .foregroundStyle(.secondary)
@@ -959,7 +990,7 @@ struct HomeFeedView: View {
             )
             .overlay(
                 Capsule(style: .continuous)
-                    .stroke(Color(.separator).opacity(0.35), lineWidth: 0.5)
+                    .stroke(appSettings.themePalette.separator.opacity(0.35), lineWidth: 0.5)
             )
         }
         .buttonStyle(.plain)
@@ -974,10 +1005,10 @@ struct HomeFeedView: View {
             ForEach(Array(authors.enumerated()), id: \.element.id) { index, item in
                 AvatarView(url: item.avatarURL, fallback: item.displayName, size: 24)
                     .padding(2)
-                    .background(Circle().fill(Color(.systemBackground)))
+                    .background(Circle().fill(appSettings.themePalette.chromeBackground))
                     .overlay {
                         Circle()
-                            .stroke(Color(.systemBackground), lineWidth: 1.2)
+                            .stroke(appSettings.themePalette.chromeBackground, lineWidth: 1.2)
                     }
                     .zIndex(Double(authors.count - index))
             }
@@ -1116,7 +1147,7 @@ private struct FilterKindTileView: View {
                     .fill(
                         isSelected
                             ? appSettings.primaryColor.opacity(0.14)
-                            : Color(.secondarySystemBackground)
+                            : appSettings.themePalette.secondaryBackground
                     )
             )
             .overlay(
@@ -1124,7 +1155,7 @@ private struct FilterKindTileView: View {
                     .stroke(
                         isSelected
                             ? appSettings.primaryColor.opacity(0.75)
-                            : Color(.separator).opacity(0.35),
+                            : appSettings.themePalette.separator.opacity(0.35),
                         lineWidth: 1
                     )
             )
