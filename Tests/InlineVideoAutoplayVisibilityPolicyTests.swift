@@ -51,4 +51,30 @@ final class InlineVideoAutoplayVisibilityPolicyTests: XCTestCase {
 
         XCTAssertGreaterThan(centeredScore ?? 0, edgeScore ?? 0)
     }
+
+    func testIgnoresTinyFrameChangesWithinSameAutoplayBucket() {
+        let previous = CGRect(x: 0, y: 250, width: 320, height: 300)
+        let next = CGRect(x: 0, y: 255, width: 320, height: 300)
+
+        let shouldReport = InlineVideoAutoplayVisibilityPolicy.shouldReportFrameChange(
+            previous: previous,
+            next: next,
+            viewportHeight: 800
+        )
+
+        XCTAssertFalse(shouldReport)
+    }
+
+    func testReportsFrameChangeWhenEligibilityChanges() {
+        let previous = CGRect(x: 0, y: 250, width: 320, height: 300)
+        let next = CGRect(x: 0, y: 80, width: 320, height: 300)
+
+        let shouldReport = InlineVideoAutoplayVisibilityPolicy.shouldReportFrameChange(
+            previous: previous,
+            next: next,
+            viewportHeight: 800
+        )
+
+        XCTAssertTrue(shouldReport)
+    }
 }

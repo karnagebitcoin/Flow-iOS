@@ -10,6 +10,11 @@ enum AuthSheetTab: String, CaseIterable, Identifiable {
 }
 
 struct AuthSheetView: View {
+    private enum PostAuthDestination {
+        case dismiss
+        case accounts
+    }
+
     @EnvironmentObject private var auth: AuthManager
     @EnvironmentObject private var appSettings: AppSettingsStore
     @EnvironmentObject private var relaySettings: RelaySettingsStore
@@ -23,6 +28,7 @@ struct AuthSheetView: View {
     @State private var signInError: String?
     @State private var accountProfiles: [String: NostrProfile] = [:]
     @State private var pendingAccountRemoval: AuthAccount?
+    @State private var postAuthDestination: PostAuthDestination = .dismiss
 
     init(
         initialTab: AuthSheetTab = .signIn,
@@ -42,10 +48,11 @@ struct AuthSheetView: View {
                     SignupOnboardingView(
                         canSwitchToSignIn: availableTabs.contains(.signIn),
                         onSwitchToSignIn: {
+                            postAuthDestination = auth.accounts.isEmpty ? .dismiss : .accounts
                             selectedTab = .signIn
                         },
                         onComplete: {
-                            dismiss()
+                            handlePostAuthenticationCompletion()
                         }
                     )
                 } else {
@@ -75,6 +82,15 @@ struct AuthSheetView: View {
                 let resolvedInitialTab = availableTabs.contains(initialTab) ? initialTab : availableTabs[0]
                 if selectedTab != resolvedInitialTab {
                     selectedTab = resolvedInitialTab
+                }
+                postAuthDestination = resolvedInitialTab == .accounts ? .accounts : .dismiss
+            }
+            .onChange(of: selectedTab) { _, newValue in
+                switch newValue {
+                case .accounts:
+                    postAuthDestination = .accounts
+                case .signIn, .signUp:
+                    postAuthDestination = auth.accounts.isEmpty ? .dismiss : .accounts
                 }
             }
             .task(id: accountsProfileLookupID) {
@@ -186,9 +202,40 @@ struct AuthSheetView: View {
                         )
                 }
                 .buttonStyle(.plain)
+
+                NavigationLink {
+                    ICloudKeyRestoreView {
+                        dismiss()
+                    }
+                } label: {
+                    HStack(spacing: 10) {
+                        Image(systemName: "icloud.and.arrow.down")
+                            .font(.subheadline.weight(.semibold))
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Restore from iCloud")
+                                .font(.subheadline.weight(.semibold))
+                                .foregroundStyle(.primary)
+                            Text("Use a private key already backed up to iCloud Keychain.")
+                                .font(.footnote)
+                                .foregroundStyle(.secondary)
+                        }
+                        Spacer()
+                    }
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 14)
+                    .background(
+                        RoundedRectangle(cornerRadius: 18, style: .continuous)
+                            .fill(Color(.secondarySystemBackground))
+                    )
+                    .overlay {
+                        RoundedRectangle(cornerRadius: 18, style: .continuous)
+                            .stroke(Color(.separator).opacity(0.28), lineWidth: 1)
+                    }
+                }
+                .buttonStyle(.plain)
             }
         } footer: {
-            Text("Use private-key sign in to enable posting, reactions, and replies.")
+            Text("Use private-key sign in to enable posting, reactions, and replies. If your key was backed up before, you can restore it from iCloud here.")
         }
     }
 
@@ -222,6 +269,26 @@ struct AuthSheetView: View {
 
     @ViewBuilder
     private var accountsSection: some View {
+        if availableTabs.contains(.signUp) || availableTabs.contains(.signIn) {
+            Section("Add Account") {
+                if availableTabs.contains(.signUp) {
+                    Button {
+                        beginAccountAddFlow(tab: .signUp)
+                    } label: {
+                        Label("Create New Account", systemImage: "person.badge.plus")
+                    }
+                }
+
+                if availableTabs.contains(.signIn) {
+                    Button {
+                        beginAccountAddFlow(tab: .signIn)
+                    } label: {
+                        Label("Add Existing Key", systemImage: "key.horizontal")
+                    }
+                }
+            }
+        }
+
         Section {
             if auth.accounts.isEmpty {
                 Text("No saved accounts yet.")
@@ -286,9 +353,29 @@ struct AuthSheetView: View {
         signInError = nil
         do {
             _ = try auth.loginWithNsecOrHex(privateKeyInput)
-            dismiss()
+            privateKeyInput = ""
+            handlePostAuthenticationCompletion()
         } catch {
             signInError = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+        }
+    }
+
+    private func beginAccountAddFlow(tab: AuthSheetTab) {
+        postAuthDestination = .accounts
+        signInError = nil
+        privateKeyInput = ""
+        selectedTab = tab
+    }
+
+    private func handlePostAuthenticationCompletion() {
+        switch postAuthDestination {
+        case .dismiss:
+            dismiss()
+        case .accounts:
+            selectedTab = .accounts
+            Task {
+                await refreshSavedAccountProfiles()
+            }
         }
     }
 

@@ -110,6 +110,10 @@ final class AuthStore: @unchecked Sendable {
         privateKeyStore.privateKeyMetadata(for: accountID)
     }
 
+    func iCloudPrivateKeyBackups() -> [AuthICloudPrivateKeyBackup] {
+        privateKeyStore.iCloudPrivateKeyBackups()
+    }
+
     func savePrivateKey(_ nsec: String, for accountID: String, backupToICloud: Bool) throws {
         try privateKeyStore.savePrivateKey(nsec, for: accountID, backupToICloud: backupToICloud)
     }

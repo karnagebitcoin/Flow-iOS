@@ -12,6 +12,7 @@ struct FlowApp: App {
     @StateObject private var appSettings = AppSettingsStore.shared
     @StateObject private var premiumStore = FlowPremiumStore()
     @StateObject private var relaySettings = RelaySettingsStore.shared
+    @StateObject private var followStore = FollowStore.shared
     @StateObject private var toastCenter = AppToastCenter()
     @StateObject private var composeSheetCoordinator = AppComposeSheetCoordinator()
     @StateObject private var breakReminderCoordinator = BreakReminderCoordinator()
@@ -45,11 +46,13 @@ struct FlowApp: App {
             .environmentObject(toastCenter)
             .environmentObject(composeSheetCoordinator)
             .environmentObject(breakReminderCoordinator)
+            .font(appSettings.appFont(.body))
             .tint(appSettings.primaryColor)
             .preferredColorScheme(appSettings.preferredColorScheme)
             .environment(\.dynamicTypeSize, appSettings.dynamicTypeSize)
             .task {
                 appSettings.configure(accountPubkey: authManager.currentAccount?.pubkey)
+                updateGlobalTypographyAppearance()
                 await premiumStore.refreshEntitlements()
                 updateBreakReminderMonitoring()
                 await appSettings.refreshNotificationAuthorizationStatus()
@@ -65,10 +68,22 @@ struct FlowApp: App {
             .onChange(of: appSettings.breakReminderInterval) { _, _ in
                 updateBreakReminderMonitoring()
             }
+            .onChange(of: appSettings.activeFontOption.rawValue) { _, _ in
+                updateGlobalTypographyAppearance()
+            }
+            .onChange(of: appSettings.fontSize) { _, _ in
+                updateGlobalTypographyAppearance()
+            }
             .onChange(of: composeSheetCoordinator.draft?.id) { _, newValue in
                 guard newValue == nil else { return }
                 Task {
                     await presentPendingSharedComposeDraftIfPossible()
+                }
+            }
+            .onChange(of: followStore.lastActionFeedback?.id) { _, _ in
+                guard let feedback = followStore.lastActionFeedback else { return }
+                Task {
+                    await presentFollowToast(for: feedback)
                 }
             }
             .onChange(of: scenePhase) { _, newValue in
@@ -100,12 +115,66 @@ struct FlowApp: App {
         composeSheetCoordinator.presentSharedMedia(attachments: pendingDraft.attachments)
     }
 
+    @MainActor
+    private func updateGlobalTypographyAppearance() {
+        let navigationBar = UINavigationBar.appearance()
+        navigationBar.titleTextAttributes = [
+            .font: appSettings.appUIFont(.headline, weight: .semibold)
+        ]
+        navigationBar.largeTitleTextAttributes = [
+            .font: appSettings.appUIFont(.largeTitle, weight: .bold)
+        ]
+
+        let barButtonFont = appSettings.appUIFont(.body, weight: .semibold)
+        UIBarButtonItem.appearance().setTitleTextAttributes([.font: barButtonFont], for: .normal)
+        UIBarButtonItem.appearance().setTitleTextAttributes([.font: barButtonFont], for: .highlighted)
+        UIBarButtonItem.appearance().setTitleTextAttributes([.font: barButtonFont], for: .disabled)
+    }
+
     private func updateBreakReminderMonitoring() {
         breakReminderCoordinator.update(
             isEnabled: authManager.currentAccount != nil,
             interval: appSettings.breakReminderInterval,
             scenePhase: scenePhase
         )
+    }
+
+    @MainActor
+    private func presentFollowToast(for feedback: FollowStore.ActionFeedback) async {
+        let message = await followToastMessage(for: feedback)
+        toastCenter.show(
+            message,
+            style: feedback.didFollow ? .success : .info
+        )
+    }
+
+    private func followToastMessage(for feedback: FollowStore.ActionFeedback) async -> String {
+        if feedback.pubkeys.count == 1,
+           let pubkey = feedback.pubkeys.first,
+           let label = await followToastLabel(for: pubkey) {
+            return "\(feedback.didFollow ? "Followed" : "Unfollowed") \(label)"
+        }
+
+        if feedback.pubkeys.count > 1 {
+            return feedback.didFollow
+                ? "Followed \(feedback.pubkeys.count) accounts"
+                : "Unfollowed \(feedback.pubkeys.count) accounts"
+        }
+
+        return feedback.didFollow ? "Followed account" : "Unfollowed account"
+    }
+
+    private func followToastLabel(for pubkey: String) async -> String? {
+        let profile = await ProfileCache.shared.cachedProfile(pubkey: pubkey)
+        if let displayName = profile?.displayName?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !displayName.isEmpty {
+            return displayName
+        }
+        if let name = profile?.name?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !name.isEmpty {
+            return "@\(name)"
+        }
+        return nil
     }
 }
 
@@ -229,6 +298,7 @@ private final class GlobalProfileQRCodeOverlayController {
     static let shared = GlobalProfileQRCodeOverlayController()
 
     private var overlayWindow: UIWindow?
+    private var overlayHostingController: UIHostingController<PresentedProfileQRCodeView>?
     private var pendingPresentationTask: Task<Void, Never>?
     private var presentedPubkey: String?
 
@@ -258,6 +328,7 @@ private final class GlobalProfileQRCodeOverlayController {
         pendingPresentationTask = nil
         overlayWindow?.isHidden = true
         overlayWindow = nil
+        overlayHostingController = nil
         presentedPubkey = nil
     }
 
@@ -290,6 +361,9 @@ private final class GlobalProfileQRCodeOverlayController {
 
     private func show(_ presentation: GlobalProfileQRCodePresentation) {
         guard let windowScene = activeWindowScene() else { return }
+        let qrBackgroundResourceName = ProfileQRCodePresentationBackground.resourceName(
+            for: AppSettingsStore.shared.activeTheme
+        )
 
         let content = PresentedProfileQRCodeView(
             trigger: .automatic,
@@ -297,19 +371,21 @@ private final class GlobalProfileQRCodeOverlayController {
             handle: presentation.handle,
             avatarURL: presentation.avatarURL,
             qrCodeImage: presentation.qrCodeImage,
+            qrBackgroundResourceName: qrBackgroundResourceName,
             onDismiss: { [weak self] in
                 self?.dismiss()
             }
         )
 
-        let hostingController = UIHostingController(rootView: content)
-        hostingController.view.backgroundColor = .black
-
-        if let overlayWindow {
-            overlayWindow.rootViewController = hostingController
-            overlayWindow.isHidden = false
+        if let overlayHostingController {
+            overlayHostingController.rootView = content
+            overlayWindow?.isHidden = false
             return
         }
+
+        let hostingController = UIHostingController(rootView: content)
+        hostingController.view.backgroundColor = .black
+        overlayHostingController = hostingController
 
         let window = UIWindow(windowScene: windowScene)
         window.backgroundColor = .black

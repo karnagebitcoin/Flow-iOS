@@ -2067,6 +2067,7 @@ private struct CameraCapturePermissionSheet: View {
 }
 
 private struct ComposeMultilineTextView: UIViewRepresentable {
+    @EnvironmentObject private var appSettings: AppSettingsStore
     @Binding var text: String
     @Binding var isFocused: Bool
 
@@ -2078,8 +2079,9 @@ private struct ComposeMultilineTextView: UIViewRepresentable {
         let textView = UITextView()
         textView.delegate = context.coordinator
         textView.backgroundColor = .clear
-        textView.font = .preferredFont(forTextStyle: .body)
-        textView.adjustsFontForContentSizeCategory = true
+        textView.font = appSettings.appUIFont(.body)
+        textView.typingAttributes[.font] = appSettings.appUIFont(.body)
+        textView.adjustsFontForContentSizeCategory = false
         textView.textColor = .label
         textView.tintColor = .label
         textView.autocorrectionType = .yes
@@ -2098,6 +2100,12 @@ private struct ComposeMultilineTextView: UIViewRepresentable {
     }
 
     func updateUIView(_ uiView: UITextView, context: Context) {
+        let preferredFont = appSettings.appUIFont(.body)
+        if uiView.font != preferredFont {
+            uiView.font = preferredFont
+            uiView.typingAttributes[.font] = preferredFont
+        }
+
         if uiView.text != text {
             uiView.text = text
             uiView.selectedRange = NSRange(location: uiView.text.utf16.count, length: 0)

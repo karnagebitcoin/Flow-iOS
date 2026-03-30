@@ -28,7 +28,9 @@ struct ProfileAboutTextView: View {
         Text(attributedString)
             .font(.body)
             .foregroundStyle(.primary)
+            .multilineTextAlignment(.leading)
             .fixedSize(horizontal: false, vertical: true)
+            .layoutPriority(1)
             .frame(maxWidth: .infinity, alignment: .leading)
             .environment(\.openURL, OpenURLAction { url in
                 if let pubkey = NoteContentParser.profilePubkey(fromActionURL: url) {

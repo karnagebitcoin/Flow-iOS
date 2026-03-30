@@ -146,6 +146,11 @@ final class ProfileViewModel: ObservableObject {
         return url
     }
 
+    var bannerURL: URL? {
+        guard let banner = profile?.banner?.trimmed, let url = URL(string: banner) else { return nil }
+        return url
+    }
+
     var about: String? {
         profile?.about?.trimmed
     }

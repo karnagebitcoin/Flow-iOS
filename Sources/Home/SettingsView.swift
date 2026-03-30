@@ -63,6 +63,15 @@ struct SettingsView: View {
                         value: .connection
                     )
                 }
+
+                Section {
+                    SettingsValueNavigationRow(
+                        title: "Flow Plus",
+                        subtitle: flowPlusSummaryText,
+                        systemImage: "sparkles",
+                        value: .flowPlus
+                    )
+                }
             }
             .navigationTitle("Settings")
             .navigationBarTitleDisplayMode(.large)
@@ -106,6 +115,18 @@ struct SettingsView: View {
         return "Connected to \(count) \(count == 1 ? "source" : "sources")"
     }
 
+    private var flowPlusSummaryText: String {
+        if premiumStore.isFlowPlusActive {
+            return "Themes and typography unlocked"
+        }
+
+        if appSettings.previewTheme == .sakura {
+            return "Previewing Sakura"
+        }
+
+        return "Themes, typography, and extras"
+    }
+
     private var navigationPathBinding: Binding<[SettingsDestination]> {
         Binding(
             get: { sheetState.navigationPath },
@@ -131,6 +152,8 @@ struct SettingsView: View {
                     sheetState.isShowingPrimaryColorPicker = true
                 }
             )
+        case .flowPlus:
+            SettingsFlowPlusView()
         case .feeds:
             SettingsFeedsView()
         case .notifications:
@@ -161,6 +184,7 @@ final class SettingsSheetState: ObservableObject {
 enum SettingsDestination: Hashable {
     case general
     case appearance
+    case flowPlus
     case feeds
     case notifications
     case media
@@ -201,11 +225,12 @@ private struct SettingsNavigationRow<Destination: View>: View {
 
                 VStack(alignment: .leading, spacing: 2) {
                     Text(title)
+                        .font(appSettings.appFont(.body, weight: .regular))
                         .foregroundStyle(.primary)
 
                     if let subtitle, !subtitle.isEmpty {
                         Text(subtitle)
-                            .font(.footnote)
+                            .font(appSettings.appFont(.footnote))
                             .foregroundStyle(.secondary)
                     }
                 }
@@ -246,11 +271,12 @@ private struct SettingsValueNavigationRow: View {
 
                 VStack(alignment: .leading, spacing: 2) {
                     Text(title)
+                        .font(appSettings.appFont(.body, weight: .regular))
                         .foregroundStyle(.primary)
 
                     if let subtitle, !subtitle.isEmpty {
                         Text(subtitle)
-                            .font(.footnote)
+                            .font(appSettings.appFont(.footnote))
                             .foregroundStyle(.secondary)
                     }
                 }
@@ -357,16 +383,14 @@ private struct NotificationPreferencesToggleRow: View {
 
 private struct SettingsAppearanceView: View {
     @EnvironmentObject private var appSettings: AppSettingsStore
-    @EnvironmentObject private var premiumStore: FlowPremiumStore
-    @State private var isShowingFlowPlusPaywall = false
     let onOpenPrimaryColorPicker: () -> Void
+
+    private var appearanceThemeOptions: [AppThemeOption] {
+        AppThemeOption.allCases.filter { !$0.requiresFlowPlus }
+    }
 
     var body: some View {
         Form {
-            Section("Flow Plus") {
-                flowPlusCard
-            }
-
             Section("Appearance") {
                 Button {
                     guard appSettings.canCustomizePrimaryColor else { return }
@@ -414,7 +438,7 @@ private struct SettingsAppearanceView: View {
                         ],
                         spacing: 10
                     ) {
-                        ForEach(AppThemeOption.allCases) { option in
+                        ForEach(appearanceThemeOptions) { option in
                             themeOptionCard(for: option)
                         }
                     }
@@ -452,9 +476,6 @@ private struct SettingsAppearanceView: View {
         }
         .navigationTitle("Appearance")
         .navigationBarTitleDisplayMode(.large)
-        .sheet(isPresented: $isShowingFlowPlusPaywall) {
-            FlowPlusPaywallView()
-        }
     }
 
     private var notePreviewCard: some View {
@@ -476,16 +497,16 @@ private struct SettingsAppearanceView: View {
 
                     VStack(alignment: .leading, spacing: 1) {
                         Text("alex")
-                            .font(.subheadline.weight(.semibold))
+                            .font(appSettings.appFont(.subheadline, weight: .semibold))
                         Text("@alex")
-                            .font(.caption)
+                            .font(appSettings.appFont(.caption1))
                             .foregroundStyle(.secondary)
                     }
 
                     Spacer(minLength: 0)
 
                     Text("2 hr")
-                        .font(.caption2)
+                        .font(appSettings.appFont(.caption2))
                         .foregroundStyle(.secondary)
                 }
 
@@ -495,22 +516,16 @@ private struct SettingsAppearanceView: View {
             .padding(12)
             .background(appSettings.themePalette.secondaryBackground, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
             .environment(\.dynamicTypeSize, appSettings.dynamicTypeSize)
-            .id(appSettings.fontSize)
+            .id("\(appSettings.fontSize.rawValue)-\(appSettings.activeFontOption.rawValue)")
         }
         .padding(.vertical, 2)
     }
 
     private func themeOptionCard(for option: AppThemeOption) -> some View {
-        let isPreviewing = appSettings.previewTheme == option
-        let isSelected = !isPreviewing && appSettings.activeTheme == option
-        let isAvailable = option.isSelectable(with: premiumStore.isFlowPlusActive)
+        let isSelected = appSettings.theme == option
 
         return Button {
             guard option.isEnabled else { return }
-            guard isAvailable else {
-                isShowingFlowPlusPaywall = true
-                return
-            }
             appSettings.theme = option
         } label: {
             VStack(alignment: .leading, spacing: 10) {
@@ -528,22 +543,6 @@ private struct SettingsAppearanceView: View {
                         Image(systemName: "checkmark.circle.fill")
                             .font(.system(size: 18, weight: .semibold))
                             .foregroundStyle(appSettings.primaryColor)
-                            .padding(8)
-                    } else if isPreviewing {
-                        Text("Preview")
-                            .font(.caption2.weight(.semibold))
-                            .foregroundStyle(Color(red: 0.73, green: 0.30, blue: 0.50))
-                            .padding(.horizontal, 8)
-                            .padding(.vertical, 4)
-                            .background(Color.white.opacity(0.9), in: Capsule(style: .continuous))
-                            .padding(8)
-                    } else if option.requiresFlowPlus && !premiumStore.isFlowPlusActive {
-                        Text("Plus")
-                            .font(.caption2.weight(.semibold))
-                            .foregroundStyle(Color(red: 0.73, green: 0.30, blue: 0.50))
-                            .padding(.horizontal, 8)
-                            .padding(.vertical, 4)
-                            .background(Color.white.opacity(0.86), in: Capsule(style: .continuous))
                             .padding(8)
                     } else if !option.isEnabled {
                         Text("Soon")
@@ -589,111 +588,6 @@ private struct SettingsAppearanceView: View {
         .disabled(!option.isEnabled)
     }
 
-    private var flowPlusCard: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack(alignment: .top, spacing: 12) {
-                VStack(alignment: .leading, spacing: 5) {
-                    Text("Flow Plus")
-                        .font(.headline)
-
-                    Text("Unlock premium themes for Flow. Sakura is first, with more signature looks ready for the same subscription later.")
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-
-                Spacer(minLength: 12)
-
-                if premiumStore.isFlowPlusActive {
-                    Label("Active", systemImage: "checkmark.seal.fill")
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(.green)
-                } else if appSettings.previewTheme == .sakura {
-                    Label("Previewing", systemImage: "eye.fill")
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(appSettings.primaryColor)
-                } else {
-                    Label("Themes", systemImage: "sparkles")
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(appSettings.primaryColor)
-                }
-            }
-
-            HStack(spacing: 10) {
-                sakuraSwatch(AnyShapeStyle(sakuraAccentGradient))
-                sakuraSwatch(AnyShapeStyle(Color(red: 1.0, green: 0.985, blue: 0.994)))
-                sakuraSwatch(AnyShapeStyle(AppThemeOption.sakura.fixedPrimaryColor ?? appSettings.primaryColor))
-            }
-
-            if premiumStore.isFlowPlusActive {
-                Link("Manage Subscription", destination: URL(string: "https://apps.apple.com/account/subscriptions")!)
-                    .font(.subheadline.weight(.semibold))
-            } else {
-                if appSettings.previewTheme == .sakura {
-                    Text("Sakura preview is temporary. Subscribe to keep it as your selected theme.")
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-
-                HStack(spacing: 10) {
-                    Button {
-                        if appSettings.previewTheme == .sakura {
-                            appSettings.endThemePreview()
-                        } else {
-                            appSettings.beginThemePreview(.sakura)
-                        }
-                    } label: {
-                        Text(appSettings.previewTheme == .sakura ? "Stop Preview" : "Preview Sakura")
-                            .font(.subheadline.weight(.semibold))
-                            .frame(maxWidth: .infinity)
-                            .padding(.vertical, 12)
-                            .background(
-                                appSettings.themePalette.secondaryBackground,
-                                in: RoundedRectangle(cornerRadius: 14, style: .continuous)
-                            )
-                            .foregroundStyle(.primary)
-                    }
-                    .buttonStyle(.plain)
-
-                    Button {
-                        isShowingFlowPlusPaywall = true
-                    } label: {
-                        Text("Unlock Flow Plus")
-                            .font(.subheadline.weight(.semibold))
-                            .frame(maxWidth: .infinity)
-                            .padding(.vertical, 12)
-                            .background(appSettings.primaryGradient, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-                            .foregroundStyle(.white)
-                    }
-                    .buttonStyle(.plain)
-                }
-            }
-        }
-        .padding(.vertical, 4)
-    }
-
-    private var sakuraAccentGradient: LinearGradient {
-        AppThemeOption.sakura.fixedPrimaryGradient ?? LinearGradient(
-            colors: [
-                Color(red: 0.976, green: 0.659, blue: 1.0),
-                Color(red: 1.0, green: 0.404, blue: 0.941)
-            ],
-            startPoint: .topLeading,
-            endPoint: .bottomTrailing
-        )
-    }
-
-    private func sakuraSwatch(_ style: AnyShapeStyle) -> some View {
-        RoundedRectangle(cornerRadius: 12, style: .continuous)
-            .fill(style)
-            .frame(width: 40, height: 32)
-            .overlay {
-                RoundedRectangle(cornerRadius: 12, style: .continuous)
-                    .stroke(Color.white.opacity(0.85), lineWidth: 1)
-            }
-    }
-
     private func themePreviewFill(for option: AppThemeOption) -> LinearGradient {
         switch option {
         case .system:
@@ -715,7 +609,14 @@ private struct SettingsAppearanceView: View {
                 endPoint: .bottomTrailing
             )
         case .sakura:
-            return sakuraAccentGradient
+            return AppThemeOption.sakura.fixedPrimaryGradient ?? LinearGradient(
+                colors: [
+                    Color(red: 0.976, green: 0.659, blue: 1.0),
+                    Color(red: 1.0, green: 0.404, blue: 0.941)
+                ],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
         case .dark:
             return LinearGradient(
                 colors: [Color(red: 0.19, green: 0.16, blue: 0.28), Color(red: 0.09, green: 0.08, blue: 0.14)],

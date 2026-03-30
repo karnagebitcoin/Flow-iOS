@@ -3,10 +3,17 @@ import NostrSDK
 
 @MainActor
 final class FollowStore: ObservableObject {
+    struct ActionFeedback: Identifiable, Equatable {
+        let id = UUID()
+        let pubkeys: [String]
+        let didFollow: Bool
+    }
+
     static let shared = FollowStore()
 
     @Published private(set) var followedPubkeys: Set<String>
     @Published private(set) var lastPublishError: String?
+    @Published private(set) var lastActionFeedback: ActionFeedback?
 
     private let defaults: UserDefaults
     private let authStore: AuthStore
@@ -88,6 +95,7 @@ final class FollowStore: ObservableObject {
         session = nextSession
         latestFollowListSnapshot = nil
         lastPublishError = nil
+        lastActionFeedback = nil
         hasInFlightFollowPublish = false
 
         syncTask?.cancel()
@@ -298,6 +306,7 @@ final class FollowStore: ObservableObject {
             followedPubkeys = Set(mergedSnapshot.followedPubkeys)
             persistCurrentFollowings()
             lastPublishError = nil
+            lastActionFeedback = ActionFeedback(pubkeys: targetPubkeys, didFollow: shouldFollow)
             scheduleProfileCacheUpdate(for: session, snapshot: mergedSnapshot)
         } catch {
             guard !Task.isCancelled else { return }

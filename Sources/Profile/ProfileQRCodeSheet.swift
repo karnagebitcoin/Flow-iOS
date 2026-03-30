@@ -334,6 +334,7 @@ struct PresentedProfileQRCodeView: View {
     let handle: String?
     let avatarURL: URL?
     let qrCodeImage: UIImage?
+    let qrBackgroundResourceName: String
     let onDismiss: () -> Void
 
     @State private var automaticEntrancePhase: AutomaticEntrancePhase = .offscreen
@@ -346,7 +347,7 @@ struct PresentedProfileQRCodeView: View {
             let entranceState = automaticEntranceState(for: proxy.size.height)
 
             ZStack {
-                ProfileQRCodePresentationBackground()
+                ProfileQRCodePresentationBackground(resourceName: qrBackgroundResourceName)
                     .frame(width: contentSize.width, height: contentSize.height)
                     .rotationEffect(.degrees(rotationDegrees))
                     .position(x: proxy.size.width / 2, y: proxy.size.height / 2)
@@ -541,22 +542,48 @@ private enum AutomaticEntrancePhase {
 }
 
 struct ProfileQRCodePresentationBackground: View {
+    static let defaultResourceName = "welcome_onboarding_unicorn.json"
+
+    let resourceName: String
+
+    static func resourceName(for theme: AppThemeOption) -> String {
+        theme.qrShareBackgroundResourceName ?? defaultResourceName
+    }
+
+    private var isSakuraBackground: Bool {
+        resourceName == AppThemeOption.sakura.qrShareBackgroundResourceName
+    }
+
     var body: some View {
         ZStack {
-            Color.black
+            if isSakuraBackground {
+                LinearGradient(
+                    colors: [
+                        Color(red: 1.0, green: 0.986, blue: 0.994),
+                        Color(red: 0.994, green: 0.948, blue: 0.975),
+                        Color(red: 0.979, green: 0.870, blue: 0.935)
+                    ],
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing
+                )
                 .ignoresSafeArea()
+            } else {
+                Color.black
+                    .ignoresSafeArea()
+            }
 
             UnicornStudioBackgroundView(
-                source: .bundledJSON("welcome_onboarding_unicorn.json"),
+                source: .bundledJSON(resourceName),
                 opacity: 1
             )
+            .scaleEffect(isSakuraBackground ? 1.18 : 1)
             .ignoresSafeArea()
 
             LinearGradient(
                 colors: [
-                    Color.black.opacity(0.12),
-                    Color.black.opacity(0.20),
-                    Color.black.opacity(0.28)
+                    isSakuraBackground ? Color.white.opacity(0.03) : Color.black.opacity(0.12),
+                    isSakuraBackground ? Color(red: 0.53, green: 0.16, blue: 0.42).opacity(0.10) : Color.black.opacity(0.20),
+                    isSakuraBackground ? Color(red: 0.41, green: 0.08, blue: 0.30).opacity(0.18) : Color.black.opacity(0.28)
                 ],
                 startPoint: .top,
                 endPoint: .bottom

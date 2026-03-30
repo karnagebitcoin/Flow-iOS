@@ -1,56 +1,165 @@
 import SwiftUI
 
+struct AppThemeCapsuleTabStyle {
+    let background: Color
+    let border: Color
+    let foreground: Color
+    let selectedBackground: Color
+    let selectedBorder: Color
+    let selectedForeground: Color
+}
+
+struct AppThemeProfileActionStyle {
+    let background: Color
+    let border: Color
+    let foreground: Color
+    let primaryBackground: Color
+    let primaryBorder: Color
+    let primaryForeground: Color
+    let bannerBackground: Color
+    let bannerBorder: Color
+    let bannerForeground: Color
+}
+
+struct AppThemePollStyle {
+    let cardBackground: Color
+    let cardBorder: Color
+    let metadataForeground: Color
+    let optionBackground: Color
+    let optionResultBackground: Color
+    let optionBorder: Color
+    let optionSelectedBackground: Color
+    let optionSelectedBorder: Color
+    let optionWinningBackground: Color
+    let optionWinningBorder: Color
+    let imagePlaceholderBackground: Color
+    let imagePlaceholderForeground: Color
+    let neutralBadgeBackground: Color
+    let neutralBadgeForeground: Color
+    let refreshButtonBackground: Color
+    let refreshButtonForeground: Color
+}
+
 struct AppThemePalette {
+    private static let sakuraPinkTint = Color(red: 0.992, green: 0.647, blue: 0.835) // #FDA5D5
+    private static let sakuraPrimary = Color(red: 1.0, green: 0.404, blue: 0.941)
+    private static let sakuraSoftWhite = Color(red: 1.0, green: 0.985, blue: 0.992)
+    private static let sakuraPetalWash = Color(red: 1.0, green: 0.947, blue: 0.979)
+
     let background: Color
     let chromeBackground: Color
+    let chromeBorder: Color
+    let mutedForeground: Color
     let secondaryBackground: Color
+    let quoteBackground: Color
     let groupedBackground: Color
     let secondaryGroupedBackground: Color
     let secondaryFill: Color
     let tertiaryFill: Color
     let separator: Color
+    let capsuleTabStyle: AppThemeCapsuleTabStyle?
+    let profileActionStyle: AppThemeProfileActionStyle?
+    let pollStyle: AppThemePollStyle?
 
     static let system = AppThemePalette(
         background: Color(.systemBackground),
         chromeBackground: Color(.systemBackground),
+        chromeBorder: Color(.separator),
+        mutedForeground: .secondary,
         secondaryBackground: Color(.secondarySystemBackground),
+        quoteBackground: Color(.secondarySystemBackground),
         groupedBackground: Color(.systemGroupedBackground),
         secondaryGroupedBackground: Color(.secondarySystemGroupedBackground),
         secondaryFill: Color(.secondarySystemFill),
         tertiaryFill: Color(.tertiarySystemFill),
-        separator: Color(.separator)
+        separator: Color(.separator),
+        capsuleTabStyle: nil,
+        profileActionStyle: nil,
+        pollStyle: nil
     )
 
     static let black = AppThemePalette(
-        background: Color(red: 0.03, green: 0.03, blue: 0.04),
-        chromeBackground: Color(red: 0.05, green: 0.05, blue: 0.06),
+        background: .black,
+        chromeBackground: .black,
+        chromeBorder: Color.white.opacity(0.10),
+        mutedForeground: Color.white.opacity(0.58),
         secondaryBackground: Color(red: 0.11, green: 0.11, blue: 0.13),
-        groupedBackground: Color(red: 0.06, green: 0.06, blue: 0.08),
+        quoteBackground: Color(red: 0.11, green: 0.11, blue: 0.13),
+        groupedBackground: .black,
         secondaryGroupedBackground: Color(red: 0.12, green: 0.12, blue: 0.14),
         secondaryFill: Color.white.opacity(0.10),
         tertiaryFill: Color.white.opacity(0.06),
-        separator: Color.white.opacity(0.16)
+        separator: Color.white.opacity(0.16),
+        capsuleTabStyle: nil,
+        profileActionStyle: nil,
+        pollStyle: nil
     )
 
     static let white = AppThemePalette(
         background: Color.white,
         chromeBackground: Color.white,
+        chromeBorder: Color.black.opacity(0.12),
+        mutedForeground: Color.black.opacity(0.45),
         secondaryBackground: Color(red: 0.96, green: 0.96, blue: 0.97),
+        quoteBackground: Color(red: 0.96, green: 0.96, blue: 0.97),
         groupedBackground: Color(red: 0.98, green: 0.98, blue: 0.985),
         secondaryGroupedBackground: Color(red: 0.955, green: 0.955, blue: 0.965),
         secondaryFill: Color.black.opacity(0.08),
         tertiaryFill: Color.black.opacity(0.05),
-        separator: Color.black.opacity(0.12)
+        separator: Color.black.opacity(0.12),
+        capsuleTabStyle: nil,
+        profileActionStyle: nil,
+        pollStyle: nil
     )
 
     static let sakura = AppThemePalette(
-        background: Color(red: 1.0, green: 0.985, blue: 0.994),
-        chromeBackground: Color(red: 1.0, green: 0.991, blue: 0.997),
-        secondaryBackground: Color(red: 0.994, green: 0.954, blue: 0.987),
-        groupedBackground: Color(red: 0.995, green: 0.968, blue: 0.992),
-        secondaryGroupedBackground: Color(red: 0.988, green: 0.945, blue: 0.981),
-        secondaryFill: Color(red: 1.0, green: 0.404, blue: 0.941).opacity(0.14),
-        tertiaryFill: Color(red: 0.976, green: 0.659, blue: 1.0).opacity(0.18),
-        separator: Color(red: 1.0, green: 0.404, blue: 0.941).opacity(0.18)
+        background: Color(red: 1.0, green: 0.994, blue: 0.997),
+        chromeBackground: Color(red: 1.0, green: 0.996, blue: 0.998),
+        chromeBorder: Self.sakuraPinkTint.opacity(0.24),
+        mutedForeground: Self.sakuraPinkTint,
+        secondaryBackground: Color(red: 0.998, green: 0.978, blue: 0.989),
+        quoteBackground: .white,
+        groupedBackground: Color(red: 0.999, green: 0.988, blue: 0.994),
+        secondaryGroupedBackground: Color(red: 0.996, green: 0.972, blue: 0.985),
+        secondaryFill: Color(red: 0.968, green: 0.760, blue: 0.880).opacity(0.12),
+        tertiaryFill: Color(red: 0.986, green: 0.878, blue: 0.942).opacity(0.16),
+        separator: Self.sakuraPinkTint.opacity(0.34),
+        capsuleTabStyle: AppThemeCapsuleTabStyle(
+            background: .white,
+            border: Self.sakuraPinkTint.opacity(0.42),
+            foreground: Self.sakuraPinkTint,
+            selectedBackground: Self.sakuraPetalWash,
+            selectedBorder: Self.sakuraPinkTint.opacity(0.78),
+            selectedForeground: Self.sakuraPrimary
+        ),
+        profileActionStyle: AppThemeProfileActionStyle(
+            background: .white,
+            border: Self.sakuraPinkTint.opacity(0.42),
+            foreground: Self.sakuraPinkTint,
+            primaryBackground: Self.sakuraPetalWash,
+            primaryBorder: Self.sakuraPinkTint.opacity(0.74),
+            primaryForeground: Self.sakuraPrimary,
+            bannerBackground: Color.white.opacity(0.90),
+            bannerBorder: Self.sakuraPinkTint.opacity(0.52),
+            bannerForeground: Self.sakuraPinkTint
+        ),
+        pollStyle: AppThemePollStyle(
+            cardBackground: .white,
+            cardBorder: Self.sakuraPinkTint.opacity(0.34),
+            metadataForeground: Self.sakuraPinkTint,
+            optionBackground: Self.sakuraSoftWhite,
+            optionResultBackground: Self.sakuraPetalWash,
+            optionBorder: Self.sakuraPinkTint.opacity(0.28),
+            optionSelectedBackground: Self.sakuraPinkTint.opacity(0.16),
+            optionSelectedBorder: Self.sakuraPinkTint.opacity(0.70),
+            optionWinningBackground: Self.sakuraPrimary.opacity(0.12),
+            optionWinningBorder: Self.sakuraPrimary.opacity(0.32),
+            imagePlaceholderBackground: Self.sakuraPetalWash,
+            imagePlaceholderForeground: Self.sakuraPinkTint,
+            neutralBadgeBackground: Self.sakuraPetalWash,
+            neutralBadgeForeground: Self.sakuraPinkTint,
+            refreshButtonBackground: Self.sakuraPetalWash,
+            refreshButtonForeground: Self.sakuraPinkTint
+        )
     )
 }

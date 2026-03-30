@@ -24,6 +24,21 @@ struct AuthPrivateKeyMetadata: Hashable, Sendable {
     let modifiedAt: Date?
 }
 
+struct AuthICloudPrivateKeyBackup: Identifiable, Hashable, Sendable {
+    let accountID: String
+    let createdAt: Date?
+    let modifiedAt: Date?
+
+    var id: String { accountID }
+
+    var pubkey: String? {
+        let prefix = "\(AuthSignerType.nsec.rawValue):"
+        guard accountID.hasPrefix(prefix) else { return nil }
+        let value = String(accountID.dropFirst(prefix.count)).lowercased()
+        return value.isEmpty ? nil : value
+    }
+}
+
 final class AuthPrivateKeyStore: @unchecked Sendable {
     static let shared = AuthPrivateKeyStore()
 
@@ -63,6 +78,29 @@ final class AuthPrivateKeyStore: @unchecked Sendable {
         let status = SecItemAdd(query as CFDictionary, nil)
         guard status == errSecSuccess else {
             throw AuthPrivateKeyStoreError.keychainFailure(status)
+        }
+    }
+
+    func iCloudPrivateKeyBackups() -> [AuthICloudPrivateKeyBackup] {
+        let combined = loadSynchronizablePrivateKeyBackups(service: service)
+            + loadSynchronizablePrivateKeyBackups(service: legacyService)
+
+        var deduplicated: [String: AuthICloudPrivateKeyBackup] = [:]
+        for backup in combined {
+            if let existing = deduplicated[backup.accountID] {
+                deduplicated[backup.accountID] = preferredBackup(between: existing, and: backup)
+            } else {
+                deduplicated[backup.accountID] = backup
+            }
+        }
+
+        return deduplicated.values.sorted {
+            let lhsDate = $0.modifiedAt ?? $0.createdAt ?? .distantPast
+            let rhsDate = $1.modifiedAt ?? $1.createdAt ?? .distantPast
+            if lhsDate != rhsDate {
+                return lhsDate > rhsDate
+            }
+            return $0.accountID < $1.accountID
         }
     }
 
@@ -132,5 +170,54 @@ final class AuthPrivateKeyStore: @unchecked Sendable {
             createdAt: createdAt,
             modifiedAt: modifiedAt
         )
+    }
+
+    private func loadSynchronizablePrivateKeyBackups(service: String) -> [AuthICloudPrivateKeyBackup] {
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: service,
+            kSecAttrSynchronizable as String: kCFBooleanTrue as Any,
+            kSecReturnAttributes as String: true,
+            kSecMatchLimit as String: kSecMatchLimitAll
+        ]
+
+        var item: CFTypeRef?
+        let status = SecItemCopyMatching(query as CFDictionary, &item)
+        guard status != errSecItemNotFound else { return [] }
+        guard status == errSecSuccess else { return [] }
+
+        let attributesList: [[String: Any]]
+        if let list = item as? [[String: Any]] {
+            attributesList = list
+        } else if let attributes = item as? [String: Any] {
+            attributesList = [attributes]
+        } else {
+            attributesList = []
+        }
+
+        return attributesList.compactMap { attributes in
+            guard let accountID = attributes[kSecAttrAccount as String] as? String,
+                  !accountID.isEmpty else {
+                return nil
+            }
+
+            return AuthICloudPrivateKeyBackup(
+                accountID: accountID,
+                createdAt: attributes[kSecAttrCreationDate as String] as? Date,
+                modifiedAt: attributes[kSecAttrModificationDate as String] as? Date
+            )
+        }
+    }
+
+    private func preferredBackup(
+        between lhs: AuthICloudPrivateKeyBackup,
+        and rhs: AuthICloudPrivateKeyBackup
+    ) -> AuthICloudPrivateKeyBackup {
+        let lhsDate = lhs.modifiedAt ?? lhs.createdAt ?? .distantPast
+        let rhsDate = rhs.modifiedAt ?? rhs.createdAt ?? .distantPast
+        if lhsDate == rhsDate {
+            return lhs
+        }
+        return lhsDate > rhsDate ? lhs : rhs
     }
 }

@@ -31,7 +31,8 @@ enum MediaUploadPreparationError: LocalizedError {
 }
 
 enum MediaUploadPreparation {
-    private static let compressionThresholdBytes = 12 * 1_024 * 1_024
+    private static let lightCompressionThresholdBytes = 24 * 1_024 * 1_024
+    private static let aggressiveCompressionThresholdBytes = 80 * 1_024 * 1_024
     private static let imageCompressionThresholdBytes = 2 * 1_024 * 1_024
     private static let maxStillImageDimension: CGFloat = 2_400
 
@@ -157,7 +158,7 @@ enum MediaUploadPreparation {
         let normalizedMimeType = mimeType.lowercased()
         let normalizedExtension = fallbackFileExtension.lowercased()
         let shouldAttemptCompression =
-            originalSize >= compressionThresholdBytes ||
+            originalSize >= lightCompressionThresholdBytes ||
             normalizedMimeType.contains("quicktime") ||
             normalizedExtension == "mov"
 
@@ -166,7 +167,7 @@ enum MediaUploadPreparation {
         }
 
         let asset = AVURLAsset(url: sourceURL)
-        let presets = preferredExportPresets(for: asset)
+        let presets = preferredExportPresets(for: asset, originalSize: originalSize)
 
         for presetName in presets {
             let candidateURL = try? await exportCompressedVideo(
@@ -212,13 +213,20 @@ enum MediaUploadPreparation {
         return outputURL
     }
 
-    private static func preferredExportPresets(for asset: AVAsset) -> [String] {
+    private static func preferredExportPresets(for asset: AVAsset, originalSize: Int) -> [String] {
         let presets = AVAssetExportSession.exportPresets(compatibleWith: asset)
-        let preferredPresets = [
-            AVAssetExportPreset1920x1080,
-            AVAssetExportPreset1280x720,
-            AVAssetExportPresetMediumQuality
+        var preferredPresets = [
+            AVAssetExportPresetPassthrough,
+            AVAssetExportPresetHighestQuality
         ]
+
+        if originalSize >= aggressiveCompressionThresholdBytes {
+            preferredPresets.append(contentsOf: [
+                AVAssetExportPreset1920x1080,
+                AVAssetExportPreset1280x720,
+                AVAssetExportPresetMediumQuality
+            ])
+        }
 
         return preferredPresets.filter { presets.contains($0) }
     }

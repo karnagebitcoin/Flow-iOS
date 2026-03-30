@@ -1,0 +1,109 @@
+import SwiftUI
+import UIKit
+
+extension AppFontSize {
+    var uiContentSizeCategory: UIContentSizeCategory {
+        switch self {
+        case .small:
+            return .small
+        case .medium:
+            return .medium
+        case .large:
+            return .large
+        case .extraLarge:
+            return .extraLarge
+        }
+    }
+}
+
+extension AppSettingsStore {
+    func appFont(_ textStyle: UIFont.TextStyle, weight: UIFont.Weight = .regular) -> Font {
+        Font(appUIFont(textStyle, weight: weight))
+    }
+
+    func appUIFont(_ textStyle: UIFont.TextStyle, weight: UIFont.Weight = .regular) -> UIFont {
+        activeFontOption.uiFont(
+            textStyle: textStyle,
+            weight: weight,
+            contentSizeCategory: fontSize.uiContentSizeCategory
+        )
+    }
+
+    func appFont(size: CGFloat, weight: UIFont.Weight = .regular) -> Font {
+        Font(appUIFont(size: size, weight: weight))
+    }
+
+    func appUIFont(size: CGFloat, weight: UIFont.Weight = .regular) -> UIFont {
+        activeFontOption.uiFont(size: size, weight: weight)
+    }
+}
+
+extension AppFontOption {
+    func previewFont(size: CGFloat, weight: UIFont.Weight = .regular) -> Font {
+        Font(uiFont(size: size, weight: weight))
+    }
+
+    fileprivate func uiFont(
+        textStyle: UIFont.TextStyle,
+        weight: UIFont.Weight,
+        contentSizeCategory: UIContentSizeCategory
+    ) -> UIFont {
+        let metrics = UIFontMetrics(forTextStyle: textStyle)
+        let baseFont = uiFont(size: textStyle.basePointSize, weight: weight)
+        let traitCollection = UITraitCollection(preferredContentSizeCategory: contentSizeCategory)
+        return metrics.scaledFont(for: baseFont, compatibleWith: traitCollection)
+    }
+
+    fileprivate func uiFont(size: CGFloat, weight: UIFont.Weight) -> UIFont {
+        if usesSystemMonospacedDesign {
+            return UIFont.monospacedSystemFont(ofSize: size, weight: weight)
+        }
+
+        guard let familyName else {
+            return UIFont.systemFont(ofSize: size, weight: weight)
+        }
+
+        let descriptor = UIFontDescriptor(fontAttributes: [
+            .family: familyName,
+            .traits: [UIFontDescriptor.TraitKey.weight: weight]
+        ])
+        let font = UIFont(descriptor: descriptor, size: size)
+
+        if font.familyName == familyName {
+            return font
+        }
+
+        return UIFont.systemFont(ofSize: size, weight: weight)
+    }
+}
+
+private extension UIFont.TextStyle {
+    var basePointSize: CGFloat {
+        switch self {
+        case .largeTitle:
+            return 34
+        case .title1:
+            return 28
+        case .title2:
+            return 22
+        case .title3:
+            return 20
+        case .headline:
+            return 17
+        case .subheadline:
+            return 15
+        case .body:
+            return 17
+        case .callout:
+            return 16
+        case .footnote:
+            return 13
+        case .caption1:
+            return 12
+        case .caption2:
+            return 11
+        default:
+            return 17
+        }
+    }
+}

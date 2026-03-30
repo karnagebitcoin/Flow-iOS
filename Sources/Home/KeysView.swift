@@ -86,7 +86,7 @@ struct KeysView: View {
             } footer: {
                 Text(
                     account.privateKeyBackupEnabled
-                        ? "This confirms the key was added to iCloud Keychain on this device. Apple does not expose the exact cross-device sync time."
+                        ? "This confirms the key was added to iCloud Keychain on this device. Apple does not expose the exact cross-device sync time. On another device, go to Sign In and choose Restore from iCloud."
                         : "This private key stays only on this device until you turn on iCloud backup. New Flow-created accounts back this up automatically."
                 )
             }

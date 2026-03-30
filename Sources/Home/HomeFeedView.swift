@@ -165,6 +165,7 @@ struct HomeFeedView: View {
                                         )
                                     )
                                     .listRowSeparator(.visible)
+                                    .listRowSeparatorTint(appSettings.themePalette.chromeBorder)
                                     .listRowBackground(Color.clear)
                                     .onAppear {
                                         if appSettings.reactionsVisibleInFeeds {
@@ -487,7 +488,7 @@ struct HomeFeedView: View {
                         .font(.subheadline.weight(.semibold))
                         .foregroundStyle(appSettings.primaryColor)
                     Text(feedSourceLabel(for: viewModel.feedSource))
-                        .font(.headline)
+                        .font(appSettings.appFont(.headline, weight: .semibold))
                         .lineLimit(1)
                     Image(systemName: "chevron.down")
                         .font(.footnote.weight(.semibold))
@@ -510,7 +511,9 @@ struct HomeFeedView: View {
         .padding(.vertical, 10)
         .background(topNavigationBackground)
         .overlay(alignment: .bottom) {
-            Divider()
+            Rectangle()
+                .fill(appSettings.themePalette.chromeBorder)
+                .frame(height: 0.7)
         }
     }
 
@@ -518,8 +521,16 @@ struct HomeFeedView: View {
     private var topNavigationBackground: some View {
         if appSettings.activeTheme == .sakura {
             ZStack {
-                appSettings.themePalette.chromeBackground.opacity(0.78)
-                appSettings.primaryGradient.opacity(0.14)
+                appSettings.themePalette.chromeBackground
+
+                LinearGradient(
+                    colors: [
+                        Color.white.opacity(0.78),
+                        Color(red: 1.0, green: 0.960, blue: 0.978).opacity(0.66)
+                    ],
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing
+                )
             }
         } else {
             appSettings.themePalette.chromeBackground
@@ -528,7 +539,7 @@ struct HomeFeedView: View {
 
     private var topNavigationControlFill: Color {
         if appSettings.activeTheme == .sakura {
-            return Color.white.opacity(0.72)
+            return Color.white.opacity(0.88)
         }
         return appSettings.themePalette.secondaryBackground
     }

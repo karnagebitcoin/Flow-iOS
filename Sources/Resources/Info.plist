@@ -37,6 +37,23 @@
 	<string>Flow saves remixed images to your photo library when you choose Save.</string>
 	<key>NSSpeechRecognitionUsageDescription</key>
 	<string>Flow uses speech recognition to transcribe your voice into note text.</string>
+	<key>UIAppFonts</key>
+	<array>
+		<string>DMSans.ttf</string>
+		<string>EBGaramond.ttf</string>
+		<string>ElmsSans.ttf</string>
+		<string>GeistSans.ttf</string>
+		<string>HubotSans.ttf</string>
+		<string>Inter.ttf</string>
+		<string>MonaSans.ttf</string>
+		<string>Nacelle-Bold.otf</string>
+		<string>Nacelle-Italic.otf</string>
+		<string>Nacelle-Regular.otf</string>
+		<string>Nacelle-SemiBold.otf</string>
+		<string>Nunito.ttf</string>
+		<string>PublicSans.ttf</string>
+		<string>SpaceGrotesk.ttf</string>
+	</array>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>

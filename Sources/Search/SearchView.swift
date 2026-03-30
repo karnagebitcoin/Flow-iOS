@@ -64,6 +64,7 @@ struct SearchView: View {
                                         )
                                     )
                                     .listRowSeparator(.visible)
+                                    .listRowSeparatorTint(appSettings.themePalette.chromeBorder)
                                     .listRowBackground(Color.clear)
                             }
                         } header: {
@@ -131,6 +132,7 @@ struct SearchView: View {
                                     )
                                 )
                                 .listRowSeparator(.visible)
+                                .listRowSeparatorTint(appSettings.themePalette.chromeBorder)
                                 .listRowBackground(Color.clear)
                                 .onAppear {
                                     if appSettings.reactionsVisibleInFeeds {
@@ -322,6 +324,7 @@ struct SearchView: View {
                     .foregroundStyle(.secondary)
 
                 TextField("Search notes, profiles, and hashtags", text: $viewModel.searchText)
+                    .font(appSettings.appFont(.body))
                     .textInputAutocapitalization(.never)
                     .autocorrectionDisabled()
                     .submitLabel(.search)
@@ -345,7 +348,9 @@ struct SearchView: View {
             .padding(.top, 8)
             .padding(.bottom, 10)
 
-            Divider()
+            Rectangle()
+                .fill(appSettings.themePalette.chromeBorder)
+                .frame(height: 0.7)
         }
         .background(searchBarBackground)
     }

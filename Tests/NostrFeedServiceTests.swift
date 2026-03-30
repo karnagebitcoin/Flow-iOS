@@ -2,6 +2,25 @@ import XCTest
 @testable import Flow
 
 final class NostrFeedServiceTests: XCTestCase {
+    func testNostrProfileDecodeReadsBannerMetadataKeys() {
+        let bannerJSON = """
+        {
+          "name": "alice",
+          "banner": "https://example.com/banner.jpg"
+        }
+        """
+
+        let coverJSON = """
+        {
+          "name": "alice",
+          "cover": "https://example.com/cover.jpg"
+        }
+        """
+
+        XCTAssertEqual(NostrProfile.decode(from: bannerJSON)?.banner, "https://example.com/banner.jpg")
+        XCTAssertEqual(NostrProfile.decode(from: coverJSON)?.banner, "https://example.com/cover.jpg")
+    }
+
     func testReactionStatsPrefetchSkipsFreshNetworkRefetch() async throws {
         var rootURLBox: URL? = FileManager.default.temporaryDirectory
             .appendingPathComponent("FlowReactionStatsTests-\(UUID().uuidString)", isDirectory: true)

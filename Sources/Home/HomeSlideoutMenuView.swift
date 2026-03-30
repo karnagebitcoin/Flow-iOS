@@ -20,7 +20,7 @@ struct HomeSlideoutMenuView: View {
         VStack(alignment: .leading, spacing: 0) {
             HStack {
                 Text("Menu")
-                    .font(.headline)
+                    .font(appSettings.appFont(.headline, weight: .semibold))
                 Spacer()
                 Button {
                     onClose()
@@ -119,11 +119,11 @@ struct HomeSlideoutMenuView: View {
 
             VStack(alignment: .leading, spacing: 4) {
                 Text(resolvedName)
-                    .font(.system(.subheadline, design: .default).weight(.semibold))
+                    .font(appSettings.appFont(.subheadline, weight: .semibold))
                     .lineLimit(1)
                     .truncationMode(.middle)
                 Text("Signed in")
-                    .font(.caption)
+                    .font(appSettings.appFont(.caption1))
                     .foregroundStyle(.secondary)
             }
 
@@ -179,7 +179,7 @@ struct HomeSlideoutMenuView: View {
                     .frame(width: 22)
 
                 Text(title)
-                    .font(.body)
+                    .font(appSettings.appFont(.body))
                     .lineLimit(1)
             }
             .foregroundStyle(tint)

@@ -140,7 +140,7 @@ struct NoteContentView: View {
                         case .inlineTokens(let inlineTokens):
                             if mediaLayout == .detailCarousel {
                                 inlineText(from: inlineTokens)
-                                    .font(.body)
+                                    .font(appSettings.appFont(.body))
                                     .lineLimit(isCollapsedPreviewActive ? Self.collapsedPreviewLineLimit : nil)
                                     .multilineTextAlignment(.leading)
                                     .fixedSize(horizontal: false, vertical: true)
@@ -149,7 +149,7 @@ struct NoteContentView: View {
                                     .textSelection(.enabled)
                             } else {
                                 inlineText(from: inlineTokens)
-                                    .font(.body)
+                                    .font(appSettings.appFont(.body))
                                     .lineLimit(isCollapsedPreviewActive ? Self.collapsedPreviewLineLimit : nil)
                                     .multilineTextAlignment(.leading)
                                     .fixedSize(horizontal: false, vertical: true)
@@ -767,7 +767,7 @@ struct NoteContentView: View {
         let lowered = shortcode.lowercased()
         guard let baseImage = emojiImages[shortcode] ?? emojiImages[lowered] else { return nil }
 
-        let lineHeight = UIFont.preferredFont(forTextStyle: .body).lineHeight
+        let lineHeight = appSettings.appUIFont(.body).lineHeight
         let emojiSize = max(16, floor(lineHeight * 0.95))
         let scaledImage = baseImage.preparingThumbnail(
             of: CGSize(width: emojiSize, height: emojiSize)
@@ -1435,7 +1435,6 @@ private struct NoteImageFullscreenViewer: View {
         .padding(.horizontal, 16)
         .padding(.vertical, 12)
         .frame(maxWidth: .infinity, alignment: .center)
-        .background(actionBarBackground)
     }
 
     private var visibleReactionCount: Int {
@@ -1572,20 +1571,6 @@ private struct NoteImageFullscreenViewer: View {
             )
             .padding(.horizontal, 14)
             .padding(.bottom, 14)
-        }
-    }
-
-    @ViewBuilder
-    private var actionBarBackground: some View {
-        if colorScheme == .dark {
-            Color.black.opacity(0.7)
-        } else {
-            Rectangle()
-                .fill(.ultraThinMaterial)
-                .overlay(
-                    Rectangle()
-                        .fill(Color(.systemGray6).opacity(0.5))
-                )
         }
     }
 
@@ -1883,6 +1868,9 @@ private struct NoteImageRemixComposeDraft: Identifiable {
 }
 
 struct InlineVideoAutoplayVisibilityPolicy {
+    private static let framePositionThreshold: CGFloat = 10
+    private static let frameSizeThreshold: CGFloat = 2
+
     static func autoplayScore(for frame: CGRect, viewportHeight: CGFloat) -> CGFloat? {
         guard viewportHeight > 0, frame.height > 0 else { return nil }
 
@@ -1907,6 +1895,37 @@ struct InlineVideoAutoplayVisibilityPolicy {
         let centerDistance = abs(frameMidY - (viewportHeight * 0.5))
         let centerScore = max(0, 1 - (centerDistance / bandRadius))
         return visibleRatio + centerScore
+    }
+
+    static func shouldReportFrameChange(
+        previous: CGRect,
+        next: CGRect,
+        viewportHeight: CGFloat
+    ) -> Bool {
+        guard previous != .zero else { return true }
+
+        let positionDelta = max(
+            abs(previous.minY - next.minY),
+            abs(previous.maxY - next.maxY)
+        )
+        let sizeDelta = max(
+            abs(previous.width - next.width),
+            abs(previous.height - next.height)
+        )
+
+        if positionDelta >= framePositionThreshold || sizeDelta >= frameSizeThreshold {
+            return true
+        }
+
+        return autoplayScoreBucket(for: previous, viewportHeight: viewportHeight)
+            != autoplayScoreBucket(for: next, viewportHeight: viewportHeight)
+    }
+
+    private static func autoplayScoreBucket(for frame: CGRect, viewportHeight: CGFloat) -> Int {
+        guard let score = autoplayScore(for: frame, viewportHeight: viewportHeight) else {
+            return -1
+        }
+        return Int((score * 5).rounded())
     }
 }
 
@@ -1955,6 +1974,58 @@ private final class InlineVideoPlaybackCoordinator: ObservableObject {
     }
 }
 
+private actor NoteVideoAspectRatioCache {
+    static let shared = NoteVideoAspectRatioCache()
+
+    private var cachedRatios: [URL: CGFloat] = [:]
+    private var inFlight: [URL: Task<CGFloat?, Never>] = [:]
+
+    func ratio(for url: URL) async -> CGFloat? {
+        if let cached = cachedRatios[url] {
+            return cached
+        }
+
+        if let existingTask = inFlight[url] {
+            return await existingTask.value
+        }
+
+        let task = Task(priority: .utility) {
+            await Self.loadRatio(for: url)
+        }
+        inFlight[url] = task
+
+        let ratio = await task.value
+        inFlight[url] = nil
+
+        if let ratio {
+            cachedRatios[url] = ratio
+        }
+
+        return ratio
+    }
+
+    private static func loadRatio(for url: URL) async -> CGFloat? {
+        let asset = AVURLAsset(url: url)
+
+        do {
+            let tracks = try await asset.loadTracks(withMediaType: .video)
+            guard let track = tracks.first else { return nil }
+
+            let naturalSize = try await track.load(.naturalSize)
+            let preferredTransform = try await track.load(.preferredTransform)
+            let transformedSize = naturalSize.applying(preferredTransform)
+
+            let width = abs(transformedSize.width)
+            let height = abs(transformedSize.height)
+            guard width > 0, height > 0 else { return nil }
+
+            return max(0.4, min(width / height, 3.0))
+        } catch {
+            return nil
+        }
+    }
+}
+
 private struct NoteVideoPlayerView: View {
     let url: URL
     let layout: NoteContentMediaLayout
@@ -1968,7 +2039,7 @@ private struct NoteVideoPlayerView: View {
     @State private var videoAspectRatio: CGFloat = 16.0 / 9.0
     @State private var suppressSharedMuteSync = false
     @State private var globalFrame: CGRect = .zero
-    private let muteSyncTimer = Timer.publish(every: 0.15, on: .main, in: .common).autoconnect()
+    @State private var pendingAutoplayTask: Task<Void, Never>?
 
     init(
         url: URL,
@@ -2007,7 +2078,7 @@ private struct NoteVideoPlayerView: View {
         )
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(videoViewportObserver)
-        .task(id: url) {
+        .task(id: url, priority: .utility) {
             await loadVideoAspectRatio()
         }
         .onAppear {
@@ -2026,11 +2097,15 @@ private struct NoteVideoPlayerView: View {
         .onChange(of: playbackCoordinator.activeVideoID) { _, _ in
             applyPlaybackPolicy()
         }
-        .onReceive(muteSyncTimer) { _ in
+        .onReceive(player.publisher(for: \.isMuted).removeDuplicates()) { _ in
             syncMutePreferenceFromPlayer()
+        }
+        .onReceive(player.publisher(for: \.timeControlStatus).removeDuplicates()) { _ in
             syncPlaybackPriorityFromPlayer()
         }
         .onDisappear {
+            pendingAutoplayTask?.cancel()
+            pendingAutoplayTask = nil
             playbackCoordinator.videoDidDisappear(playbackID)
             syncMutePreferenceFromPlayer()
             player.pause()
@@ -2043,7 +2118,12 @@ private struct NoteVideoPlayerView: View {
                 .preference(key: InlineVideoFramePreferenceKey.self, value: proxy.frame(in: .global))
         }
         .onPreferenceChange(InlineVideoFramePreferenceKey.self) { frame in
-            guard frame != globalFrame else { return }
+            let viewportHeight = UIScreen.main.bounds.height
+            guard InlineVideoAutoplayVisibilityPolicy.shouldReportFrameChange(
+                previous: globalFrame,
+                next: frame,
+                viewportHeight: viewportHeight
+            ) else { return }
             globalFrame = frame
             updateAutoplayEligibility(using: frame)
         }
@@ -2164,25 +2244,17 @@ private struct NoteVideoPlayerView: View {
     }
 
     private func loadVideoAspectRatio() async {
-        let asset = AVURLAsset(url: url)
-        do {
-            let tracks = try await asset.loadTracks(withMediaType: .video)
-            guard let track = tracks.first else { return }
+        if layout == .feed {
+            try? await Task.sleep(for: .milliseconds(180))
+            guard !Task.isCancelled else { return }
+        }
 
-            let naturalSize = try await track.load(.naturalSize)
-            let preferredTransform = try await track.load(.preferredTransform)
-            let transformedSize = naturalSize.applying(preferredTransform)
+        guard let ratio = await NoteVideoAspectRatioCache.shared.ratio(for: url) else { return }
+        guard !Task.isCancelled else { return }
 
-            let width = abs(transformedSize.width)
-            let height = abs(transformedSize.height)
-            guard width > 0, height > 0 else { return }
-
-            let ratio = max(0.4, min(width / height, 3.0))
-            await MainActor.run {
-                videoAspectRatio = ratio
-            }
-        } catch {
-            // Keep default fallback ratio when metadata cannot be loaded.
+        await MainActor.run {
+            guard abs(videoAspectRatio - ratio) > 0.02 else { return }
+            videoAspectRatio = ratio
         }
     }
 
@@ -2201,10 +2273,32 @@ private struct NoteVideoPlayerView: View {
 
         if isActiveVideo {
             if appSettings.autoplayVideos && !isAlreadyPlaying {
-                player.play()
+                scheduleAutoplayStart()
             }
-        } else if isAlreadyPlaying {
-            player.pause()
+        } else {
+            pendingAutoplayTask?.cancel()
+            pendingAutoplayTask = nil
+            if isAlreadyPlaying {
+                player.pause()
+            }
+        }
+    }
+
+    private func scheduleAutoplayStart() {
+        guard pendingAutoplayTask == nil else { return }
+
+        pendingAutoplayTask = Task { @MainActor in
+            defer { pendingAutoplayTask = nil }
+
+            try? await Task.sleep(for: .milliseconds(140))
+            guard !Task.isCancelled else { return }
+            guard playbackCoordinator.activeVideoID == playbackID else { return }
+            guard appSettings.autoplayVideos else { return }
+
+            let isAlreadyPlaying = player.timeControlStatus == .playing || player.rate > 0
+            guard !isAlreadyPlaying else { return }
+
+            player.play()
         }
     }
 
@@ -2365,6 +2459,7 @@ private actor EmbeddedReferencedNoteCache {
 
 private struct NostrEventReferenceFallbackView: View {
     let nostrURI: String
+    @EnvironmentObject private var appSettings: AppSettingsStore
 
     private var identifier: String {
         let normalized = nostrURI
@@ -2390,11 +2485,11 @@ private struct NostrEventReferenceFallbackView: View {
         .padding(12)
         .background(
             RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .fill(Color(.secondarySystemBackground))
+                .fill(appSettings.themePalette.quoteBackground)
         )
         .overlay(
             RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .stroke(Color(.separator), lineWidth: 0.5)
+                .stroke(appSettings.themePalette.separator, lineWidth: 0.5)
         )
     }
 
@@ -2402,19 +2497,19 @@ private struct NostrEventReferenceFallbackView: View {
     private func fallbackLabel(showExternalIcon: Bool) -> some View {
         HStack(spacing: 10) {
             Image(systemName: "quote.bubble")
-                .foregroundStyle(.secondary)
+                .foregroundStyle(appSettings.themePalette.mutedForeground)
             VStack(alignment: .leading, spacing: 2) {
                 Text("Open referenced note")
                     .font(.subheadline.weight(.semibold))
                 Text(shortIdentifier(identifier))
                     .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(appSettings.themePalette.mutedForeground)
                     .lineLimit(1)
             }
             Spacer()
             if showExternalIcon {
                 Image(systemName: "arrow.up.right.square")
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(appSettings.themePalette.mutedForeground)
             }
         }
     }
@@ -2491,7 +2586,7 @@ private struct NostrEventReferenceCardView: View {
                     .font(.subheadline.weight(.semibold))
                 Text(shortIdentifier(normalizedIdentifier))
                     .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(appSettings.themePalette.mutedForeground)
                     .lineLimit(1)
             }
             Spacer(minLength: 0)
@@ -2499,11 +2594,11 @@ private struct NostrEventReferenceCardView: View {
         .padding(12)
         .background(
             RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .fill(Color(.secondarySystemBackground))
+                .fill(appSettings.themePalette.quoteBackground)
         )
         .overlay(
             RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .stroke(Color(.separator), lineWidth: 0.5)
+                .stroke(appSettings.themePalette.separator, lineWidth: 0.5)
         )
     }
 
@@ -2532,7 +2627,7 @@ private struct NostrEventReferenceCardView: View {
                         .lineLimit(1)
                     Text(item.handle)
                         .font(.caption)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(appSettings.themePalette.mutedForeground)
                         .lineLimit(1)
                 }
 
@@ -2540,7 +2635,7 @@ private struct NostrEventReferenceCardView: View {
 
                 Text(RelativeTimestampFormatter.shortString(from: item.displayEvent.createdAtDate))
                     .font(.caption2)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(appSettings.themePalette.mutedForeground)
                     .lineLimit(1)
             }
 
@@ -2554,11 +2649,11 @@ private struct NostrEventReferenceCardView: View {
         .padding(10)
         .background(
             RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .fill(Color(.secondarySystemBackground))
+                .fill(appSettings.themePalette.quoteBackground)
         )
         .overlay(
             RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .stroke(Color(.separator), lineWidth: 0.5)
+                .stroke(appSettings.themePalette.separator, lineWidth: 0.5)
         )
     }
 
@@ -2584,16 +2679,16 @@ private struct NostrEventReferenceCardView: View {
         .frame(width: 30, height: 30)
         .clipShape(Circle())
         .overlay {
-            Circle().stroke(Color(.separator), lineWidth: 0.5)
+            Circle().stroke(appSettings.themePalette.separator, lineWidth: 0.5)
         }
     }
 
     private func fallbackAvatar(for item: FeedItem) -> some View {
         ZStack {
-            Circle().fill(Color(.secondarySystemFill))
+            Circle().fill(appSettings.themePalette.secondaryFill)
             Text(String(item.displayName.prefix(1)).uppercased())
                 .font(.caption.weight(.semibold))
-                .foregroundStyle(.secondary)
+                .foregroundStyle(appSettings.themePalette.mutedForeground)
         }
     }
 
@@ -3119,7 +3214,7 @@ private struct NoteZoomableImageView: UIViewRepresentable {
     }
 
     func makeUIView(context: Context) -> UIScrollView {
-        let scrollView = UIScrollView()
+        let scrollView = LayoutAwareZoomScrollView()
         scrollView.backgroundColor = .clear
         scrollView.delegate = context.coordinator
         scrollView.minimumZoomScale = 1
@@ -3143,6 +3238,9 @@ private struct NoteZoomableImageView: UIViewRepresentable {
         scrollView.addGestureRecognizer(doubleTap)
         context.coordinator.doubleTapRecognizer = doubleTap
         context.coordinator.scrollView = scrollView
+        scrollView.onLayout = { [weak coordinator = context.coordinator] scrollView in
+            coordinator?.handleLayout(in: scrollView)
+        }
 
         return scrollView
     }
@@ -3166,6 +3264,7 @@ private struct NoteZoomableImageView: UIViewRepresentable {
         weak var doubleTapRecognizer: UITapGestureRecognizer?
         var onZoomStateChange: (Bool) -> Void
 
+        private var currentAsset: NoteMediaAsset?
         private var currentAssetIdentifier: ObjectIdentifier?
         private var lastReportedZoomedState = false
         private var lastBoundsSize: CGSize = .zero
@@ -3176,7 +3275,17 @@ private struct NoteZoomableImageView: UIViewRepresentable {
 
         func updateAsset(_ asset: NoteMediaAsset, in scrollView: UIScrollView) {
             self.scrollView = scrollView
+            currentAsset = asset
 
+            applyLayout(for: asset, in: scrollView)
+        }
+
+        func handleLayout(in scrollView: UIScrollView) {
+            guard let currentAsset else { return }
+            applyLayout(for: currentAsset, in: scrollView)
+        }
+
+        private func applyLayout(for asset: NoteMediaAsset, in scrollView: UIScrollView) {
             let assetIdentifier = Self.assetIdentifier(for: asset)
             let boundsSize = scrollView.bounds.size
             let assetChanged = currentAssetIdentifier != assetIdentifier
@@ -3186,6 +3295,8 @@ private struct NoteZoomableImageView: UIViewRepresentable {
                 scrollView.zoomScale = 1
                 reportZoomState(false)
             }
+
+            guard boundsSize.width > 0, boundsSize.height > 0 else { return }
 
             if assetChanged ||
                 lastBoundsSize != boundsSize ||
@@ -3291,6 +3402,15 @@ private struct NoteZoomableImageView: UIViewRepresentable {
                 return ObjectIdentifier(image)
             }
         }
+    }
+}
+
+private final class LayoutAwareZoomScrollView: UIScrollView {
+    var onLayout: ((UIScrollView) -> Void)?
+
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        onLayout?(self)
     }
 }
 

@@ -63,12 +63,12 @@ struct FeedRowView: View {
                     HStack(alignment: .firstTextBaseline, spacing: 6) {
                         HStack(alignment: .firstTextBaseline, spacing: 6) {
                             Text(item.displayName)
-                                .font(.headline)
+                                .font(appSettings.appFont(.headline, weight: .semibold))
                                 .lineLimit(1)
 
                             Text(item.handle)
-                                .font(.subheadline)
-                                .foregroundStyle(.secondary)
+                                .font(appSettings.appFont(.subheadline))
+                                .foregroundStyle(mutedChromeColor)
                                 .lineLimit(1)
                         }
                         .contentShape(Rectangle())
@@ -84,8 +84,8 @@ struct FeedRowView: View {
                             }
 
                         Text(RelativeTimestampFormatter.shortString(from: item.displayEvent.createdAtDate))
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
+                            .font(appSettings.appFont(.caption1))
+                            .foregroundStyle(mutedChromeColor)
                             .lineLimit(1)
                             .contentShape(Rectangle())
                             .onTapGesture {
@@ -125,13 +125,13 @@ struct FeedRowView: View {
                                     Image(systemName: "bubble.right")
                                     if commentCount > 0 {
                                         Text("\(commentCount)")
-                                            .font(.footnote)
+                                            .font(appSettings.appFont(.footnote))
                                     }
                                 }
                                 .frame(minWidth: 34, minHeight: 28, alignment: .leading)
                             }
                             .buttonStyle(.plain)
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(mutedChromeColor)
                             .accessibilityLabel("Reply")
 
                             Button {
@@ -143,12 +143,13 @@ struct FeedRowView: View {
                                     .frame(minWidth: 34, minHeight: 28, alignment: .leading)
                             }
                             .buttonStyle(.plain)
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(mutedChromeColor)
                             .accessibilityLabel("Re-share")
 
                             ReactionButton(
                                 isLiked: isLikedByCurrentUser,
-                                count: visibleReactionCount
+                                count: visibleReactionCount,
+                                inactiveColor: mutedChromeColor
                             ) {
                                 Task {
                                     await handleReactionTap()
@@ -160,10 +161,10 @@ struct FeedRowView: View {
                                     .frame(minWidth: 34, minHeight: 28, alignment: .leading)
                             }
                             .buttonStyle(.plain)
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(mutedChromeColor)
                             .accessibilityLabel("Share")
                         }
-                        .font(.headline)
+                        .font(appSettings.appFont(.headline))
                     }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -239,6 +240,10 @@ struct FeedRowView: View {
 
     private var visibleReactionCount: Int {
         reactionCount
+    }
+
+    private var mutedChromeColor: Color {
+        appSettings.themePalette.mutedForeground
     }
 
     private var isLikedByCurrentUser: Bool {
@@ -324,13 +329,13 @@ struct FeedRowView: View {
             HStack(spacing: 6) {
                 Image(systemName: "arrow.2.squarepath")
                     .font(.caption.weight(.semibold))
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(mutedChromeColor)
 
                 AvatarView(url: item.actorAvatarURL, fallback: item.actorDisplayName, size: 18)
 
                 Text("\(item.actorDisplayName) reposted")
                     .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(mutedChromeColor)
                     .lineLimit(1)
 
                 Spacer(minLength: 0)
@@ -358,14 +363,14 @@ struct FeedRowView: View {
         let content = HStack(spacing: 6) {
             Image(systemName: "arrow.turn.up.left")
                 .font(.caption.weight(.semibold))
-                .foregroundStyle(.secondary)
+                .foregroundStyle(mutedChromeColor)
 
             (
                 Text("Replying to ")
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(mutedChromeColor)
                 +
                 Text(snippet)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(mutedChromeColor)
             )
             .font(.caption)
             .lineLimit(1)
@@ -393,7 +398,7 @@ struct FeedRowView: View {
         } label: {
             Image(systemName: "ellipsis")
                 .font(.subheadline.weight(.semibold))
-                .foregroundStyle(.secondary)
+                .foregroundStyle(mutedChromeColor)
                 .frame(width: 28, height: 28)
                 .contentShape(Rectangle())
         }

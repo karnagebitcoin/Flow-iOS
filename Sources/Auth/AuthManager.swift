@@ -5,6 +5,7 @@ enum AuthManagerError: LocalizedError {
     case invalidNsecOrHex
     case invalidNpub
     case keyGenerationFailed
+    case iCloudBackupUnavailable
 
     var errorDescription: String? {
         switch self {
@@ -14,6 +15,8 @@ enum AuthManagerError: LocalizedError {
             return "Invalid npub public key."
         case .keyGenerationFailed:
             return "Could not generate a new keypair right now."
+        case .iCloudBackupUnavailable:
+            return "We couldn’t find that iCloud-backed private key on this device yet."
         }
     }
 }
@@ -52,6 +55,24 @@ final class AuthManager: ObservableObject {
 
     func privateKeyMetadata(for account: AuthAccount) -> AuthPrivateKeyMetadata? {
         store.privateKeyMetadata(for: account.id)
+    }
+
+    func iCloudRestoreCandidates() -> [AuthICloudRestoreCandidate] {
+        store.iCloudPrivateKeyBackups().compactMap { backup in
+            guard let pubkey = backup.pubkey,
+                  let npub = PublicKey(hex: pubkey)?.npub else {
+                return nil
+            }
+
+            return AuthICloudRestoreCandidate(
+                accountID: backup.accountID,
+                pubkey: pubkey,
+                npub: npub,
+                createdAt: backup.createdAt,
+                modifiedAt: backup.modifiedAt,
+                isAlreadyOnDevice: storedAccounts.contains(where: { $0.id == backup.accountID })
+            )
+        }
     }
 
     @discardableResult
@@ -129,6 +150,24 @@ final class AuthManager: ObservableObject {
             privateKeyBackupEnabled: false
         )
         return try upsertAndActivate(stored)
+    }
+
+    @discardableResult
+    func restoreFromICloud(_ candidate: AuthICloudRestoreCandidate) throws -> AuthAccount {
+        guard store.privateKey(for: candidate.accountID) != nil else {
+            throw AuthManagerError.iCloudBackupUnavailable
+        }
+
+        let stored = StoredAuthAccount(
+            pubkey: candidate.pubkey,
+            npub: candidate.npub,
+            signerType: .nsec,
+            privateKeyBackupEnabled: true
+        )
+        return try upsertAndActivate(
+            stored,
+            backupPrivateKeyToICloud: true
+        )
     }
 
     func switchAccount(to account: AuthAccount?) {

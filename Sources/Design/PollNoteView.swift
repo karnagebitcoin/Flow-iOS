@@ -24,7 +24,7 @@ struct PollNoteView: View {
             if let subtitleText {
                 Text(subtitleText)
                     .font(.footnote)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(pollMetadataForeground)
             }
 
             VStack(spacing: 8) {
@@ -38,7 +38,7 @@ struct PollNoteView: View {
             if let feedbackMessage, !feedbackMessage.isEmpty {
                 Text(feedbackMessage)
                     .font(.footnote)
-                    .foregroundStyle(feedbackIsError ? .red : .secondary)
+                    .foregroundStyle(feedbackIsError ? .red : pollMetadataForeground)
             }
 
             if poll.format == .nip88, canSelectOptions {
@@ -68,11 +68,11 @@ struct PollNoteView: View {
         .padding(14)
         .background(
             RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .fill(Color(.secondarySystemBackground))
+                .fill(pollCardBackground)
         )
         .overlay(
             RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .stroke(Color(.separator).opacity(0.28), lineWidth: 0.8)
+                .stroke(pollCardBorder, lineWidth: 0.8)
         )
         .task(id: taskIdentifier) {
             await loadResultsIfNeeded()
@@ -199,8 +199,8 @@ struct PollNoteView: View {
             if poll.pollType.allowsMultipleChoices {
                 statusBadge(
                     "Multiple Choice",
-                    foregroundColor: .secondary,
-                    backgroundColor: Color(.tertiarySystemFill)
+                    foregroundColor: pollNeutralBadgeForeground,
+                    backgroundColor: pollNeutralBadgeBackground
                 )
             }
 
@@ -229,11 +229,11 @@ struct PollNoteView: View {
                         .font(.caption.weight(.semibold))
                 }
             }
-            .foregroundStyle(.secondary)
+            .foregroundStyle(pollRefreshButtonForeground)
             .frame(width: 30, height: 30)
             .background(
                 Circle()
-                    .fill(Color(.tertiarySystemFill))
+                    .fill(pollRefreshButtonBackground)
             )
         }
         .buttonStyle(.plain)
@@ -271,7 +271,7 @@ struct PollNoteView: View {
         } label: {
             ZStack(alignment: .leading) {
                 RoundedRectangle(cornerRadius: 16, style: .continuous)
-                    .fill(Color(.tertiarySystemFill))
+                    .fill(pollOptionBackground)
 
                 GeometryReader { proxy in
                     RoundedRectangle(cornerRadius: 16, style: .continuous)
@@ -295,10 +295,10 @@ struct PollNoteView: View {
                                     .scaledToFill()
                             default:
                                 RoundedRectangle(cornerRadius: 10, style: .continuous)
-                                    .fill(Color(.quaternarySystemFill))
+                                    .fill(pollImagePlaceholderBackground)
                                     .overlay {
                                         Image(systemName: "photo")
-                                            .foregroundStyle(.secondary)
+                                            .foregroundStyle(pollImagePlaceholderForeground)
                                     }
                             }
                         }
@@ -316,7 +316,7 @@ struct PollNoteView: View {
                         if shouldShowResults {
                             Text("\(voteCount) vote\(voteCount == 1 ? "" : "s")")
                                 .font(.caption)
-                                .foregroundStyle(.secondary)
+                                .foregroundStyle(pollMetadataForeground)
                         }
                     }
 
@@ -327,11 +327,11 @@ struct PollNoteView: View {
                     } else if shouldShowResults {
                         Text(fillFraction.formatted(.percent.precision(.fractionLength(0))))
                             .font(.caption.weight(.semibold))
-                            .foregroundStyle(isWinningOption ? .primary : .secondary)
+                            .foregroundStyle(isWinningOption ? appSettings.primaryColor : pollMetadataForeground)
                     } else {
                         Image(systemName: isSelectedForSubmission ? "checkmark.circle.fill" : "circle")
                             .font(.headline)
-                            .foregroundStyle(isSelectedForSubmission ? Color.accentColor : .secondary)
+                            .foregroundStyle(isSelectedForSubmission ? Color.accentColor : pollMetadataForeground)
                     }
                 }
                 .padding(.horizontal, 12)
@@ -357,7 +357,7 @@ struct PollNoteView: View {
         HStack(spacing: 10) {
             Text("\((pollResults?.totalVotes ?? 0)) vote\((pollResults?.totalVotes ?? 0) == 1 ? "" : "s")")
                 .font(.footnote)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(pollMetadataForeground)
 
             Spacer(minLength: 0)
 
@@ -373,10 +373,12 @@ struct PollNoteView: View {
         isHighlighted: Bool
     ) -> Color {
         if shouldShowResults {
-            return isWinningOption ? Color.accentColor.opacity(0.20) : Color(.quaternarySystemFill)
+            return isWinningOption
+                ? (appSettings.themePalette.pollStyle?.optionWinningBackground ?? Color.accentColor.opacity(0.20))
+                : (appSettings.themePalette.pollStyle?.optionResultBackground ?? Color(.quaternarySystemFill))
         }
         if isHighlighted {
-            return Color.accentColor.opacity(0.18)
+            return appSettings.themePalette.pollStyle?.optionSelectedBackground ?? Color.accentColor.opacity(0.18)
         }
         return .clear
     }
@@ -386,12 +388,52 @@ struct PollNoteView: View {
         isHighlighted: Bool
     ) -> Color {
         if shouldShowResults, isWinningOption {
-            return Color.accentColor.opacity(0.35)
+            return appSettings.themePalette.pollStyle?.optionWinningBorder ?? Color.accentColor.opacity(0.35)
         }
         if isHighlighted {
-            return Color.accentColor.opacity(0.42)
+            return appSettings.themePalette.pollStyle?.optionSelectedBorder ?? Color.accentColor.opacity(0.42)
         }
-        return Color(.separator).opacity(0.22)
+        return appSettings.themePalette.pollStyle?.optionBorder ?? Color(.separator).opacity(0.22)
+    }
+
+    private var pollCardBackground: Color {
+        appSettings.themePalette.pollStyle?.cardBackground ?? Color(.secondarySystemBackground)
+    }
+
+    private var pollCardBorder: Color {
+        appSettings.themePalette.pollStyle?.cardBorder ?? Color(.separator).opacity(0.28)
+    }
+
+    private var pollMetadataForeground: Color {
+        appSettings.themePalette.pollStyle?.metadataForeground ?? .secondary
+    }
+
+    private var pollOptionBackground: Color {
+        appSettings.themePalette.pollStyle?.optionBackground ?? Color(.tertiarySystemFill)
+    }
+
+    private var pollImagePlaceholderBackground: Color {
+        appSettings.themePalette.pollStyle?.imagePlaceholderBackground ?? Color(.quaternarySystemFill)
+    }
+
+    private var pollImagePlaceholderForeground: Color {
+        appSettings.themePalette.pollStyle?.imagePlaceholderForeground ?? .secondary
+    }
+
+    private var pollNeutralBadgeBackground: Color {
+        appSettings.themePalette.pollStyle?.neutralBadgeBackground ?? Color(.tertiarySystemFill)
+    }
+
+    private var pollNeutralBadgeForeground: Color {
+        appSettings.themePalette.pollStyle?.neutralBadgeForeground ?? .secondary
+    }
+
+    private var pollRefreshButtonBackground: Color {
+        appSettings.themePalette.pollStyle?.refreshButtonBackground ?? Color(.tertiarySystemFill)
+    }
+
+    private var pollRefreshButtonForeground: Color {
+        appSettings.themePalette.pollStyle?.refreshButtonForeground ?? .secondary
     }
 
     private func toggleSelection(for optionID: String) {

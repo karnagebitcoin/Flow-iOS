@@ -79,3 +79,14 @@ struct GeneratedNostrAccount: Hashable, Sendable {
     let npub: String
     let nsec: String
 }
+
+struct AuthICloudRestoreCandidate: Identifiable, Hashable, Sendable {
+    let accountID: String
+    let pubkey: String
+    let npub: String
+    let createdAt: Date?
+    let modifiedAt: Date?
+    let isAlreadyOnDevice: Bool
+
+    var id: String { accountID }
+}

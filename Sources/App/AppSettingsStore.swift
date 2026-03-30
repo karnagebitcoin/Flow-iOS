@@ -119,6 +119,15 @@ enum AppThemeOption: String, CaseIterable, Codable, Identifiable, Hashable, Send
         }
     }
 
+    var qrShareBackgroundResourceName: String? {
+        switch self {
+        case .sakura:
+            return "sakura-share-bg.json"
+        case .system, .black, .white, .dark, .light:
+            return nil
+        }
+    }
+
     var palette: AppThemePalette {
         switch self {
         case .system:
@@ -342,7 +351,12 @@ final class AppSettingsStore: ObservableObject {
     @Published private var persistedSettings: PersistedSettings
     @Published private(set) var notificationAuthorizationStatus: UNAuthorizationStatus = .notDetermined
     @Published private(set) var premiumThemesUnlocked = false
+    @Published private(set) var premiumFontsUnlocked = false
     @Published private(set) var previewTheme: AppThemeOption?
+    @Published private(set) var previewFontOption: AppFontOption?
+    @Published private(set) var isFlowPlusPreviewUnlocked = false
+    @Published private(set) var hasUsedFlowPlusPreviewThisSession = false
+    @Published private(set) var hasUsedPremiumThemePreviewThisSession = false
 
     private let defaults: UserDefaults
     private let authStore: AuthStore
@@ -353,6 +367,7 @@ final class AppSettingsStore: ObservableObject {
         private enum CodingKeys: String, CodingKey {
             case primaryColor
             case theme
+            case fontOption
             case fontSize
             case breakReminderInterval
             case liveReactsEnabled
@@ -378,6 +393,7 @@ final class AppSettingsStore: ObservableObject {
 
         var primaryColor: StoredColor?
         var theme: AppThemeOption = .system
+        var fontOption: AppFontOption = .system
         var fontSize: AppFontSize = .medium
         var breakReminderInterval: BreakReminderInterval = .fortyMinutes
         var liveReactsEnabled: Bool = true
@@ -406,6 +422,7 @@ final class AppSettingsStore: ObservableObject {
             let container = try decoder.container(keyedBy: CodingKeys.self)
             primaryColor = try container.decodeIfPresent(StoredColor.self, forKey: .primaryColor)
             theme = (try? container.decode(AppThemeOption.self, forKey: .theme)) ?? .system
+            fontOption = (try? container.decode(AppFontOption.self, forKey: .fontOption)) ?? .system
             fontSize = (try? container.decode(AppFontSize.self, forKey: .fontSize)) ?? .medium
             breakReminderInterval = (try? container.decode(BreakReminderInterval.self, forKey: .breakReminderInterval)) ?? .fortyMinutes
             liveReactsEnabled = try container.decodeIfPresent(Bool.self, forKey: .liveReactsEnabled) ?? true
@@ -444,6 +461,7 @@ final class AppSettingsStore: ObservableObject {
             var container = encoder.container(keyedBy: CodingKeys.self)
             try container.encodeIfPresent(primaryColor, forKey: .primaryColor)
             try container.encode(theme, forKey: .theme)
+            try container.encode(fontOption, forKey: .fontOption)
             try container.encode(fontSize, forKey: .fontSize)
             try container.encode(breakReminderInterval, forKey: .breakReminderInterval)
             try container.encode(liveReactsEnabled, forKey: .liveReactsEnabled)
@@ -579,6 +597,15 @@ final class AppSettingsStore: ObservableObject {
         get { persistedSettings.fontSize }
         set {
             persistedSettings.fontSize = newValue
+            persist()
+        }
+    }
+
+    var fontOption: AppFontOption {
+        get { persistedSettings.fontOption }
+        set {
+            previewFontOption = nil
+            persistedSettings.fontOption = newValue
             persist()
         }
     }
@@ -847,28 +874,86 @@ final class AppSettingsStore: ObservableObject {
         activeTheme.palette
     }
 
+    var activeFontOption: AppFontOption {
+        if let previewFontOption, previewFontOption.isEnabled {
+            return previewFontOption
+        }
+        let requestedFontOption = persistedSettings.fontOption
+        return requestedFontOption.isSelectable(with: premiumFontsUnlocked) ? requestedFontOption : .system
+    }
+
+    var hasFlowPlusCustomizationAccess: Bool {
+        premiumThemesUnlocked || premiumFontsUnlocked || isFlowPlusPreviewUnlocked
+    }
+
     var canCustomizePrimaryColor: Bool {
         activeTheme.fixedPrimaryColor == nil
     }
 
-    func beginThemePreview(_ theme: AppThemeOption) {
-        guard theme.isEnabled else { return }
+    func canBeginThemePreview(_ theme: AppThemeOption) -> Bool {
+        guard theme.isEnabled else { return false }
+        guard theme.requiresFlowPlus else { return true }
+        guard !premiumThemesUnlocked else { return true }
+        return !hasUsedPremiumThemePreviewThisSession || previewTheme == theme
+    }
+
+    func canBeginFlowPlusPreview() -> Bool {
+        guard !premiumThemesUnlocked || !premiumFontsUnlocked else { return true }
+        return !hasUsedFlowPlusPreviewThisSession || isFlowPlusPreviewUnlocked
+    }
+
+    @discardableResult
+    func beginFlowPlusPreview() -> Bool {
+        guard canBeginFlowPlusPreview() else { return false }
+        isFlowPlusPreviewUnlocked = true
+        if !premiumThemesUnlocked || !premiumFontsUnlocked {
+            hasUsedFlowPlusPreviewThisSession = true
+        }
+        return true
+    }
+
+    @discardableResult
+    func beginThemePreview(_ theme: AppThemeOption) -> Bool {
+        guard canBeginThemePreview(theme) else { return false }
         previewTheme = theme
+        if theme.requiresFlowPlus && !premiumThemesUnlocked {
+            hasUsedPremiumThemePreviewThisSession = true
+        }
+        return true
     }
 
     func endThemePreview() {
         previewTheme = nil
     }
 
-    func updatePremiumThemesUnlocked(_ unlocked: Bool) {
-        guard premiumThemesUnlocked != unlocked else { return }
+    func beginFontPreview(_ option: AppFontOption) {
+        guard option.isEnabled else { return }
+        previewFontOption = option
+    }
+
+    func endFontPreview() {
+        previewFontOption = nil
+    }
+
+    func updateFlowPlusAccess(_ unlocked: Bool) {
+        guard premiumThemesUnlocked != unlocked || premiumFontsUnlocked != unlocked else { return }
         premiumThemesUnlocked = unlocked
+        premiumFontsUnlocked = unlocked
+        if unlocked {
+            isFlowPlusPreviewUnlocked = false
+        }
 
         if unlocked, let previewTheme, previewTheme.requiresFlowPlus {
             persistedSettings.theme = previewTheme
             self.previewTheme = nil
-            persist()
         }
+
+        if unlocked, let previewFontOption, previewFontOption.requiresFlowPlus {
+            persistedSettings.fontOption = previewFontOption
+            self.previewFontOption = nil
+        }
+
+        persist()
     }
 
     var preferredColorScheme: ColorScheme? {

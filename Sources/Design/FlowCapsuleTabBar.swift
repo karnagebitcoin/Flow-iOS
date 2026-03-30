@@ -2,6 +2,7 @@ import SwiftUI
 
 struct FlowCapsuleTabBar<Selection: Hashable>: View {
     @Environment(\.colorScheme) private var colorScheme
+    @EnvironmentObject private var appSettings: AppSettingsStore
     @Binding private var selection: Selection
 
     private let items: [Selection]
@@ -76,36 +77,41 @@ struct FlowCapsuleTabBar<Selection: Hashable>: View {
     }
 
     private var unselectedFill: Color {
-        .clear
+        appSettings.themePalette.capsuleTabStyle?.background ?? .clear
     }
 
     private var selectedFill: Color {
-        colorScheme == .dark
-            ? Color.white.opacity(0.12)
-            : Color.black.opacity(0.06)
+        appSettings.themePalette.capsuleTabStyle?.selectedBackground
+            ?? (colorScheme == .dark
+                ? Color.white.opacity(0.12)
+                : Color.black.opacity(0.06))
     }
 
     private var unselectedStroke: Color {
-        colorScheme == .dark
-            ? Color.white.opacity(0.14)
-            : Color.black.opacity(0.12)
+        appSettings.themePalette.capsuleTabStyle?.border
+            ?? (colorScheme == .dark
+                ? Color.white.opacity(0.14)
+                : Color.black.opacity(0.12))
     }
 
     private var selectedStroke: Color {
-        colorScheme == .dark
-            ? Color.white.opacity(0.2)
-            : Color.black.opacity(0.14)
+        appSettings.themePalette.capsuleTabStyle?.selectedBorder
+            ?? (colorScheme == .dark
+                ? Color.white.opacity(0.2)
+                : Color.black.opacity(0.14))
     }
 
     private var unselectedForeground: Color {
-        colorScheme == .dark
-            ? Color.white.opacity(0.9)
-            : Color.black.opacity(0.84)
+        appSettings.themePalette.capsuleTabStyle?.foreground
+            ?? (colorScheme == .dark
+                ? Color.white.opacity(0.9)
+                : Color.black.opacity(0.84))
     }
 
     private var selectedForeground: Color {
-        colorScheme == .dark
-            ? .white
-            : .black
+        appSettings.themePalette.capsuleTabStyle?.selectedForeground
+            ?? (colorScheme == .dark
+                ? .white
+                : .black)
     }
 }

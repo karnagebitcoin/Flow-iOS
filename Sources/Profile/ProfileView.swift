@@ -4,6 +4,9 @@ import UIKit
 struct ProfileView: View {
     private static let feedHorizontalInset: CGFloat = 14
     private static let bottomScrollClearance: CGFloat = 110
+    private static let profileBannerHeight: CGFloat = 220
+    private static let profileAvatarSize: CGFloat = 96
+    private static let profileContentHorizontalPadding: CGFloat = 16
     @EnvironmentObject private var auth: AuthManager
     @EnvironmentObject private var appSettings: AppSettingsStore
     @EnvironmentObject private var toastCenter: AppToastCenter
@@ -302,142 +305,121 @@ struct ProfileView: View {
     }
 
     private var profileHeader: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            HStack {
-                Button {
-                    dismiss()
-                } label: {
-                    Image(systemName: "chevron.left")
-                        .font(.headline.weight(.semibold))
-                        .foregroundStyle(.primary)
-                        .frame(width: 36, height: 36)
-                        .background(Color(.secondarySystemBackground), in: Circle())
+        VStack(alignment: .leading, spacing: 0) {
+            profileBanner
+                .overlay(alignment: .topLeading) {
+                    profileBackButton
+                        .padding(.leading, 16)
+                        .padding(.top, 12)
+                        .zIndex(3)
                 }
-                .buttonStyle(.plain)
-                .accessibilityLabel("Back")
-
-                Spacer()
-
-                profileMenuButton
-            }
-
-            HStack(alignment: .top, spacing: 16) {
-                profileAvatar
-
-                VStack(alignment: .leading, spacing: 6) {
-                    Text(viewModel.displayName)
-                        .font(.custom("SF Pro Display", size: 28).weight(.heavy))
-                        .foregroundStyle(.primary)
-                        .lineLimit(2)
-
-                    HStack(alignment: .firstTextBaseline, spacing: 6) {
-                        Text(viewModel.handle)
-                            .font(.subheadline)
-                            .foregroundStyle(.secondary)
-                            .lineLimit(1)
-                            .truncationMode(.tail)
-
-                        if let profileFollowStatusIconName {
-                            Image(systemName: profileFollowStatusIconName)
-                                .font(.caption.weight(.semibold))
-                                .foregroundStyle(Color.accentColor)
-                                .accessibilityHidden(true)
-                        }
-                    }
-
-                    if viewModel.followsCurrentUser {
-                        Text("Follows you")
-                            .font(.footnote.weight(.medium))
-                            .foregroundStyle(.secondary)
-                    }
-
-                    Button {
-                        selectedFollowingRoute = FollowingListRoute(pubkey: viewModel.pubkey)
-                    } label: {
-                        HStack(spacing: 4) {
-                            Text("\(displayedFollowingCount) following")
-                            Image(systemName: "chevron.right")
-                                .font(.caption2.weight(.semibold))
-                        }
-                        .font(.footnote.weight(.semibold))
-                        .foregroundStyle(Color.accentColor)
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel("View following list")
+                .overlay(alignment: .topTrailing) {
+                    profileMenuButton
+                        .padding(.trailing, 16)
+                        .padding(.top, 12)
+                        .zIndex(4)
                 }
 
-                Spacer(minLength: 0)
-            }
+            VStack(alignment: .leading, spacing: 14) {
+                HStack(alignment: .bottom, spacing: 16) {
+                    profileAvatar
 
-            if let about = viewModel.about, !about.isEmpty {
-                ProfileAboutTextView(
-                    text: about,
-                    onProfileTap: { pubkey in
-                        openProfile(pubkey: pubkey)
-                    },
-                    onHashtagTap: { hashtag in
-                        openHashtagFeed(hashtag: hashtag)
-                    }
-                )
-            }
+                    Spacer(minLength: 0)
 
-            if hasVisibleInfoRows {
-                VStack(alignment: .leading, spacing: 10) {
-                    if let nip05 = viewModel.nip05, !nip05.isEmpty {
-                        infoRow(text: nip05, systemImage: "checkmark.seal")
-                    }
-                    if let websiteURL = viewModel.websiteURL {
-                        Link(destination: websiteURL) {
-                            infoRow(text: websiteDisplayText(for: websiteURL), systemImage: "link")
+                    actionRow
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+                profileIdentityBlock
+
+                if let about = viewModel.about, !about.isEmpty {
+                    ProfileAboutTextView(
+                        text: about,
+                        onProfileTap: { pubkey in
+                            openProfile(pubkey: pubkey)
+                        },
+                        onHashtagTap: { hashtag in
+                            openHashtagFeed(hashtag: hashtag)
                         }
-                        .buttonStyle(.plain)
-                    }
-                    if let lightning = viewModel.lightningAddress, !lightning.isEmpty {
-                        infoRow(text: lightning, systemImage: "bolt.fill")
+                    )
+                }
+
+                if hasVisibleInfoRows {
+                    VStack(alignment: .leading, spacing: 10) {
+                        if let nip05 = viewModel.nip05, !nip05.isEmpty {
+                            infoRow(text: nip05, systemImage: "checkmark.seal")
+                        }
+                        if let websiteURL = viewModel.websiteURL {
+                            Link(destination: websiteURL) {
+                                infoRow(text: websiteDisplayText(for: websiteURL), systemImage: "link")
+                            }
+                            .buttonStyle(.plain)
+                        }
+                        if let lightning = viewModel.lightningAddress, !lightning.isEmpty {
+                            infoRow(text: lightning, systemImage: "bolt.fill")
+                        }
                     }
                 }
-            }
 
-            actionRow
-
-            if let actionMessage = actionMessage, !actionMessage.isEmpty {
-                Text(actionMessage)
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
+                if let actionMessage = actionMessage, !actionMessage.isEmpty {
+                    Text(actionMessage)
+                        .font(appSettings.appFont(.footnote))
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
             }
+            .frame(width: profileContentWidth, alignment: .leading)
+            .padding(.horizontal, Self.profileContentHorizontalPadding)
+            .padding(.top, -(Self.profileAvatarSize / 2))
         }
-        .padding(.horizontal, 16)
-        .padding(.top, 12)
+        .frame(width: profileRowWidth, alignment: .leading)
         .padding(.bottom, 8)
     }
 
     private var profileHeaderSkeleton: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            HStack {
-                Button {
-                    dismiss()
-                } label: {
-                    Image(systemName: "chevron.left")
-                        .font(.headline.weight(.semibold))
-                        .foregroundStyle(.primary)
-                        .frame(width: 36, height: 36)
-                        .background(Color(.secondarySystemBackground), in: Circle())
+        VStack(alignment: .leading, spacing: 0) {
+            Rectangle()
+                .fill(Color(.secondarySystemFill))
+                .frame(height: Self.profileBannerHeight)
+                .overlay(alignment: .topLeading) {
+                    profileBackButton
+                        .padding(.leading, 16)
+                        .padding(.top, 12)
+                        .zIndex(3)
                 }
-                .buttonStyle(.plain)
-                .accessibilityLabel("Back")
+                .overlay(alignment: .topTrailing) {
+                    Circle()
+                        .fill(Color(.tertiarySystemFill))
+                        .frame(width: 36, height: 36)
+                        .padding(.trailing, 16)
+                        .padding(.top, 12)
+                        .zIndex(4)
+                }
 
-                Spacer()
+            VStack(alignment: .leading, spacing: 14) {
+                HStack(alignment: .bottom, spacing: 16) {
+                    Circle()
+                        .fill(Color(.secondarySystemFill))
+                        .frame(width: Self.profileAvatarSize, height: Self.profileAvatarSize)
 
-                Circle()
-                    .fill(Color(.secondarySystemFill))
-                    .frame(width: 36, height: 36)
-            }
+                    Spacer(minLength: 0)
 
-            HStack(alignment: .top, spacing: 16) {
-                Circle()
-                    .fill(Color(.secondarySystemFill))
-                    .frame(width: 88, height: 88)
+                    HStack(spacing: 10) {
+                        Capsule()
+                            .fill(Color(.secondarySystemFill))
+                            .frame(width: 44, height: 40)
+                        Capsule()
+                            .fill(Color(.secondarySystemFill))
+                            .frame(width: 44, height: 40)
+                        Capsule()
+                            .fill(Color(.secondarySystemFill))
+                            .frame(width: 44, height: 40)
+                        Capsule()
+                            .fill(Color(.secondarySystemFill))
+                            .frame(width: 44, height: 40)
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
 
                 VStack(alignment: .leading, spacing: 10) {
                     RoundedRectangle(cornerRadius: 8, style: .continuous)
@@ -453,47 +435,162 @@ struct ProfileView: View {
                         .frame(width: 120, height: 16)
                 }
 
-                Spacer(minLength: 0)
-            }
+                VStack(alignment: .leading, spacing: 8) {
+                    RoundedRectangle(cornerRadius: 6, style: .continuous)
+                        .fill(Color(.secondarySystemFill))
+                        .frame(height: 15)
+                    RoundedRectangle(cornerRadius: 6, style: .continuous)
+                        .fill(Color(.secondarySystemFill))
+                        .frame(height: 15)
+                    RoundedRectangle(cornerRadius: 6, style: .continuous)
+                        .fill(Color(.secondarySystemFill))
+                        .frame(width: 236, height: 15)
+                }
 
-            VStack(alignment: .leading, spacing: 8) {
-                RoundedRectangle(cornerRadius: 6, style: .continuous)
-                    .fill(Color(.secondarySystemFill))
-                    .frame(height: 15)
-                RoundedRectangle(cornerRadius: 6, style: .continuous)
-                    .fill(Color(.secondarySystemFill))
-                    .frame(height: 15)
-                RoundedRectangle(cornerRadius: 6, style: .continuous)
-                    .fill(Color(.secondarySystemFill))
-                    .frame(width: 236, height: 15)
+                VStack(alignment: .leading, spacing: 10) {
+                    skeletonInfoRow(width: 184)
+                    skeletonInfoRow(width: 152)
+                    skeletonInfoRow(width: 228)
+                }
             }
-
-            VStack(alignment: .leading, spacing: 10) {
-                skeletonInfoRow(width: 184)
-                skeletonInfoRow(width: 152)
-                skeletonInfoRow(width: 228)
-            }
-
-            HStack(spacing: 10) {
-                Capsule()
-                    .fill(Color(.secondarySystemFill))
-                    .frame(height: 40)
-                    .frame(maxWidth: .infinity)
-                Capsule()
-                    .fill(Color(.secondarySystemFill))
-                    .frame(width: 46, height: 40)
-                Capsule()
-                    .fill(Color(.secondarySystemFill))
-                    .frame(width: 46, height: 40)
-                Capsule()
-                    .fill(Color(.secondarySystemFill))
-                    .frame(width: 110, height: 40)
-            }
+            .frame(width: profileContentWidth, alignment: .leading)
+            .padding(.horizontal, Self.profileContentHorizontalPadding)
+            .padding(.top, -(Self.profileAvatarSize / 2))
         }
-        .padding(.horizontal, 16)
-        .padding(.top, 12)
+        .frame(width: profileRowWidth, alignment: .leading)
         .padding(.bottom, 8)
         .redacted(reason: .placeholder)
+    }
+
+    private var profileIdentityBlock: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(viewModel.displayName)
+                .font(appSettings.appFont(size: 30, weight: .heavy))
+                .foregroundStyle(.primary)
+                .lineLimit(2)
+                .fixedSize(horizontal: false, vertical: true)
+
+            HStack(alignment: .firstTextBaseline, spacing: 6) {
+                Text(viewModel.handle)
+                    .font(appSettings.appFont(.subheadline))
+                    .foregroundStyle(appSettings.themePalette.mutedForeground)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+
+                if let profileFollowStatusIconName {
+                    Image(systemName: profileFollowStatusIconName)
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(Color.accentColor)
+                        .accessibilityHidden(true)
+                }
+            }
+
+            if viewModel.followsCurrentUser {
+                Text("Follows you")
+                    .font(appSettings.appFont(.footnote, weight: .medium))
+                    .foregroundStyle(appSettings.themePalette.mutedForeground)
+            }
+
+            Button {
+                selectedFollowingRoute = FollowingListRoute(pubkey: viewModel.pubkey)
+            } label: {
+                HStack(spacing: 4) {
+                    Text("\(displayedFollowingCount) following")
+                    Image(systemName: "chevron.right")
+                        .font(.caption2.weight(.semibold))
+                }
+                .font(appSettings.appFont(.footnote, weight: .semibold))
+                .foregroundStyle(appSettings.themePalette.mutedForeground)
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("View following list")
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .layoutPriority(1)
+    }
+
+    private var profileBackButton: some View {
+        Button {
+            dismiss()
+        } label: {
+            Image(systemName: "chevron.left")
+                .font(.headline.weight(.semibold))
+                .foregroundStyle(profileBannerButtonForeground)
+                .frame(width: 36, height: 36)
+                .background(profileBannerButtonBackground())
+                .overlay {
+                    Circle()
+                        .stroke(profileBannerButtonBorder, lineWidth: 1)
+                }
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Back")
+    }
+
+    private var profileBanner: some View {
+        ZStack {
+            profileBannerContent
+
+            LinearGradient(
+                colors: [
+                    Color.black.opacity(0.08),
+                    Color.clear,
+                    appSettings.themePalette.groupedBackground.opacity(0.28)
+                ],
+                startPoint: .top,
+                endPoint: .bottom
+            )
+        }
+        .frame(maxWidth: .infinity)
+        .frame(height: Self.profileBannerHeight)
+        .background(appSettings.themePalette.secondaryBackground)
+        .clipped()
+    }
+
+    @ViewBuilder
+    private var profileBannerContent: some View {
+        if appSettings.textOnlyMode {
+            profileBannerFallback
+        } else if let bannerURL = viewModel.bannerURL {
+            CachedAsyncImage(url: bannerURL) { phase in
+                switch phase {
+                case .success(let image):
+                    image
+                        .resizable()
+                        .scaledToFill()
+                case .empty, .failure:
+                    profileBannerFallback
+                }
+            }
+        } else {
+            profileBannerFallback
+        }
+    }
+
+    private var profileBannerFallback: some View {
+        ZStack {
+            LinearGradient(
+                colors: [
+                    appSettings.themePalette.secondaryBackground,
+                    appSettings.primaryColor.opacity(0.20),
+                    appSettings.themePalette.background
+                ],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
+
+            Circle()
+                .fill(Color.white.opacity(0.42))
+                .frame(width: 152, height: 152)
+                .blur(radius: 18)
+                .offset(x: 120, y: -40)
+
+            Circle()
+                .fill(appSettings.primaryColor.opacity(0.16))
+                .frame(width: 188, height: 188)
+                .blur(radius: 28)
+                .offset(x: -132, y: 54)
+        }
     }
 
     private var profileAvatar: some View {
@@ -533,11 +630,16 @@ struct ProfileView: View {
                 profileAvatarFallback
             }
         }
-        .frame(width: 88, height: 88)
+        .frame(width: Self.profileAvatarSize, height: Self.profileAvatarSize)
+        .background(Circle().fill(appSettings.themePalette.background))
         .clipShape(Circle())
         .overlay {
-            Circle().stroke(Color(.separator).opacity(0.35), lineWidth: 0.8)
+            Circle().stroke(appSettings.themePalette.background, lineWidth: 4)
         }
+        .overlay {
+            Circle().stroke(Color(.separator).opacity(0.22), lineWidth: 0.8)
+        }
+        .shadow(color: Color.black.opacity(0.12), radius: 14, x: 0, y: 8)
     }
 
     private var profileAvatarFallback: some View {
@@ -562,57 +664,69 @@ struct ProfileView: View {
 
     private var actionRow: some View {
         HStack(spacing: 10) {
-            primaryActionButton
             if isOwnProfile {
-                iconActionButton(
-                    systemImage: "qrcode",
-                    isPrimary: false,
-                    isDisabled: false,
-                    accessibilityLabel: "QR Code",
-                    action: {
-                        isShowingProfileQR = true
-                    }
-                )
+                qrActionButton
+                editProfileActionButton
             } else {
-                iconActionButton(
-                    systemImage: "bubble.left.and.bubble.right",
-                    isPrimary: false,
-                    isDisabled: true,
-                    accessibilityLabel: "Direct Message",
-                    action: {}
-                )
-                iconActionButton(
-                    systemImage: "qrcode",
-                    isPrimary: false,
-                    isDisabled: false,
-                    accessibilityLabel: "QR Code",
-                    action: {
-                        isShowingProfileQR = true
-                    }
-                )
-            }
-
-            if !isOwnProfile {
-                actionButton(
-                    title: muteStore.isMuted(viewModel.pubkey) ? "Unmute" : "Mute",
-                    systemImage: muteStore.isMuted(viewModel.pubkey) ? "speaker.wave.2" : "speaker.slash",
-                    isPrimary: false,
-                    isDisabled: muteStore.isPublishing || auth.currentNsec == nil,
-                    action: {
-                        muteStore.toggleMute(viewModel.pubkey)
-                    }
-                )
+                muteActionButton
+                dmActionButton
+                qrActionButton
+                followActionButton
             }
         }
+        .frame(maxWidth: .infinity, alignment: .trailing)
     }
 
-    private var primaryActionButton: some View {
-        actionButton(
-            title: primaryActionTitle,
-            systemImage: isOwnProfile ? "square.and.pencil" : nil,
-            isPrimary: isOwnProfile || !followStore.isFollowing(viewModel.pubkey),
+    private var dmActionButton: some View {
+        iconActionButton(
+            systemImage: "bubble.left.and.bubble.right",
+            isPrimary: false,
+            isDisabled: true,
+            accessibilityLabel: "Direct Message",
+            action: {}
+        )
+    }
+
+    private var qrActionButton: some View {
+        iconActionButton(
+            systemImage: "qrcode",
+            isPrimary: false,
+            isDisabled: false,
+            accessibilityLabel: "QR Code",
+            action: {
+                isShowingProfileQR = true
+            }
+        )
+    }
+
+    private var muteActionButton: some View {
+        iconActionButton(
+            systemImage: muteStore.isMuted(viewModel.pubkey) ? "speaker.wave.2" : "speaker.slash",
+            isPrimary: false,
+            isDisabled: muteStore.isPublishing || auth.currentNsec == nil,
+            accessibilityLabel: muteStore.isMuted(viewModel.pubkey) ? "Unmute" : "Mute",
+            action: {
+                muteStore.toggleMute(viewModel.pubkey)
+            }
+        )
+    }
+
+    private var editProfileActionButton: some View {
+        iconActionButton(
+            systemImage: "square.and.pencil",
+            isPrimary: false,
             isDisabled: primaryActionDisabled,
-            expandsToFillRow: !isOwnProfile,
+            accessibilityLabel: "Edit profile",
+            action: primaryAction
+        )
+    }
+
+    private var followActionButton: some View {
+        iconActionButton(
+            systemImage: followStore.isFollowing(viewModel.pubkey) ? "person.crop.circle.badge.checkmark" : "plus",
+            isPrimary: !followStore.isFollowing(viewModel.pubkey),
+            isDisabled: false,
+            accessibilityLabel: followStore.isFollowing(viewModel.pubkey) ? "Following" : "Follow",
             action: primaryAction
         )
     }
@@ -624,6 +738,17 @@ struct ProfileView: View {
                     isShowingProfileEditor = true
                 } label: {
                     profileMenuLabel("Edit Profile", systemImage: "square.and.pencil")
+                }
+            } else {
+                Button {
+                    followStore.toggleFollow(viewModel.pubkey)
+                } label: {
+                    profileMenuLabel(
+                        followStore.isFollowing(viewModel.pubkey) ? "Unfollow" : "Follow",
+                        systemImage: followStore.isFollowing(viewModel.pubkey)
+                            ? "person.crop.circle.badge.minus"
+                            : "person.crop.circle.badge.plus"
+                    )
                 }
             }
             Button {
@@ -639,9 +764,13 @@ struct ProfileView: View {
         } label: {
             Image(systemName: "ellipsis")
                 .font(.headline.weight(.semibold))
-                .foregroundStyle(.primary)
+                .foregroundStyle(profileBannerButtonForeground)
                 .frame(width: 36, height: 36)
-                .background(Color(.secondarySystemBackground), in: Circle())
+                .background(profileBannerButtonBackground())
+                .overlay {
+                    Circle()
+                        .stroke(profileBannerButtonBorder, lineWidth: 1)
+                }
         }
         .buttonStyle(.plain)
         .accessibilityLabel("Profile options")
@@ -650,6 +779,7 @@ struct ProfileView: View {
     private func profileMenuLabel(_ title: String, systemImage: String) -> some View {
         Label {
             Text(title)
+                .font(appSettings.appFont(.body))
                 .foregroundStyle(.primary)
         } icon: {
             Image(systemName: systemImage)
@@ -679,13 +809,6 @@ struct ProfileView: View {
         }
         .padding(.vertical, 10)
         .redacted(reason: .placeholder)
-    }
-
-    private var primaryActionTitle: String {
-        if isOwnProfile {
-            return "Edit"
-        }
-        return followStore.isFollowing(viewModel.pubkey) ? "Following" : "Follow"
     }
 
     private var primaryActionDisabled: Bool {
@@ -725,44 +848,6 @@ struct ProfileView: View {
         toastCenter.show("Copied")
     }
 
-    private func actionButton(
-        title: String,
-        systemImage: String?,
-        isPrimary: Bool,
-        isDisabled: Bool,
-        expandsToFillRow: Bool = true,
-        action: @escaping () -> Void
-    ) -> some View {
-        Button(action: action) {
-            HStack(spacing: 6) {
-                if let systemImage {
-                    Image(systemName: systemImage)
-                        .imageScale(.small)
-                }
-                Text(title)
-                    .font(.subheadline.weight(.semibold))
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.75)
-            }
-            .frame(maxWidth: expandsToFillRow ? .infinity : nil)
-            .padding(.vertical, 10)
-            .padding(.horizontal, 8)
-            .foregroundStyle(isPrimary ? Color.white : (isDisabled ? Color.secondary : Color.primary))
-            .background(
-                Capsule()
-                    .fill(isPrimary ? Color.accentColor : Color(.secondarySystemBackground))
-            )
-            .overlay {
-                if !isPrimary {
-                    Capsule()
-                        .stroke(Color(.separator).opacity(0.35), lineWidth: 0.8)
-                }
-            }
-        }
-        .buttonStyle(.plain)
-        .disabled(isDisabled)
-    }
-
     private func iconActionButton(
         systemImage: String,
         isPrimary: Bool,
@@ -770,19 +855,32 @@ struct ProfileView: View {
         accessibilityLabel: String,
         action: @escaping () -> Void
     ) -> some View {
-        Button(action: action) {
+        let style = appSettings.themePalette.profileActionStyle
+        let disabledOpacity = isDisabled ? 0.48 : 1.0
+        let foreground = isPrimary
+            ? (style?.primaryForeground ?? Color.white)
+            : (style?.foreground ?? (isDisabled ? Color.secondary : Color.primary))
+        let background = isPrimary
+            ? (style?.primaryBackground ?? Color.accentColor)
+            : (style?.background ?? Color(.secondarySystemBackground))
+        let borderColor = isPrimary ? style?.primaryBorder : style?.border
+
+        return Button(action: action) {
             Image(systemName: systemImage)
                 .font(.subheadline.weight(.semibold))
                 .frame(width: 18, height: 18)
                 .padding(.vertical, 10)
                 .padding(.horizontal, 12)
-                .foregroundStyle(isPrimary ? Color.white : (isDisabled ? Color.secondary : Color.primary))
+                .foregroundStyle(foreground.opacity(disabledOpacity))
                 .background(
                     Capsule()
-                        .fill(isPrimary ? Color.accentColor : Color(.secondarySystemBackground))
+                        .fill(background.opacity(isDisabled && style != nil ? 0.72 : 1))
                 )
                 .overlay {
-                    if !isPrimary {
+                    if let borderColor {
+                        Capsule()
+                            .stroke(borderColor.opacity(disabledOpacity), lineWidth: 0.8)
+                    } else if !isPrimary {
                         Capsule()
                             .stroke(Color(.separator).opacity(0.35), lineWidth: 0.8)
                     }
@@ -797,12 +895,14 @@ struct ProfileView: View {
         HStack(spacing: 8) {
             Image(systemName: systemImage)
                 .imageScale(.small)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(appSettings.themePalette.mutedForeground)
             Text(text)
-                .font(.footnote)
-                .foregroundStyle(.secondary)
+                .font(appSettings.appFont(.footnote))
+                .foregroundStyle(appSettings.themePalette.mutedForeground)
                 .lineLimit(1)
                 .truncationMode(.middle)
+                .minimumScaleFactor(0.85)
+                .layoutPriority(1)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }
@@ -886,6 +986,31 @@ struct ProfileView: View {
 
     private var isInitialProfileMetadataLoading: Bool {
         viewModel.profile == nil && !viewModel.hasCompletedInitialLoad
+    }
+
+    private var profileBannerButtonForeground: Color {
+        appSettings.themePalette.profileActionStyle?.bannerForeground ?? .primary
+    }
+
+    private var profileBannerButtonBorder: Color {
+        appSettings.themePalette.profileActionStyle?.bannerBorder ?? Color.white.opacity(0.24)
+    }
+
+    @ViewBuilder
+    private func profileBannerButtonBackground() -> some View {
+        if let style = appSettings.themePalette.profileActionStyle {
+            Circle().fill(style.bannerBackground)
+        } else {
+            Circle().fill(.ultraThinMaterial)
+        }
+    }
+
+    private var profileRowWidth: CGFloat {
+        UIScreen.main.bounds.width
+    }
+
+    private var profileContentWidth: CGFloat {
+        max(profileRowWidth - (Self.profileContentHorizontalPadding * 2), 0)
     }
 
     private var profileFollowStatusIconName: String? {

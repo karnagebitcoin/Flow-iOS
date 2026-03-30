@@ -121,6 +121,11 @@ enum HomePrimaryFeedSource: Identifiable, Hashable {
 
 @MainActor
 final class HomeFeedViewModel: ObservableObject {
+    struct FeedRequestStrategy: Equatable {
+        let fetchTimeout: TimeInterval
+        let relayFetchMode: RelayFetchMode
+    }
+
     private struct NewsFeedPageResult {
         let items: [FeedItem]
         let hadMoreAvailable: Bool
@@ -183,6 +188,8 @@ final class HomeFeedViewModel: ObservableObject {
     private let mutedConversationStoragePrefix = "homeFeedMutedConversations"
     private static let fastHomeFetchTimeout: TimeInterval = 3
     private static let fastHomeRelayFetchMode: RelayFetchMode = .firstNonEmptyRelay
+    private static let followingHomeFetchTimeout: TimeInterval = 8
+    private static let followingPaginationFetchTimeout: TimeInterval = 12
     private static let trendingRelayURL = URL(string: "wss://trending.relays.land")!
     private static let newsFallbackRelayURL = URL(string: "wss://news.utxo.one")!
     private static let customFeedSupplementalRelayURLs: [URL] = [
@@ -316,6 +323,26 @@ final class HomeFeedViewModel: ObservableObject {
             return "This feed has posts, but the media-only filter is hiding them."
         }
         return "No posts match the current filters."
+    }
+
+    // Following history should be fetched exhaustively so older notes are not
+    // truncated just because the first responding relay has no more results.
+    static func requestStrategy(
+        for source: HomePrimaryFeedSource,
+        isPagination: Bool
+    ) -> FeedRequestStrategy {
+        switch source {
+        case .following:
+            return FeedRequestStrategy(
+                fetchTimeout: isPagination ? Self.followingPaginationFetchTimeout : Self.followingHomeFetchTimeout,
+                relayFetchMode: .allRelays
+            )
+        default:
+            return FeedRequestStrategy(
+                fetchTimeout: Self.fastHomeFetchTimeout,
+                relayFetchMode: Self.fastHomeRelayFetchMode
+            )
+        }
     }
 
     private var recentFeedKey: String {
@@ -570,8 +597,9 @@ final class HomeFeedViewModel: ObservableObject {
             let requestRelayURLs = relayURLs(for: requestSource)
             let requestKinds = feedKinds(for: requestSource)
             let requestHydrationMode: FeedItemHydrationMode = .cachedProfilesOnly
-            let requestFetchTimeout = Self.fastHomeFetchTimeout
-            let requestRelayFetchMode = Self.fastHomeRelayFetchMode
+            let requestStrategy = Self.requestStrategy(for: requestSource, isPagination: false)
+            let requestFetchTimeout = requestStrategy.fetchTimeout
+            let requestRelayFetchMode = requestStrategy.relayFetchMode
 
             if requestSource != .following {
                 startLiveUpdatesIfNeeded()
@@ -783,8 +811,9 @@ final class HomeFeedViewModel: ObservableObject {
         let requestSource = feedSource
         let requestUserPubkey = currentUserPubkey
         let requestHydrationMode: FeedItemHydrationMode = .cachedProfilesOnly
-        let requestFetchTimeout = Self.fastHomeFetchTimeout
-        let requestRelayFetchMode = Self.fastHomeRelayFetchMode
+        let requestStrategy = Self.requestStrategy(for: requestSource, isPagination: true)
+        let requestFetchTimeout = requestStrategy.fetchTimeout
+        let requestRelayFetchMode = requestStrategy.relayFetchMode
 
         isLoadingMore = true
         itemHydrationTask?.cancel()

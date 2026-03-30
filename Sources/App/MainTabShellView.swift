@@ -163,7 +163,9 @@ struct MainTabShellView: View {
 
     private var bottomTabBar: some View {
         VStack(spacing: 0) {
-            Divider()
+            Rectangle()
+                .fill(appSettings.themePalette.chromeBorder)
+                .frame(height: 0.7)
 
             HStack(spacing: 0) {
                 tabBarButton(for: .home)
@@ -175,17 +177,27 @@ struct MainTabShellView: View {
             .padding(.horizontal, 10)
             .padding(.top, 8)
             .padding(.bottom, 10)
-            .background(bottomTabBarBackground)
         }
-        .background(bottomTabBarBackground)
+        .background {
+            bottomTabBarBackground
+                .ignoresSafeArea(edges: .bottom)
+        }
     }
 
     @ViewBuilder
     private var bottomTabBarBackground: some View {
         if appSettings.activeTheme == .sakura {
             ZStack {
-                appSettings.themePalette.chromeBackground.opacity(0.78)
-                appSettings.primaryGradient.opacity(0.14)
+                appSettings.themePalette.chromeBackground
+
+                LinearGradient(
+                    colors: [
+                        Color.white.opacity(0.76),
+                        Color(red: 1.0, green: 0.960, blue: 0.978).opacity(0.66)
+                    ],
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing
+                )
             }
         } else {
             appSettings.themePalette.chromeBackground

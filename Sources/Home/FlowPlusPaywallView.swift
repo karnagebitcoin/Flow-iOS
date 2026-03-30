@@ -43,6 +43,10 @@ struct FlowPlusPaywallView: View {
         appSettings.previewTheme == .sakura && !premiumStore.isFlowPlusActive
     }
 
+    private var canPreviewSakura: Bool {
+        premiumStore.isFlowPlusActive || appSettings.canBeginThemePreview(.sakura)
+    }
+
     private var sakuraAccentGradient: LinearGradient {
         AppThemeOption.sakura.fixedPrimaryGradient ?? LinearGradient(
             colors: [
@@ -62,19 +66,19 @@ struct FlowPlusPaywallView: View {
         VStack(alignment: .leading, spacing: 14) {
             HStack(alignment: .top) {
                 VStack(alignment: .leading, spacing: 8) {
-                    Text("Unlock premium themes for Flow.")
-                        .font(.system(size: 30, weight: .bold, design: .rounded))
+                    Text("Unlock premium themes and custom fonts for Flow.")
+                        .font(appSettings.appFont(size: 30, weight: .bold))
                         .foregroundStyle(Color(red: 0.33, green: 0.18, blue: 0.25))
 
-                    Text("Flow Plus starts with Sakura, a light-only look built around paper whites, gradient blossom pinks, and soft cherry tones.")
-                        .font(.body)
+                    Text("Flow Plus starts with Sakura, a light-only look built around paper whites, gradient blossom pinks, and soft cherry tones, then layers in curated mono, serif, and sans font choices for the whole app.")
+                        .font(appSettings.appFont(.body))
                         .foregroundStyle(Color(red: 0.45, green: 0.27, blue: 0.35))
                 }
 
                 Spacer(minLength: 12)
 
                 Label("Sakura", systemImage: "sparkles")
-                    .font(.caption.weight(.semibold))
+                    .font(appSettings.appFont(.caption1, weight: .semibold))
                     .foregroundStyle(sakuraPrimaryColor)
                     .padding(.horizontal, 10)
                     .padding(.vertical, 7)
@@ -148,16 +152,17 @@ struct FlowPlusPaywallView: View {
     private var featureCard: some View {
         VStack(alignment: .leading, spacing: 12) {
             Label("What’s included", systemImage: "wand.and.stars")
-                .font(.headline)
+                .font(appSettings.appFont(.headline, weight: .semibold))
                 .foregroundStyle(Color(red: 0.45, green: 0.21, blue: 0.32))
 
             flowPlusFeature("Sakura theme with a dedicated light palette and a signature pink gradient accent.")
+            flowPlusFeature("A premium font library with mono, serif, and modern sans options that can restyle the feed, composer, and settings.")
             flowPlusFeature("Future premium looks will unlock automatically with the same monthly Flow Plus subscription.")
             flowPlusFeature("Theme access stays tied to your App Store subscription and restores with Apple.")
 
             if let error = premiumStore.lastErrorMessage, !error.isEmpty {
                 Text(error)
-                    .font(.footnote)
+                    .font(appSettings.appFont(.footnote))
                     .foregroundStyle(.red)
                     .padding(.top, 4)
             }
@@ -173,20 +178,20 @@ struct FlowPlusPaywallView: View {
     private var previewCard: some View {
         VStack(alignment: .leading, spacing: 12) {
             Label("Try Sakura first", systemImage: "eye")
-                .font(.headline)
+                .font(appSettings.appFont(.headline, weight: .semibold))
                 .foregroundStyle(Color(red: 0.45, green: 0.21, blue: 0.32))
 
-            Text("Preview Sakura across the app before you subscribe. It stays temporary until you unlock Flow Plus.")
-                .font(.subheadline)
+            Text("Preview Sakura across the app before you subscribe. The preview is temporary until you unlock Flow Plus.")
+                .font(appSettings.appFont(.subheadline))
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
 
             Button {
-                appSettings.beginThemePreview(.sakura)
+                guard appSettings.beginThemePreview(.sakura) else { return }
                 dismiss()
             } label: {
-                Text(isPreviewingSakura ? "Continue Sakura Preview" : "Preview Sakura in App")
-                    .font(.subheadline.weight(.semibold))
+                Text("Preview")
+                    .font(appSettings.appFont(.subheadline, weight: .semibold))
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 12)
                     .background(
@@ -196,12 +201,17 @@ struct FlowPlusPaywallView: View {
                     .foregroundStyle(.white)
             }
             .buttonStyle(.plain)
+            .disabled(!canPreviewSakura)
+            .opacity(canPreviewSakura ? 1 : 0.6)
 
             if isPreviewingSakura {
-                Button("Stop Preview") {
-                    appSettings.endThemePreview()
-                }
-                .font(.footnote.weight(.semibold))
+                Text("Sakura preview is active for this session.")
+                    .font(appSettings.appFont(.footnote))
+                    .foregroundStyle(.secondary)
+            } else if !appSettings.canBeginThemePreview(.sakura) && !premiumStore.isFlowPlusActive {
+                Text("Preview already used this session.")
+                    .font(appSettings.appFont(.footnote))
+                    .foregroundStyle(.secondary)
             }
         }
         .padding(18)
@@ -216,24 +226,27 @@ struct FlowPlusPaywallView: View {
         VStack(alignment: .leading, spacing: 12) {
             if premiumStore.isFlowPlusActive {
                 Label("Flow Plus is active", systemImage: "checkmark.seal.fill")
-                    .font(.headline)
+                    .font(appSettings.appFont(.headline, weight: .semibold))
                     .foregroundStyle(Color(red: 0.33, green: 0.55, blue: 0.41))
 
-                Link("Manage Subscription", destination: URL(string: "https://apps.apple.com/account/subscriptions")!)
-                    .font(.subheadline.weight(.semibold))
+                Link(destination: manageSubscriptionsURL) {
+                    primaryPaywallButtonLabel("Manage Subscription")
+                }
+                .buttonStyle(.plain)
             } else if premiumStore.isLoadingProducts && premiumStore.flowPlusProduct == nil {
                 HStack(spacing: 10) {
                     ProgressView()
                     Text("Loading Flow Plus pricing…")
+                        .font(appSettings.appFont(.body))
                         .foregroundStyle(.secondary)
                 }
             } else if premiumStore.flowPlusProduct == nil {
                 Text("Flow Plus pricing isn’t available yet. Finish the App Store Connect setup for the monthly subscription and try again.")
-                    .font(.footnote)
+                    .font(appSettings.appFont(.footnote))
                     .foregroundStyle(.secondary)
             } else {
                 Text("Monthly membership")
-                    .font(.headline)
+                    .font(appSettings.appFont(.headline, weight: .semibold))
                     .foregroundStyle(Color(red: 0.45, green: 0.21, blue: 0.32))
 
                 if let product = premiumStore.flowPlusProduct {
@@ -252,7 +265,7 @@ struct FlowPlusPaywallView: View {
                             .controlSize(.small)
                     } else {
                         Text("Restore Purchases")
-                            .font(.subheadline.weight(.semibold))
+                            .font(appSettings.appFont(.subheadline, weight: .semibold))
                     }
                 }
                 .frame(maxWidth: .infinity)
@@ -281,10 +294,26 @@ struct FlowPlusPaywallView: View {
                 }
 
             Text(text)
-                .font(.subheadline)
+                .font(appSettings.appFont(.subheadline))
                 .foregroundStyle(.primary)
                 .fixedSize(horizontal: false, vertical: true)
         }
+    }
+
+    private var manageSubscriptionsURL: URL {
+        URL(string: "https://apps.apple.com/account/subscriptions")!
+    }
+
+    private func primaryPaywallButtonLabel(_ title: String) -> some View {
+        Text(title)
+            .font(appSettings.appFont(.subheadline, weight: .semibold))
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 12)
+            .background(
+                sakuraAccentGradient,
+                in: RoundedRectangle(cornerRadius: 16, style: .continuous)
+            )
+            .foregroundStyle(.white)
     }
 
     private func planButton(for product: Product) -> some View {
@@ -301,11 +330,11 @@ struct FlowPlusPaywallView: View {
             HStack(spacing: 12) {
                 VStack(alignment: .leading, spacing: 4) {
                     Text(product.displayName)
-                        .font(.headline)
+                        .font(appSettings.appFont(.headline, weight: .semibold))
                         .foregroundStyle(.primary)
 
                     Text(product.subscriptionPeriodDescription ?? "Monthly subscription")
-                        .font(.footnote)
+                        .font(appSettings.appFont(.footnote))
                         .foregroundStyle(.secondary)
                 }
 
@@ -318,10 +347,10 @@ struct FlowPlusPaywallView: View {
                 } else {
                     VStack(alignment: .trailing, spacing: 3) {
                         Text(product.displayPrice)
-                            .font(.headline.weight(.semibold))
+                            .font(appSettings.appFont(.headline, weight: .semibold))
                             .foregroundStyle(.white)
                         Text(product.pricePerPeriodDescription)
-                            .font(.caption2.weight(.medium))
+                            .font(appSettings.appFont(.caption2, weight: .medium))
                             .foregroundStyle(.white.opacity(0.82))
                     }
                 }
@@ -339,6 +368,7 @@ struct FlowPlusPaywallView: View {
         }
         .buttonStyle(.plain)
     }
+
 }
 
 private extension Product {

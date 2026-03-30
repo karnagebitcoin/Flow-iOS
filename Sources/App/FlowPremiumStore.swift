@@ -71,7 +71,7 @@ final class FlowPremiumStore: ObservableObject {
 
         activeProductIDs = activeIDs
         isFlowPlusActive = !activeIDs.isEmpty
-        appSettings.updatePremiumThemesUnlocked(!activeIDs.isEmpty)
+        appSettings.updateFlowPlusAccess(!activeIDs.isEmpty)
     }
 
     func purchase(_ product: Product) async -> PurchaseOutcome {
@@ -97,6 +97,19 @@ final class FlowPremiumStore: ObservableObject {
             lastErrorMessage = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
             return .failed
         }
+    }
+
+    func purchaseFlowPlus() async -> PurchaseOutcome {
+        if flowPlusProduct == nil {
+            await refreshProducts()
+        }
+
+        guard let product = flowPlusProduct else {
+            lastErrorMessage = "Flow Plus pricing isn’t available yet."
+            return .failed
+        }
+
+        return await purchase(product)
     }
 
     func restorePurchases() async {

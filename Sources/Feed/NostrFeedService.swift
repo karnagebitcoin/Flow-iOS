@@ -326,7 +326,7 @@ enum FeedItemHydrationMode: Sendable {
     case cachedProfilesOnly
 }
 
-enum RelayFetchMode: Sendable {
+enum RelayFetchMode: Sendable, Equatable {
     case allRelays
     case firstNonEmptyRelay
 }

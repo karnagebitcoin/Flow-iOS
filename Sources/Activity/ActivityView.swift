@@ -197,7 +197,7 @@ struct ActivityView: View {
     private var topNavigationBar: some View {
         ZStack {
             Text("Activity")
-                .font(.headline)
+                .font(appSettings.appFont(.headline, weight: .semibold))
                 .lineLimit(1)
 
             HStack {
@@ -229,7 +229,9 @@ struct ActivityView: View {
         .padding(.vertical, 10)
         .background(topNavigationBackground)
         .overlay(alignment: .bottom) {
-            Divider()
+            Rectangle()
+                .fill(appSettings.themePalette.chromeBorder)
+                .frame(height: 0.7)
         }
     }
 

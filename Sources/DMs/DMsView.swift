@@ -11,11 +11,11 @@ struct DMsView: View {
                     .foregroundStyle(.secondary)
 
                 Text("Messages coming soon")
-                    .font(.headline)
+                    .font(appSettings.appFont(.headline, weight: .semibold))
                     .foregroundStyle(.primary)
 
                 Text("This tab is a placeholder while messaging is being built.")
-                    .font(.subheadline)
+                    .font(appSettings.appFont(.subheadline))
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
             }
