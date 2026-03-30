@@ -258,6 +258,8 @@ final class ActivityViewModel: ObservableObject {
         guard !pendingLiveEventIDs.contains(normalizedEventID) else { return }
         pendingLiveEventIDs.insert(normalizedEventID)
 
+        await service.ingestLiveEvents([event])
+
         if let reaction = event.activityAction?.reaction {
             onLiveReactionDetected?(reaction)
         }

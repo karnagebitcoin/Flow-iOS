@@ -2,10 +2,22 @@ import Foundation
 import NostrSDK
 
 struct FlowNostrDBDiagnostics: Equatable, Sendable {
+    var isOpen: Bool = false
+    var databaseDirectoryExists: Bool = false
+    var databasePath: String = ""
+    var lastOpenError: String?
+    var openMapsizeBytes: Int64 = 0
+    var lastAttemptedMapsizeBytes: Int64 = 0
     var persistedEventCount: Int = 0
     var persistedProfileCount: Int = 0
     var sessionIngestedEventCount: Int = 0
     var sessionIngestedProfileCount: Int = 0
+    var ingestCallCount: Int = 0
+    var successfulIngestCallCount: Int = 0
+    var eventLookupCount: Int = 0
+    var profileLookupCount: Int = 0
+    var followListLookupCount: Int = 0
+    var queryCount: Int = 0
     var recentOverlayEventCount: Int = 0
     var recentReplaceableOverlayCount: Int = 0
     var diskUsageBytes: Int64 = 0
@@ -13,6 +25,8 @@ struct FlowNostrDBDiagnostics: Equatable, Sendable {
 
 final class FlowNostrDB: @unchecked Sendable {
     static let shared = FlowNostrDB()
+
+    typealias OpenDatabase = @Sendable (_ path: String, _ ingestThreads: Int32, _ mapsize: size_t, _ writerScratchBufferSize: Int32, _ flags: Int32) -> UnsafeMutableRawPointer?
 
     private struct ReplaceableKey: Hashable {
         let authorPubkey: String
@@ -25,30 +39,55 @@ final class FlowNostrDB: @unchecked Sendable {
     private let fileManager: FileManager
     private let databaseDirectoryURL: URL
     private let ingestThreadCount: Int
-    private let mapsize: size_t
+    private let initialMapsize: size_t
+    private let minimumMapsize: size_t
     private let writerScratchBufferSize: Int32
     private let flags: Int32
+    private let openDatabase: OpenDatabase
     private let eventOverlayLimit = 4_000
     private let replaceableOverlayLimit = 2_000
 
     private var handle: UnsafeMutableRawPointer?
+    private var openMapsize: size_t = 0
+    private var lastAttemptedMapsize: size_t = 0
     private var recentEventsByID: [String: NostrEvent] = [:]
     private var recentEventOrder: [String] = []
     private var recentReplaceableEventsByKey: [ReplaceableKey: NostrEvent] = [:]
     private var recentReplaceableOrder: [ReplaceableKey] = []
     private var sessionIngestedEventIDs = Set<String>()
     private var sessionIngestedProfilePubkeys = Set<String>()
+    private var ingestCallCount = 0
+    private var successfulIngestCallCount = 0
+    private var eventLookupCount = 0
+    private var profileLookupCount = 0
+    private var followListLookupCount = 0
+    private var queryCount = 0
+    private var lastOpenErrorMessage: String?
 
-    init(fileManager: FileManager = .default) {
+    init(
+        fileManager: FileManager = .default,
+        initialMapsize: size_t = size_t(32) * 1024 * 1024 * 1024,
+        minimumMapsize: size_t = size_t(768) * 1024 * 1024,
+        openDatabase: @escaping OpenDatabase = { path, ingestThreads, mapsize, writerScratchBufferSize, flags in
+            path.withCString { rawPath in
+                flow_ndb_open(
+                    rawPath,
+                    ingestThreads,
+                    mapsize,
+                    writerScratchBufferSize,
+                    flags
+                )
+            }
+        }
+    ) {
         self.fileManager = fileManager
-        let root = fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
-            ?? URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)
-        self.databaseDirectoryURL = root
-            .appendingPathComponent("FlowNostrDB", isDirectory: true)
+        self.databaseDirectoryURL = Self.resolveDatabaseDirectoryURL(fileManager: fileManager)
         self.ingestThreadCount = max(ProcessInfo.processInfo.processorCount - 1, 1)
-        self.mapsize = size_t(64) * 1024 * 1024 * 1024
+        self.initialMapsize = max(initialMapsize, minimumMapsize)
+        self.minimumMapsize = minimumMapsize
         self.writerScratchBufferSize = 2 * 1024 * 1024
         self.flags = Int32(FLOW_NDB_FLAG_NO_NOTE_BLOCKS | FLOW_NDB_FLAG_NO_STATS)
+        self.openDatabase = openDatabase
     }
 
     deinit {
@@ -61,6 +100,7 @@ final class FlowNostrDB: @unchecked Sendable {
         guard !events.isEmpty else { return true }
 
         return queue.sync {
+            ingestCallCount += 1
             guard openIfNeeded() else { return false }
 
             var ingestedAny = false
@@ -74,6 +114,9 @@ final class FlowNostrDB: @unchecked Sendable {
                 ingestedAny = ingestedAny || ok != 0
             }
 
+            if ingestedAny {
+                successfulIngestCallCount += 1
+            }
             return ingestedAny
         }
     }
@@ -84,6 +127,7 @@ final class FlowNostrDB: @unchecked Sendable {
 
         return queue.sync {
             guard openIfNeeded() else { return nil }
+            eventLookupCount += normalizedIDs.count
 
             var resolved: [String: NostrEvent] = [:]
             resolved.reserveCapacity(normalizedIDs.count)
@@ -131,6 +175,7 @@ final class FlowNostrDB: @unchecked Sendable {
 
         return queue.sync {
             guard openIfNeeded() else { return nil }
+            profileLookupCount += normalizedPubkeys.count
 
             var resolved: [String: NostrProfile] = [:]
             resolved.reserveCapacity(normalizedPubkeys.count)
@@ -166,6 +211,7 @@ final class FlowNostrDB: @unchecked Sendable {
 
         return queue.sync {
             guard openIfNeeded() else { return nil }
+            followListLookupCount += 1
 
             if let event = recentReplaceableEvent(authorPubkey: normalized, kind: 3) {
                 return Self.makeFollowListSnapshot(from: event)
@@ -193,6 +239,7 @@ final class FlowNostrDB: @unchecked Sendable {
 
         return queue.sync {
             guard openIfNeeded() else { return nil }
+            queryCount += usableFilters.count
 
             var combinedEvents: [NostrEvent] = []
             combinedEvents.reserveCapacity(usableFilters.count * 32)
@@ -219,12 +266,29 @@ final class FlowNostrDB: @unchecked Sendable {
             let opened = openIfNeeded()
             let persistedEventCount = opened ? Int(flow_ndb_note_count(handle)) : 0
             let persistedProfileCount = opened ? Int(flow_ndb_profile_count(handle)) : 0
+            var isDirectory = ObjCBool(false)
+            let databaseDirectoryExists = fileManager.fileExists(
+                atPath: databaseDirectoryURL.path,
+                isDirectory: &isDirectory
+            ) && isDirectory.boolValue
 
             return FlowNostrDBDiagnostics(
+                isOpen: opened,
+                databaseDirectoryExists: databaseDirectoryExists,
+                databasePath: databaseDirectoryURL.path,
+                lastOpenError: lastOpenErrorMessage,
+                openMapsizeBytes: Int64(openMapsize),
+                lastAttemptedMapsizeBytes: Int64(lastAttemptedMapsize),
                 persistedEventCount: persistedEventCount,
                 persistedProfileCount: persistedProfileCount,
                 sessionIngestedEventCount: sessionIngestedEventIDs.count,
                 sessionIngestedProfileCount: sessionIngestedProfilePubkeys.count,
+                ingestCallCount: ingestCallCount,
+                successfulIngestCallCount: successfulIngestCallCount,
+                eventLookupCount: eventLookupCount,
+                profileLookupCount: profileLookupCount,
+                followListLookupCount: followListLookupCount,
+                queryCount: queryCount,
                 recentOverlayEventCount: recentEventOrder.count,
                 recentReplaceableOverlayCount: recentReplaceableOrder.count,
                 diskUsageBytes: diskUsageBytes()
@@ -232,8 +296,22 @@ final class FlowNostrDB: @unchecked Sendable {
         }
     }
 
+    func resetSessionDiagnostics() {
+        queue.sync {
+            sessionIngestedEventIDs.removeAll()
+            sessionIngestedProfilePubkeys.removeAll()
+            ingestCallCount = 0
+            successfulIngestCallCount = 0
+            eventLookupCount = 0
+            profileLookupCount = 0
+            followListLookupCount = 0
+            queryCount = 0
+        }
+    }
+
     private func openIfNeeded() -> Bool {
         if handle != nil {
+            lastOpenErrorMessage = nil
             return true
         }
 
@@ -243,21 +321,60 @@ final class FlowNostrDB: @unchecked Sendable {
                 withIntermediateDirectories: true
             )
         } catch {
+            lastOpenErrorMessage = error.localizedDescription
             return false
         }
 
         let path = databaseDirectoryURL.path
-        handle = path.withCString { rawPath in
-            flow_ndb_open(
-                rawPath,
+        var attemptedMapsizes: [size_t] = []
+        var candidateMapsize = initialMapsize
+
+        while candidateMapsize >= minimumMapsize {
+            lastAttemptedMapsize = candidateMapsize
+            attemptedMapsizes.append(candidateMapsize)
+
+            if let openedHandle = openDatabase(
+                path,
                 Int32(ingestThreadCount),
-                mapsize,
+                candidateMapsize,
                 writerScratchBufferSize,
                 flags
-            )
+            ) {
+                handle = openedHandle
+                openMapsize = candidateMapsize
+                lastOpenErrorMessage = nil
+                return true
+            }
+
+            candidateMapsize /= 2
         }
 
-        return handle != nil
+        openMapsize = 0
+        let attemptedDescription = attemptedMapsizes
+            .map { Self.mapsizeDescription(bytes: Int64($0)) }
+            .joined(separator: ", ")
+        lastOpenErrorMessage = "Failed to open nostrdb at \(path) after trying mapsizes: \(attemptedDescription)"
+        return false
+    }
+
+    private static func mapsizeDescription(bytes: Int64) -> String {
+        ByteCountFormatter.string(fromByteCount: bytes, countStyle: .binary)
+    }
+
+    private static func resolveDatabaseDirectoryURL(fileManager: FileManager) -> URL {
+        if let applicationSupport = fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask).first {
+            return applicationSupport.appendingPathComponent("FlowNostrDB", isDirectory: true)
+        }
+
+        if let cachesDirectory = fileManager.urls(for: .cachesDirectory, in: .userDomainMask).first {
+            let libraryDirectory = cachesDirectory.deletingLastPathComponent()
+            return libraryDirectory
+                .appendingPathComponent("Application Support", isDirectory: true)
+                .appendingPathComponent("FlowNostrDB", isDirectory: true)
+        }
+
+        return URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)
+            .appendingPathComponent("FlowNostrDB", isDirectory: true)
     }
 
     private func remember(event: NostrEvent) {

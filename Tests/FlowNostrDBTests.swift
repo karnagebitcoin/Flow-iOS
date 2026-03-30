@@ -210,11 +210,102 @@ final class FlowNostrDBTests: XCTestCase {
 
         let diagnostics = database.diagnosticsSnapshot()
 
+        XCTAssertTrue(diagnostics.isOpen)
+        XCTAssertTrue(diagnostics.databaseDirectoryExists)
+        XCTAssertFalse(diagnostics.databasePath.isEmpty)
+        XCTAssertNil(diagnostics.lastOpenError)
         XCTAssertEqual(diagnostics.sessionIngestedEventCount, 2)
         XCTAssertEqual(diagnostics.sessionIngestedProfileCount, 1)
+        XCTAssertEqual(diagnostics.ingestCallCount, 1)
+        XCTAssertEqual(diagnostics.successfulIngestCallCount, 1)
         XCTAssertGreaterThanOrEqual(diagnostics.persistedEventCount, 0)
         XCTAssertGreaterThanOrEqual(diagnostics.persistedProfileCount, 0)
         XCTAssertGreaterThanOrEqual(diagnostics.diskUsageBytes, 0)
+    }
+
+    func testDiagnosticsSnapshotTracksLocalReadUsage() throws {
+        let rootURL = try makeRootURL(prefix: "FlowNostrDBUsage")
+        defer { try? FileManager.default.removeItem(at: rootURL) }
+
+        let fileManager = FlowNostrDBTestFileManager(rootURL: rootURL)
+        let database = FlowNostrDB(fileManager: fileManager)
+        let profileEvent = makeTestEvent(
+            id: hex("1"),
+            pubkey: hex("2"),
+            kind: 0,
+            tags: [],
+            content: #"{"name":"reader"}"#
+        )
+        let followListEvent = makeTestEvent(
+            id: hex("3"),
+            pubkey: hex("4"),
+            kind: 3,
+            tags: [["p", hex("5")]],
+            content: "follows"
+        )
+        let noteEvent = makeTestEvent(
+            id: hex("6"),
+            pubkey: hex("7"),
+            kind: 1,
+            tags: [["t", "flow"]],
+            content: "local note"
+        )
+
+        XCTAssertTrue(database.ingest(events: [profileEvent, followListEvent, noteEvent]))
+
+        XCTAssertNotNil(database.events(ids: [noteEvent.id]))
+        XCTAssertNotNil(database.profile(pubkey: profileEvent.pubkey))
+        XCTAssertNotNil(database.followListSnapshot(pubkey: followListEvent.pubkey))
+        XCTAssertNotNil(database.queryEvents(filter: NostrFilter(kinds: [1], limit: 10)))
+
+        let diagnostics = database.diagnosticsSnapshot()
+
+        XCTAssertEqual(diagnostics.eventLookupCount, 1)
+        XCTAssertEqual(diagnostics.profileLookupCount, 1)
+        XCTAssertEqual(diagnostics.followListLookupCount, 1)
+        XCTAssertEqual(diagnostics.queryCount, 1)
+    }
+
+    func testOpenFallsBackToSmallerMapsizeWhenLargerAttemptFails() throws {
+        let rootURL = try makeRootURL(prefix: "FlowNostrDBMapsizeFallback")
+        defer { try? FileManager.default.removeItem(at: rootURL) }
+
+        let fileManager = FlowNostrDBTestFileManager(rootURL: rootURL)
+        let attempts = FlowNostrDBAttemptLog()
+        let fallbackThreshold = size_t(2) * 1024 * 1024 * 1024
+        let database = FlowNostrDB(
+            fileManager: fileManager,
+            initialMapsize: size_t(8) * 1024 * 1024 * 1024,
+            minimumMapsize: size_t(1) * 1024 * 1024 * 1024,
+            openDatabase: { path, ingestThreads, mapsize, writerScratchBufferSize, flags in
+                attempts.values.append(mapsize)
+                guard mapsize <= fallbackThreshold else {
+                    return nil
+                }
+
+                return path.withCString { rawPath in
+                    flow_ndb_open(
+                        rawPath,
+                        ingestThreads,
+                        mapsize,
+                        writerScratchBufferSize,
+                        flags
+                    )
+                }
+            }
+        )
+
+        let diagnostics = database.diagnosticsSnapshot()
+
+        XCTAssertTrue(diagnostics.isOpen)
+        XCTAssertEqual(attempts.values, [
+            size_t(8) * 1024 * 1024 * 1024,
+            size_t(4) * 1024 * 1024 * 1024,
+            size_t(2) * 1024 * 1024 * 1024,
+        ])
+        XCTAssertEqual(diagnostics.openMapsizeBytes, Int64(fallbackThreshold))
+        XCTAssertEqual(diagnostics.lastAttemptedMapsizeBytes, Int64(fallbackThreshold))
+        XCTAssertNil(diagnostics.lastOpenError)
     }
 
     private func makeRootURL(prefix: String) throws -> URL {
@@ -259,4 +350,8 @@ private final class FlowNostrDBTestFileManager: FileManager, @unchecked Sendable
     override func urls(for directory: SearchPathDirectory, in domainMask: SearchPathDomainMask) -> [URL] {
         [rootURL]
     }
+}
+
+private final class FlowNostrDBAttemptLog: @unchecked Sendable {
+    var values: [size_t] = []
 }

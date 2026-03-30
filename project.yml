@@ -73,7 +73,7 @@ targets:
         GCC_PREPROCESSOR_DEFINITIONS:
           - $(inherited)
           - MDB_SHORT_SEMNAMES=1
-          - MDB_SEM_NAME_PREFIX=\"flow\"
+          - MDB_SEM_NAME_PREFIX=flow
     dependencies:
       - package: NostrSDK
       - target: FlowShareExtension

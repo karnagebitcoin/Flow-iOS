@@ -500,69 +500,7 @@ final class ProfileViewModel: ObservableObject {
     ) async throws -> ProfileMetadataSnapshot? {
         let targets = Self.normalizedRelayURLs(relayURLs)
         guard !targets.isEmpty else { return nil }
-
-        if targets.count == 1, let onlyRelay = targets.first {
-            return try await profileEventService.fetchProfileMetadataSnapshot(relayURL: onlyRelay, pubkey: pubkey)
-        }
-
-        let filter = NostrFilter(
-            authors: [pubkey],
-            kinds: [0],
-            limit: 20
-        )
-
-        let result = await withTaskGroup(
-            of: (events: [NostrEvent]?, error: Error?).self,
-            returning: (mergedEvents: [NostrEvent], successfulFetches: Int, firstError: Error?).self
-        ) { group in
-            for relayURL in targets {
-                group.addTask { [relayClient] in
-                    do {
-                        let events = try await relayClient.fetchEvents(
-                            relayURL: relayURL,
-                            filter: filter,
-                            timeout: 10
-                        )
-                        return (events: events, error: nil)
-                    } catch {
-                        return (events: nil, error: error)
-                    }
-                }
-            }
-
-            var mergedEvents: [NostrEvent] = []
-            var firstError: Error?
-            var successfulFetches = 0
-
-            for await item in group {
-                if let events = item.events {
-                    successfulFetches += 1
-                    mergedEvents.append(contentsOf: events)
-                } else if firstError == nil, let error = item.error {
-                    firstError = error
-                }
-            }
-
-            return (mergedEvents, successfulFetches, firstError)
-        }
-
-        if result.successfulFetches == 0, let firstError = result.firstError {
-            throw firstError
-        }
-
-        guard let newest = result.mergedEvents
-            .filter({ $0.kind == 0 })
-            .sorted(by: { lhs, rhs in
-                if lhs.createdAt == rhs.createdAt {
-                    return lhs.id > rhs.id
-                }
-                return lhs.createdAt > rhs.createdAt
-            })
-            .first else {
-            return nil
-        }
-
-        return ProfileMetadataSnapshot(content: newest.content, tags: newest.tags)
+        return try await profileEventService.fetchProfileMetadataSnapshot(relayURLs: targets, pubkey: pubkey)
     }
 
     private func mergeKeepingNewest(itemsToMerge: [FeedItem]) {

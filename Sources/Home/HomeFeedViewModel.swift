@@ -1095,6 +1095,8 @@ final class HomeFeedViewModel: ObservableObject {
         guard feedKinds(for: feedSource).contains(event.kind) else { return }
         guard !normalizedEventID.isEmpty, !knownEventIDs.contains(normalizedEventID) else { return }
 
+        await service.ingestLiveEvents([event])
+
         let hydrated = await service.buildFeedItems(
             relayURLs: hydrationRelayURLs(for: feedSource),
             events: [event],

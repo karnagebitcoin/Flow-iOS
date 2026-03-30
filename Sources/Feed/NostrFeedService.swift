@@ -341,6 +341,7 @@ struct NostrFeedService: Sendable {
     private let nostrDatabase: FlowNostrDB
     private static let trendingRelayURL = URL(string: "wss://trending.relays.land")!
     private static let followListFreshCacheAge: TimeInterval = 60 * 5
+    private static let profileBackfillBatchSize = 24
     private static let metadataFallbackRelayURLs: [URL] = [
         URL(string: "wss://relay.damus.io/")!,
         URL(string: "wss://relay.primal.net/")!,
@@ -366,6 +367,11 @@ struct NostrFeedService: Sendable {
         self.followListCache = followListCache
         self.seenEventStore = seenEventStore
         self.nostrDatabase = nostrDatabase
+    }
+
+    func ingestLiveEvents(_ events: [NostrEvent]) async {
+        guard !events.isEmpty else { return }
+        await seenEventStore.store(events: events)
     }
 
     func fetchFeed(relayURL: URL, kinds: [Int], limit: Int, until: Int?) async throws -> [FeedItem] {
@@ -1074,12 +1080,13 @@ struct NostrFeedService: Sendable {
         guard !relayTargets.isEmpty else { return [] }
         guard !events.isEmpty else { return [] }
 
-        async let actorProfilesTask = hydrateActorProfiles(
-            for: events,
-            relayURLs: relayTargets,
-            fetchTimeout: profileFetchTimeout,
-            relayFetchMode: profileRelayFetchMode
+        let actorPubkeys = Array(
+            Set(events.map { normalizePubkey($0.pubkey) })
+                .filter { !$0.isEmpty }
         )
+        async let actorProfilesTask = actorPubkeys.isEmpty
+            ? [String: NostrProfile]()
+            : profileCache.cachedProfiles(pubkeys: actorPubkeys)
         async let targetEventsTask = resolveActivityTargetEvents(
             relayURLs: relayTargets,
             sourceEvents: events,
@@ -1447,37 +1454,52 @@ struct NostrFeedService: Sendable {
         )
         var profilesByPubkey = resolved.hits
         var unresolvedPubkeys = Set(resolved.missing)
-        guard !unresolvedPubkeys.isEmpty else { return profilesByPubkey }
+
+        var backfillPubkeys = Set(
+            missingPersistedProfilePubkeysInNostrDB(
+                requestedPubkeys: normalizedPubkeys,
+                resolvedProfiles: profilesByPubkey
+            )
+        )
+        guard !unresolvedPubkeys.isEmpty || !backfillPubkeys.isEmpty else {
+            return profilesByPubkey
+        }
 
         let primaryRelayTargets = normalizedRelayURLs(relayURLs)
         let prioritizedRelayTargets = await relayHintCache.prioritizedRelayURLs(
-            for: Array(unresolvedPubkeys),
+            for: Array(unresolvedPubkeys.union(backfillPubkeys)),
             baseRelayURLs: primaryRelayTargets
         )
+
+        let requestedPubkeys = Array(unresolvedPubkeys.union(backfillPubkeys))
         var fetchedProfiles = await fetchProfilesForPubkeys(
             relayURLs: prioritizedRelayTargets,
-            pubkeys: Array(unresolvedPubkeys),
+            pubkeys: requestedPubkeys,
             timeout: fetchTimeout,
             relayFetchMode: relayFetchMode
         )
-        unresolvedPubkeys.subtract(fetchedProfiles.keys.map(normalizePubkey))
+        let fetchedPubkeys = Set(fetchedProfiles.keys.map(normalizePubkey))
+        unresolvedPubkeys.subtract(fetchedPubkeys)
+        backfillPubkeys.subtract(fetchedPubkeys)
 
-        if !unresolvedPubkeys.isEmpty {
+        if !unresolvedPubkeys.isEmpty || !backfillPubkeys.isEmpty {
             let metadataRelayTargets = metadataRelayURLs(primaryRelayURLs: prioritizedRelayTargets)
             let fallbackProfiles = await fetchProfilesForPubkeys(
                 relayURLs: metadataRelayTargets,
-                pubkeys: Array(unresolvedPubkeys),
+                pubkeys: Array(unresolvedPubkeys.union(backfillPubkeys)),
                 timeout: fetchTimeout,
                 relayFetchMode: relayFetchMode
             )
             if !fallbackProfiles.isEmpty {
-                fetchedProfiles.merge(fallbackProfiles, uniquingKeysWith: { existing, _ in existing })
-                unresolvedPubkeys.subtract(fallbackProfiles.keys.map(normalizePubkey))
+                fetchedProfiles.merge(fallbackProfiles, uniquingKeysWith: { _, new in new })
+                let fallbackPubkeys = Set(fallbackProfiles.keys.map(normalizePubkey))
+                unresolvedPubkeys.subtract(fallbackPubkeys)
+                backfillPubkeys.subtract(fallbackPubkeys)
             }
         }
 
         if !fetchedProfiles.isEmpty || !unresolvedPubkeys.isEmpty {
-            profilesByPubkey.merge(fetchedProfiles, uniquingKeysWith: { existing, _ in existing })
+            profilesByPubkey.merge(fetchedProfiles, uniquingKeysWith: { _, new in new })
             await profileCache.store(
                 profiles: fetchedProfiles,
                 missed: Array(unresolvedPubkeys)
@@ -2257,6 +2279,27 @@ struct NostrFeedService: Sendable {
         }
 
         return collectedProfiles
+    }
+
+    private func missingPersistedProfilePubkeysInNostrDB(
+        requestedPubkeys: [String],
+        resolvedProfiles: [String: NostrProfile]
+    ) -> [String] {
+        let candidatePubkeys = requestedPubkeys.filter { resolvedProfiles[$0] != nil }
+        guard !candidatePubkeys.isEmpty else { return [] }
+
+        let persistedProfiles = nostrDatabase.profiles(pubkeys: candidatePubkeys) ?? [:]
+        var missing: [String] = []
+        missing.reserveCapacity(min(candidatePubkeys.count, Self.profileBackfillBatchSize))
+
+        for pubkey in candidatePubkeys where persistedProfiles[pubkey] == nil {
+            missing.append(pubkey)
+            if missing.count >= Self.profileBackfillBatchSize {
+                break
+            }
+        }
+
+        return missing
     }
 
     private func decodeNewestProfiles(from events: [NostrEvent]) -> [String: NostrProfile] {

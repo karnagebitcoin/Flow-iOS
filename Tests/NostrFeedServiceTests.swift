@@ -21,6 +21,119 @@ final class NostrFeedServiceTests: XCTestCase {
         XCTAssertEqual(NostrProfile.decode(from: coverJSON)?.banner, "https://example.com/cover.jpg")
     }
 
+    func testIngestLiveEventsStoresEventsLocally() async throws {
+        let harness = try TestHarness()
+        let event = makeEvent(
+            id: hex("a"),
+            pubkey: hex("b"),
+            kind: 1,
+            tags: [["t", "flow"]],
+            content: "live event"
+        )
+
+        await harness.service.ingestLiveEvents([event])
+
+        let resolved = await harness.seenEventStore.events(ids: [event.id])
+        XCTAssertEqual(resolved[event.id.lowercased()]?.id.lowercased(), event.id.lowercased())
+
+        let diagnostics = harness.nostrDatabase.diagnosticsSnapshot()
+        XCTAssertEqual(diagnostics.sessionIngestedEventCount, 1)
+        XCTAssertEqual(diagnostics.ingestCallCount, 1)
+        XCTAssertEqual(diagnostics.successfulIngestCallCount, 1)
+    }
+
+    func testProfileEventServicePersistsFetchedMetadataSnapshotsLocally() async throws {
+        let rootURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("FlowProfileEventService-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: rootURL, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: rootURL) }
+
+        let fileManager = TestFileManager(rootURL: rootURL)
+        let nostrDatabase = FlowNostrDB(fileManager: fileManager)
+        let seenEventStore = SeenEventStore(fileManager: fileManager, nostrDatabase: nostrDatabase)
+        let pubkey = hex("a")
+        let older = makeEvent(
+            id: hex("b"),
+            pubkey: pubkey,
+            kind: 0,
+            tags: [],
+            content: #"{"name":"older"}"#,
+            createdAt: 1_700_000_000
+        )
+        let newer = makeEvent(
+            id: hex("c"),
+            pubkey: pubkey,
+            kind: 0,
+            tags: [],
+            content: #"{"name":"newer"}"#,
+            createdAt: 1_700_000_100
+        )
+        let relayClient = ProfileMetadataRelayClient(eventsByRelay: [
+            relayURL: [older],
+            relayURL2: [newer]
+        ])
+        let service = ProfileEventService(relayClient: relayClient, seenEventStore: seenEventStore)
+
+        let snapshot = try await service.fetchProfileMetadataSnapshot(
+            relayURLs: [relayURL, relayURL2],
+            pubkey: pubkey
+        )
+
+        XCTAssertEqual(snapshot?.content, newer.content)
+        XCTAssertEqual(nostrDatabase.profile(pubkey: pubkey)?.name, "newer")
+        let diagnostics = nostrDatabase.diagnosticsSnapshot()
+        XCTAssertEqual(diagnostics.sessionIngestedProfileCount, 1)
+        XCTAssertEqual(diagnostics.successfulIngestCallCount, 1)
+    }
+
+    func testFetchProfilesBackfillsSnapshotOnlyProfilesIntoNostrDB() async throws {
+        let rootURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("FlowProfileBackfill-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: rootURL, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: rootURL) }
+
+        let fileManager = TestFileManager(rootURL: rootURL)
+        let profileSnapshotStore = ProfileSnapshotStore(fileManager: fileManager)
+        let nostrDatabase = FlowNostrDB(fileManager: fileManager)
+        let followListCache = FollowListSnapshotCache(fileManager: fileManager, nostrDatabase: nostrDatabase)
+        let seenEventStore = SeenEventStore(fileManager: fileManager, nostrDatabase: nostrDatabase)
+        let profileCache = ProfileCache(snapshotStore: profileSnapshotStore, nostrDatabase: nostrDatabase)
+        let pubkey = hex("d")
+        let cachedProfile = makeProfile(name: "cached", displayName: "Cached")
+        await profileSnapshotStore.putMany(entries: [
+            pubkey: PersistedProfileSnapshot(profile: cachedProfile, fetchedAt: Date())
+        ])
+
+        let freshProfileEvent = makeEvent(
+            id: hex("e"),
+            pubkey: pubkey,
+            kind: 0,
+            tags: [],
+            content: #"{"name":"fresh","display_name":"Fresh"}"#,
+            createdAt: 1_700_000_200
+        )
+        let relayClient = ProfileMetadataRelayClient(eventsByRelay: [
+            relayURL: [freshProfileEvent]
+        ])
+        let service = NostrFeedService(
+            relayClient: relayClient,
+            timelineCache: TimelineEventCache(),
+            profileCache: profileCache,
+            relayHintCache: ProfileRelayHintCache(),
+            followListCache: followListCache,
+            seenEventStore: seenEventStore,
+            nostrDatabase: nostrDatabase
+        )
+
+        let profiles = await service.fetchProfiles(relayURLs: [relayURL], pubkeys: [pubkey])
+
+        XCTAssertEqual(profiles[pubkey]?.name, "fresh")
+        XCTAssertEqual(nostrDatabase.profile(pubkey: pubkey)?.name, "fresh")
+        let diagnostics = nostrDatabase.diagnosticsSnapshot()
+        XCTAssertEqual(diagnostics.sessionIngestedProfileCount, 1)
+        XCTAssertEqual(diagnostics.successfulIngestCallCount, 1)
+    }
+
     func testReactionStatsPrefetchSkipsFreshNetworkRefetch() async throws {
         var rootURLBox: URL? = FileManager.default.temporaryDirectory
             .appendingPathComponent("FlowReactionStatsTests-\(UUID().uuidString)", isDirectory: true)
@@ -456,6 +569,7 @@ final class NostrFeedServiceTests: XCTestCase {
 }
 
 private let relayURL = URL(string: "wss://relay.example.com")!
+private let relayURL2 = URL(string: "wss://relay-two.example.com")!
 
 private actor SpyRelayClient: NostrRelayEventFetching {
     private var fetchCallCount = 0
@@ -467,6 +581,35 @@ private actor SpyRelayClient: NostrRelayEventFetching {
     ) async throws -> [NostrEvent] {
         fetchCallCount += 1
         return []
+    }
+
+    func fetchCount() -> Int {
+        fetchCallCount
+    }
+}
+
+private actor ProfileMetadataRelayClient: NostrRelayEventFetching {
+    private let eventsByRelay: [URL: [NostrEvent]]
+    private var fetchCallCount = 0
+
+    init(eventsByRelay: [URL: [NostrEvent]]) {
+        self.eventsByRelay = eventsByRelay
+    }
+
+    func fetchEvents(
+        relayURL: URL,
+        filter: NostrFilter,
+        timeout: TimeInterval
+    ) async throws -> [NostrEvent] {
+        fetchCallCount += 1
+
+        let authors = Set(filter.authors ?? [])
+        let kinds = Set(filter.kinds ?? [])
+        let events = eventsByRelay[relayURL] ?? []
+        return events.filter { event in
+            (authors.isEmpty || authors.contains(event.pubkey)) &&
+            (kinds.isEmpty || kinds.contains(event.kind))
+        }
     }
 
     func fetchCount() -> Int {
@@ -531,6 +674,7 @@ private final class TestHarness {
     let relayClient: SpyRelayClient
     let profileCache: ProfileCache
     let seenEventStore: SeenEventStore
+    let nostrDatabase: FlowNostrDB
     let service: NostrFeedService
 
     init() throws {
@@ -541,7 +685,7 @@ private final class TestHarness {
         let fileManager = TestFileManager(rootURL: rootURL)
         let profileSnapshotStore = ProfileSnapshotStore(fileManager: fileManager)
         let relayHintCache = ProfileRelayHintCache()
-        let nostrDatabase = FlowNostrDB(fileManager: fileManager)
+        nostrDatabase = FlowNostrDB(fileManager: fileManager)
         let followListCache = FollowListSnapshotCache(fileManager: fileManager, nostrDatabase: nostrDatabase)
 
         relayClient = SpyRelayClient()

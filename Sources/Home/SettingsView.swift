@@ -987,6 +987,30 @@ private struct SettingsMediaDiagnosticsView: View {
 
             Section {
                 diagnosticMetricRow(
+                    title: "DB Open",
+                    value: flowDBDiagnostics.isOpen ? "Yes" : "No"
+                )
+                diagnosticMetricRow(
+                    title: "DB Directory",
+                    value: flowDBDiagnostics.databaseDirectoryExists ? "Present" : "Missing"
+                )
+                diagnosticMetricRow(
+                    title: "Open Mapsize",
+                    value: byteDescription(flowDBDiagnostics.openMapsizeBytes)
+                )
+                diagnosticMetricRow(
+                    title: "Last Attempted Mapsize",
+                    value: byteDescription(flowDBDiagnostics.lastAttemptedMapsizeBytes)
+                )
+                diagnosticMetricRow(
+                    title: "Ingest Calls",
+                    value: flowDBDiagnostics.ingestCallCount.formatted()
+                )
+                diagnosticMetricRow(
+                    title: "Successful Ingests",
+                    value: flowDBDiagnostics.successfulIngestCallCount.formatted()
+                )
+                diagnosticMetricRow(
                     title: "Persisted Events",
                     value: flowDBDiagnostics.persistedEventCount.formatted()
                 )
@@ -1003,6 +1027,22 @@ private struct SettingsMediaDiagnosticsView: View {
                     value: flowDBDiagnostics.sessionIngestedProfileCount.formatted()
                 )
                 diagnosticMetricRow(
+                    title: "Local Event Lookups",
+                    value: flowDBDiagnostics.eventLookupCount.formatted()
+                )
+                diagnosticMetricRow(
+                    title: "Local Profile Lookups",
+                    value: flowDBDiagnostics.profileLookupCount.formatted()
+                )
+                diagnosticMetricRow(
+                    title: "Local Follow List Reads",
+                    value: flowDBDiagnostics.followListLookupCount.formatted()
+                )
+                diagnosticMetricRow(
+                    title: "Local Timeline Queries",
+                    value: flowDBDiagnostics.queryCount.formatted()
+                )
+                diagnosticMetricRow(
                     title: "Recent Event Overlay",
                     value: flowDBDiagnostics.recentOverlayEventCount.formatted()
                 )
@@ -1017,7 +1057,13 @@ private struct SettingsMediaDiagnosticsView: View {
             } header: {
                 Text("Flow DB")
             } footer: {
-                Text("Persisted values reflect what is already committed into the local nostrdb store. Session ingested values reflect what the current app run has pushed through the ingester, even if writer threads have not finished compacting everything yet.")
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Persisted values reflect what is already committed into the local nostrdb store. Session ingested values reflect what the current app run has pushed through the ingester, even if writer threads have not finished compacting everything yet.")
+                    Text("Path: \(flowDBDiagnostics.databasePath)")
+                    if let error = flowDBDiagnostics.lastOpenError, !error.isEmpty {
+                        Text("Last open error: \(error)")
+                    }
+                }
             }
 
             Section {
@@ -1071,6 +1117,7 @@ private struct SettingsMediaDiagnosticsView: View {
     private func resetDiagnostics() {
         Task {
             await FlowImageCache.shared.resetDiagnostics()
+            FlowNostrDB.shared.resetSessionDiagnostics()
             await refreshDiagnostics()
         }
     }
