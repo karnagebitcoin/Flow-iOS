@@ -221,7 +221,11 @@ struct NoteContentView: View {
                     }
 
                     if !isCollapsedPreviewActive, let websitePreviewURL, !appSettings.textOnlyMode {
-                        WebsiteLinkCardView(url: websitePreviewURL)
+                        WebsiteLinkCardView(
+                            url: websitePreviewURL,
+                            backgroundColor: appSettings.themePalette.linkPreviewBackground,
+                            borderColor: appSettings.themePalette.linkPreviewBorder
+                        )
                     }
 
                     if isCollapsedPreviewActive {
@@ -267,52 +271,26 @@ struct NoteContentView: View {
     }
 
     private var collapseMoreOverlay: some View {
-        ZStack(alignment: .leading) {
-            LinearGradient(
-                colors: [
-                    Color.clear,
-                    collapseOverlayBackgroundColor.opacity(0.88),
-                    collapseOverlayBackgroundColor
-                ],
-                startPoint: .top,
-                endPoint: .bottom
-            )
-            .frame(height: 34)
-
-            Button {
-                withAnimation(.easeOut(duration: 0.18)) {
-                    isExpanded = true
-                }
-            } label: {
-                Text("More")
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(.secondary)
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 6)
-                    .background(
-                        Capsule()
-                            .fill(Color(.tertiarySystemFill))
-                    )
-                    .overlay(
-                        Capsule()
-                            .stroke(Color(.separator).opacity(0.3), lineWidth: 0.6)
-                    )
+        Button {
+            withAnimation(.easeOut(duration: 0.18)) {
+                isExpanded = true
             }
-            .buttonStyle(.plain)
-            .accessibilityLabel("Show full note")
+        } label: {
+            Text("More")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 6)
+                .background(Capsule().fill(Color(.tertiarySystemFill)))
+                .overlay(Capsule().stroke(Color(.separator).opacity(0.3), lineWidth: 0.6))
         }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Show full note")
         .padding(.top, -12)
     }
 
     private var isCollapsedPreviewActive: Bool {
         shouldCollapseLongNote && !isExpanded
-    }
-
-    private var collapseOverlayBackgroundColor: Color {
-        if embedDepth > 0 {
-            return Color(.secondarySystemBackground)
-        }
-        return Color(.systemBackground)
     }
 
     private var shouldCollapseLongNote: Bool {
@@ -2148,38 +2126,22 @@ private struct NoteVideoPlayerView: View {
 
     @ViewBuilder
     private var muteButtonBackground: some View {
-        if #available(iOS 26, *) {
-            Circle()
-                .fill(muteButtonBaseFill)
-                .glassEffect(.regular.tint(muteButtonGlassTint).interactive(), in: .circle)
-                .overlay {
-                    Circle()
-                        .fill(muteButtonHighlightGradient)
-                        .blendMode(.screen)
-                }
-                .overlay {
-                    Circle()
-                        .strokeBorder(muteButtonStrokeColor, lineWidth: 0.8)
-                }
-                .shadow(color: muteButtonShadowColor, radius: 8, x: 0, y: 2)
-        } else {
-            Circle()
-                .fill(.thinMaterial)
-                .overlay {
-                    Circle()
-                        .fill(muteButtonBaseFill)
-                }
-                .overlay {
-                    Circle()
-                        .fill(muteButtonHighlightGradient)
-                        .blendMode(.screen)
-                }
-                .overlay {
-                    Circle()
-                        .strokeBorder(muteButtonStrokeColor, lineWidth: 0.8)
-                }
-                .shadow(color: muteButtonShadowColor, radius: 8, x: 0, y: 2)
-        }
+        Circle()
+            .fill(.thinMaterial)
+            .overlay {
+                Circle()
+                    .fill(muteButtonBaseFill)
+            }
+            .overlay {
+                Circle()
+                    .fill(muteButtonHighlightGradient)
+                    .blendMode(.screen)
+            }
+            .overlay {
+                Circle()
+                    .strokeBorder(muteButtonStrokeColor, lineWidth: 0.8)
+            }
+            .shadow(color: muteButtonShadowColor, radius: 8, x: 0, y: 2)
     }
 
     private var muteButtonForegroundColor: Color {
@@ -2188,10 +2150,6 @@ private struct NoteVideoPlayerView: View {
 
     private var muteButtonBaseFill: Color {
         colorScheme == .light ? .black.opacity(0.10) : .black.opacity(0.22)
-    }
-
-    private var muteButtonGlassTint: Color {
-        colorScheme == .light ? .gray.opacity(0.18) : .black.opacity(0.18)
     }
 
     private var muteButtonStrokeColor: Color {
@@ -2938,10 +2896,14 @@ private struct NostrEventReferenceCardView: View {
 
 private struct WebsiteLinkCardView: View {
     let url: URL
+    let backgroundColor: Color
+    let borderColor: Color
     @StateObject private var loader: LinkMetadataLoader
 
-    init(url: URL) {
+    init(url: URL, backgroundColor: Color, borderColor: Color) {
         self.url = url
+        self.backgroundColor = backgroundColor
+        self.borderColor = borderColor
         _loader = StateObject(wrappedValue: LinkMetadataLoader(url: url))
     }
 
@@ -2981,11 +2943,11 @@ private struct WebsiteLinkCardView: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(
                 RoundedRectangle(cornerRadius: 12, style: .continuous)
-                    .fill(Color(.secondarySystemBackground))
+                    .fill(backgroundColor)
             )
             .overlay(
                 RoundedRectangle(cornerRadius: 12, style: .continuous)
-                    .stroke(Color(.separator), lineWidth: 0.5)
+                    .stroke(borderColor, lineWidth: 0.5)
             )
         }
         .buttonStyle(.plain)

@@ -17,7 +17,22 @@ final class AppThemeOptionTests: XCTestCase {
         assertColor(AppThemeOption.sakura.palette.quoteBackground, matches: .white)
         assertColor(
             AppThemeOption.sakura.palette.separator,
-            matches: UIColor(red: 0.992, green: 0.647, blue: 0.835, alpha: 0.34)
+            matches: UIColor(red: 1.0, green: 0.882, blue: 0.945, alpha: 1)
+        )
+        assertColor(AppThemeOption.sakura.palette.linkPreviewBackground, matches: .white)
+        assertColor(
+            AppThemeOption.sakura.palette.chromeBorder,
+            matches: UIColor(red: 1.0, green: 0.882, blue: 0.945, alpha: 1)
+        )
+        assertColor(
+            AppThemeOption.sakura.palette.linkPreviewBorder,
+            matches: UIColor(red: 1.0, green: 0.882, blue: 0.945, alpha: 1)
+        )
+        assertColor(AppThemeOption.sakura.palette.articlePreviewBackgroundTop, matches: .white)
+        assertColor(AppThemeOption.sakura.palette.articlePreviewBackgroundBottom, matches: .white)
+        assertColor(
+            AppThemeOption.sakura.palette.articlePreviewBorder,
+            matches: UIColor(red: 1.0, green: 0.882, blue: 0.945, alpha: 1)
         )
         XCTAssertNotNil(AppThemeOption.sakura.palette.capsuleTabStyle)
         XCTAssertNotNil(AppThemeOption.sakura.palette.profileActionStyle)

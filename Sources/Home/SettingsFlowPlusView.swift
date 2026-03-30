@@ -270,17 +270,10 @@ private struct SettingsFlowPlusThemesView: View {
                     }
                 }
 
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(option.title)
-                        .font(appSettings.appFont(.subheadline, weight: .semibold))
-                        .foregroundStyle(.primary)
-                        .lineLimit(1)
-
-                    Text(option.subtitle)
-                        .font(appSettings.appFont(.caption1))
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
+                Text(option.title)
+                    .font(appSettings.appFont(.subheadline, weight: .semibold))
+                    .foregroundStyle(.primary)
+                    .lineLimit(1)
             }
             .padding(10)
             .frame(maxWidth: .infinity, alignment: .leading)

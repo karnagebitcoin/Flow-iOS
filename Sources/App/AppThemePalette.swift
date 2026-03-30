@@ -43,6 +43,7 @@ struct AppThemePollStyle {
 struct AppThemePalette {
     private static let sakuraPinkTint = Color(red: 0.992, green: 0.647, blue: 0.835) // #FDA5D5
     private static let sakuraPrimary = Color(red: 1.0, green: 0.404, blue: 0.941)
+    private static let sakuraBorder = Color(red: 1.0, green: 0.882, blue: 0.945) // #FFE1F1
     private static let sakuraSoftWhite = Color(red: 1.0, green: 0.985, blue: 0.992)
     private static let sakuraPetalWash = Color(red: 1.0, green: 0.947, blue: 0.979)
 
@@ -57,6 +58,11 @@ struct AppThemePalette {
     let secondaryFill: Color
     let tertiaryFill: Color
     let separator: Color
+    let linkPreviewBackground: Color
+    let linkPreviewBorder: Color
+    let articlePreviewBackgroundTop: Color
+    let articlePreviewBackgroundBottom: Color
+    let articlePreviewBorder: Color
     let capsuleTabStyle: AppThemeCapsuleTabStyle?
     let profileActionStyle: AppThemeProfileActionStyle?
     let pollStyle: AppThemePollStyle?
@@ -73,6 +79,11 @@ struct AppThemePalette {
         secondaryFill: Color(.secondarySystemFill),
         tertiaryFill: Color(.tertiarySystemFill),
         separator: Color(.separator),
+        linkPreviewBackground: Color(.secondarySystemBackground),
+        linkPreviewBorder: Color(.separator),
+        articlePreviewBackgroundTop: Color(.secondarySystemBackground),
+        articlePreviewBackgroundBottom: Color(.systemBackground),
+        articlePreviewBorder: Color(.separator).opacity(0.24),
         capsuleTabStyle: nil,
         profileActionStyle: nil,
         pollStyle: nil
@@ -90,6 +101,11 @@ struct AppThemePalette {
         secondaryFill: Color.white.opacity(0.10),
         tertiaryFill: Color.white.opacity(0.06),
         separator: Color.white.opacity(0.16),
+        linkPreviewBackground: Color(red: 0.11, green: 0.11, blue: 0.13),
+        linkPreviewBorder: Color.white.opacity(0.16),
+        articlePreviewBackgroundTop: Color(red: 0.11, green: 0.11, blue: 0.13),
+        articlePreviewBackgroundBottom: .black,
+        articlePreviewBorder: Color.white.opacity(0.18),
         capsuleTabStyle: nil,
         profileActionStyle: nil,
         pollStyle: nil
@@ -107,6 +123,11 @@ struct AppThemePalette {
         secondaryFill: Color.black.opacity(0.08),
         tertiaryFill: Color.black.opacity(0.05),
         separator: Color.black.opacity(0.12),
+        linkPreviewBackground: Color(red: 0.96, green: 0.96, blue: 0.97),
+        linkPreviewBorder: Color.black.opacity(0.12),
+        articlePreviewBackgroundTop: Color(red: 0.96, green: 0.96, blue: 0.97),
+        articlePreviewBackgroundBottom: .white,
+        articlePreviewBorder: Color.black.opacity(0.12),
         capsuleTabStyle: nil,
         profileActionStyle: nil,
         pollStyle: nil
@@ -115,7 +136,7 @@ struct AppThemePalette {
     static let sakura = AppThemePalette(
         background: Color(red: 1.0, green: 0.994, blue: 0.997),
         chromeBackground: Color(red: 1.0, green: 0.996, blue: 0.998),
-        chromeBorder: Self.sakuraPinkTint.opacity(0.24),
+        chromeBorder: Self.sakuraBorder,
         mutedForeground: Self.sakuraPinkTint,
         secondaryBackground: Color(red: 0.998, green: 0.978, blue: 0.989),
         quoteBackground: .white,
@@ -123,37 +144,42 @@ struct AppThemePalette {
         secondaryGroupedBackground: Color(red: 0.996, green: 0.972, blue: 0.985),
         secondaryFill: Color(red: 0.968, green: 0.760, blue: 0.880).opacity(0.12),
         tertiaryFill: Color(red: 0.986, green: 0.878, blue: 0.942).opacity(0.16),
-        separator: Self.sakuraPinkTint.opacity(0.34),
+        separator: Self.sakuraBorder,
+        linkPreviewBackground: .white,
+        linkPreviewBorder: Self.sakuraBorder,
+        articlePreviewBackgroundTop: .white,
+        articlePreviewBackgroundBottom: .white,
+        articlePreviewBorder: Self.sakuraBorder,
         capsuleTabStyle: AppThemeCapsuleTabStyle(
             background: .white,
-            border: Self.sakuraPinkTint.opacity(0.42),
+            border: Self.sakuraBorder,
             foreground: Self.sakuraPinkTint,
             selectedBackground: Self.sakuraPetalWash,
-            selectedBorder: Self.sakuraPinkTint.opacity(0.78),
+            selectedBorder: Self.sakuraBorder,
             selectedForeground: Self.sakuraPrimary
         ),
         profileActionStyle: AppThemeProfileActionStyle(
             background: .white,
-            border: Self.sakuraPinkTint.opacity(0.42),
+            border: Self.sakuraBorder,
             foreground: Self.sakuraPinkTint,
             primaryBackground: Self.sakuraPetalWash,
-            primaryBorder: Self.sakuraPinkTint.opacity(0.74),
+            primaryBorder: Self.sakuraBorder,
             primaryForeground: Self.sakuraPrimary,
             bannerBackground: Color.white.opacity(0.90),
-            bannerBorder: Self.sakuraPinkTint.opacity(0.52),
+            bannerBorder: Self.sakuraBorder,
             bannerForeground: Self.sakuraPinkTint
         ),
         pollStyle: AppThemePollStyle(
             cardBackground: .white,
-            cardBorder: Self.sakuraPinkTint.opacity(0.34),
+            cardBorder: Self.sakuraBorder,
             metadataForeground: Self.sakuraPinkTint,
             optionBackground: Self.sakuraSoftWhite,
             optionResultBackground: Self.sakuraPetalWash,
-            optionBorder: Self.sakuraPinkTint.opacity(0.28),
+            optionBorder: Self.sakuraBorder,
             optionSelectedBackground: Self.sakuraPinkTint.opacity(0.16),
-            optionSelectedBorder: Self.sakuraPinkTint.opacity(0.70),
+            optionSelectedBorder: Self.sakuraBorder,
             optionWinningBackground: Self.sakuraPrimary.opacity(0.12),
-            optionWinningBorder: Self.sakuraPrimary.opacity(0.32),
+            optionWinningBorder: Self.sakuraBorder,
             imagePlaceholderBackground: Self.sakuraPetalWash,
             imagePlaceholderForeground: Self.sakuraPinkTint,
             neutralBadgeBackground: Self.sakuraPetalWash,

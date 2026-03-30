@@ -67,7 +67,7 @@ struct LongFormArticlePreviewView: View {
         .background(previewBackground, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
         .overlay {
             RoundedRectangle(cornerRadius: 22, style: .continuous)
-                .stroke(Color(.separator).opacity(0.24), lineWidth: 0.8)
+                .stroke(appSettings.themePalette.articlePreviewBorder, lineWidth: 0.8)
         }
     }
 
@@ -83,8 +83,8 @@ struct LongFormArticlePreviewView: View {
     private var previewBackground: LinearGradient {
         LinearGradient(
             colors: [
-                Color(.secondarySystemBackground),
-                Color(.systemBackground)
+                appSettings.themePalette.articlePreviewBackgroundTop,
+                appSettings.themePalette.articlePreviewBackgroundBottom
             ],
             startPoint: .topLeading,
             endPoint: .bottomTrailing

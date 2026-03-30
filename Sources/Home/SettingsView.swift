@@ -555,18 +555,10 @@ private struct SettingsAppearanceView: View {
                     }
                 }
 
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(option.title)
-                        .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(option.isEnabled ? .primary : .secondary)
-                        .lineLimit(1)
-
-                    Text(option.subtitle)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(2)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
+                Text(option.title)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(option.isEnabled ? .primary : .secondary)
+                    .lineLimit(1)
             }
             .padding(10)
             .frame(maxWidth: .infinity, alignment: .leading)
