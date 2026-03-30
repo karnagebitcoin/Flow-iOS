@@ -63,7 +63,6 @@
 		58B77DB29944D82D60054441 /* ActivityView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4C415B7E3F07575507ED1F2B /* ActivityView.swift */; };
 		5CE21FBD402B779884AC8EC8 /* SearchView.swift in Sources */ = {isa = PBXBuildFile; fileRef = EADAAC1F003B015CDB20E50F /* SearchView.swift */; };
 		5EAF61B91665BD4813E38368 /* NostrSDK in Frameworks */ = {isa = PBXBuildFile; productRef = 5F7308D9FA71E781FAE528E2 /* NostrSDK */; };
-		5F015362E1208C0120B5B711 /* InlineVideoAutoplayVisibilityPolicyTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 728E5E9205402D9D0C91D77C /* InlineVideoAutoplayVisibilityPolicyTests.swift */; };
 		5F992FBFE1651B29293B6234 /* NostrRelayClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = FB5DA9CD86A2BCCAA2A6947D /* NostrRelayClient.swift */; };
 		6258EF4A253709554F9133F2 /* mem.c in Sources */ = {isa = PBXBuildFile; fileRef = 1C9A910FEE6E5787B79522DB /* mem.c */; };
 		650431FE86FDCD7F24D61D97 /* bech32.c in Sources */ = {isa = PBXBuildFile; fileRef = D77F084FE77B41B232F9F2CC /* bech32.c */; };
@@ -276,7 +275,6 @@
 		6EA07E7BA1105A303737FC2A /* FollowingListView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FollowingListView.swift; sourceTree = "<group>"; };
 		71C6CD017B6EEEE4E003688E /* Nacelle-Regular.otf */ = {isa = PBXFileReference; lastKnownFileType = file; path = "Nacelle-Regular.otf"; sourceTree = "<group>"; };
 		7215D735EE8084586736A003 /* hash_u5.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = hash_u5.c; sourceTree = "<group>"; };
-		728E5E9205402D9D0C91D77C /* InlineVideoAutoplayVisibilityPolicyTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InlineVideoAutoplayVisibilityPolicyTests.swift; sourceTree = "<group>"; };
 		73207CDE546C3885AE73A5F9 /* Flow-Bridging-Header.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = "Flow-Bridging-Header.h"; sourceTree = "<group>"; };
 		73524C099B08853D1740EFED /* ComposeSpeechTranscriber.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ComposeSpeechTranscriber.swift; sourceTree = "<group>"; };
 		73A09E5C5DEB394F9F612B36 /* ThreadReplyPublishService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ThreadReplyPublishService.swift; sourceTree = "<group>"; };
@@ -528,7 +526,6 @@
 				D2EE38569BAF46EC577CDF58 /* FlowMediaCacheDiagnosticsTests.swift */,
 				CC8EE400CBF546830C3B930A /* FlowNostrDBTests.swift */,
 				7D2F9C728B9BF4A4C652D8AF /* HomeFeedViewModelTests.swift */,
-				728E5E9205402D9D0C91D77C /* InlineVideoAutoplayVisibilityPolicyTests.swift */,
 				425996BFC8F1FE946E745146 /* LongFormArticleModelsTests.swift */,
 				58C5041AD8041427E01D7B42 /* NostrFeedServiceTests.swift */,
 				D6D17F2EC311D3203D8950E1 /* NostrRelayClientTests.swift */,
@@ -1135,7 +1132,6 @@
 				9D863BB7629A60AC9BD679EE /* FlowMediaCacheDiagnosticsTests.swift in Sources */,
 				EACA7719D5C5304FAA4EEFB1 /* FlowNostrDBTests.swift in Sources */,
 				EBDF2086176BD4F89676D952 /* HomeFeedViewModelTests.swift in Sources */,
-				5F015362E1208C0120B5B711 /* InlineVideoAutoplayVisibilityPolicyTests.swift in Sources */,
 				3526AA8C857820567D62575C /* LongFormArticleModelsTests.swift in Sources */,
 				DF564A10D83D14512B25E8FE /* NostrFeedServiceTests.swift in Sources */,
 				52C61C33CE36A6629F3F83C3 /* NostrRelayClientTests.swift in Sources */,

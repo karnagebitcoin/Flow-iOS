@@ -312,7 +312,6 @@ struct ThreadDetailView: View {
                 NoteContentView(
                     event: viewModel.rootItem.displayEvent,
                     mediaLayout: .feed,
-                    videoControlBottomInset: 82,
                     reactionCount: appSettings.reactionsVisibleInFeeds ? rootReactionCount : 0,
                     commentCount: appSettings.reactionsVisibleInFeeds ? threadReplies.count : 0,
                     onHashtagTap: { hashtag in

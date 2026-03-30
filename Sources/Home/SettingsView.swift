@@ -742,15 +742,6 @@ private struct SettingsGeneralView: View {
                 )
 
                 SettingsToggleRow(
-                    title: "Autoplay Videos",
-                    isOn: Binding(
-                        get: { appSettings.autoplayVideos },
-                        set: { appSettings.autoplayVideos = $0 }
-                    ),
-                    footer: "Videos autoplay muted while you browse."
-                )
-
-                SettingsToggleRow(
                     title: "Text Only Mode",
                     isOn: Binding(
                         get: { appSettings.textOnlyMode },

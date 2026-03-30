@@ -54,7 +54,6 @@ struct NoteContentView: View {
     private let onProfileTap: ((String) -> Void)?
     private let onReferencedEventTap: ((FeedItem) -> Void)?
     private let mediaLayout: NoteContentMediaLayout
-    private let videoControlBottomInset: CGFloat?
     private let reactionCount: Int
     private let commentCount: Int
     private let embedDepth: Int
@@ -78,7 +77,6 @@ struct NoteContentView: View {
     init(
         event: NostrEvent,
         mediaLayout: NoteContentMediaLayout = .feed,
-        videoControlBottomInset: CGFloat? = nil,
         reactionCount: Int = 0,
         commentCount: Int = 0,
         embedDepth: Int = 0,
@@ -110,7 +108,6 @@ struct NoteContentView: View {
         self.onProfileTap = onProfileTap
         self.onReferencedEventTap = onReferencedEventTap
         self.mediaLayout = mediaLayout
-        self.videoControlBottomInset = videoControlBottomInset
         self.reactionCount = reactionCount
         self.commentCount = commentCount
         self.embedDepth = embedDepth
@@ -187,9 +184,7 @@ struct NoteContentView: View {
                                 restrictedMediaView {
                                     NoteVideoPlayerView(
                                         url: url,
-                                        layout: mediaLayout,
-                                        bottomInsetOverride: videoControlBottomInset,
-                                        forceMute: shouldBlurMediaFromUnfollowedAuthors
+                                        layout: mediaLayout
                                     )
                                 }
                             }
@@ -1845,113 +1840,6 @@ private struct NoteImageRemixComposeDraft: Identifiable {
     let replyTargetEvent: NostrEvent?
 }
 
-struct InlineVideoAutoplayVisibilityPolicy {
-    private static let framePositionThreshold: CGFloat = 10
-    private static let frameSizeThreshold: CGFloat = 2
-
-    static func autoplayScore(for frame: CGRect, viewportHeight: CGFloat) -> CGFloat? {
-        guard viewportHeight > 0, frame.height > 0 else { return nil }
-
-        let viewportRect = CGRect(
-            x: frame.minX,
-            y: 0,
-            width: max(frame.width, 1),
-            height: viewportHeight
-        )
-        let visibleFrame = viewportRect.intersection(frame)
-        guard !visibleFrame.isNull, visibleFrame.height > 0 else { return nil }
-
-        let visibleRatio = visibleFrame.height / max(frame.height, 1)
-        guard visibleRatio >= 0.4 else { return nil }
-
-        let centerBandStart = viewportHeight * 0.4
-        let centerBandEnd = viewportHeight * 0.6
-        let frameMidY = frame.midY
-        guard (centerBandStart...centerBandEnd).contains(frameMidY) else { return nil }
-
-        let bandRadius = max(viewportHeight * 0.1, 1)
-        let centerDistance = abs(frameMidY - (viewportHeight * 0.5))
-        let centerScore = max(0, 1 - (centerDistance / bandRadius))
-        return visibleRatio + centerScore
-    }
-
-    static func shouldReportFrameChange(
-        previous: CGRect,
-        next: CGRect,
-        viewportHeight: CGFloat
-    ) -> Bool {
-        guard previous != .zero else { return true }
-
-        let positionDelta = max(
-            abs(previous.minY - next.minY),
-            abs(previous.maxY - next.maxY)
-        )
-        let sizeDelta = max(
-            abs(previous.width - next.width),
-            abs(previous.height - next.height)
-        )
-
-        if positionDelta >= framePositionThreshold || sizeDelta >= frameSizeThreshold {
-            return true
-        }
-
-        return autoplayScoreBucket(for: previous, viewportHeight: viewportHeight)
-            != autoplayScoreBucket(for: next, viewportHeight: viewportHeight)
-    }
-
-    private static func autoplayScoreBucket(for frame: CGRect, viewportHeight: CGFloat) -> Int {
-        guard let score = autoplayScore(for: frame, viewportHeight: viewportHeight) else {
-            return -1
-        }
-        return Int((score * 5).rounded())
-    }
-}
-
-@MainActor
-private final class InlineVideoPlaybackCoordinator: ObservableObject {
-    static let shared = InlineVideoPlaybackCoordinator()
-
-    @Published private(set) var activeVideoID: UUID?
-
-    private var autoplayEligibleScores: [UUID: CGFloat] = [:]
-    private var manuallyActivatedVideoID: UUID?
-
-    func updateAutoplayEligibility(_ id: UUID, score: CGFloat?) {
-        if let score {
-            autoplayEligibleScores[id] = score
-        } else {
-            autoplayEligibleScores.removeValue(forKey: id)
-            if manuallyActivatedVideoID == id {
-                manuallyActivatedVideoID = nil
-            }
-        }
-        updateActiveVideoID()
-    }
-
-    func videoDidDisappear(_ id: UUID) {
-        autoplayEligibleScores.removeValue(forKey: id)
-        if manuallyActivatedVideoID == id {
-            manuallyActivatedVideoID = nil
-        }
-        updateActiveVideoID()
-    }
-
-    func requestPlayback(_ id: UUID) {
-        manuallyActivatedVideoID = id
-        updateActiveVideoID()
-    }
-
-    private func updateActiveVideoID() {
-        if let manuallyActivatedVideoID, autoplayEligibleScores[manuallyActivatedVideoID] != nil {
-            activeVideoID = manuallyActivatedVideoID
-            return
-        }
-
-        manuallyActivatedVideoID = nil
-        activeVideoID = autoplayEligibleScores.max(by: { $0.value < $1.value })?.key
-    }
-}
-
 private actor NoteVideoAspectRatioCache {
     static let shared = NoteVideoAspectRatioCache()
 
@@ -2025,59 +1913,31 @@ private final class NoteVideoThumbnailCache {
 private struct NoteVideoPlayerView: View {
     let url: URL
     let layout: NoteContentMediaLayout
-    let bottomInsetOverride: CGFloat?
-    let forceMute: Bool
     @Environment(\.colorScheme) private var colorScheme
-    @EnvironmentObject private var appSettings: AppSettingsStore
-    @ObservedObject private var playbackCoordinator = InlineVideoPlaybackCoordinator.shared
-    @State private var player = AVPlayer()
-    @State private var playbackID = UUID()
     @State private var videoAspectRatio: CGFloat = 16.0 / 9.0
     @State private var videoThumbnail: UIImage?
-    @State private var suppressSharedMuteSync = false
-    @State private var globalFrame: CGRect = .zero
-    @State private var pendingAutoplayTask: Task<Void, Never>?
-    @State private var isPlayerPrepared = false
+    @State private var isShowingPlayer = false
 
     init(
         url: URL,
-        layout: NoteContentMediaLayout,
-        bottomInsetOverride: CGFloat? = nil,
-        forceMute: Bool = false
+        layout: NoteContentMediaLayout
     ) {
         self.url = url
         self.layout = layout
-        self.bottomInsetOverride = bottomInsetOverride
-        self.forceMute = forceMute
     }
 
     var body: some View {
-        ZStack(alignment: .bottomTrailing) {
-            if layout == .feed {
-                feedThumbnailLayer
-            }
-
-            if shouldRenderVideoPlayer {
-                VideoPlayer(player: player)
-            }
-
-            if showsFeedPlayOverlay {
-                feedPlayOverlayButton
-                    .zIndex(1)
-            }
-
-            if !forceMute && isPlayerPrepared {
-                muteToggleButton
-                    .padding(.trailing, 12)
-                    .padding(.bottom, muteButtonBottomInset)
-                    .zIndex(2)
+        Button {
+            isShowingPlayer = true
+        } label: {
+            ZStack {
+                thumbnailLayer
+                playOverlayButton
             }
         }
-        // Constrain height before aspect-fit so portrait videos shrink to a valid
-        // in-card width instead of rendering wider than the visible container.
+        .buttonStyle(.plain)
         .frame(maxWidth: .infinity, maxHeight: maxVideoHeight, alignment: .leading)
         .aspectRatio(videoAspectRatio, contentMode: .fit)
-        .compositingGroup()
         .clipShape(
             RoundedRectangle(cornerRadius: mediaCornerRadius, style: .continuous)
         )
@@ -2085,64 +1945,17 @@ private struct NoteVideoPlayerView: View {
             RoundedRectangle(cornerRadius: mediaCornerRadius, style: .continuous)
         )
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(videoViewportObserver)
         .task(id: url, priority: .utility) {
             await loadVideoAspectRatio()
             await loadVideoThumbnailIfNeeded()
         }
-        .onAppear {
-            if layout == .detailCarousel {
-                preparePlayerIfNeeded()
-            }
-            updateAutoplayEligibility(using: globalFrame)
-            applyPlaybackPolicy()
-        }
-        .onChange(of: appSettings.autoplayVideos) { _, _ in
-            applyPlaybackPolicy()
-        }
-        .onChange(of: appSettings.autoplayVideoSoundEnabled) { _, _ in
-            applyPlaybackPolicy()
-        }
-        .onChange(of: forceMute) { _, _ in
-            applyPlaybackPolicy()
-        }
-        .onChange(of: playbackCoordinator.activeVideoID) { _, _ in
-            applyPlaybackPolicy()
-        }
-        .onReceive(player.publisher(for: \.isMuted).removeDuplicates()) { _ in
-            syncMutePreferenceFromPlayer()
-        }
-        .onReceive(player.publisher(for: \.timeControlStatus).removeDuplicates()) { _ in
-            syncPlaybackPriorityFromPlayer()
-        }
-        .onDisappear {
-            pendingAutoplayTask?.cancel()
-            pendingAutoplayTask = nil
-            playbackCoordinator.videoDidDisappear(playbackID)
-            syncMutePreferenceFromPlayer()
-            releasePlayerResources()
-        }
-    }
-
-    private var videoViewportObserver: some View {
-        GeometryReader { proxy in
-            Color.clear
-                .preference(key: InlineVideoFramePreferenceKey.self, value: proxy.frame(in: .global))
-        }
-        .onPreferenceChange(InlineVideoFramePreferenceKey.self) { frame in
-            let viewportHeight = UIScreen.main.bounds.height
-            guard InlineVideoAutoplayVisibilityPolicy.shouldReportFrameChange(
-                previous: globalFrame,
-                next: frame,
-                viewportHeight: viewportHeight
-            ) else { return }
-            globalFrame = frame
-            updateAutoplayEligibility(using: frame)
+        .fullScreenCover(isPresented: $isShowingPlayer) {
+            NoteNativeVideoPlayerScreen(url: url)
         }
     }
 
     @ViewBuilder
-    private var feedThumbnailLayer: some View {
+    private var thumbnailLayer: some View {
         if let videoThumbnail {
             Image(uiImage: videoThumbnail)
                 .resizable()
@@ -2164,125 +1977,25 @@ private struct NoteVideoPlayerView: View {
         }
     }
 
-    private var feedPlayOverlayButton: some View {
-        Button {
-            handleManualPlaybackRequest()
-        } label: {
-            Circle()
-                .fill(.ultraThinMaterial)
-                .frame(width: 54, height: 54)
-                .overlay {
-                    Image(systemName: "play.fill")
-                        .font(.system(size: 18, weight: .semibold))
-                        .foregroundStyle(.primary)
-                        .offset(x: 1)
-                }
-                .overlay {
-                    Circle()
-                        .strokeBorder(Color.white.opacity(colorScheme == .dark ? 0.16 : 0.24), lineWidth: 0.8)
-                }
-                .shadow(color: .black.opacity(0.16), radius: 14, x: 0, y: 6)
-        }
-        .buttonStyle(.plain)
-        .accessibilityLabel("Play video")
-    }
-
-    private var muteToggleButton: some View {
-        Button {
-            toggleMute()
-        } label: {
-            Image(systemName: player.isMuted ? "speaker.slash.fill" : "speaker.wave.2.fill")
-                .font(.system(size: 14, weight: .semibold))
-                .foregroundStyle(muteButtonForegroundColor)
-                .frame(width: 36, height: 36)
-                .background(muteButtonBackground)
-        }
-        .buttonStyle(.plain)
-        .frame(width: 52, height: 52)
-        .contentShape(Circle())
-        .accessibilityLabel(player.isMuted ? "Unmute video" : "Mute video")
-        .accessibilityHint("Toggles video sound instantly")
-    }
-
-    @ViewBuilder
-    private var muteButtonBackground: some View {
+    private var playOverlayButton: some View {
         Circle()
-            .fill(.thinMaterial)
+            .fill(.ultraThinMaterial)
+            .frame(width: 54, height: 54)
             .overlay {
-                Circle()
-                    .fill(muteButtonBaseFill)
+                Image(systemName: "play.fill")
+                    .font(.system(size: 18, weight: .semibold))
+                    .foregroundStyle(.primary)
+                    .offset(x: 1)
             }
             .overlay {
                 Circle()
-                    .fill(muteButtonHighlightGradient)
-                    .blendMode(.screen)
+                    .strokeBorder(Color.white.opacity(colorScheme == .dark ? 0.16 : 0.24), lineWidth: 0.8)
             }
-            .overlay {
-                Circle()
-                    .strokeBorder(muteButtonStrokeColor, lineWidth: 0.8)
-            }
-            .shadow(color: muteButtonShadowColor, radius: 8, x: 0, y: 2)
-    }
-
-    private var muteButtonForegroundColor: Color {
-        colorScheme == .light ? .black.opacity(0.72) : .white.opacity(0.88)
-    }
-
-    private var muteButtonBaseFill: Color {
-        colorScheme == .light ? .black.opacity(0.10) : .black.opacity(0.22)
-    }
-
-    private var muteButtonStrokeColor: Color {
-        colorScheme == .light ? .white.opacity(0.34) : .white.opacity(0.16)
-    }
-
-    private var muteButtonShadowColor: Color {
-        .black.opacity(colorScheme == .light ? 0.10 : 0.18)
-    }
-
-    private var muteButtonHighlightGradient: LinearGradient {
-        LinearGradient(
-            colors: colorScheme == .light
-                ? [
-                    .white.opacity(0.20),
-                    .white.opacity(0.04)
-                ]
-                : [
-                    .white.opacity(0.12),
-                    .white.opacity(0.02)
-                ],
-            startPoint: .topLeading,
-            endPoint: .bottomTrailing
-        )
-    }
-
-    private var muteButtonBottomInset: CGFloat {
-        if let bottomInsetOverride {
-            return bottomInsetOverride
-        }
-        return layout == .feed ? 54 : 60
-    }
-
-    private func toggleMute() {
-        let shouldMute = !player.isMuted
-        suppressSharedMuteSync = true
-        player.isMuted = shouldMute
-        setSharedAutoplaySoundEnabled(!shouldMute)
-        DispatchQueue.main.async {
-            suppressSharedMuteSync = false
-        }
+            .shadow(color: .black.opacity(0.16), radius: 14, x: 0, y: 6)
     }
 
     private var maxVideoHeight: CGFloat {
         min(UIScreen.main.bounds.height * 0.72, 620)
-    }
-
-    private var shouldRenderVideoPlayer: Bool {
-        layout == .detailCarousel || isPlayerPrepared
-    }
-
-    private var showsFeedPlayOverlay: Bool {
-        layout == .feed && !isPlayerPrepared
     }
 
     private var mediaCornerRadius: CGFloat {
@@ -2305,8 +2018,6 @@ private struct NoteVideoPlayerView: View {
     }
 
     private func loadVideoThumbnailIfNeeded() async {
-        guard layout == .feed else { return }
-
         if let cached = NoteVideoThumbnailCache.shared.image(for: url) {
             await MainActor.run {
                 videoThumbnail = cached
@@ -2342,123 +2053,6 @@ private struct NoteVideoPlayerView: View {
         await MainActor.run {
             videoThumbnail = generatedThumbnail
         }
-    }
-
-    private func applyPlaybackPolicy() {
-        let shouldMute = forceMute || !appSettings.autoplayVideoSoundEnabled
-        if player.isMuted != shouldMute {
-            suppressSharedMuteSync = true
-            player.isMuted = shouldMute
-            DispatchQueue.main.async {
-                suppressSharedMuteSync = false
-            }
-        }
-
-        let isActiveVideo = playbackCoordinator.activeVideoID == playbackID
-        let isAlreadyPlaying = player.timeControlStatus == .playing || player.rate > 0
-
-        if isActiveVideo {
-            preparePlayerIfNeeded()
-            if appSettings.autoplayVideos && !isAlreadyPlaying {
-                scheduleAutoplayStart()
-            }
-        } else {
-            pendingAutoplayTask?.cancel()
-            pendingAutoplayTask = nil
-            if isAlreadyPlaying {
-                player.pause()
-            }
-            if layout == .feed {
-                releasePlayerResources()
-            }
-        }
-    }
-
-    private func scheduleAutoplayStart() {
-        guard pendingAutoplayTask == nil else { return }
-
-        pendingAutoplayTask = Task { @MainActor in
-            defer { pendingAutoplayTask = nil }
-
-            try? await Task.sleep(for: .milliseconds(140))
-            guard !Task.isCancelled else { return }
-            guard playbackCoordinator.activeVideoID == playbackID else { return }
-            guard appSettings.autoplayVideos else { return }
-
-            let isAlreadyPlaying = player.timeControlStatus == .playing || player.rate > 0
-            guard !isAlreadyPlaying else { return }
-
-            preparePlayerIfNeeded()
-            player.play()
-        }
-    }
-
-    @MainActor
-    private func preparePlayerIfNeeded() {
-        guard !isPlayerPrepared else { return }
-        player.replaceCurrentItem(with: AVPlayerItem(url: url))
-        player.isMuted = forceMute || !appSettings.autoplayVideoSoundEnabled
-        isPlayerPrepared = true
-    }
-
-    @MainActor
-    private func releasePlayerResources() {
-        pendingAutoplayTask?.cancel()
-        pendingAutoplayTask = nil
-        guard isPlayerPrepared else {
-            player.pause()
-            return
-        }
-
-        player.pause()
-        player.replaceCurrentItem(with: nil)
-        isPlayerPrepared = false
-    }
-
-    @MainActor
-    private func updateAutoplayEligibility(using frame: CGRect) {
-        let score = InlineVideoAutoplayVisibilityPolicy.autoplayScore(
-            for: frame,
-            viewportHeight: UIScreen.main.bounds.height
-        )
-        playbackCoordinator.updateAutoplayEligibility(playbackID, score: score)
-    }
-
-    @MainActor
-    private func syncMutePreferenceFromPlayer() {
-        guard !forceMute else { return }
-        guard !suppressSharedMuteSync else { return }
-        setSharedAutoplaySoundEnabled(!player.isMuted)
-    }
-
-    @MainActor
-    private func setSharedAutoplaySoundEnabled(_ soundEnabled: Bool) {
-        guard appSettings.autoplayVideoSoundEnabled != soundEnabled else { return }
-        appSettings.autoplayVideoSoundEnabled = soundEnabled
-    }
-
-    @MainActor
-    private func syncPlaybackPriorityFromPlayer() {
-        guard !forceMute else { return }
-        let isAlreadyPlaying = player.timeControlStatus == .playing || player.rate > 0
-        guard isAlreadyPlaying else { return }
-        guard playbackCoordinator.activeVideoID != playbackID else { return }
-        playbackCoordinator.requestPlayback(playbackID)
-    }
-
-    @MainActor
-    private func handleManualPlaybackRequest() {
-        preparePlayerIfNeeded()
-        playbackCoordinator.requestPlayback(playbackID)
-        player.play()
-    }
-}
-
-private struct InlineVideoFramePreferenceKey: PreferenceKey {
-    static var defaultValue: CGRect = .zero
-
-    static func reduce(value: inout CGRect, nextValue: () -> CGRect) {
-        value = nextValue()
     }
 }
 
@@ -2540,6 +2134,86 @@ private struct NoteAudioPlayerView: View {
             player.play()
             isPlaying = true
         }
+    }
+}
+
+private struct NoteNativeVideoPlayerScreen: View {
+    let url: URL
+
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        ZStack(alignment: .topTrailing) {
+            Color.black.ignoresSafeArea()
+
+            NoteNativeVideoPlayerController(url: url)
+                .ignoresSafeArea()
+
+            Button {
+                dismiss()
+            } label: {
+                Text("Done")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 10)
+                    .background(.ultraThinMaterial, in: Capsule(style: .continuous))
+            }
+            .buttonStyle(.plain)
+            .padding(.top, 16)
+            .padding(.trailing, 16)
+        }
+        .preferredColorScheme(.dark)
+    }
+}
+
+private struct NoteNativeVideoPlayerController: UIViewControllerRepresentable {
+    let url: URL
+
+    final class Coordinator {
+        let player = AVPlayer()
+        private var currentURL: URL?
+
+        func configure(url: URL, controller: AVPlayerViewController) {
+            guard currentURL != url || controller.player !== player else { return }
+            currentURL = url
+            controller.player = player
+            player.replaceCurrentItem(with: AVPlayerItem(url: url))
+            player.play()
+        }
+
+        func stop() {
+            player.pause()
+            player.replaceCurrentItem(with: nil)
+            currentURL = nil
+        }
+    }
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator()
+    }
+
+    func makeUIViewController(context: Context) -> AVPlayerViewController {
+        let controller = AVPlayerViewController()
+        controller.showsPlaybackControls = true
+        controller.videoGravity = .resizeAspect
+        controller.entersFullScreenWhenPlaybackBegins = false
+        controller.exitsFullScreenWhenPlaybackEnds = false
+        controller.canStartPictureInPictureAutomaticallyFromInline = false
+        context.coordinator.configure(url: url, controller: controller)
+        return controller
+    }
+
+    func updateUIViewController(_ uiViewController: AVPlayerViewController, context: Context) {
+        context.coordinator.configure(url: url, controller: uiViewController)
+    }
+
+    static func dismantleUIViewController(
+        _ uiViewController: AVPlayerViewController,
+        coordinator: Coordinator
+    ) {
+        uiViewController.player = nil
+        coordinator.stop()
     }
 }
 
