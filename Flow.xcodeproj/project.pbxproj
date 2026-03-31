@@ -17,6 +17,7 @@
 		0A3981CFDB4B11AD524F5048 /* SpaceGrotesk.ttf in Resources */ = {isa = PBXBuildFile; fileRef = 0799BCF380BFFF7B4339FE90 /* SpaceGrotesk.ttf */; };
 		0B1B3CE64991DA949BFD425B /* FlowPlusPaywallView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8467D457DCF59811885D322C /* FlowPlusPaywallView.swift */; };
 		0E23BAC793C3C26E9546124E /* AuthModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = EFEC568C11975A59AEBD528D /* AuthModels.swift */; };
+		1282B309527C91A9738A850A /* ComposeKlipyGIFPickerSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8264623494917B38C1140FFF /* ComposeKlipyGIFPickerSheet.swift */; };
 		13035ACC9DB792CC0923C3E1 /* ActivityViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 448CEA1E978254AE2F331085 /* ActivityViewModel.swift */; };
 		1311B4BE4FDA659FCFE75042 /* RelaySettingsStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4326CEACDA9C72B3A03BEC11 /* RelaySettingsStore.swift */; };
 		13B0FBAAFAA006FD2ACFACF8 /* ComposeNoteSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1179EFC9888CA4803C582715 /* ComposeNoteSheet.swift */; };
@@ -57,6 +58,7 @@
 		471D2A71946F997761A9907A /* SettingsFlowPlusView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E06B001C9CF614F66BD2C92B /* SettingsFlowPlusView.swift */; };
 		47CE76B972995AF553AE736A /* SearchViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 668778178F4FBD32B9CAB751 /* SearchViewModel.swift */; };
 		49A33778F8CC7699D01EA0C8 /* InterestFeedStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 21DF8275F493101456489799 /* InterestFeedStore.swift */; };
+		51C692A0B2D75FC091A58283 /* KlipyGIFServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3BBC297781EB6C719EE31929 /* KlipyGIFServiceTests.swift */; };
 		52C61C33CE36A6629F3F83C3 /* NostrRelayClientTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D6D17F2EC311D3203D8950E1 /* NostrRelayClientTests.swift */; };
 		556F2AD3E0ECD6AF4E24EB12 /* NostrLiveFeedSubscriber.swift in Sources */ = {isa = PBXBuildFile; fileRef = 208F8589194C51AD6888863E /* NostrLiveFeedSubscriber.swift */; };
 		5793DEDF418C7507D356BDC4 /* RecentFeedStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8B5C4629D9580FC17B515E35 /* RecentFeedStore.swift */; };
@@ -68,6 +70,7 @@
 		650431FE86FDCD7F24D61D97 /* bech32.c in Sources */ = {isa = PBXBuildFile; fileRef = D77F084FE77B41B232F9F2CC /* bech32.c */; };
 		6569AD819B9B491AAFB8F0C6 /* ProfileRoute.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7EDAF1E82A260C359E4D827B /* ProfileRoute.swift */; };
 		679EE6C0E5E8931989A28074 /* aura.json in Resources */ = {isa = PBXBuildFile; fileRef = 34E0E4C03AE499A85957C356 /* aura.json */; };
+		68803B564208AB6E17F01FE1 /* KlipyGIFService.swift in Sources */ = {isa = PBXBuildFile; fileRef = AED0817A296804831BD0F16D /* KlipyGIFService.swift */; };
 		697EDCC189A914F33FE7F205 /* AppThemePalette.swift in Sources */ = {isa = PBXBuildFile; fileRef = 373455F6CDF99124C3D9A51F /* AppThemePalette.swift */; };
 		69D6CF9F7B4C78BCD3BC892F /* NoteReactionPublishService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 89B43C2C1C0220AB508839B1 /* NoteReactionPublishService.swift */; };
 		6A802630793BFAC84B033576 /* WelcomeOnboardingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 39D83C388BD3011D7D65432E /* WelcomeOnboardingView.swift */; };
@@ -242,6 +245,7 @@
 		373455F6CDF99124C3D9A51F /* AppThemePalette.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppThemePalette.swift; sourceTree = "<group>"; };
 		392BF0CBA726B8A166A0B0AB /* PollResultsStoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PollResultsStoreTests.swift; sourceTree = "<group>"; };
 		39D83C388BD3011D7D65432E /* WelcomeOnboardingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WelcomeOnboardingView.swift; sourceTree = "<group>"; };
+		3BBC297781EB6C719EE31929 /* KlipyGIFServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KlipyGIFServiceTests.swift; sourceTree = "<group>"; };
 		3BF58C9E17E69DC8787A73BC /* HomeFeedView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HomeFeedView.swift; sourceTree = "<group>"; };
 		3CD01B3CCD290336C325682C /* midl.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = midl.c; sourceTree = "<group>"; };
 		3D961155CF6467EAA934FDBA /* ReactionButton.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReactionButton.swift; sourceTree = "<group>"; };
@@ -280,7 +284,7 @@
 		73A09E5C5DEB394F9F612B36 /* ThreadReplyPublishService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ThreadReplyPublishService.swift; sourceTree = "<group>"; };
 		76774507CAA34DFDCC29230A /* builder.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = builder.c; sourceTree = "<group>"; };
 		77DB1D6F0859F5EFA6F7D3B6 /* ProfileView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProfileView.swift; sourceTree = "<group>"; };
-		7C05D1C3683EFAEC836826DC /* Flow.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Flow.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		7C05D1C3683EFAEC836826DC /* Flow.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = Flow.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		7C870FAB58995AFBC0E052DB /* str.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = str.c; sourceTree = "<group>"; };
 		7CF25F42AF5E640A0958D88A /* AppTypography.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppTypography.swift; sourceTree = "<group>"; };
 		7D2F9C728B9BF4A4C652D8AF /* HomeFeedViewModelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HomeFeedViewModelTests.swift; sourceTree = "<group>"; };
@@ -288,6 +292,7 @@
 		7E1A0D446E96339734859F0F /* HashtagFavoritesStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HashtagFavoritesStore.swift; sourceTree = "<group>"; };
 		7EDAF1E82A260C359E4D827B /* ProfileRoute.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProfileRoute.swift; sourceTree = "<group>"; };
 		8030679878DFA4FEAD247B37 /* BreakReminderOverlay.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BreakReminderOverlay.swift; sourceTree = "<group>"; };
+		8264623494917B38C1140FFF /* ComposeKlipyGIFPickerSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ComposeKlipyGIFPickerSheet.swift; sourceTree = "<group>"; };
 		83D09F5E927339516641BC1C /* content_parser.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = content_parser.c; sourceTree = "<group>"; };
 		845975B17AAA4A48E4DEA9A4 /* AuthSheetView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AuthSheetView.swift; sourceTree = "<group>"; };
 		8467D457DCF59811885D322C /* FlowPlusPaywallView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FlowPlusPaywallView.swift; sourceTree = "<group>"; };
@@ -302,7 +307,7 @@
 		925F46E0FC75C191103D09E9 /* AppHaptics.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppHaptics.swift; sourceTree = "<group>"; };
 		92745AAE627B22A05C5801E1 /* ProfileEventService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProfileEventService.swift; sourceTree = "<group>"; };
 		93F2DE09E60173B3EF41F370 /* RelayMessageParser.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RelayMessageParser.swift; sourceTree = "<group>"; };
-		946FDA8DACD7D0BE1301214A /* FlowPlus.storekit */ = {isa = PBXFileReference; lastKnownFileType = text; path = FlowPlus.storekit; sourceTree = "<group>"; };
+		946FDA8DACD7D0BE1301214A /* FlowPlus.storekit */ = {isa = PBXFileReference; path = FlowPlus.storekit; sourceTree = "<group>"; };
 		94E4428036681D2C32127F98 /* FlowPremiumStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FlowPremiumStore.swift; sourceTree = "<group>"; };
 		96D4B5BA28A24BEE53F56796 /* HomeFeedFilterStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HomeFeedFilterStore.swift; sourceTree = "<group>"; };
 		98FAC17906D393F287394FBD /* AuthStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AuthStore.swift; sourceTree = "<group>"; };
@@ -318,12 +323,13 @@
 		A986D586CC5154F59A114A37 /* ActivityModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ActivityModels.swift; sourceTree = "<group>"; };
 		AA1B291DA499152538A295F6 /* HomeSlideoutMenuView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HomeSlideoutMenuView.swift; sourceTree = "<group>"; };
 		AD38ADD0555295271C55F01F /* welcome_onboarding_unicorn.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = welcome_onboarding_unicorn.json; sourceTree = "<group>"; };
+		AED0817A296804831BD0F16D /* KlipyGIFService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KlipyGIFService.swift; sourceTree = "<group>"; };
 		AFABF13735545F8FDEA81317 /* RelativeTimestampFormatter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RelativeTimestampFormatter.swift; sourceTree = "<group>"; };
 		AFF76C308688241A3E60CE4D /* AppThemeOptionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppThemeOptionTests.swift; sourceTree = "<group>"; };
 		B05785D04DB8CEBA2BD42EA2 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		B16BEBB7843C445E4A56C6D6 /* FollowingListViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FollowingListViewModel.swift; sourceTree = "<group>"; };
 		B3CA6AFAAD52A87540DCEB3A /* emitter.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = emitter.c; sourceTree = "<group>"; };
-		B9BEB6EA4B182422CED31E86 /* FlowShareExtension.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = FlowShareExtension.appex; sourceTree = BUILT_PRODUCTS_DIR; };
+		B9BEB6EA4B182422CED31E86 /* FlowShareExtension.appex */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = "wrapper.app-extension"; path = FlowShareExtension.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 		BEF58221EB8AAD8A71DC7AEE /* bolt11.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = bolt11.c; sourceTree = "<group>"; };
 		BFE1331CC7D26B2FEB4A9096 /* Flow.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = Flow.entitlements; sourceTree = "<group>"; };
 		C034C57B08F7E75F988005B8 /* FlowNostrDB.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FlowNostrDB.swift; sourceTree = "<group>"; };
@@ -354,7 +360,7 @@
 		E4AF05EBED242301B710AD29 /* json_parser.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = json_parser.c; sourceTree = "<group>"; };
 		E695E0883CD0CDEE151E004B /* ShareViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShareViewController.swift; sourceTree = "<group>"; };
 		E6BDD5E9DEFAD0D257ED53A2 /* RelaySettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RelaySettingsView.swift; sourceTree = "<group>"; };
-		E8D296822B861C00CC436CE9 /* FlowTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = FlowTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		E8D296822B861C00CC436CE9 /* FlowTests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = FlowTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		EADAAC1F003B015CDB20E50F /* SearchView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SearchView.swift; sourceTree = "<group>"; };
 		EDE66A5BBD34930A34D3923F /* NostrFeedService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NostrFeedService.swift; sourceTree = "<group>"; };
 		EFEC568C11975A59AEBD528D /* AuthModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AuthModels.swift; sourceTree = "<group>"; };
@@ -460,6 +466,7 @@
 				6018FB948D5F4B745EA4EFCE /* FlowApp.swift */,
 				4B67EBE0499A7E029AD05A18 /* FlowMediaCache.swift */,
 				94E4428036681D2C32127F98 /* FlowPremiumStore.swift */,
+				AED0817A296804831BD0F16D /* KlipyGIFService.swift */,
 				5AE5072564E400712902A306 /* LiveReactsOverlay.swift */,
 				4DE8EBF20CE78C8EC67DDEF4 /* MainTabShellView.swift */,
 				7D3039E41566418D6E94D7C6 /* MediaUploadPreparation.swift */,
@@ -526,6 +533,7 @@
 				D2EE38569BAF46EC577CDF58 /* FlowMediaCacheDiagnosticsTests.swift */,
 				CC8EE400CBF546830C3B930A /* FlowNostrDBTests.swift */,
 				7D2F9C728B9BF4A4C652D8AF /* HomeFeedViewModelTests.swift */,
+				3BBC297781EB6C719EE31929 /* KlipyGIFServiceTests.swift */,
 				425996BFC8F1FE946E745146 /* LongFormArticleModelsTests.swift */,
 				58C5041AD8041427E01D7B42 /* NostrFeedServiceTests.swift */,
 				D6D17F2EC311D3203D8950E1 /* NostrRelayClientTests.swift */,
@@ -839,6 +847,7 @@
 		FD01136A6823D628ECDFD09E /* Compose */ = {
 			isa = PBXGroup;
 			children = (
+				8264623494917B38C1140FFF /* ComposeKlipyGIFPickerSheet.swift */,
 				DB9619AA2B74AE8DE02E11D9 /* ComposeNotePublishService.swift */,
 				1179EFC9888CA4803C582715 /* ComposeNoteSheet.swift */,
 				8CC40241CBAA4918EEE51CF3 /* ComposePollEditorView.swift */,
@@ -916,7 +925,7 @@
 			isa = PBXProject;
 			attributes = {
 				BuildIndependentTargetsInParallel = YES;
-				LastUpgradeCheck = 2640;
+				LastUpgradeCheck = 1430;
 				TargetAttributes = {
 					582133B0091E7B797566D191 = {
 						ProvisioningStyle = Automatic;
@@ -1008,6 +1017,7 @@
 				064EA2E56841A005EFBA1B89 /* AuthStore.swift in Sources */,
 				C6DA55EE314F31B0EEEB3C81 /* BreakReminderOverlay.swift in Sources */,
 				DCEDACF4FDA917B689B6FC06 /* CompactMediaAttachmentPreview.swift in Sources */,
+				1282B309527C91A9738A850A /* ComposeKlipyGIFPickerSheet.swift in Sources */,
 				0627B86CB55C015CC15C16D3 /* ComposeNotePublishService.swift in Sources */,
 				13B0FBAAFAA006FD2ACFACF8 /* ComposeNoteSheet.swift in Sources */,
 				C7B6762C5D90AB7B9E0C4232 /* ComposePollEditorView.swift in Sources */,
@@ -1042,6 +1052,7 @@
 				8879AC3A5F08A6C3834FA14C /* ImageRemixEditorView.swift in Sources */,
 				49A33778F8CC7699D01EA0C8 /* InterestFeedStore.swift in Sources */,
 				1E35171B279FDBD958C28245 /* KeysView.swift in Sources */,
+				68803B564208AB6E17F01FE1 /* KlipyGIFService.swift in Sources */,
 				193FEE523F8578101768CF40 /* LiveReactsOverlay.swift in Sources */,
 				B5B65D0F2E911BDDBA839EFE /* LongFormArticleModels.swift in Sources */,
 				9E35DBB52EEA5BFFA72A78DB /* LongFormArticleView.swift in Sources */,
@@ -1132,6 +1143,7 @@
 				9D863BB7629A60AC9BD679EE /* FlowMediaCacheDiagnosticsTests.swift in Sources */,
 				EACA7719D5C5304FAA4EEFB1 /* FlowNostrDBTests.swift in Sources */,
 				EBDF2086176BD4F89676D952 /* HomeFeedViewModelTests.swift in Sources */,
+				51C692A0B2D75FC091A58283 /* KlipyGIFServiceTests.swift in Sources */,
 				3526AA8C857820567D62575C /* LongFormArticleModelsTests.swift in Sources */,
 				DF564A10D83D14512B25E8FE /* NostrFeedServiceTests.swift in Sources */,
 				52C61C33CE36A6629F3F83C3 /* NostrRelayClientTests.swift in Sources */,
@@ -1161,7 +1173,6 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ALWAYS_SEARCH_USER_PATHS = NO;
-				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
 				CLANG_ANALYZER_NONNULL = YES;
 				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
 				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
@@ -1195,7 +1206,6 @@
 				DEBUG_INFORMATION_FORMAT = dwarf;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
 				ENABLE_TESTABILITY = YES;
-				ENABLE_USER_SCRIPT_SANDBOXING = YES;
 				GCC_C_LANGUAGE_STANDARD = gnu11;
 				GCC_DYNAMIC_NO_PIC = NO;
 				GCC_NO_COMMON_BLOCKS = YES;
@@ -1215,7 +1225,6 @@
 				ONLY_ACTIVE_ARCH = YES;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = iphoneos;
-				STRING_CATALOG_GENERATE_SYMBOLS = YES;
 				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
 				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
 				SWIFT_VERSION = 5.0;
@@ -1249,7 +1258,6 @@
 				CODE_SIGN_IDENTITY = "iPhone Developer";
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_TEAM = Y8R8RLW5BL;
 				GCC_C_LANGUAGE_STANDARD = gnu11;
 				GCC_PREPROCESSOR_DEFINITIONS = (
 					"$(inherited)",
@@ -1286,7 +1294,6 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ALWAYS_SEARCH_USER_PATHS = NO;
-				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
 				CLANG_ANALYZER_NONNULL = YES;
 				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
 				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
@@ -1320,7 +1327,6 @@
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
 				ENABLE_NS_ASSERTIONS = NO;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
-				ENABLE_USER_SCRIPT_SANDBOXING = YES;
 				GCC_C_LANGUAGE_STANDARD = gnu11;
 				GCC_NO_COMMON_BLOCKS = YES;
 				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
@@ -1333,7 +1339,6 @@
 				MTL_FAST_MATH = YES;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = iphoneos;
-				STRING_CATALOG_GENERATE_SYMBOLS = YES;
 				SWIFT_COMPILATION_MODE = wholemodule;
 				SWIFT_OPTIMIZATION_LEVEL = "-O";
 				SWIFT_VERSION = 5.0;
@@ -1347,7 +1352,6 @@
 				CODE_SIGN_ENTITLEMENTS = Sources/ShareExtension/ShareExtension.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_TEAM = Y8R8RLW5BL;
 				INFOPLIST_FILE = Sources/ShareExtension/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = Flow;
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
@@ -1390,7 +1394,6 @@
 				CODE_SIGN_ENTITLEMENTS = Sources/ShareExtension/ShareExtension.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_TEAM = Y8R8RLW5BL;
 				INFOPLIST_FILE = Sources/ShareExtension/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = Flow;
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
@@ -1417,7 +1420,6 @@
 				CODE_SIGN_IDENTITY = "iPhone Developer";
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_TEAM = Y8R8RLW5BL;
 				GCC_C_LANGUAGE_STANDARD = gnu11;
 				GCC_PREPROCESSOR_DEFINITIONS = (
 					"$(inherited)",

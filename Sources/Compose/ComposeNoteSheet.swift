@@ -288,8 +288,10 @@ struct ComposeNoteSheet: View {
     @State private var hasAppliedInitialAttachments = false
     @State private var hasAppliedInitialSharedAttachments = false
     @State private var previewingMediaAttachment: ComposeMediaAttachment?
+    @State private var isShowingKlipyGIFPicker = false
 
     private let mediaUploadService = MediaUploadService.shared
+    private let klipyGIFService = KlipyGIFService.shared
     private let profileService = NostrFeedService()
 
     let currentAccountPubkey: String?
@@ -389,6 +391,13 @@ struct ComposeNoteSheet: View {
         }
         .sheet(item: $previewingMediaAttachment) { attachment in
             ComposeMediaAttachmentPreviewSheet(attachment: attachment)
+        }
+        .sheet(isPresented: $isShowingKlipyGIFPicker) {
+            ComposeKlipyGIFPickerSheet(currentAccountPubkey: currentAccountPubkey) { selection in
+                Task {
+                    await handleKlipyGIFSelection(selection)
+                }
+            }
         }
     }
 
@@ -521,7 +530,7 @@ struct ComposeNoteSheet: View {
                 cameraAttachmentButton(symbolFont: .system(size: 18, weight: .medium))
 
                 Button {
-                    // GIF picker is intentionally disabled for this iteration.
+                    isShowingKlipyGIFPicker = true
                 } label: {
                     Text("GIF")
                         .font(.footnote.weight(.semibold))
@@ -532,7 +541,7 @@ struct ComposeNoteSheet: View {
                 }
                 .buttonStyle(.plain)
                 .foregroundStyle(.secondary)
-                .disabled(true)
+                .disabled(isUploadingMedia || viewModel.isPublishing)
 
                 Button {
                     Task {
@@ -1466,6 +1475,75 @@ struct ComposeNoteSheet: View {
     private func uploadMediaAttachment(from item: PhotosPickerItem, normalizedNsec: String) async throws -> ComposeMediaAttachment {
         let preparedMedia = try await MediaUploadPreparation.prepareUploadMedia(from: item)
         let filename = "note-\(UUID().uuidString).\(preparedMedia.fileExtension)"
+
+        let result = try await mediaUploadService.uploadMedia(
+            data: preparedMedia.data,
+            mimeType: preparedMedia.mimeType,
+            filename: filename,
+            nsec: normalizedNsec,
+            provider: .blossom
+        )
+
+        return ComposeMediaAttachment(
+            url: result.url,
+            imetaTag: result.imetaTag,
+            mimeType: preparedMedia.mimeType,
+            fileSizeBytes: preparedMedia.data.count
+        )
+    }
+
+    private func handleKlipyGIFSelection(_ selection: KlipyGIFAttachmentCandidate) async {
+        guard !isUploadingMedia else { return }
+        viewModel.feedbackMessage = nil
+        viewModel.feedbackIsError = false
+
+        guard let normalizedNsec = currentNsec?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !normalizedNsec.isEmpty else {
+            viewModel.feedbackMessage = "Sign in with a private key to upload media."
+            viewModel.feedbackIsError = true
+            return
+        }
+
+        isUploadingMedia = true
+        defer {
+            isUploadingMedia = false
+        }
+
+        do {
+            let attachment = try await uploadKlipyGIFAttachment(selection, normalizedNsec: normalizedNsec)
+
+            if !mediaAttachments.contains(where: { $0.url == attachment.url }) {
+                mediaAttachments.append(attachment)
+                removeUploadedMediaURLIfPresent(attachment.url)
+            }
+
+            isEditorFocused = true
+            toastCenter.show("GIF added")
+
+            Task {
+                await klipyGIFService.registerShare(
+                    slug: selection.slug,
+                    customerID: selection.customerID,
+                    query: selection.searchQuery
+                )
+            }
+        } catch {
+            viewModel.feedbackMessage = (error as? LocalizedError)?.errorDescription ?? "Couldn't add that GIF right now."
+            viewModel.feedbackIsError = true
+        }
+    }
+
+    private func uploadKlipyGIFAttachment(
+        _ selection: KlipyGIFAttachmentCandidate,
+        normalizedNsec: String
+    ) async throws -> ComposeMediaAttachment {
+        let downloadedData = try await klipyGIFService.downloadGIFData(for: selection)
+        let preparedMedia = try MediaUploadPreparation.prepareUploadMedia(
+            data: downloadedData,
+            mimeType: selection.mimeType,
+            fileExtension: selection.fileExtension
+        )
+        let filename = "gif-\(UUID().uuidString).\(preparedMedia.fileExtension)"
 
         let result = try await mediaUploadService.uploadMedia(
             data: preparedMedia.data,
