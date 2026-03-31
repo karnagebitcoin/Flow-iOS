@@ -281,7 +281,7 @@ struct NoteContentView: View {
         }
         .buttonStyle(.plain)
         .accessibilityLabel("Show full note")
-        .padding(.top, -12)
+        .padding(.top, 10)
     }
 
     private var isCollapsedPreviewActive: Bool {

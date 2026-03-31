@@ -1,5 +1,11 @@
 import Foundation
 
+private enum HomeFeedPaginationDefaults {
+    static let pageSize = 100
+    static let prefetchTriggerDistance = 15
+    static let spinnerTriggerDistance = 2
+}
+
 enum FeedMode: String, CaseIterable, Identifiable {
     case posts
     case postsAndReplies
@@ -224,12 +230,17 @@ final class HomeFeedViewModel: ObservableObject {
     private var liveUpdatesTask: Task<Void, Never>?
     private var resetFeedTask: Task<Void, Never>?
     private var itemHydrationTask: Task<Void, Never>?
+    private var isPrefetchingMore = false
     private var latestRefreshRequestID = 0
+
+    nonisolated static var defaultPageSizeForTesting: Int {
+        HomeFeedPaginationDefaults.pageSize
+    }
 
     init(
         relayURL: URL,
         readRelayURLs: [URL]? = nil,
-        pageSize: Int = 70,
+        pageSize: Int = HomeFeedPaginationDefaults.pageSize,
         service: NostrFeedService = NostrFeedService(),
         liveSubscriber: NostrLiveFeedSubscriber = NostrLiveFeedSubscriber(),
         recentFeedStore: RecentFeedStore = .shared,
@@ -802,23 +813,49 @@ final class HomeFeedViewModel: ObservableObject {
     }
 
     func loadMoreIfNeeded(currentItem: FeedItem) async {
-        guard !isLoading, !isLoadingMore, !hasReachedEnd else { return }
-        guard let lastVisibleID = visibleItems.last?.id, lastVisibleID == currentItem.id else { return }
+        guard !isLoading, !hasReachedEnd else { return }
+
+        let currentVisibleItems = visibleItems
+        guard let currentIndex = currentVisibleItems.firstIndex(where: { $0.id == currentItem.id }) else { return }
+        guard Self.shouldPrefetchMore(
+            visibleItemCount: currentVisibleItems.count,
+            currentIndex: currentIndex
+        ) else {
+            return
+        }
+
+        let shouldShowLoadingIndicator = Self.shouldShowPaginationSpinner(
+            visibleItemCount: currentVisibleItems.count,
+            currentIndex: currentIndex
+        )
+
+        if isPrefetchingMore {
+            if shouldShowLoadingIndicator {
+                isLoadingMore = true
+            }
+            return
+        }
+        guard !isLoadingMore else { return }
 
         let until = max((oldestCreatedAt ?? Int(Date().timeIntervalSince1970)) - 1, 0)
         guard until > 0 else { return }
 
         let requestSource = feedSource
         let requestUserPubkey = currentUserPubkey
+        let requestRefreshID = latestRefreshRequestID
         let requestHydrationMode: FeedItemHydrationMode = .cachedProfilesOnly
         let requestStrategy = Self.requestStrategy(for: requestSource, isPagination: true)
         let requestFetchTimeout = requestStrategy.fetchTimeout
         let requestRelayFetchMode = requestStrategy.relayFetchMode
 
-        isLoadingMore = true
+        isPrefetchingMore = true
+        if shouldShowLoadingIndicator {
+            isLoadingMore = true
+        }
         itemHydrationTask?.cancel()
         itemHydrationTask = nil
         defer {
+            isPrefetchingMore = false
             isLoadingMore = false
         }
 
@@ -922,7 +959,7 @@ final class HomeFeedViewModel: ObservableObject {
                 )
             }
 
-            if requestSource != feedSource {
+            if requestRefreshID != latestRefreshRequestID || requestSource != feedSource {
                 return
             }
 
@@ -951,6 +988,26 @@ final class HomeFeedViewModel: ObservableObject {
         } catch {
             errorMessage = "Couldn't load more posts."
         }
+    }
+
+    nonisolated static func shouldPrefetchMore(
+        visibleItemCount: Int,
+        currentIndex: Int
+    ) -> Bool {
+        guard visibleItemCount > 0 else { return false }
+        guard currentIndex >= 0, currentIndex < visibleItemCount else { return false }
+        let remainingItemCount = visibleItemCount - currentIndex - 1
+        return remainingItemCount <= HomeFeedPaginationDefaults.prefetchTriggerDistance
+    }
+
+    nonisolated static func shouldShowPaginationSpinner(
+        visibleItemCount: Int,
+        currentIndex: Int
+    ) -> Bool {
+        guard visibleItemCount > 0 else { return false }
+        guard currentIndex >= 0, currentIndex < visibleItemCount else { return false }
+        let remainingItemCount = visibleItemCount - currentIndex - 1
+        return remainingItemCount <= HomeFeedPaginationDefaults.spinnerTriggerDistance
     }
 
     func showBufferedNewItems() {

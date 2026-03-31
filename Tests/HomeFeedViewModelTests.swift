@@ -3,6 +3,43 @@ import XCTest
 
 final class HomeFeedViewModelTests: XCTestCase {
     @MainActor
+    func testHomeFeedUsesLargerDefaultPageSize() {
+        XCTAssertEqual(HomeFeedViewModel.defaultPageSizeForTesting, 100)
+    }
+
+    @MainActor
+    func testPaginationPrefetchStartsBeforeLastVisibleItem() {
+        XCTAssertTrue(
+            HomeFeedViewModel.shouldPrefetchMore(
+                visibleItemCount: 100,
+                currentIndex: 86
+            )
+        )
+        XCTAssertFalse(
+            HomeFeedViewModel.shouldPrefetchMore(
+                visibleItemCount: 100,
+                currentIndex: 70
+            )
+        )
+    }
+
+    @MainActor
+    func testPaginationSpinnerAppearsOnlyNearTheEdge() {
+        XCTAssertTrue(
+            HomeFeedViewModel.shouldShowPaginationSpinner(
+                visibleItemCount: 100,
+                currentIndex: 97
+            )
+        )
+        XCTAssertFalse(
+            HomeFeedViewModel.shouldShowPaginationSpinner(
+                visibleItemCount: 100,
+                currentIndex: 90
+            )
+        )
+    }
+
+    @MainActor
     func testFollowingRefreshUsesExhaustiveRelayStrategy() {
         let strategy = HomeFeedViewModel.requestStrategy(for: .following, isPagination: false)
 

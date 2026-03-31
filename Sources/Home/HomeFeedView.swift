@@ -175,7 +175,7 @@ struct HomeFeedView: View {
                                         if appSettings.reactionsVisibleInFeeds {
                                             reactionStats.prefetch(events: [item.displayEvent], relayURLs: effectiveReadRelayURLs)
                                         }
-                                        Task {
+                                        Task(priority: .utility) {
                                             await viewModel.loadMoreIfNeeded(currentItem: item)
                                         }
                                     }
