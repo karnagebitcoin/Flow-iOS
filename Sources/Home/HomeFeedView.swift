@@ -855,7 +855,7 @@ struct HomeFeedView: View {
         case .custom(let feedID):
             return viewModel.customFeedDefinition(id: feedID)?.name ?? "Custom Feed"
         case .hashtag(let hashtag):
-            return HomePrimaryFeedSource.normalizeHashtag(hashtag)
+            return "#\(HomePrimaryFeedSource.normalizeHashtag(hashtag))"
         }
     }
 

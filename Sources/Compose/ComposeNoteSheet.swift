@@ -1,5 +1,6 @@
 import AVFoundation
 import AVKit
+import ImageIO
 import NostrSDK
 import PhotosUI
 import SwiftUI
@@ -65,7 +66,7 @@ final class ComposeNoteViewModel: ObservableObject {
                 feedbackIsError = false
                 return true
             } else if let pollDraft {
-                let successfulRelayCount = try await publishingService.publishPoll(
+                _ = try await publishingService.publishPoll(
                     content: text,
                     poll: pollDraft,
                     currentNsec: currentNsec,
@@ -74,11 +75,11 @@ final class ComposeNoteViewModel: ObservableObject {
                 )
 
                 text = ""
-                feedbackMessage = "Poll posted to \(successfulRelayCount) relay\(successfulRelayCount == 1 ? "" : "s")."
+                feedbackMessage = "Poll posted."
                 feedbackIsError = false
                 return true
             } else {
-                let successfulRelayCount = try await publishingService.publishNote(
+                _ = try await publishingService.publishNote(
                     content: text,
                     currentNsec: currentNsec,
                     writeRelayURLs: writeRelayURLs,
@@ -86,7 +87,7 @@ final class ComposeNoteViewModel: ObservableObject {
                 )
 
                 text = ""
-                feedbackMessage = "Posted to \(successfulRelayCount) relay\(successfulRelayCount == 1 ? "" : "s")."
+                feedbackMessage = "Posted."
                 feedbackIsError = false
                 return true
             }
@@ -130,6 +131,14 @@ struct ComposeMediaAttachment: Identifiable, Hashable {
         }
         return [".mp3", ".m4a", ".aac", ".wav", ".ogg"]
             .contains { url.path.lowercased().hasSuffix($0) }
+    }
+
+    var isGIF: Bool {
+        let normalized = mimeType.lowercased()
+        if normalized.contains("gif") {
+            return true
+        }
+        return url.pathExtension.lowercased() == "gif"
     }
 }
 
@@ -605,7 +614,7 @@ struct ComposeNoteSheet: View {
                         .font(.footnote.weight(.semibold))
                         .foregroundStyle(.secondary)
                 } else if writeRelayURLs.isEmpty {
-                    Label("No publish relays", systemImage: "wifi.slash")
+                    Label("No publish sources", systemImage: "wifi.slash")
                         .font(.footnote.weight(.semibold))
                         .foregroundStyle(.secondary)
                 }
@@ -620,7 +629,7 @@ struct ComposeNoteSheet: View {
                 HStack(spacing: 10) {
                     ProgressView()
                         .controlSize(.small)
-                    Text("Publishing to \(writeRelayURLs.count) relay\(writeRelayURLs.count == 1 ? "" : "s")...")
+                    Text("Posting to \(configuredPublishSourceCount) source\(configuredPublishSourceCount == 1 ? "" : "s")...")
                         .font(.footnote)
                         .foregroundStyle(.secondary)
                     Spacer()
@@ -655,7 +664,7 @@ struct ComposeNoteSheet: View {
             } else if writeRelayURLs.isEmpty {
                 infoBanner(
                     systemImage: "wifi.slash",
-                    text: "Add at least one publish relay to post notes."
+                    text: "Add at least one publish source to post notes."
                 )
             } else if let pollValidationMessage {
                 infoBanner(
@@ -1723,14 +1732,14 @@ struct ComposeNoteSheet: View {
             if currentNsec == nil {
                 viewModel.feedbackMessage = "This account needs an nsec to publish notes."
             } else if writeRelayURLs.isEmpty {
-                viewModel.feedbackMessage = "No publish relays are configured."
+                viewModel.feedbackMessage = "No publish sources are configured."
             } else if let pollValidationMessage {
                 viewModel.feedbackMessage = pollValidationMessage
             } else {
                 viewModel.feedbackMessage = currentNsec == nil
                     ? "This account needs an nsec to publish notes."
                     : writeRelayURLs.isEmpty
-                        ? "No publish relays are configured."
+                        ? "No publish sources are configured."
                         : "Write a note or attach media before posting."
             }
             viewModel.feedbackIsError = true
@@ -1781,6 +1790,11 @@ struct ComposeNoteSheet: View {
             mediaAttachments.append(attachment)
             removeUploadedMediaURLIfPresent(attachment.url)
         }
+    }
+
+    private var configuredPublishSourceCount: Int {
+        let normalized = Set(writeRelayURLs.map { $0.absoluteString.lowercased() })
+        return normalized.count
     }
 
     private func applyInitialSharedAttachmentsIfNeeded() async {
@@ -1992,6 +2006,7 @@ private struct ComposeMediaAttachmentPreviewSheet: View {
     @Environment(\.dismiss) private var dismiss
 
     let attachment: ComposeMediaAttachment
+    @State private var isAnimatingGIF = false
 
     var body: some View {
         NavigationStack {
@@ -2003,24 +2018,10 @@ private struct ComposeMediaAttachmentPreviewSheet: View {
                     VideoPreviewPlayer(url: attachment.url)
                         .ignoresSafeArea(edges: .bottom)
                 } else if attachment.isImage {
-                    AsyncImage(url: attachment.url) { phase in
-                        switch phase {
-                        case .empty:
-                            ProgressView()
-                                .tint(.white)
-                        case .success(let image):
-                            image
-                                .resizable()
-                                .scaledToFit()
-                                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                        case .failure:
-                            Image(systemName: "exclamationmark.triangle")
-                                .font(.largeTitle)
-                                .foregroundStyle(.white.opacity(0.8))
-                        @unknown default:
-                            EmptyView()
-                        }
-                    }
+                    ComposeAttachmentImagePreview(
+                        url: attachment.url,
+                        animateGIF: attachment.isGIF && isAnimatingGIF
+                    )
                     .padding()
                 } else {
                     VStack(spacing: 12) {
@@ -2033,6 +2034,14 @@ private struct ComposeMediaAttachmentPreviewSheet: View {
                 }
             }
             .toolbar {
+                if attachment.isGIF {
+                    ToolbarItem(placement: .topBarLeading) {
+                        Button(isAnimatingGIF ? "Pause" : "Animate") {
+                            isAnimatingGIF.toggle()
+                        }
+                    }
+                }
+
                 ToolbarItem(placement: .topBarTrailing) {
                     Button("Done") {
                         dismiss()
@@ -2041,6 +2050,79 @@ private struct ComposeMediaAttachmentPreviewSheet: View {
             }
             .toolbarBackground(.hidden, for: .navigationBar)
         }
+    }
+}
+
+private struct ComposeAttachmentImagePreview: View {
+    let url: URL
+    let animateGIF: Bool
+
+    @State private var animatedImage: UIImage?
+    @State private var animatedImageLoadFailed = false
+
+    var body: some View {
+        Group {
+            if animateGIF {
+                animatedPreview
+            } else {
+                staticPreview
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .task(id: animateGIF) {
+            guard animateGIF, animatedImage == nil, !animatedImageLoadFailed else { return }
+
+            let decodedImage: UIImage? = await Task.detached(priority: .userInitiated) {
+                guard let data = await FlowImageCache.shared.data(for: url) else {
+                    return nil
+                }
+                return ComposeGIFImageDecoder.image(from: data)
+            }.value
+
+            guard !Task.isCancelled else { return }
+            animatedImage = decodedImage
+            animatedImageLoadFailed = decodedImage == nil
+        }
+    }
+
+    @ViewBuilder
+    private var staticPreview: some View {
+        AsyncImage(url: url) { phase in
+            switch phase {
+            case .empty:
+                ProgressView()
+                    .tint(.white)
+            case .success(let image):
+                image
+                    .resizable()
+                    .scaledToFit()
+            case .failure:
+                previewFailureIcon
+            @unknown default:
+                EmptyView()
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var animatedPreview: some View {
+        if let animatedImage {
+            ComposeAnimatedUIImageView(
+                image: animatedImage,
+                contentMode: .scaleAspectFit
+            )
+        } else if animatedImageLoadFailed {
+            staticPreview
+        } else {
+            ProgressView()
+                .tint(.white)
+        }
+    }
+
+    private var previewFailureIcon: some View {
+        Image(systemName: "exclamationmark.triangle")
+            .font(.largeTitle)
+            .foregroundStyle(.white.opacity(0.8))
     }
 }
 
@@ -2057,6 +2139,79 @@ private struct VideoPreviewPlayer: View {
             .onDisappear {
                 player.pause()
             }
+    }
+}
+
+private struct ComposeAnimatedUIImageView: UIViewRepresentable {
+    let image: UIImage
+    let contentMode: UIView.ContentMode
+
+    func makeUIView(context: Context) -> UIImageView {
+        let imageView = UIImageView()
+        imageView.backgroundColor = .clear
+        imageView.clipsToBounds = true
+        imageView.isUserInteractionEnabled = false
+        return imageView
+    }
+
+    func updateUIView(_ imageView: UIImageView, context: Context) {
+        imageView.stopAnimating()
+        imageView.contentMode = contentMode
+        imageView.image = image
+        if image.images != nil {
+            imageView.startAnimating()
+        }
+    }
+
+    static func dismantleUIView(_ imageView: UIImageView, coordinator: ()) {
+        imageView.stopAnimating()
+        imageView.image = nil
+    }
+}
+
+private enum ComposeGIFImageDecoder {
+    static func image(from data: Data) -> UIImage? {
+        guard data.starts(with: [0x47, 0x49, 0x46]),
+              let source = CGImageSourceCreateWithData(data as CFData, nil) else {
+            return UIImage(data: data)
+        }
+
+        let frameCount = CGImageSourceGetCount(source)
+        guard frameCount > 1 else {
+            return UIImage(data: data)
+        }
+
+        var frames: [UIImage] = []
+        frames.reserveCapacity(frameCount)
+        var totalDuration: TimeInterval = 0
+
+        for index in 0..<frameCount {
+            guard let frame = CGImageSourceCreateImageAtIndex(source, index, nil) else { continue }
+            totalDuration += frameDuration(forFrameAt: index, source: source)
+            frames.append(UIImage(cgImage: frame, scale: UIScreen.main.scale, orientation: .up))
+        }
+
+        guard !frames.isEmpty else {
+            return UIImage(data: data)
+        }
+
+        return UIImage.animatedImage(
+            with: frames,
+            duration: max(totalDuration, Double(frames.count) * 0.1)
+        )
+    }
+
+    private static func frameDuration(forFrameAt index: Int, source: CGImageSource) -> TimeInterval {
+        let defaultDelay = 0.1
+        guard let properties = CGImageSourceCopyPropertiesAtIndex(source, index, nil) as? [CFString: Any],
+              let gifProperties = properties[kCGImagePropertyGIFDictionary] as? [CFString: Any] else {
+            return defaultDelay
+        }
+
+        let unclampedDelay = (gifProperties[kCGImagePropertyGIFUnclampedDelayTime] as? NSNumber)?.doubleValue
+        let delay = (gifProperties[kCGImagePropertyGIFDelayTime] as? NSNumber)?.doubleValue
+        let frameDelay = unclampedDelay ?? delay ?? defaultDelay
+        return frameDelay < 0.02 ? defaultDelay : frameDelay
     }
 }
 

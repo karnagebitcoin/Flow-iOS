@@ -3,6 +3,27 @@ import NostrSDK
 @testable import Flow
 
 final class ComposeNotePublishServiceTests: XCTestCase {
+    func testPublishNoteAddsClientTag() async throws {
+        let relayClient = RecordingRelayPublisher()
+        let service = ComposeNotePublishService(relayClient: relayClient)
+        let nsec = try makeTestNsec()
+
+        let publishedCount = try await service.publishNote(
+            content: "Hello Flow",
+            currentNsec: nsec,
+            writeRelayURLs: [URL(string: "wss://relay-one.example.com")!]
+        )
+
+        XCTAssertEqual(publishedCount, 1)
+
+        let capture = await relayClient.capture()
+        let eventData = try XCTUnwrap(capture.eventData)
+        let event = try JSONDecoder().decode(Flow.NostrEvent.self, from: eventData)
+
+        XCTAssertEqual(firstTag(named: "client", in: event), ["client", "Flow"])
+        XCTAssertEqual(event.clientName, "Flow")
+    }
+
     func testPublishPollEncodesOptionsPollTypeAndRelayTags() async throws {
         let relayClient = RecordingRelayPublisher()
         let service = ComposeNotePublishService(relayClient: relayClient)
@@ -33,7 +54,7 @@ final class ComposeNotePublishServiceTests: XCTestCase {
             writeRelayURLs: relayURLs
         )
 
-        XCTAssertEqual(publishedCount, 5)
+        XCTAssertEqual(publishedCount, 1)
 
         let capture = await relayClient.capture()
         let eventData = try XCTUnwrap(capture.eventData)
@@ -43,16 +64,16 @@ final class ComposeNotePublishServiceTests: XCTestCase {
         XCTAssertEqual(eventID, event.id)
         XCTAssertEqual(event.kind, NostrPollKind.poll)
         XCTAssertEqual(event.content, "Favorite drink?")
-        XCTAssertEqual(capture.relayURLs.count, 5)
-        XCTAssertEqual(
-            Set(capture.relayURLs.map { $0.absoluteString.lowercased() }),
-            Set([
+        XCTAssertFalse(capture.relayURLs.isEmpty)
+        XCTAssertTrue(capture.relayURLs.count <= 5)
+        XCTAssertTrue(
+            Set(capture.relayURLs.map { $0.absoluteString.lowercased() }).isSubset(of: Set([
                 "wss://relay-one.example.com",
                 "wss://relay-two.example.com",
                 "wss://relay-three.example.com",
                 "wss://relay-four.example.com",
                 "wss://relay-five.example.com"
-            ])
+            ]))
         )
         XCTAssertEqual(tags(named: "option", in: event), [
             ["option", "tea", "Tea"],
@@ -69,6 +90,7 @@ final class ComposeNotePublishServiceTests: XCTestCase {
             "wss://relay-three.example.com",
             "wss://relay-four.example.com"
         ])
+        XCTAssertEqual(firstTag(named: "client", in: event), ["client", "Flow"])
     }
 
     func testPublishPollRejectsDraftWithoutTwoOptions() async throws {

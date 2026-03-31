@@ -22,6 +22,11 @@ struct SourcePublishOutcome: Sendable {
     let firstFailureMessage: String?
 }
 
+enum SourcePublishSuccessPolicy: Sendable {
+    case waitForAllAcknowledgements
+    case returnAfterFirstSuccess
+}
+
 struct SourcePublishTransportError: LocalizedError, Sendable {
     let message: String
 
@@ -242,7 +247,8 @@ extension NostrRelayEventPublishing {
         to sourceURLs: [URL],
         eventData: Data,
         eventID: String,
-        timeout: TimeInterval = 10
+        timeout: TimeInterval = 10,
+        successPolicy: SourcePublishSuccessPolicy = .waitForAllAcknowledgements
     ) async -> SourcePublishOutcome {
         await withTaskGroup(of: SourcePublishAttempt.self, returning: SourcePublishOutcome.self) { group in
             for sourceURL in sourceURLs {
@@ -269,6 +275,13 @@ extension NostrRelayEventPublishing {
                 switch attempt {
                 case .success:
                     successfulSourceCount += 1
+                    if successPolicy == .returnAfterFirstSuccess {
+                        group.cancelAll()
+                        return SourcePublishOutcome(
+                            successfulSourceCount: successfulSourceCount,
+                            firstFailureMessage: firstFailureMessage
+                        )
+                    }
                 case .failure(let message):
                     if firstFailureMessage == nil {
                         firstFailureMessage = message

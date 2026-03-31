@@ -121,8 +121,10 @@ final class ComposeNotePublishService {
             throw ComposeNotePublishError.missingWriteRelays
         }
 
+        let eventTags = FlowClientAttribution.appending(to: additionalTags)
+
         var sdkTags: [Tag] = []
-        for rawTag in additionalTags {
+        for rawTag in eventTags {
             guard let tag = decodeSDKTag(from: rawTag) else { continue }
             sdkTags.append(tag)
         }
@@ -136,7 +138,8 @@ final class ComposeNotePublishService {
         let publishOutcome = await relayClient.publishEvent(
             to: targets,
             eventData: eventData,
-            eventID: event.id
+            eventID: event.id,
+            successPolicy: .returnAfterFirstSuccess
         )
 
         if publishOutcome.successfulSourceCount == 0 {

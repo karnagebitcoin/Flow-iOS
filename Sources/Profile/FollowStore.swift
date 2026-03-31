@@ -18,7 +18,7 @@ final class FollowStore: ObservableObject {
     private let defaults: UserDefaults
     private let authStore: AuthStore
     private let feedService: NostrFeedService
-    private let relayClient: NostrRelayClient
+    private let relayClient: any NostrRelayEventPublishing
     private let keyPrefix = "flow.followedPubkeys"
     private let legacyKeyPrefix = "x21.followedPubkeys"
     private let legacyKey = "x21.followedPubkeys"
@@ -41,7 +41,7 @@ final class FollowStore: ObservableObject {
         defaults: UserDefaults = .standard,
         authStore: AuthStore = .shared,
         feedService: NostrFeedService = NostrFeedService(),
-        relayClient: NostrRelayClient = NostrRelayClient()
+        relayClient: any NostrRelayEventPublishing = NostrRelayClient()
     ) {
         self.defaults = defaults
         self.authStore = authStore
@@ -99,7 +99,7 @@ final class FollowStore: ObservableObject {
         hasInFlightFollowPublish = false
 
         syncTask?.cancel()
-        publishTask?.cancel()
+        publishTask = nil
         prewarmTask?.cancel()
 
         guard let session = nextSession else {
@@ -242,9 +242,9 @@ final class FollowStore: ObservableObject {
 
         guard let nsec = session.nsec else { return }
         guard let keypair = Keypair(nsec: nsec.lowercased()) else {
+            persistFollowings(rollbackFollowings, for: session.accountPubkey)
             guard self.session == session else { return }
             followedPubkeys = rollbackFollowings
-            persistCurrentFollowings()
             lastPublishError = "Couldn't sign follow update. Please sign in again."
             return
         }
@@ -272,9 +272,6 @@ final class FollowStore: ObservableObject {
                 .build(signedBy: keypair)
 
             let eventData = try JSONEncoder().encode(event)
-            guard let eventObject = try JSONSerialization.jsonObject(with: eventData) as? [String: Any] else {
-                throw RelayClientError.publishRejected("Malformed follow event")
-            }
 
             var successfulPublishes = 0
             var firstPublishError: Error?
@@ -283,8 +280,9 @@ final class FollowStore: ObservableObject {
                 do {
                     try await relayClient.publishEvent(
                         relayURL: relayURL,
-                        eventObject: eventObject,
-                        eventID: event.id
+                        eventData: eventData,
+                        eventID: event.id,
+                        timeout: 10
                     )
                     successfulPublishes += 1
                 } catch {
@@ -299,21 +297,24 @@ final class FollowStore: ObservableObject {
             }
 
             guard !Task.isCancelled else { return }
-            guard self.session == session else { return }
 
             let mergedSnapshot = FollowListSnapshot(content: mergedContent, tags: mergedRawTags)
+            await feedService.storeFollowListSnapshotLocally(mergedSnapshot, for: session.accountPubkey)
+            persistFollowings(Set(mergedSnapshot.followedPubkeys), for: session.accountPubkey)
+
+            guard self.session == session else { return }
+
             latestFollowListSnapshot = mergedSnapshot
             followedPubkeys = Set(mergedSnapshot.followedPubkeys)
-            persistCurrentFollowings()
             lastPublishError = nil
             lastActionFeedback = ActionFeedback(pubkeys: targetPubkeys, didFollow: shouldFollow)
             scheduleProfileCacheUpdate(for: session, snapshot: mergedSnapshot)
         } catch {
+            persistFollowings(rollbackFollowings, for: session.accountPubkey)
             guard !Task.isCancelled else { return }
             guard self.session == session else { return }
 
             followedPubkeys = rollbackFollowings
-            persistCurrentFollowings()
             lastPublishError = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
             scheduleProfileCacheUpdate(for: session, snapshot: latestFollowListSnapshot)
         }
@@ -453,7 +454,11 @@ final class FollowStore: ObservableObject {
 
     private func persistCurrentFollowings() {
         guard let accountPubkey = session?.accountPubkey else { return }
-        defaults.set(Array(followedPubkeys), forKey: defaultsKey(for: accountPubkey))
+        persistFollowings(followedPubkeys, for: accountPubkey)
+    }
+
+    private func persistFollowings(_ followings: Set<String>, for accountPubkey: String) {
+        defaults.set(Array(followings).sorted(), forKey: defaultsKey(for: accountPubkey))
     }
 
     private func defaultsKey(for accountPubkey: String) -> String {

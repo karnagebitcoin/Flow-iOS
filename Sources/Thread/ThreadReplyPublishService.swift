@@ -97,7 +97,7 @@ final class ThreadReplyPublishService {
             appendPubkey(current)
         }
 
-        for rawTag in additionalTags {
+        for rawTag in FlowClientAttribution.appending(to: additionalTags) {
             guard let tag = decodeSDKTag(from: rawTag) else { continue }
             sdkTags.append(tag)
         }
@@ -111,7 +111,8 @@ final class ThreadReplyPublishService {
         let publishOutcome = await relayClient.publishEvent(
             to: targets,
             eventData: eventData,
-            eventID: event.id
+            eventID: event.id,
+            successPolicy: .returnAfterFirstSuccess
         )
 
         if publishOutcome.successfulSourceCount == 0 {

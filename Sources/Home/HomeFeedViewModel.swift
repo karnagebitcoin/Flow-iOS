@@ -1961,17 +1961,50 @@ final class HomeFeedViewModel: ObservableObject {
         return try await withThrowingTaskGroup(of: [FeedItem].self) { group in
             for phrase in phrases {
                 group.addTask { [self] in
-                    try await self.service.searchNotes(
-                        relayURLs: relayTargets,
+                    let localItems = await self.service.searchLocalNotes(
                         query: phrase,
                         kinds: kinds,
                         limit: limit,
                         until: until,
                         hydrationMode: hydrationMode,
-                        fetchTimeout: fetchTimeout,
-                        relayFetchMode: relayFetchMode,
                         moderationSnapshot: moderationSnapshot
                     )
+
+                    let remoteItems: [FeedItem]
+                    do {
+                        remoteItems = try await self.service.searchNotes(
+                            relayURLs: relayTargets,
+                            query: phrase,
+                            kinds: kinds,
+                            limit: limit,
+                            until: until,
+                            hydrationMode: hydrationMode,
+                            fetchTimeout: fetchTimeout,
+                            relayFetchMode: relayFetchMode,
+                            moderationSnapshot: moderationSnapshot
+                        )
+                    } catch {
+                        remoteItems = []
+                    }
+
+                    var byID: [String: FeedItem] = Dictionary(
+                        uniqueKeysWithValues: remoteItems.map { ($0.id, $0) }
+                    )
+
+                    for item in localItems {
+                        if let existing = byID[item.id] {
+                            byID[item.id] = existing.merged(with: item)
+                        } else {
+                            byID[item.id] = item
+                        }
+                    }
+
+                    return byID.values.sorted {
+                        if $0.event.createdAt == $1.event.createdAt {
+                            return $0.id > $1.id
+                        }
+                        return $0.event.createdAt > $1.event.createdAt
+                    }
                 }
             }
 

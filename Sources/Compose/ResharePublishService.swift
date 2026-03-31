@@ -130,7 +130,7 @@ final class ResharePublishService {
             rawTags.append(["k", "\(event.kind)"])
         }
 
-        let sdkTags = rawTags.compactMap(decodeSDKTag(from:))
+        let sdkTags = FlowClientAttribution.appending(to: rawTags).compactMap(decodeSDKTag(from:))
         let repostEvent = try NostrSDK.NostrEvent.Builder<NostrSDK.NostrEvent>(kind: repostKind)
             .content(content)
             .appendTags(contentsOf: sdkTags)

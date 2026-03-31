@@ -535,6 +535,14 @@ struct NostrFeedService: Sendable {
         return snapshot
     }
 
+    func storeFollowListSnapshotLocally(_ snapshot: FollowListSnapshot, for pubkey: String) async {
+        let normalizedPubkey = normalizePubkey(pubkey)
+        guard !normalizedPubkey.isEmpty else { return }
+
+        await followListCache.storeSnapshot(snapshot, for: normalizedPubkey)
+        await relayHintCache.storeHints(snapshot.relayHintsByPubkey)
+    }
+
     func fetchFollowListSnapshot(relayURL: URL, pubkey: String) async throws -> FollowListSnapshot? {
         try await fetchFollowListSnapshot(relayURLs: [relayURL], pubkey: pubkey)
     }
@@ -755,6 +763,128 @@ struct NostrFeedService: Sendable {
         )
     }
 
+    func searchLocalNotes(
+        query: String,
+        kinds: [Int],
+        limit: Int,
+        until: Int? = nil,
+        hydrationMode: FeedItemHydrationMode = .full,
+        moderationSnapshot: MuteFilterSnapshot? = nil
+    ) async -> [FeedItem] {
+        guard limit > 0 else { return [] }
+        let normalizedQuery = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !normalizedQuery.isEmpty else { return [] }
+
+        let shouldVerifyResults = shouldLocallyVerifyNIP50Results(for: normalizedQuery)
+        let searchTerms = shouldVerifyResults ? normalizedSearchTerms(from: normalizedQuery) : []
+        let primarySearchLimit = expandedTimelineLimit(
+            for: max(limit * 2, 120),
+            moderationSnapshot: moderationSnapshot
+        )
+        let fallbackSearchLimit = min(
+            expandedTimelineLimit(
+                for: min(max(limit * 8, 220), 600),
+                moderationSnapshot: moderationSnapshot
+            ),
+            600
+        )
+
+        let kindsSet = Set(kinds)
+        let searchFilter = NostrFilter(
+            kinds: kinds,
+            search: normalizedQuery,
+            limit: primarySearchLimit,
+            until: until
+        )
+
+        var fetchedEvents = (nostrDatabase.queryEvents(filter: searchFilter) ?? []).filter { event in
+            guard kindsSet.contains(event.kind) else { return false }
+            if let until, event.createdAt > until {
+                return false
+            }
+            guard shouldVerifyResults else { return true }
+            return eventMatchesSearchTerms(event, terms: searchTerms)
+        }
+        fetchedEvents = filterVisibleEvents(fetchedEvents, moderationSnapshot: moderationSnapshot)
+
+        if fetchedEvents.count < limit {
+            let fallbackFilter = NostrFilter(
+                kinds: kinds,
+                limit: fallbackSearchLimit,
+                until: until
+            )
+
+            let fallbackEvents = (nostrDatabase.queryEvents(filter: fallbackFilter) ?? []).filter { event in
+                guard kindsSet.contains(event.kind) else { return false }
+                if let until, event.createdAt > until {
+                    return false
+                }
+                guard shouldVerifyResults else { return true }
+                return eventMatchesSearchTerms(event, terms: searchTerms)
+            }
+
+            fetchedEvents = mergedTimelineEvents(
+                filterVisibleEvents(fetchedEvents + fallbackEvents, moderationSnapshot: moderationSnapshot),
+                filter: searchFilter
+            )
+        }
+
+        let timelineEvents = Array(
+            deduplicateEvents(fetchedEvents)
+                .sorted(by: { lhs, rhs in
+                    if lhs.createdAt == rhs.createdAt {
+                        return lhs.id > rhs.id
+                    }
+                    return lhs.createdAt > rhs.createdAt
+                })
+                .prefix(limit)
+        )
+
+        return await buildFeedItems(
+            relayURLs: [],
+            events: timelineEvents,
+            hydrationMode: hydrationMode,
+            moderationSnapshot: moderationSnapshot
+        )
+    }
+
+    func searchProfiles(
+        query: String,
+        limit: Int
+    ) async -> [ProfileSearchResult] {
+        guard limit > 0 else { return [] }
+        let normalizedQuery = query.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !normalizedQuery.isEmpty else { return [] }
+
+        let searchLimited = NostrFilter(
+            kinds: [0],
+            search: normalizedQuery,
+            limit: min(max(limit * 6, 120), 400)
+        )
+        let broadLocalScanLimit = normalizedQuery.count <= 1 ? 500 : 1_500
+        let broadLocalScan = NostrFilter(
+            kinds: [0],
+            limit: broadLocalScanLimit
+        )
+
+        let localEvents = nostrDatabase.queryEvents(
+            filters: [searchLimited, broadLocalScan]
+        ) ?? []
+
+        let sortedEvents = deduplicateEvents(localEvents).sorted { lhs, rhs in
+            if lhs.createdAt == rhs.createdAt {
+                return lhs.id > rhs.id
+            }
+            return lhs.createdAt > rhs.createdAt
+        }
+
+        return await matchedProfileResults(
+            from: sortedEvents,
+            query: normalizedQuery,
+            limit: limit
+        )
+    }
+
     func searchProfiles(
         relayURLs: [URL],
         query: String,
@@ -765,6 +895,14 @@ struct NostrFeedService: Sendable {
         guard limit > 0 else { return [] }
         let normalizedQuery = query.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         guard !normalizedQuery.isEmpty else { return [] }
+
+        let localMatches = await searchProfiles(
+            query: normalizedQuery,
+            limit: limit
+        )
+        if localMatches.count >= limit {
+            return localMatches
+        }
 
         let metadataFilter = NostrFilter(
             kinds: [0],
@@ -820,30 +958,16 @@ struct NostrFeedService: Sendable {
             return lhs.createdAt > rhs.createdAt
         }
 
-        var seen = Set<String>()
-        var matches: [ProfileSearchResult] = []
-        var fetchedProfiles: [String: NostrProfile] = [:]
+        let relayMatches = await matchedProfileResults(
+            from: sortedEvents,
+            query: normalizedQuery,
+            limit: limit
+        )
 
-        for event in sortedEvents {
-            guard let profile = NostrProfile.decode(from: event.content) else { continue }
-            let pubkey = normalizePubkey(event.pubkey)
-            guard !pubkey.isEmpty else { continue }
-            guard seen.insert(pubkey).inserted else { continue }
-            guard profileMatchesQuery(profile: profile, pubkey: pubkey, query: normalizedQuery) else { continue }
-
-            fetchedProfiles[pubkey] = profile
-            matches.append(ProfileSearchResult(pubkey: pubkey, profile: profile, createdAt: event.createdAt))
-
-            if matches.count >= limit {
-                break
-            }
-        }
-
-        if !fetchedProfiles.isEmpty {
-            await profileCache.store(profiles: fetchedProfiles, missed: [])
-        }
-
-        return matches
+        return mergeProfileSearchResults(
+            groups: [localMatches, relayMatches],
+            limit: limit
+        )
     }
 
     func fetchTrendingNotes(
@@ -1200,6 +1324,47 @@ struct NostrFeedService: Sendable {
         )
         return await buildFeedItems(
             relayURLs: relayURLs,
+            events: timelineEvents,
+            hydrationMode: hydrationMode,
+            moderationSnapshot: moderationSnapshot
+        )
+    }
+
+    func fetchLocalHashtagFeed(
+        hashtag: String,
+        kinds: [Int],
+        limit: Int,
+        until: Int?,
+        hydrationMode: FeedItemHydrationMode = .full,
+        moderationSnapshot: MuteFilterSnapshot? = nil
+    ) async -> [FeedItem] {
+        guard limit > 0 else { return [] }
+        let fetchLimit = expandedTimelineLimit(for: limit, moderationSnapshot: moderationSnapshot)
+        let normalizedHashtag = NostrEvent.normalizedHashtagValue(hashtag)
+
+        guard !normalizedHashtag.isEmpty else {
+            return []
+        }
+
+        let filter = NostrFilter(
+            kinds: kinds,
+            limit: fetchLimit,
+            until: until,
+            tagFilters: ["t": [normalizedHashtag]]
+        )
+
+        let kindsSet = Set(kinds)
+        let fetchedEvents = (nostrDatabase.queryEvents(filter: filter) ?? [])
+            .filter { kindsSet.contains($0.kind) }
+        let visibleEvents = filterVisibleEvents(fetchedEvents, moderationSnapshot: moderationSnapshot)
+        let timelineEvents = Array(
+            deduplicateEvents(visibleEvents)
+                .sorted(by: { $0.createdAt > $1.createdAt })
+                .prefix(limit)
+        )
+
+        return await buildFeedItems(
+            relayURLs: [],
             events: timelineEvents,
             hydrationMode: hydrationMode,
             moderationSnapshot: moderationSnapshot
@@ -2202,27 +2367,172 @@ struct NostrFeedService: Sendable {
     }
 
     private func profileMatchesQuery(profile: NostrProfile, pubkey: String, query: String) -> Bool {
-        let normalizedQuery = query.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        guard !normalizedQuery.isEmpty else { return false }
+        profileSearchScore(profile: profile, pubkey: pubkey, query: query) != nil
+    }
 
-        if pubkey.contains(normalizedQuery) {
-            return true
+    private func profileSearchScore(profile: NostrProfile, pubkey: String, query: String) -> Int? {
+        let normalizedQuery = query.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !normalizedQuery.isEmpty else { return nil }
+
+        if pubkey == normalizedQuery {
+            return 1_000
         }
 
-        let fields: [String] = [
-            profile.displayName ?? "",
-            profile.name ?? "",
-            profile.nip05 ?? "",
-            profile.website ?? "",
-            profile.about ?? "",
-            profile.lud16 ?? "",
-            profile.lud06 ?? ""
-        ]
+        if pubkey.hasPrefix(normalizedQuery) {
+            return 920
+        }
 
-        let haystack = fields.joined(separator: " ").lowercased()
-        let terms = normalizedSearchTerms(from: normalizedQuery)
-        guard !terms.isEmpty else { return false }
-        return terms.allSatisfy { haystack.contains($0) || pubkey.contains($0) }
+        let searchableFields = profileSearchFields(for: profile)
+        guard !searchableFields.isEmpty else { return nil }
+
+        let tokenSet = Set(searchableFields.flatMap(profileSearchTokens(from:)))
+
+        if searchableFields.contains(normalizedQuery) {
+            return 900
+        }
+
+        if tokenSet.contains(normalizedQuery) {
+            return 860
+        }
+
+        if searchableFields.contains(where: { $0.hasPrefix(normalizedQuery) }) {
+            return 820
+        }
+
+        if tokenSet.contains(where: { $0.hasPrefix(normalizedQuery) }) {
+            return 780
+        }
+
+        guard normalizedQuery.count >= 2 else { return nil }
+
+        if searchableFields.contains(where: { $0.contains(normalizedQuery) }) {
+            return 700
+        }
+
+        if tokenSet.contains(where: { $0.contains(normalizedQuery) }) {
+            return 660
+        }
+
+        return nil
+    }
+
+    private func profileSearchFields(for profile: NostrProfile) -> [String] {
+        let rawFields: [String] = [
+            profile.displayName,
+            profile.name,
+            profile.nip05,
+            profile.lud16,
+            profile.lud06
+        ]
+        .compactMap { value in
+            let normalized = value?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() ?? ""
+            return normalized.isEmpty ? nil : normalized
+        }
+
+        var expandedFields: [String] = []
+        var seen = Set<String>()
+
+        for field in rawFields {
+            if seen.insert(field).inserted {
+                expandedFields.append(field)
+            }
+
+            let compact = field.replacingOccurrences(of: " ", with: "")
+            if !compact.isEmpty, seen.insert(compact).inserted {
+                expandedFields.append(compact)
+            }
+
+            if field.hasPrefix("@") {
+                let dropped = String(field.dropFirst())
+                if !dropped.isEmpty, seen.insert(dropped).inserted {
+                    expandedFields.append(dropped)
+                }
+            }
+
+            if let atIndex = field.firstIndex(of: "@"), atIndex > field.startIndex {
+                let localPart = String(field[..<atIndex])
+                if !localPart.isEmpty, seen.insert(localPart).inserted {
+                    expandedFields.append(localPart)
+                }
+            }
+        }
+
+        return expandedFields
+    }
+
+    private func profileSearchTokens(from field: String) -> [String] {
+        field.split(whereSeparator: { character in
+            !character.isLetter && !character.isNumber
+        })
+        .map(String.init)
+        .filter { !$0.isEmpty }
+    }
+
+    private func matchedProfileResults(
+        from events: [NostrEvent],
+        query: String,
+        limit: Int
+    ) async -> [ProfileSearchResult] {
+        guard limit > 0 else { return [] }
+
+        var seen = Set<String>()
+        var matches: [(result: ProfileSearchResult, score: Int)] = []
+        var fetchedProfiles: [String: NostrProfile] = [:]
+
+        for event in events {
+            guard let profile = NostrProfile.decode(from: event.content) else { continue }
+            let pubkey = normalizePubkey(event.pubkey)
+            guard !pubkey.isEmpty else { continue }
+            guard seen.insert(pubkey).inserted else { continue }
+            guard let score = profileSearchScore(profile: profile, pubkey: pubkey, query: query) else { continue }
+
+            fetchedProfiles[pubkey] = profile
+            matches.append((
+                result: ProfileSearchResult(pubkey: pubkey, profile: profile, createdAt: event.createdAt),
+                score: score
+            ))
+        }
+
+        if !fetchedProfiles.isEmpty {
+            await profileCache.store(profiles: fetchedProfiles, missed: [])
+        }
+
+        return matches
+            .sorted { lhs, rhs in
+                if lhs.score == rhs.score {
+                    if lhs.result.createdAt == rhs.result.createdAt {
+                        return lhs.result.pubkey < rhs.result.pubkey
+                    }
+                    return lhs.result.createdAt > rhs.result.createdAt
+                }
+                return lhs.score > rhs.score
+            }
+            .prefix(limit)
+            .map(\.result)
+    }
+
+    private func mergeProfileSearchResults(
+        groups: [[ProfileSearchResult]],
+        limit: Int
+    ) -> [ProfileSearchResult] {
+        guard limit > 0 else { return [] }
+
+        var seen = Set<String>()
+        var ordered: [ProfileSearchResult] = []
+
+        for group in groups {
+            for result in group {
+                let normalizedPubkey = result.pubkey.lowercased()
+                guard seen.insert(normalizedPubkey).inserted else { continue }
+                ordered.append(result)
+
+                if ordered.count >= limit {
+                    return ordered
+                }
+            }
+        }
+
+        return ordered
     }
 
     private func deduplicateEvents(_ events: [NostrEvent]) -> [NostrEvent] {

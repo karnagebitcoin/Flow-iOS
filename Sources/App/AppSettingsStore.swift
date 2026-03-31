@@ -269,6 +269,7 @@ enum CustomFeedIconCatalog {
 
     static let availableIcons: [String] = [
         "square.stack.3d.up.fill",
+        "magnifyingglass",
         "newspaper.fill",
         "sparkles",
         "bolt.fill",

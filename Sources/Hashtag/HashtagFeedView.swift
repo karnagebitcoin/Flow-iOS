@@ -40,19 +40,6 @@ struct HashtagFeedView: View {
         let visibleReplyCounts = ReplyCountEstimator.counts(for: visibleItems)
 
         List {
-            Section {
-                VStack(alignment: .leading, spacing: 10) {
-                    FlowCapsuleTabBar(
-                        selection: $viewModel.mode,
-                        items: FeedMode.allCases,
-                        title: hashtagTabTitle(for:)
-                    )
-                }
-                .padding(.vertical, 4)
-            }
-            .listRowSeparator(.hidden)
-            .listRowBackground(Color.clear)
-
             if viewModel.isLoading && visibleItems.isEmpty {
                 ForEach(0..<6, id: \.self) { _ in
                     loadingRow
@@ -290,14 +277,5 @@ struct HashtagFeedView: View {
 
     private var isCurrentHashtagFavorite: Bool {
         hashtagFavoritesStore.isFavorite(viewModel.normalizedHashtag)
-    }
-
-    private func hashtagTabTitle(for mode: FeedMode) -> String {
-        switch mode {
-        case .posts:
-            return "Notes"
-        case .postsAndReplies:
-            return "All"
-        }
     }
 }

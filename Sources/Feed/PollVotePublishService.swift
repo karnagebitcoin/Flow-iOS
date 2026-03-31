@@ -56,7 +56,7 @@ final class PollVotePublishService {
             ["p", pollEvent.pubkey.lowercased()]
         ] + normalizedOptionIDs.map { ["response", $0] }
 
-        let sdkTags = rawTags.compactMap(decodeSDKTag(from:))
+        let sdkTags = FlowClientAttribution.appending(to: rawTags).compactMap(decodeSDKTag(from:))
         let event = try NostrSDK.NostrEvent.Builder<NostrSDK.NostrEvent>(kind: .unknown(NostrPollKind.response))
             .content("")
             .appendTags(contentsOf: sdkTags)

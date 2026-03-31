@@ -45,6 +45,12 @@ struct FeedRowView: View {
     private let reshareService = ResharePublishService()
     private let reactionPublishService = NoteReactionPublishService()
 
+    private struct ReplyContextPresentation {
+        let parentItem: FeedItem
+        let snippet: String?
+        let hasImageBadge: Bool
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             if item.isRepost {
@@ -52,8 +58,8 @@ struct FeedRowView: View {
                     .padding(.leading, 56)
             }
 
-            if shouldShowReplyContext, let snippet = item.replyTargetSnippet {
-                replyContextRow(snippet: snippet)
+            if shouldShowReplyContext, let replyContextPresentation {
+                replyContextRow(replyContextPresentation)
                     .padding(.leading, 56)
             }
 
@@ -83,6 +89,8 @@ struct FeedRowView: View {
                             .onTapGesture {
                                 onOpenThread?()
                             }
+
+                        clientAttributionLabel
 
                         Text(RelativeTimestampFormatter.shortString(from: item.displayEvent.createdAtDate))
                             .font(appSettings.appFont(.caption1))
@@ -247,6 +255,20 @@ struct FeedRowView: View {
         appSettings.themePalette.mutedForeground
     }
 
+    @ViewBuilder
+    private var clientAttributionLabel: some View {
+        if let clientName = item.displayEvent.clientName {
+            Text("via \(clientName)")
+                .font(appSettings.appFont(.caption1))
+                .foregroundStyle(mutedChromeColor)
+                .lineLimit(1)
+                .contentShape(Rectangle())
+                .onTapGesture {
+                    onOpenThread?()
+                }
+        }
+    }
+
     private var followBadgeIconName: String? {
         guard !isAuthoredByCurrentAccount, let avatarMenuActions else { return nil }
         let normalized = avatarMenuActions.followLabel
@@ -340,7 +362,22 @@ struct FeedRowView: View {
     }
 
     private var shouldShowReplyContext: Bool {
-        item.displayEvent.isReplyNote && item.replyTargetSnippet != nil
+        item.displayEvent.isReplyNote && replyContextPresentation != nil
+    }
+
+    private var replyContextPresentation: ReplyContextPresentation? {
+        guard let parentItem = item.replyTargetFeedItem else { return nil }
+
+        let imageURLs = NoteContentParser.imageURLs(in: parentItem.displayEvent)
+        let hasImageBadge = !imageURLs.isEmpty
+        let snippet = replyContextSnippet(for: parentItem.displayEvent, imageURLs: imageURLs)
+
+        guard snippet != nil || hasImageBadge else { return nil }
+        return ReplyContextPresentation(
+            parentItem: parentItem,
+            snippet: snippet,
+            hasImageBadge: hasImageBadge
+        )
     }
 
     private var shouldAllowReplyContextNavigation: Bool {
@@ -353,30 +390,49 @@ struct FeedRowView: View {
     }
 
     @ViewBuilder
-    private func replyContextRow(snippet: String) -> some View {
+    private func replyContextRow(_ presentation: ReplyContextPresentation) -> some View {
         let content = HStack(spacing: 6) {
             Image(systemName: "arrow.turn.up.left")
                 .font(.caption.weight(.semibold))
                 .foregroundStyle(mutedChromeColor)
 
-            (
-                Text("Replying to ")
-                    .foregroundStyle(mutedChromeColor)
-                +
-                Text(snippet)
-                    .foregroundStyle(mutedChromeColor)
+            Text("Replying to")
+                .font(.caption)
+                .foregroundStyle(mutedChromeColor)
+                .lineLimit(1)
+
+            AvatarView(
+                url: presentation.parentItem.avatarURL,
+                fallback: presentation.parentItem.displayName,
+                size: 18
             )
-            .font(.caption)
-            .lineLimit(1)
+
+            if let snippet = presentation.snippet {
+                Text(snippet)
+                    .font(.caption)
+                    .foregroundStyle(mutedChromeColor)
+                    .lineLimit(1)
+            }
+
+            if presentation.hasImageBadge {
+                Text("image")
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(mutedChromeColor)
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 2)
+                    .background(
+                        Capsule()
+                            .fill(appSettings.themePalette.tertiaryFill)
+                    )
+            }
 
             Spacer(minLength: 0)
         }
 
-        if let parentItem = item.replyTargetFeedItem,
-           let onReferencedEventTap,
+        if let onReferencedEventTap,
            shouldAllowReplyContextNavigation {
             Button {
-                onReferencedEventTap(parentItem.threadNavigationItem)
+                onReferencedEventTap(presentation.parentItem.threadNavigationItem)
             } label: {
                 content
             }
@@ -384,6 +440,25 @@ struct FeedRowView: View {
         } else {
             content
         }
+    }
+
+    private func replyContextSnippet(for event: NostrEvent, imageURLs: [URL]) -> String? {
+        var cleanedContent = event.content
+        for imageURL in imageURLs {
+            cleanedContent = cleanedContent.replacingOccurrences(of: imageURL.absoluteString, with: " ")
+        }
+
+        let normalized = cleanedContent
+            .replacingOccurrences(of: "\r\n", with: "\n")
+            .replacingOccurrences(of: "\r", with: "\n")
+            .replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+
+        guard !normalized.isEmpty else { return nil }
+        guard normalized.count > 72 else { return normalized }
+
+        let endIndex = normalized.index(normalized.startIndex, offsetBy: 72)
+        return String(normalized[..<endIndex]).trimmingCharacters(in: .whitespacesAndNewlines) + "..."
     }
 
     private var noteOptionsButton: some View {

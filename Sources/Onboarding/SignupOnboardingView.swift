@@ -16,6 +16,51 @@ struct SignupOnboardingView: View {
         case notifications
     }
 
+    private enum PrimaryColorOption: String, CaseIterable, Identifiable {
+        case vividOrange
+        case vividBlue
+        case vividGreen
+        case vividPurple
+        case vividRed
+        case vividPink
+
+        var id: String { rawValue }
+
+        var title: String {
+            switch self {
+            case .vividOrange:
+                return "Vivid Orange"
+            case .vividBlue:
+                return "Vivid Blue"
+            case .vividGreen:
+                return "Vivid Green"
+            case .vividPurple:
+                return "Vivid Purple"
+            case .vividRed:
+                return "Vivid Red"
+            case .vividPink:
+                return "Vivid Pink"
+            }
+        }
+
+        var color: Color {
+            switch self {
+            case .vividOrange:
+                return Color(red: 1.0, green: 0.42, blue: 0.0)
+            case .vividBlue:
+                return Color(red: 0.05, green: 0.52, blue: 1.0)
+            case .vividGreen:
+                return Color(red: 0.20, green: 0.78, blue: 0.35)
+            case .vividPurple:
+                return Color(red: 0.58, green: 0.34, blue: 0.96)
+            case .vividRed:
+                return Color(red: 1.0, green: 0.27, blue: 0.23)
+            case .vividPink:
+                return Color(red: 0.93, green: 0.26, blue: 0.60)
+            }
+        }
+    }
+
     @EnvironmentObject private var auth: AuthManager
     @EnvironmentObject private var relaySettings: RelaySettingsStore
     @EnvironmentObject private var appSettings: AppSettingsStore
@@ -30,6 +75,7 @@ struct SignupOnboardingView: View {
     @State private var displayName = ""
     @State private var handle = ""
     @State private var about = ""
+    @State private var selectedPrimaryColorOption: PrimaryColorOption = .vividOrange
     @State private var hasEditedHandle = false
     @State private var selectedTopics = Set<InterestTopic>()
     @State private var selectedAvatarItem: PhotosPickerItem?
@@ -170,6 +216,31 @@ struct SignupOnboardingView: View {
                             .textInputAutocapitalization(.never)
                             .autocorrectionDisabled()
                             .font(.body)
+                    }
+                }
+            }
+
+            onboardingFieldCard {
+                VStack(alignment: .leading, spacing: 14) {
+                    VStack(alignment: .leading, spacing: 4) {
+                        fieldLabel("Primary Color")
+                        Text("Choose a color for Flow. You can change it later in Settings.")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+
+                    LazyVGrid(
+                        columns: [
+                            GridItem(.flexible(minimum: 72), spacing: 10),
+                            GridItem(.flexible(minimum: 72), spacing: 10),
+                            GridItem(.flexible(minimum: 72), spacing: 10)
+                        ],
+                        spacing: 10
+                    ) {
+                        ForEach(PrimaryColorOption.allCases) { option in
+                            primaryColorChip(for: option)
+                        }
                     }
                 }
             }
@@ -442,6 +513,41 @@ struct SignupOnboardingView: View {
             )
         }
         .buttonStyle(.plain)
+    }
+
+    private func primaryColorChip(for option: PrimaryColorOption) -> some View {
+        let isSelected = selectedPrimaryColorOption == option
+
+        return Button {
+            selectedPrimaryColorOption = option
+        } label: {
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .fill(option.color)
+                .frame(height: 72)
+                .overlay(alignment: .topTrailing) {
+                    if isSelected {
+                        Image(systemName: "checkmark.circle.fill")
+                            .font(.title3.weight(.semibold))
+                            .foregroundStyle(Color.white)
+                            .padding(8)
+                    }
+                }
+                .shadow(
+                    color: option.color.opacity(isSelected ? 0.24 : 0.14),
+                    radius: isSelected ? 10 : 6,
+                    y: 4
+                )
+            .overlay {
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    .stroke(
+                        isSelected ? Color.white.opacity(0.95) : Color.white.opacity(0.22),
+                        lineWidth: isSelected ? 2.5 : 1
+                    )
+            }
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(option.title)
+        .accessibilityAddTraits(isSelected ? [.isSelected] : [])
     }
 
     private var handleBinding: Binding<String> {
@@ -731,7 +837,8 @@ struct SignupOnboardingView: View {
                 backupPrivateKeyToICloud: true
             )
             appSettings.configure(accountPubkey: account.pubkey)
-            appSettings.primaryColor = AppSettingsStore.defaultPrimaryColor
+            appSettings.theme = .system
+            appSettings.primaryColor = selectedPrimaryColorOption.color
 
             confettiBurstID += 1
             withAnimation(.easeInOut(duration: 0.2)) {

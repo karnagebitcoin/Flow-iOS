@@ -93,7 +93,7 @@ final class NoteReactionPublishService {
         rawTags.append(["p", targetPubkey])
         rawTags.append(["k", "\(targetEvent.kind)"])
 
-        let sdkTags = rawTags.compactMap(decodeSDKTag(from:))
+        let sdkTags = FlowClientAttribution.appending(to: rawTags).compactMap(decodeSDKTag(from:))
         let reactionEvent = try NostrSDK.NostrEvent.Builder<NostrSDK.NostrEvent>(kind: .unknown(7))
             .content("+")
             .appendTags(contentsOf: sdkTags)
@@ -114,7 +114,7 @@ final class NoteReactionPublishService {
             ["e", reactionEventID],
             ["k", "7"]
         ]
-        let sdkTags = rawTags.compactMap(decodeSDKTag(from:))
+        let sdkTags = FlowClientAttribution.appending(to: rawTags).compactMap(decodeSDKTag(from:))
         let deleteEvent = try NostrSDK.NostrEvent.Builder<NostrSDK.NostrEvent>(kind: .unknown(5))
             .content("Removed reaction")
             .appendTags(contentsOf: sdkTags)

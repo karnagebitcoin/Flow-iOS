@@ -1,4 +1,5 @@
 import XCTest
+import NostrSDK
 @testable import Flow
 
 final class NostrFeedServiceTests: XCTestCase {
@@ -132,6 +133,155 @@ final class NostrFeedServiceTests: XCTestCase {
         let diagnostics = nostrDatabase.diagnosticsSnapshot()
         XCTAssertEqual(diagnostics.sessionIngestedProfileCount, 1)
         XCTAssertEqual(diagnostics.successfulIngestCallCount, 1)
+    }
+
+    func testSearchProfilesReturnsLocalMatchWithoutRelayFetchWhenLimitSatisfied() async throws {
+        let rootURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("FlowLocalProfileSearch-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: rootURL, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: rootURL) }
+
+        let fileManager = TestFileManager(rootURL: rootURL)
+        let nostrDatabase = FlowNostrDB(fileManager: fileManager)
+        let relayClient = SpyRelayClient()
+        let service = NostrFeedService(
+            relayClient: relayClient,
+            timelineCache: TimelineEventCache(),
+            profileCache: ProfileCache(
+                snapshotStore: ProfileSnapshotStore(fileManager: fileManager),
+                nostrDatabase: nostrDatabase
+            ),
+            relayHintCache: ProfileRelayHintCache(),
+            followListCache: FollowListSnapshotCache(fileManager: fileManager, nostrDatabase: nostrDatabase),
+            seenEventStore: SeenEventStore(fileManager: fileManager, nostrDatabase: nostrDatabase),
+            nostrDatabase: nostrDatabase
+        )
+
+        let pubkey = hex("a")
+        let event = makeEvent(
+            id: hex("b"),
+            pubkey: pubkey,
+            kind: 0,
+            tags: [],
+            content: #"{"name":"holokat","display_name":"Holo Kat"}"#,
+            createdAt: 1_700_000_300
+        )
+
+        XCTAssertTrue(nostrDatabase.ingest(events: [event]))
+
+        let results = try await service.searchProfiles(
+            relayURLs: [relayURL],
+            query: "holokat",
+            limit: 1,
+            fetchTimeout: 0.01,
+            relayFetchMode: .firstNonEmptyRelay
+        )
+
+        let fetchCount = await relayClient.fetchCount()
+
+        XCTAssertEqual(results.map(\.pubkey), [pubkey])
+        XCTAssertEqual(results.first?.profile?.name, "holokat")
+        XCTAssertEqual(fetchCount, 0)
+    }
+
+    func testStoreFollowListSnapshotLocallyCachesSnapshot() async throws {
+        let rootURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("FlowFollowSnapshotStore-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: rootURL, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: rootURL) }
+
+        let fileManager = TestFileManager(rootURL: rootURL)
+        let nostrDatabase = FlowNostrDB(fileManager: fileManager)
+        let followListCache = FollowListSnapshotCache(fileManager: fileManager, nostrDatabase: nostrDatabase)
+        let service = NostrFeedService(
+            relayClient: SpyRelayClient(),
+            timelineCache: TimelineEventCache(),
+            profileCache: ProfileCache(
+                snapshotStore: ProfileSnapshotStore(fileManager: fileManager),
+                nostrDatabase: nostrDatabase
+            ),
+            relayHintCache: ProfileRelayHintCache(),
+            followListCache: followListCache,
+            seenEventStore: SeenEventStore(fileManager: fileManager, nostrDatabase: nostrDatabase),
+            nostrDatabase: nostrDatabase
+        )
+
+        let authorPubkey = hex("1")
+        let followedPubkey = hex("2")
+        let snapshot = FollowListSnapshot(
+            content: "",
+            tags: [["p", followedPubkey, relayURL.absoluteString]]
+        )
+
+        await service.storeFollowListSnapshotLocally(snapshot, for: authorPubkey)
+
+        let cached = await followListCache.cachedSnapshot(pubkey: authorPubkey)
+        XCTAssertEqual(cached?.followedPubkeys, [followedPubkey])
+    }
+
+    @MainActor
+    func testFollowStorePreservesSuccessfulPublishAcrossLogout() async throws {
+        let rootURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("FlowFollowStoreLogout-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: rootURL, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: rootURL) }
+
+        let defaultsSuite = "FlowFollowStoreTests-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: defaultsSuite))
+        defer {
+            defaults.removePersistentDomain(forName: defaultsSuite)
+        }
+
+        let fileManager = TestFileManager(rootURL: rootURL)
+        let nostrDatabase = FlowNostrDB(fileManager: fileManager)
+        let followListCache = FollowListSnapshotCache(fileManager: fileManager, nostrDatabase: nostrDatabase)
+        let relayClient = FollowPublishRelayClient(publishDelayNanoseconds: 150_000_000)
+        let service = NostrFeedService(
+            relayClient: relayClient,
+            timelineCache: TimelineEventCache(),
+            profileCache: ProfileCache(
+                snapshotStore: ProfileSnapshotStore(fileManager: fileManager),
+                nostrDatabase: nostrDatabase
+            ),
+            relayHintCache: ProfileRelayHintCache(),
+            followListCache: followListCache,
+            seenEventStore: SeenEventStore(fileManager: fileManager, nostrDatabase: nostrDatabase),
+            nostrDatabase: nostrDatabase
+        )
+        let followStore = FollowStore(
+            defaults: defaults,
+            authStore: AuthStore(defaults: defaults),
+            feedService: service,
+            relayClient: relayClient
+        )
+
+        let accountKeypair = try XCTUnwrap(Keypair())
+        let targetKeypair = try XCTUnwrap(Keypair())
+        let accountPubkey = accountKeypair.publicKey.hex.lowercased()
+        let targetPubkey = targetKeypair.publicKey.hex.lowercased()
+
+        followStore.configure(
+            accountPubkey: accountPubkey,
+            nsec: accountKeypair.privateKey.nsec,
+            readRelayURLs: [relayURL],
+            writeRelayURLs: [relayURL]
+        )
+        followStore.follow(targetPubkey)
+
+        followStore.configure(
+            accountPubkey: nil,
+            nsec: nil,
+            readRelayURLs: [relayURL],
+            writeRelayURLs: [relayURL]
+        )
+
+        try await Task.sleep(nanoseconds: 400_000_000)
+
+        let cachedSnapshot = await service.cachedFollowListSnapshot(pubkey: accountPubkey)
+        let publishCount = await relayClient.publishCount()
+        XCTAssertEqual(cachedSnapshot?.followedPubkeys, [targetPubkey])
+        XCTAssertEqual(defaults.stringArray(forKey: "flow.followedPubkeys.\(accountPubkey)"), [targetPubkey])
+        XCTAssertEqual(publishCount, 1)
     }
 
     func testReactionStatsPrefetchSkipsFreshNetworkRefetch() async throws {
@@ -578,7 +728,7 @@ private actor SpyRelayClient: NostrRelayEventFetching {
         relayURL: URL,
         filter: NostrFilter,
         timeout: TimeInterval
-    ) async throws -> [NostrEvent] {
+    ) async throws -> [Flow.NostrEvent] {
         fetchCallCount += 1
         return []
     }
@@ -588,11 +738,42 @@ private actor SpyRelayClient: NostrRelayEventFetching {
     }
 }
 
+private actor FollowPublishRelayClient: NostrRelayEventFetching, NostrRelayEventPublishing {
+    private let publishDelayNanoseconds: UInt64
+    private var publishCallCount = 0
+
+    init(publishDelayNanoseconds: UInt64) {
+        self.publishDelayNanoseconds = publishDelayNanoseconds
+    }
+
+    func fetchEvents(
+        relayURL: URL,
+        filter: NostrFilter,
+        timeout: TimeInterval
+    ) async throws -> [Flow.NostrEvent] {
+        []
+    }
+
+    func publishEvent(
+        relayURL: URL,
+        eventData: Data,
+        eventID: String,
+        timeout: TimeInterval
+    ) async throws {
+        publishCallCount += 1
+        try await Task.sleep(nanoseconds: publishDelayNanoseconds)
+    }
+
+    func publishCount() -> Int {
+        publishCallCount
+    }
+}
+
 private actor ProfileMetadataRelayClient: NostrRelayEventFetching {
-    private let eventsByRelay: [URL: [NostrEvent]]
+    private let eventsByRelay: [URL: [Flow.NostrEvent]]
     private var fetchCallCount = 0
 
-    init(eventsByRelay: [URL: [NostrEvent]]) {
+    init(eventsByRelay: [URL: [Flow.NostrEvent]]) {
         self.eventsByRelay = eventsByRelay
     }
 
@@ -600,7 +781,7 @@ private actor ProfileMetadataRelayClient: NostrRelayEventFetching {
         relayURL: URL,
         filter: NostrFilter,
         timeout: TimeInterval
-    ) async throws -> [NostrEvent] {
+    ) async throws -> [Flow.NostrEvent] {
         fetchCallCount += 1
 
         let authors = Set(filter.authors ?? [])
@@ -619,11 +800,11 @@ private actor ProfileMetadataRelayClient: NostrRelayEventFetching {
 
 private actor ThreadReplyRelayClient: NostrRelayEventFetching {
     private let rootEventID: String
-    private let directReply: NostrEvent
-    private let nestedReply: NostrEvent
+    private let directReply: Flow.NostrEvent
+    private let nestedReply: Flow.NostrEvent
     private var fetchCallCount = 0
 
-    init(rootEventID: String, directReply: NostrEvent, nestedReply: NostrEvent) {
+    init(rootEventID: String, directReply: Flow.NostrEvent, nestedReply: Flow.NostrEvent) {
         self.rootEventID = rootEventID
         self.directReply = directReply
         self.nestedReply = nestedReply
@@ -633,7 +814,7 @@ private actor ThreadReplyRelayClient: NostrRelayEventFetching {
         relayURL: URL,
         filter: NostrFilter,
         timeout: TimeInterval
-    ) async throws -> [NostrEvent] {
+    ) async throws -> [Flow.NostrEvent] {
         fetchCallCount += 1
 
         let referencedEventIDs = Set(filter.tagFilters?["e"] ?? [])
@@ -659,7 +840,7 @@ private actor FailingRelayClient: NostrRelayEventFetching {
         relayURL: URL,
         filter: NostrFilter,
         timeout: TimeInterval
-    ) async throws -> [NostrEvent] {
+    ) async throws -> [Flow.NostrEvent] {
         fetchCallCount += 1
         throw RelayClientError.closed("test failure")
     }
@@ -758,19 +939,19 @@ private func makeEvent(
     tags: [[String]],
     content: String,
     createdAt: Int = 1_700_000_000
-) -> NostrEvent {
-    NostrEvent(
+) -> Flow.NostrEvent {
+    Flow.NostrEvent(
         id: id,
         pubkey: pubkey,
         createdAt: createdAt,
         kind: kind,
         tags: tags,
         content: content,
-        sig: String(repeating: "f", count: 128)
+        sig: String(Array(repeating: "f", count: 128))
     )
 }
 
-private func originalEventJSON(for event: NostrEvent) -> String {
+private func originalEventJSON(for event: Flow.NostrEvent) -> String {
     let encoder = JSONEncoder()
     encoder.outputFormatting = [.sortedKeys]
     let data = try? encoder.encode(event)
@@ -778,5 +959,5 @@ private func originalEventJSON(for event: NostrEvent) -> String {
 }
 
 private func hex(_ character: Character) -> String {
-    String(repeating: String(character), count: 64)
+    String(Array(repeating: character, count: 64))
 }

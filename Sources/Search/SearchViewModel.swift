@@ -8,10 +8,37 @@ final class SearchViewModel: ObservableObject {
     private struct VisibleItemsCacheKey: Equatable {
         let trendingRevision: Int
         let searchedRevision: Int
-        let isSearching: Bool
+        let hasActiveContentSearch: Bool
         let hideNSFW: Bool
         let filterRevision: Int
         let mutedConversationRevision: Int
+    }
+
+    struct SuggestedContentSearch: Equatable {
+        enum Kind: Equatable {
+            case notes(query: String)
+            case hashtag(String)
+        }
+
+        let kind: Kind
+
+        var title: String {
+            switch kind {
+            case .notes(let query):
+                return "Search notes for \(query)"
+            case .hashtag(let hashtag):
+                return "Search #\(hashtag) hashtag"
+            }
+        }
+
+        var sectionTitle: String {
+            switch kind {
+            case .notes:
+                return "Notes"
+            case .hashtag(let hashtag):
+                return "#\(hashtag)"
+            }
+        }
     }
 
     struct ProfileMatch: Identifiable, Hashable {
@@ -83,12 +110,15 @@ final class SearchViewModel: ObservableObject {
         }
     }
     @Published private(set) var profileMatches: [ProfileMatch] = []
+    @Published private(set) var popularProfiles: [ProfileMatch] = []
     @Published private(set) var isLoading = false
     @Published private(set) var isLoadingMore = false
     @Published private(set) var errorMessage: String?
+    @Published private(set) var activeContentSearch: SuggestedContentSearch?
 
     private let service: NostrFeedService
     private let trendingNotesLoader: TrendingNotesLoader
+    private let vertexSearchService = VertexProfileSearchService.shared
     private let pageSize: Int
     private let assetPrefetchItemCount = 18
 
@@ -105,6 +135,9 @@ final class SearchViewModel: ObservableObject {
     private var mutedConversationRevision = 0
     private var visibleItemsCacheKey: VisibleItemsCacheKey?
     private var visibleItemsCache: [FeedItem] = []
+    private var followedAuthorPubkeys: [String] = []
+    private var currentAccountPubkey: String?
+    private var currentNsec: String?
 
     private(set) var readRelayURLs: [URL]
     private(set) var relayURL: URL
@@ -151,7 +184,7 @@ final class SearchViewModel: ObservableObject {
         let key = VisibleItemsCacheKey(
             trendingRevision: trendingNotesRevision,
             searchedRevision: searchedNotesRevision,
-            isSearching: isSearching,
+            hasActiveContentSearch: activeContentSearch != nil,
             hideNSFW: AppSettingsStore.shared.hideNSFWContent,
             filterRevision: MuteStore.shared.filterRevision,
             mutedConversationRevision: mutedConversationRevision
@@ -161,7 +194,7 @@ final class SearchViewModel: ObservableObject {
             return visibleItemsCache
         }
 
-        let source = isSearching ? searchedNotes : trendingNotes
+        let source = activeContentSearch == nil ? [] : searchedNotes
         let filtered = filteredItems(source)
         visibleItemsCacheKey = key
         visibleItemsCache = filtered
@@ -176,12 +209,46 @@ final class SearchViewModel: ObservableObject {
         !trimmedSearchQuery.isEmpty
     }
 
+    var displayedProfiles: [ProfileMatch] {
+        isSearching ? profileMatches : popularProfiles
+    }
+
+    var suggestedContentSearch: SuggestedContentSearch? {
+        suggestion(for: trimmedSearchQuery)
+    }
+
     var hasAnySearchResults: Bool {
-        !profileMatches.isEmpty || !visibleItems.isEmpty
+        !displayedProfiles.isEmpty || !visibleItems.isEmpty
+    }
+
+    func updateSearchContext(
+        currentAccountPubkey: String?,
+        currentNsec: String?,
+        followedPubkeys: [String]
+    ) {
+        let normalizedAccountPubkey = normalizedPubkey(currentAccountPubkey)
+        let nextAccountPubkey = normalizedAccountPubkey.isEmpty ? nil : normalizedAccountPubkey
+        let nextNsec = normalizedPrivateKey(currentNsec)
+        let nextFollowedPubkeys = normalizedPubkeys(followedPubkeys)
+
+        let didChange =
+            self.currentAccountPubkey != nextAccountPubkey ||
+            self.currentNsec != nextNsec ||
+            self.followedAuthorPubkeys != nextFollowedPubkeys
+
+        self.currentAccountPubkey = nextAccountPubkey
+        self.currentNsec = nextNsec
+        self.followedAuthorPubkeys = nextFollowedPubkeys
+
+        guard didChange, !isSearching else { return }
+        popularProfiles = []
+        errorMessage = nil
     }
 
     func handleSearchTextChanged() {
         searchTask?.cancel()
+        activeContentSearch = nil
+        searchedNotes = []
 
         let query = trimmedSearchQuery
         guard !query.isEmpty else {
@@ -193,10 +260,13 @@ final class SearchViewModel: ObservableObject {
             return
         }
 
+        profileMatches = []
+        errorMessage = nil
+
         searchTask = Task { [weak self] in
             try? await Task.sleep(nanoseconds: 320_000_000)
             guard !Task.isCancelled else { return }
-            await self?.performSearch()
+            await self?.performProfileSearch()
         }
     }
 
@@ -221,22 +291,26 @@ final class SearchViewModel: ObservableObject {
 
     func loadIfNeeded() async {
         if isSearching {
-            await performSearch()
+            await performProfileSearch()
             return
         }
 
-        if trendingNotes.isEmpty {
-            await refreshTrending()
+        if popularProfiles.isEmpty {
+            await refreshPopularProfiles()
         }
     }
 
     func refresh() async {
         if isSearching {
-            await performSearch()
+            if activeContentSearch == nil {
+                await performProfileSearch()
+            } else {
+                await activateSuggestedContentSearch()
+            }
             return
         }
 
-        await refreshTrending()
+        await refreshPopularProfiles()
     }
 
     func loadMoreIfNeeded(currentItem: FeedItem) async {
@@ -255,12 +329,47 @@ final class SearchViewModel: ObservableObject {
         searchedNotes.removeAll { $0.event.conversationID == normalized }
     }
 
-    private func refreshTrending() async {
+    func activateSuggestedContentSearch() async {
+        guard let suggestion = suggestedContentSearch else { return }
+        await performContentSearch(suggestion)
+    }
+
+    private func refreshPopularProfiles() async {
         guard !isLoading else { return }
 
         isLoading = true
         errorMessage = nil
         let requestRelayURLs = readRelayURLs
+
+        let cachedFollowedSuggestions = await buildFollowedSuggestions(
+            relayURLs: requestRelayURLs,
+            query: nil,
+            limit: 12,
+            allowProfileFetch: false
+        )
+        let cachedSecondDegreeSuggestions = await buildSecondDegreeSuggestions(
+            relayURLs: requestRelayURLs,
+            limit: 10,
+            allowProfileFetch: false
+        )
+        popularProfiles = mergeProfileMatches(
+            [cachedFollowedSuggestions, cachedSecondDegreeSuggestions],
+            limit: 24
+        )
+
+        let followedSuggestions = await buildFollowedSuggestions(
+            relayURLs: requestRelayURLs,
+            query: nil,
+            limit: 12
+        )
+        let secondDegreeSuggestions = await buildSecondDegreeSuggestions(
+            relayURLs: requestRelayURLs,
+            limit: 10
+        )
+        popularProfiles = mergeProfileMatches(
+            [followedSuggestions, secondDegreeSuggestions],
+            limit: 24
+        )
 
         defer {
             isLoading = false
@@ -279,15 +388,33 @@ final class SearchViewModel: ObservableObject {
             let merged = deduplicateAndSort([fetched])
             trendingNotes = merged
             scheduleAssetPrefetch(for: merged)
+            let trendingProfiles = await buildPopularProfiles(from: merged, relayURLs: requestRelayURLs)
+            popularProfiles = mergeProfileMatches(
+                [followedSuggestions, secondDegreeSuggestions, trendingProfiles],
+                limit: 24
+            )
         } catch {
-            errorMessage = "Couldn't load trending notes. Pull to refresh and try again."
+            guard requestRelayURLs == readRelayURLs else { return }
+            popularProfiles = mergeProfileMatches(
+                [followedSuggestions, secondDegreeSuggestions],
+                limit: 24
+            )
+            errorMessage = popularProfiles.isEmpty
+                ? "Couldn't load people to discover. Pull to refresh and try again."
+                : nil
         }
     }
 
-    private func performSearch() async {
+    private func performProfileSearch() async {
         let query = trimmedSearchQuery
         guard !query.isEmpty else {
-            searchedNotes = []
+            profileMatches = []
+            errorMessage = nil
+            isLoading = false
+            return
+        }
+
+        if normalizedHashtag(from: query) != nil {
             profileMatches = []
             errorMessage = nil
             isLoading = false
@@ -298,108 +425,108 @@ final class SearchViewModel: ObservableObject {
         latestSearchRequestID = requestID
         isLoading = true
         errorMessage = nil
-        searchedNotes = []
         profileMatches = []
 
-        let keywordRelayURLs = keywordSearchRelayTargets()
-        let keywordFallbackRelayURLs = fallbackKeywordSearchRelayTargets()
-        let hashtagRelayURLs = hashtagSearchRelayTargets()
         let profileRelayURLs = profileSearchRelayTargets()
-        let hashtag = normalizedHashtag(from: query)
         let normalizedProfileQuery = normalizedProfileQuery(from: query)
         let exactPubkey = resolvedProfilePubkey(from: query)
 
-        async let keywordNotesResult = fetchKeywordNotes(
-            query: query,
-            primaryRelayURLs: keywordRelayURLs,
-            fallbackRelayURLs: keywordFallbackRelayURLs
+        async let followedProfileMatchesResult = buildFollowedSuggestions(
+            relayURLs: profileRelayURLs,
+            query: normalizedProfileQuery,
+            limit: 20
         )
-        async let hashtagNotesResult = fetchHashtagNotes(hashtag: hashtag, relayURLs: hashtagRelayURLs)
-        async let profileMatchesResult = fetchProfileMatches(
+        async let currentAccountProfileResult = fetchCurrentAccountProfileMatch(
             query: normalizedProfileQuery,
             relayURLs: profileRelayURLs
         )
-        async let exactAuthorNotesResult = fetchExactAuthorNotes(
-            pubkey: exactPubkey,
+        async let remoteProfileMatchesResult = fetchRemoteProfileMatches(
+            query: normalizedProfileQuery,
             relayURLs: profileRelayURLs
         )
+        async let localProfileMatchesResult = fetchLocalProfileMatches(query: normalizedProfileQuery)
         async let exactProfileResult = fetchExactProfile(
             pubkey: exactPubkey,
             relayURLs: profileRelayURLs
         )
 
-        let keywordNotes = await keywordNotesResult
-        let hashtagNotes = await hashtagNotesResult
-        let exactAuthorNotes = await exactAuthorNotesResult
+        let followedProfileMatches = await followedProfileMatchesResult
+        let currentAccountProfile = await currentAccountProfileResult
 
         guard latestSearchRequestID == requestID else { return }
         guard trimmedSearchQuery == query else { return }
 
-        let initialNotes = deduplicateAndSort([
-            keywordNotes.items,
-            hashtagNotes.items,
-            exactAuthorNotes.items
-        ])
-        let initialPrefetchedNotes = Array(initialNotes.prefix(pageSize))
-        self.searchedNotes = initialPrefetchedNotes
-        scheduleAssetPrefetch(for: initialPrefetchedNotes)
+        let initialProfileMatches = mergeProfileMatches(
+            [
+                currentAccountProfile.map {
+                    [ProfileMatch(pubkey: $0.pubkey, profile: $0.profile)]
+                } ?? [],
+                followedProfileMatches
+            ],
+            limit: 40
+        )
+        self.profileMatches = Array(
+            rankedProfileMatches(query: normalizedProfileQuery, matches: initialProfileMatches)
+                .prefix(20)
+        )
 
-        var profileMatches = await profileMatchesResult
+        let remoteProfileMatches = await remoteProfileMatchesResult
+
+        guard latestSearchRequestID == requestID else { return }
+        guard trimmedSearchQuery == query else { return }
+
+        let vertexFirstProfiles = mergeProfileMatches(
+            [
+                currentAccountProfile.map {
+                    [ProfileMatch(pubkey: $0.pubkey, profile: $0.profile)]
+                } ?? [],
+                followedProfileMatches,
+                remoteProfileMatches.items.map { ProfileMatch(pubkey: $0.pubkey, profile: $0.profile) }
+            ],
+            limit: 60
+        )
+
+        self.profileMatches = Array(
+            rankedProfileMatches(query: normalizedProfileQuery, matches: vertexFirstProfiles)
+                .prefix(20)
+        )
+
+        let localProfileMatches = await localProfileMatchesResult
         let exactProfile = await exactProfileResult
 
-        if let exactProfile {
-            let normalizedExactPubkey = exactProfile.pubkey.lowercased()
-            if !profileMatches.items.contains(where: { $0.pubkey.lowercased() == normalizedExactPubkey }) {
-                profileMatches = ProfileFetchResult(
-                    items: [exactProfile] + profileMatches.items,
-                    failed: profileMatches.failed
-                )
-            }
-        }
-
-        var profileAuthoredNotes = FeedFetchResult.empty
-        let profileAuthorPubkeys = Array(
-            Set(profileMatches.items.map { $0.pubkey.lowercased() }).prefix(12)
-        )
-        if !profileAuthorPubkeys.isEmpty {
-            profileAuthoredNotes = await fetchProfileAuthoredNotes(
-                pubkeys: profileAuthorPubkeys,
-                relayURLs: profileRelayURLs
-            )
-        }
-
         guard latestSearchRequestID == requestID else { return }
         guard trimmedSearchQuery == query else { return }
 
-        let mergedProfiles = deduplicateProfiles(profileMatches.items)
-        let mergedNotes = deduplicateAndSort([
-            keywordNotes.items,
-            hashtagNotes.items,
-            exactAuthorNotes.items,
-            profileAuthoredNotes.items
-        ])
+        let mergedProfiles = mergeProfileMatches(
+            [
+                currentAccountProfile.map {
+                    [ProfileMatch(pubkey: $0.pubkey, profile: $0.profile)]
+                } ?? [],
+                followedProfileMatches,
+                remoteProfileMatches.items.map { ProfileMatch(pubkey: $0.pubkey, profile: $0.profile) },
+                localProfileMatches.map { ProfileMatch(pubkey: $0.pubkey, profile: $0.profile) },
+                exactProfile.map { [ProfileMatch(pubkey: $0.pubkey, profile: $0.profile)] } ?? []
+            ],
+            limit: 60
+        )
 
-        self.profileMatches = mergedProfiles.map {
-            ProfileMatch(pubkey: $0.pubkey, profile: $0.profile)
-        }
-        let mergedPrefetchedNotes = Array(mergedNotes.prefix(pageSize))
-        self.searchedNotes = mergedPrefetchedNotes
-        scheduleAssetPrefetch(for: mergedPrefetchedNotes)
-
-        let hadNetworkFailures =
-            keywordNotes.failed ||
-            hashtagNotes.failed ||
-            exactAuthorNotes.failed ||
-            profileMatches.failed ||
-            profileAuthoredNotes.failed
-
-        if self.profileMatches.isEmpty && self.searchedNotes.isEmpty && hadNetworkFailures {
-            errorMessage = "Couldn't search right now. Pull to refresh and try again."
-        } else {
-            errorMessage = nil
-        }
+        self.profileMatches = Array(
+            rankedProfileMatches(query: normalizedProfileQuery, matches: mergedProfiles)
+                .prefix(20)
+        )
+        errorMessage = self.profileMatches.isEmpty && remoteProfileMatches.failed
+            ? "Couldn't search people right now. Pull to refresh and try again."
+            : nil
 
         isLoading = false
+    }
+
+    private func fetchLocalProfileMatches(query: String) async -> [ProfileSearchResult] {
+        guard !query.isEmpty else { return [] }
+        return await service.searchProfiles(
+            query: query,
+            limit: 12
+        )
     }
 
     private func fetchKeywordNotes(
@@ -429,6 +556,17 @@ final class SearchViewModel: ObservableObject {
             items: [],
             failed: primary.failed || fallback.failed
         )
+    }
+
+    private func fetchLocalKeywordNotes(query: String) async -> FeedFetchResult {
+        let items = await service.searchLocalNotes(
+            query: query,
+            kinds: Self.searchFeedKinds,
+            limit: pageSize,
+            hydrationMode: .cachedProfilesOnly,
+            moderationSnapshot: muteFilterSnapshot
+        )
+        return FeedFetchResult(items: items, failed: false)
     }
 
     private func performKeywordNoteSearch(query: String, relayURLs: [URL]) async -> FeedFetchResult {
@@ -471,20 +609,125 @@ final class SearchViewModel: ObservableObject {
         }
     }
 
-    private func fetchProfileMatches(query: String, relayURLs: [URL]) async -> ProfileFetchResult {
-        guard !query.isEmpty else { return .empty }
+    private func fetchLocalHashtagNotes(hashtag: String?) async -> FeedFetchResult {
+        guard let hashtag, !hashtag.isEmpty else { return .empty }
+        let items = await service.fetchLocalHashtagFeed(
+            hashtag: hashtag,
+            kinds: Self.searchFeedKinds,
+            limit: pageSize,
+            until: nil,
+            hydrationMode: .cachedProfilesOnly,
+            moderationSnapshot: muteFilterSnapshot
+        )
+        return FeedFetchResult(items: items, failed: false)
+    }
+
+    private func fetchRemoteProfileMatches(query: String, relayURLs: [URL]) async -> ProfileFetchResult {
+        guard query.count >= 2 else { return .empty }
+        guard let searchNsec = currentNsec, !searchNsec.isEmpty else { return .empty }
+        guard query.count > 3 else { return .empty }
+
         do {
-            let matches = try await service.searchProfiles(
-                relayURLs: relayURLs,
+            let matches = try await vertexSearchService.searchProfiles(
                 query: query,
                 limit: 12,
-                fetchTimeout: Self.profileSearchFetchTimeout,
-                relayFetchMode: Self.profileSearchRelayFetchMode
+                nsec: searchNsec,
+                relayURLs: relayURLs,
+                feedService: service
             )
             return ProfileFetchResult(items: matches, failed: false)
         } catch {
             return ProfileFetchResult(items: [], failed: true)
         }
+    }
+
+    private func performContentSearch(_ target: SuggestedContentSearch) async {
+        let query = trimmedSearchQuery
+        guard !query.isEmpty else {
+            activeContentSearch = nil
+            searchedNotes = []
+            errorMessage = nil
+            isLoading = false
+            return
+        }
+
+        let requestID = UUID()
+        latestSearchRequestID = requestID
+        activeContentSearch = target
+        isLoading = true
+        errorMessage = nil
+        searchedNotes = []
+
+        let keywordRelayURLs = keywordSearchRelayTargets()
+        let keywordFallbackRelayURLs = fallbackKeywordSearchRelayTargets()
+        let hashtagRelayURLs = hashtagSearchRelayTargets()
+        let profileRelayURLs = profileSearchRelayTargets()
+        let exactPubkey = resolvedProfilePubkey(from: query)
+        let profileAuthorPubkeys = Array(profileMatches.map { $0.pubkey.lowercased() }.prefix(12))
+
+        var hadNetworkFailures = false
+
+        @discardableResult
+        func apply(_ result: FeedFetchResult) -> Bool {
+            hadNetworkFailures = hadNetworkFailures || result.failed
+            guard latestSearchRequestID == requestID else { return false }
+            guard trimmedSearchQuery == query else { return false }
+            guard activeContentSearch == target else { return false }
+
+            let mergedNotes = deduplicateAndSort([searchedNotes, result.items])
+            let prefetchedNotes = Array(mergedNotes.prefix(pageSize))
+            searchedNotes = prefetchedNotes
+            scheduleAssetPrefetch(for: prefetchedNotes)
+            errorMessage = nil
+            return true
+        }
+
+        switch target.kind {
+        case .notes(let notesQuery):
+            let localKeywordNotes = await fetchLocalKeywordNotes(query: notesQuery)
+            guard apply(localKeywordNotes) else { return }
+
+            async let exactAuthorNotesResult = fetchExactAuthorNotes(
+                pubkey: exactPubkey,
+                relayURLs: profileRelayURLs
+            )
+            async let profileAuthoredNotesResult: FeedFetchResult = {
+                guard !profileAuthorPubkeys.isEmpty else { return .empty }
+                return await fetchProfileAuthoredNotes(
+                    pubkeys: profileAuthorPubkeys,
+                    relayURLs: profileRelayURLs
+                )
+            }()
+            async let remoteKeywordNotesResult = fetchKeywordNotes(
+                query: notesQuery,
+                primaryRelayURLs: keywordRelayURLs,
+                fallbackRelayURLs: keywordFallbackRelayURLs
+            )
+
+            let exactAuthorNotes = await exactAuthorNotesResult
+            guard apply(exactAuthorNotes) else { return }
+
+            let profileAuthoredNotes = await profileAuthoredNotesResult
+            guard apply(profileAuthoredNotes) else { return }
+
+            let remoteKeywordNotes = await remoteKeywordNotesResult
+            guard apply(remoteKeywordNotes) else { return }
+
+        case .hashtag(let hashtag):
+            let localHashtagNotes = await fetchLocalHashtagNotes(hashtag: hashtag)
+            guard apply(localHashtagNotes) else { return }
+
+            let remoteHashtagNotes = await fetchHashtagNotes(hashtag: hashtag, relayURLs: hashtagRelayURLs)
+            guard apply(remoteHashtagNotes) else { return }
+        }
+
+        if searchedNotes.isEmpty && hadNetworkFailures {
+            errorMessage = "Couldn't search notes right now. Pull to refresh and try again."
+        } else {
+            errorMessage = nil
+        }
+
+        isLoading = false
     }
 
     private func fetchExactAuthorNotes(pubkey: String?, relayURLs: [URL]) async -> FeedFetchResult {
@@ -536,6 +779,37 @@ final class SearchViewModel: ObservableObject {
             relayFetchMode: Self.profileSearchRelayFetchMode
         )
         return ProfileSearchResult(pubkey: pubkey, profile: profile, createdAt: Int(Date().timeIntervalSince1970))
+    }
+
+    private func fetchCurrentAccountProfileMatch(
+        query: String,
+        relayURLs: [URL]
+    ) async -> ProfileSearchResult? {
+        guard let currentAccountPubkey, !currentAccountPubkey.isEmpty else { return nil }
+        guard !query.isEmpty else { return nil }
+
+        let profile: NostrProfile?
+        if let cachedProfile = await service.cachedProfile(pubkey: currentAccountPubkey) {
+            profile = cachedProfile
+        } else {
+            profile = await service.fetchProfile(
+                relayURLs: relayURLs,
+                pubkey: currentAccountPubkey,
+                fetchTimeout: Self.profileSearchFetchTimeout,
+                relayFetchMode: .firstNonEmptyRelay
+            )
+        }
+
+        guard let profile else { return nil }
+        guard profileMatchesQuery(profile: profile, pubkey: currentAccountPubkey, query: query) else {
+            return nil
+        }
+
+        return ProfileSearchResult(
+            pubkey: currentAccountPubkey,
+            profile: profile,
+            createdAt: Int(Date().timeIntervalSince1970)
+        )
     }
 
     private func filteredItems(_ items: [FeedItem]) -> [FeedItem] {
@@ -601,27 +875,238 @@ final class SearchViewModel: ObservableObject {
         })
     }
 
-    private func deduplicateProfiles(_ profiles: [ProfileSearchResult]) -> [ProfileSearchResult] {
-        var byPubkey: [String: ProfileSearchResult] = [:]
+    private func buildPopularProfiles(from items: [FeedItem], relayURLs: [URL]) async -> [ProfileMatch] {
+        var seen = Set<String>()
+        var orderedPubkeys: [String] = []
+        var profilesByPubkey: [String: NostrProfile] = [:]
 
-        for profile in profiles {
-            let normalizedPubkey = profile.pubkey.lowercased()
-            if let existing = byPubkey[normalizedPubkey], existing.createdAt > profile.createdAt {
-                continue
+        for item in items {
+            let pubkey = item.displayAuthorPubkey.lowercased()
+            guard seen.insert(pubkey).inserted else { continue }
+            orderedPubkeys.append(pubkey)
+            if let profile = item.displayProfile ?? item.profile {
+                profilesByPubkey[pubkey] = profile
             }
-            byPubkey[normalizedPubkey] = profile
+            if orderedPubkeys.count >= 20 {
+                break
+            }
         }
 
-        return byPubkey.values.sorted {
-            if $0.createdAt == $1.createdAt {
-                return $0.pubkey < $1.pubkey
-            }
-            return $0.createdAt > $1.createdAt
+        if orderedPubkeys.isEmpty {
+            return []
         }
+
+        let missingPubkeys = orderedPubkeys.filter { profilesByPubkey[$0] == nil }
+        if !missingPubkeys.isEmpty {
+            let fetched = await service.fetchProfiles(
+                relayURLs: relayURLs,
+                pubkeys: missingPubkeys
+            )
+            for (pubkey, profile) in fetched {
+                profilesByPubkey[pubkey] = profile
+            }
+        }
+
+        return orderedPubkeys.map { pubkey in
+            ProfileMatch(pubkey: pubkey, profile: profilesByPubkey[pubkey])
+        }
+    }
+
+    private func buildFollowedSuggestions(
+        relayURLs: [URL],
+        query: String?,
+        limit: Int,
+        allowProfileFetch: Bool = true
+    ) async -> [ProfileMatch] {
+        let orderedFollowedPubkeys = await preferredFollowedPubkeys()
+        guard !orderedFollowedPubkeys.isEmpty else { return [] }
+
+        let isSearchingSpecificFollowedProfiles = query?.isEmpty == false
+        let candidateLimit = max(limit * 3, 36)
+        let candidatePubkeys = isSearchingSpecificFollowedProfiles
+            ? orderedFollowedPubkeys
+            : Array(orderedFollowedPubkeys.prefix(candidateLimit))
+        var profilesByPubkey = await service.cachedProfiles(pubkeys: candidatePubkeys)
+
+        let missingFetchLimit = isSearchingSpecificFollowedProfiles
+            ? max(limit * 12, 120)
+            : limit * 2
+        let missingPubkeys = Array(candidatePubkeys.filter { profilesByPubkey[$0] == nil }.prefix(missingFetchLimit))
+        if allowProfileFetch, !missingPubkeys.isEmpty {
+            let fetchedProfiles = await service.fetchProfiles(
+                relayURLs: relayURLs,
+                pubkeys: missingPubkeys
+            )
+            profilesByPubkey.merge(fetchedProfiles, uniquingKeysWith: { _, new in new })
+        }
+
+        let matches = candidatePubkeys.compactMap { pubkey -> ProfileMatch? in
+            let profile = profilesByPubkey[pubkey]
+            if let query, !query.isEmpty,
+               profileSearchScore(profile: profile, pubkey: pubkey, query: query) == nil {
+                return nil
+            }
+            return ProfileMatch(pubkey: pubkey, profile: profile)
+        }
+
+        guard let query, !query.isEmpty else {
+            return Array(matches.prefix(limit))
+        }
+
+        return Array(
+            rankedProfileMatches(query: query, matches: matches)
+                .prefix(limit)
+        )
+    }
+
+    private func buildSecondDegreeSuggestions(
+        relayURLs: [URL],
+        limit: Int,
+        allowProfileFetch: Bool = true
+    ) async -> [ProfileMatch] {
+        guard !followedAuthorPubkeys.isEmpty else { return [] }
+
+        let followedSet = Set(followedAuthorPubkeys)
+        let orderedFollowedPubkeys = await preferredFollowedPubkeys()
+        let seedPubkeys = Array(orderedFollowedPubkeys.prefix(20))
+
+        var mutualCounts: [String: Int] = [:]
+        for pubkey in seedPubkeys {
+            guard let snapshot = await service.cachedFollowListSnapshot(pubkey: pubkey) else { continue }
+            for candidate in snapshot.followedPubkeys {
+                let normalizedCandidate = normalizedPubkey(candidate)
+                guard !normalizedCandidate.isEmpty else { continue }
+                guard normalizedCandidate != currentAccountPubkey else { continue }
+                guard !followedSet.contains(normalizedCandidate) else { continue }
+                mutualCounts[normalizedCandidate, default: 0] += 1
+            }
+        }
+
+        let orderedCandidates = mutualCounts
+            .sorted { lhs, rhs in
+                if lhs.value == rhs.value {
+                    return lhs.key < rhs.key
+                }
+                return lhs.value > rhs.value
+            }
+            .map(\.key)
+
+        guard !orderedCandidates.isEmpty else { return [] }
+
+        let candidatePubkeys = Array(orderedCandidates.prefix(limit * 3))
+        var profilesByPubkey = await service.cachedProfiles(pubkeys: candidatePubkeys)
+        let missingPubkeys = Array(candidatePubkeys.filter { profilesByPubkey[$0] == nil }.prefix(limit * 2))
+        if allowProfileFetch, !missingPubkeys.isEmpty {
+            let fetchedProfiles = await service.fetchProfiles(
+                relayURLs: relayURLs,
+                pubkeys: missingPubkeys
+            )
+            profilesByPubkey.merge(fetchedProfiles, uniquingKeysWith: { _, new in new })
+        }
+
+        return candidatePubkeys.compactMap { pubkey in
+            guard let profile = profilesByPubkey[pubkey] else { return nil }
+            return ProfileMatch(pubkey: pubkey, profile: profile)
+        }
+        .prefix(limit)
+        .map { $0 }
+    }
+
+    private func preferredFollowedPubkeys() async -> [String] {
+        if let currentAccountPubkey,
+           let snapshot = await service.cachedFollowListSnapshot(pubkey: currentAccountPubkey) {
+            let ordered = normalizedPubkeys(snapshot.followedPubkeys)
+            if !ordered.isEmpty {
+                return ordered
+            }
+        }
+
+        return followedAuthorPubkeys
+    }
+
+    private func mergeProfileMatches(_ groups: [[ProfileMatch]], limit: Int) -> [ProfileMatch] {
+        guard limit > 0 else { return [] }
+
+        var seen = Set<String>()
+        var ordered: [ProfileMatch] = []
+
+        for group in groups {
+            for match in group {
+                let normalized = normalizedPubkey(match.pubkey)
+                guard !normalized.isEmpty else { continue }
+                guard seen.insert(normalized).inserted else { continue }
+                ordered.append(ProfileMatch(pubkey: normalized, profile: match.profile))
+                if ordered.count >= limit {
+                    return ordered
+                }
+            }
+        }
+
+        return ordered
+    }
+
+    private func rankedProfileMatches(query: String, matches: [ProfileMatch]) -> [ProfileMatch] {
+        let normalizedQuery = normalizedProfileQuery(from: query)
+        guard !normalizedQuery.isEmpty else { return matches }
+
+        let followedSet = Set(followedAuthorPubkeys)
+        let scoredMatches: [(match: ProfileMatch, score: Int)] = matches.compactMap { match in
+            let normalizedPubkey = normalizedPubkey(match.pubkey)
+            guard let baseScore = profileSearchScore(
+                profile: match.profile,
+                pubkey: normalizedPubkey,
+                query: normalizedQuery
+            ) else {
+                return nil
+            }
+
+            var score = baseScore
+            if normalizedPubkey == currentAccountPubkey {
+                score += 4_000
+            } else if followedSet.contains(normalizedPubkey) {
+                score += 2_000
+            }
+
+            return (match: match, score: score)
+        }
+
+        return scoredMatches.sorted { lhs, rhs in
+            if lhs.score == rhs.score {
+                return lhs.match.displayName.localizedCaseInsensitiveCompare(rhs.match.displayName) == .orderedAscending
+            }
+            return lhs.score > rhs.score
+        }
+        .map(\.match)
+    }
+
+    private func mergeProfileResults(_ groups: [[ProfileSearchResult]]) -> [ProfileSearchResult] {
+        var seen = Set<String>()
+        var ordered: [ProfileSearchResult] = []
+
+        for group in groups {
+            for profile in group {
+                let normalizedPubkey = profile.pubkey.lowercased()
+                guard seen.insert(normalizedPubkey).inserted else { continue }
+                ordered.append(profile)
+            }
+        }
+
+        return ordered
     }
 
     private var trimmedSearchQuery: String {
         searchText.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private func suggestion(for query: String) -> SuggestedContentSearch? {
+        let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+
+        if let hashtag = normalizedHashtag(from: trimmed) {
+            return SuggestedContentSearch(kind: .hashtag(hashtag))
+        }
+
+        return SuggestedContentSearch(kind: .notes(query: trimmed))
     }
 
     private func normalizedProfileQuery(from query: String) -> String {
@@ -689,7 +1174,144 @@ final class SearchViewModel: ObservableObject {
     }
 
     private func profileSearchRelayTargets() -> [URL] {
-        Self.normalizedRelayURLs(Self.searchableRelayURLs + Self.bigRelayURLs + readRelayURLs)
+        Self.normalizedRelayURLs(Self.searchableRelayURLs + [VertexProfileSearchService.relayURL] + Self.bigRelayURLs + readRelayURLs)
+    }
+
+    private func profileMatchesQuery(profile: NostrProfile, pubkey: String, query: String) -> Bool {
+        profileSearchScore(profile: profile, pubkey: pubkey, query: query) != nil
+    }
+
+    private func profileSearchScore(profile: NostrProfile?, pubkey: String, query: String) -> Int? {
+        let normalizedQuery = query.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !normalizedQuery.isEmpty else { return nil }
+
+        if pubkey == normalizedQuery {
+            return 1_000
+        }
+
+        if pubkey.hasPrefix(normalizedQuery) {
+            return 920
+        }
+
+        guard let profile else { return nil }
+
+        let searchableFields = profileSearchFields(for: profile)
+        guard !searchableFields.isEmpty else { return nil }
+
+        let tokenSet = Set(searchableFields.flatMap(profileSearchTokens(from:)))
+
+        if searchableFields.contains(normalizedQuery) {
+            return 900
+        }
+
+        if tokenSet.contains(normalizedQuery) {
+            return 860
+        }
+
+        if searchableFields.contains(where: { $0.hasPrefix(normalizedQuery) }) {
+            return 820
+        }
+
+        if tokenSet.contains(where: { $0.hasPrefix(normalizedQuery) }) {
+            return 780
+        }
+
+        guard normalizedQuery.count >= 2 else { return nil }
+
+        if searchableFields.contains(where: { $0.contains(normalizedQuery) }) {
+            return 700
+        }
+
+        if tokenSet.contains(where: { $0.contains(normalizedQuery) }) {
+            return 660
+        }
+
+        return nil
+    }
+
+    private func profileSearchFields(for profile: NostrProfile) -> [String] {
+        let rawFields: [String] = [
+            profile.displayName,
+            profile.name,
+            profile.nip05,
+            profile.lud16,
+            profile.lud06
+        ]
+        .compactMap { value in
+            let normalized = value?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() ?? ""
+            return normalized.isEmpty ? nil : normalized
+        }
+
+        var expandedFields: [String] = []
+        var seen = Set<String>()
+
+        for field in rawFields {
+            if seen.insert(field).inserted {
+                expandedFields.append(field)
+            }
+
+            let compact = field.replacingOccurrences(of: " ", with: "")
+            if !compact.isEmpty, seen.insert(compact).inserted {
+                expandedFields.append(compact)
+            }
+
+            if field.hasPrefix("@") {
+                let dropped = String(field.dropFirst())
+                if !dropped.isEmpty, seen.insert(dropped).inserted {
+                    expandedFields.append(dropped)
+                }
+            }
+
+            if let atIndex = field.firstIndex(of: "@"), atIndex > field.startIndex {
+                let localPart = String(field[..<atIndex])
+                if !localPart.isEmpty, seen.insert(localPart).inserted {
+                    expandedFields.append(localPart)
+                }
+            }
+        }
+
+        return expandedFields
+    }
+
+    private func profileSearchTokens(from field: String) -> [String] {
+        field.split(whereSeparator: { character in
+            !character.isLetter && !character.isNumber
+        })
+        .map(String.init)
+        .filter { !$0.isEmpty }
+    }
+
+    private func normalizedSearchTerms(from query: String) -> [String] {
+        query
+            .lowercased()
+            .split { character in
+                character.isWhitespace || character.isPunctuation
+            }
+            .map(String.init)
+            .filter { !$0.isEmpty }
+    }
+
+    private func normalizedPrivateKey(_ value: String?) -> String? {
+        let normalized = value?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() ?? ""
+        return normalized.isEmpty ? nil : normalized
+    }
+
+    private func normalizedPubkeys(_ pubkeys: [String]) -> [String] {
+        var seen = Set<String>()
+        var ordered: [String] = []
+
+        for pubkey in pubkeys {
+            let normalized = normalizedPubkey(pubkey)
+            guard !normalized.isEmpty else { continue }
+            guard seen.insert(normalized).inserted else { continue }
+            ordered.append(normalized)
+        }
+
+        return ordered
+    }
+
+    private func normalizedPubkey(_ value: String?) -> String {
+        value?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() ?? ""
     }
 
     private static func defaultTrendingNotesLoader(

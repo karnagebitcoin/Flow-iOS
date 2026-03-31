@@ -287,6 +287,13 @@ struct ThreadDetailView: View {
 
                         Spacer(minLength: 8)
 
+                        if let clientName = viewModel.rootItem.displayEvent.clientName {
+                            Text("via \(clientName)")
+                                .font(.subheadline)
+                                .foregroundStyle(.secondary)
+                                .lineLimit(1)
+                        }
+
                         Text(RelativeTimestampFormatter.shortString(from: viewModel.rootItem.displayEvent.createdAtDate))
                             .font(.subheadline)
                             .foregroundStyle(.secondary)

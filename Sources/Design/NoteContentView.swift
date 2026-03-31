@@ -957,61 +957,62 @@ private struct NoteBlurRevealContainer<Content: View>: View {
     }
 
     var body: some View {
-        Button(action: onReveal) {
-            ZStack {
-                content
-                    .blur(radius: 22)
-                    .overlay {
-                        RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-                            .fill(Color.black.opacity(0.22))
-                    }
-
-                VStack(spacing: 8) {
-                    Image(systemName: "eye.slash.fill")
-                        .font(.headline.weight(.semibold))
-                    Text("Tap to reveal")
-                        .font(.footnote.weight(.semibold))
+        ZStack {
+            content
+                .compositingGroup()
+                .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
+                .blur(radius: 22)
+                .overlay {
+                    RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                        .fill(Color.black.opacity(0.22))
                 }
-                .foregroundStyle(.white)
-                .padding(.horizontal, 16)
-                .padding(.vertical, 12)
-                .background(
-                    ZStack {
-                        Capsule(style: .continuous)
-                            .fill(.ultraThinMaterial)
+                .allowsHitTesting(false)
 
-                        Capsule(style: .continuous)
-                            .fill(
-                                LinearGradient(
-                                    colors: [
-                                        Color.white.opacity(0.28),
-                                        Color.white.opacity(0.08),
-                                        Color.clear
-                                    ],
-                                    startPoint: .topLeading,
-                                    endPoint: .bottomTrailing
-                                )
-                            )
-
-                        Capsule(style: .continuous)
-                            .fill(
-                                LinearGradient(
-                                    colors: [
-                                        Color.black.opacity(0.18),
-                                        Color.clear
-                                    ],
-                                    startPoint: .bottom,
-                                    endPoint: .top
-                                )
-                            )
-                    }
-                )
-                .shadow(color: Color.black.opacity(0.18), radius: 14, x: 0, y: 8)
+            VStack(spacing: 8) {
+                Image(systemName: "eye.slash.fill")
+                    .font(.headline.weight(.semibold))
+                Text("Tap to reveal")
+                    .font(.footnote.weight(.semibold))
             }
-            .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
-            .contentShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
+            .foregroundStyle(.white)
+            .padding(.horizontal, 16)
+            .padding(.vertical, 12)
+            .background(
+                ZStack {
+                    Capsule(style: .continuous)
+                        .fill(.ultraThinMaterial)
+
+                    Capsule(style: .continuous)
+                        .fill(
+                            LinearGradient(
+                                colors: [
+                                    Color.white.opacity(0.28),
+                                    Color.white.opacity(0.08),
+                                    Color.clear
+                                ],
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
+                            )
+                        )
+
+                    Capsule(style: .continuous)
+                        .fill(
+                            LinearGradient(
+                                colors: [
+                                    Color.black.opacity(0.18),
+                                    Color.clear
+                                ],
+                                startPoint: .bottom,
+                                endPoint: .top
+                            )
+                        )
+                }
+            )
+            .shadow(color: Color.black.opacity(0.18), radius: 14, x: 0, y: 8)
         }
-        .buttonStyle(.plain)
+        .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
+        .contentShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
+        .onTapGesture(perform: onReveal)
         .accessibilityLabel("Reveal media")
     }
 }
@@ -1916,7 +1917,7 @@ private struct NoteVideoPlayerView: View {
     @Environment(\.colorScheme) private var colorScheme
     @State private var videoAspectRatio: CGFloat = 16.0 / 9.0
     @State private var videoThumbnail: UIImage?
-    @State private var isShowingPlayer = false
+    @State private var isShowingPlayerInline = false
 
     init(
         url: URL,
@@ -1927,15 +1928,24 @@ private struct NoteVideoPlayerView: View {
     }
 
     var body: some View {
-        Button {
-            isShowingPlayer = true
-        } label: {
-            ZStack {
-                thumbnailLayer
-                playOverlayButton
+        ZStack {
+            if isShowingPlayerInline {
+                NoteNativeVideoPlayerController(url: url)
+                    .clipShape(
+                        RoundedRectangle(cornerRadius: mediaCornerRadius, style: .continuous)
+                    )
+            } else {
+                Button {
+                    isShowingPlayerInline = true
+                } label: {
+                    ZStack {
+                        thumbnailLayer
+                        playOverlayButton
+                    }
+                }
+                .buttonStyle(.plain)
             }
         }
-        .buttonStyle(.plain)
         .frame(maxWidth: .infinity, maxHeight: maxVideoHeight, alignment: .leading)
         .aspectRatio(videoAspectRatio, contentMode: .fit)
         .clipShape(
@@ -1948,9 +1958,6 @@ private struct NoteVideoPlayerView: View {
         .task(id: url, priority: .utility) {
             await loadVideoAspectRatio()
             await loadVideoThumbnailIfNeeded()
-        }
-        .fullScreenCover(isPresented: $isShowingPlayer) {
-            NoteNativeVideoPlayerScreen(url: url)
         }
     }
 
@@ -2134,36 +2141,6 @@ private struct NoteAudioPlayerView: View {
             player.play()
             isPlaying = true
         }
-    }
-}
-
-private struct NoteNativeVideoPlayerScreen: View {
-    let url: URL
-
-    @Environment(\.dismiss) private var dismiss
-
-    var body: some View {
-        ZStack(alignment: .topTrailing) {
-            Color.black.ignoresSafeArea()
-
-            NoteNativeVideoPlayerController(url: url)
-                .ignoresSafeArea()
-
-            Button {
-                dismiss()
-            } label: {
-                Text("Done")
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(.white)
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 10)
-                    .background(.ultraThinMaterial, in: Capsule(style: .continuous))
-            }
-            .buttonStyle(.plain)
-            .padding(.top, 16)
-            .padding(.trailing, 16)
-        }
-        .preferredColorScheme(.dark)
     }
 }
 
@@ -2426,6 +2403,13 @@ private struct NostrEventReferenceCardView: View {
                 }
 
                 Spacer(minLength: 8)
+
+                if let clientName = item.displayEvent.clientName {
+                    Text("via \(clientName)")
+                        .font(.caption2)
+                        .foregroundStyle(appSettings.themePalette.mutedForeground)
+                        .lineLimit(1)
+                }
 
                 Text(RelativeTimestampFormatter.shortString(from: item.displayEvent.createdAtDate))
                     .font(.caption2)
@@ -2883,6 +2867,12 @@ private enum NoteMediaAsset {
             return image.size
         }
     }
+
+    var aspectRatio: CGFloat? {
+        let resolvedSize = size
+        guard resolvedSize.width > 0, resolvedSize.height > 0 else { return nil }
+        return resolvedSize.width / resolvedSize.height
+    }
 }
 
 private enum NoteMediaScaling {
@@ -2927,6 +2917,7 @@ private struct NoteMediaAssetContentView: View {
                 )
             }
         }
+        .aspectRatio(asset.aspectRatio, contentMode: scaling.swiftUIContentMode)
     }
 }
 

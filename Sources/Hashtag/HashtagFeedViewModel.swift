@@ -9,7 +9,6 @@ final class HashtagFeedViewModel: ObservableObject {
 
     private struct VisibleItemsCacheKey: Equatable {
         let itemsRevision: Int
-        let mode: FeedMode
         let hideNSFW: Bool
         let filterRevision: Int
     }
@@ -19,9 +18,6 @@ final class HashtagFeedViewModel: ObservableObject {
             itemsRevision &+= 1
             clearVisibleItemsCache()
         }
-    }
-    @Published var mode: FeedMode = .postsAndReplies {
-        didSet { clearVisibleItemsCache() }
     }
     @Published private(set) var isLoading = false
     @Published private(set) var isLoadingMore = false
@@ -95,7 +91,6 @@ final class HashtagFeedViewModel: ObservableObject {
     var visibleItems: [FeedItem] {
         let key = VisibleItemsCacheKey(
             itemsRevision: itemsRevision,
-            mode: mode,
             hideNSFW: AppSettingsStore.shared.hideNSFWContent,
             filterRevision: MuteStore.shared.filterRevision
         )
@@ -112,12 +107,7 @@ final class HashtagFeedViewModel: ObservableObject {
             if hideNSFW && item.moderationEvents.contains(where: { $0.containsNSFWHashtag }) {
                 return false
             }
-            switch mode {
-            case .posts where item.displayEvent.isReplyNote:
-                return false
-            default:
-                return true
-            }
+            return true
         }
 
         visibleItemsCacheKey = key
@@ -163,12 +153,26 @@ final class HashtagFeedViewModel: ObservableObject {
             } else if !initialItems.isEmpty {
                 mergeKeepingNewest(itemsToMerge: initialItems)
             }
-            oldestCreatedAt = initialItems.last?.event.createdAt
-            hasReachedEnd = initialPage.fetchedFullPage ? initialPage.items.count < pageSize : false
-            scheduleItemHydration(for: items)
-            if !initialPage.fetchedFullPage {
-                scheduleRelayExpansionIfNeeded()
+            if initialPage.fetchedFullPage {
+                oldestCreatedAt = initialItems.last?.event.createdAt
+                hasReachedEnd = initialPage.items.count < pageSize
+            } else {
+                do {
+                    let expandedItems = pruneMutedItems(try await fetchExpandedHashtagPage())
+                    if !expandedItems.isEmpty {
+                        mergeKeepingNewest(itemsToMerge: expandedItems)
+                        oldestCreatedAt = expandedItems.last?.event.createdAt
+                        hasReachedEnd = expandedItems.count < pageSize
+                    } else {
+                        oldestCreatedAt = initialItems.last?.event.createdAt
+                        hasReachedEnd = false
+                    }
+                } catch {
+                    oldestCreatedAt = initialItems.last?.event.createdAt
+                    hasReachedEnd = false
+                }
             }
+            scheduleItemHydration(for: items)
         } catch {
             if items.isEmpty {
                 errorMessage = "Couldn't load #\(normalizedHashtag) right now."
@@ -303,6 +307,20 @@ final class HashtagFeedViewModel: ObservableObject {
             moderationSnapshot: muteFilterSnapshot
         )
         return InitialHashtagPageResult(items: fullFetched, fetchedFullPage: true)
+    }
+
+    private func fetchExpandedHashtagPage() async throws -> [FeedItem] {
+        try await service.fetchHashtagFeed(
+            relayURLs: hashtagRelayURLs,
+            hashtag: normalizedHashtag,
+            kinds: requestKinds,
+            limit: pageSize,
+            until: nil,
+            hydrationMode: .cachedProfilesOnly,
+            fetchTimeout: Self.fullHashtagFetchTimeout,
+            relayFetchMode: .allRelays,
+            moderationSnapshot: muteFilterSnapshot
+        )
     }
 
     private func scheduleRelayExpansionIfNeeded() {
