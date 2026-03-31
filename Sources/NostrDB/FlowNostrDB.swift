@@ -41,7 +41,6 @@ final class FlowNostrDB: @unchecked Sendable {
     private let ingestThreadCount: Int
     private let initialMapsize: size_t
     private let minimumMapsize: size_t
-    private let maxPersistedEventCount: Int
     private let maxMapUsageBeforeRebuild: Double
     private let writerScratchBufferSize: Int32
     private let flags: Int32
@@ -70,7 +69,6 @@ final class FlowNostrDB: @unchecked Sendable {
         fileManager: FileManager = .default,
         initialMapsize: size_t = size_t(32) * 1024 * 1024 * 1024,
         minimumMapsize: size_t = size_t(768) * 1024 * 1024,
-        maxPersistedEventCount: Int = 120_000,
         maxMapUsageBeforeRebuild: Double = 0.72,
         openDatabase: @escaping OpenDatabase = { path, ingestThreads, mapsize, writerScratchBufferSize, flags in
             path.withCString { rawPath in
@@ -89,8 +87,10 @@ final class FlowNostrDB: @unchecked Sendable {
         self.ingestThreadCount = max(ProcessInfo.processInfo.processorCount - 1, 1)
         self.initialMapsize = max(initialMapsize, minimumMapsize)
         self.minimumMapsize = minimumMapsize
-        self.maxPersistedEventCount = max(maxPersistedEventCount, 1)
-        self.maxMapUsageBeforeRebuild = min(max(maxMapUsageBeforeRebuild, 0.1), 0.95)
+        self.maxMapUsageBeforeRebuild = min(
+            max(maxMapUsageBeforeRebuild, Double.leastNonzeroMagnitude),
+            0.95
+        )
         self.writerScratchBufferSize = 2 * 1024 * 1024
         self.flags = Int32(FLOW_NDB_FLAG_NO_NOTE_BLOCKS | FLOW_NDB_FLAG_NO_STATS)
         self.openDatabase = openDatabase
@@ -475,14 +475,6 @@ final class FlowNostrDB: @unchecked Sendable {
     }
 
     private func shouldRebuildLocked() -> Bool {
-        let retainedEventCountEstimate = max(
-            Int(flow_ndb_note_count(handle)),
-            recentEventOrder.count
-        )
-        if retainedEventCountEstimate > maxPersistedEventCount {
-            return true
-        }
-
         guard openMapsize > 0 else { return false }
         let usageThreshold = Int64(Double(openMapsize) * maxMapUsageBeforeRebuild)
         guard usageThreshold > 0 else { return false }

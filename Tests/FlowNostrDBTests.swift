@@ -308,14 +308,14 @@ final class FlowNostrDBTests: XCTestCase {
         XCTAssertNil(diagnostics.lastOpenError)
     }
 
-    func testRequiresRebuildWhenPersistedEventCountCrossesThreshold() throws {
+    func testRequiresRebuildWhenDiskUsageCrossesThreshold() throws {
         let rootURL = try makeRootURL(prefix: "FlowNostrDBRetentionThreshold")
         defer { try? FileManager.default.removeItem(at: rootURL) }
 
         let fileManager = FlowNostrDBTestFileManager(rootURL: rootURL)
         let database = FlowNostrDB(
             fileManager: fileManager,
-            maxPersistedEventCount: 2
+            maxMapUsageBeforeRebuild: 0.00000001
         )
 
         let oldest = makeTestEvent(
@@ -352,10 +352,7 @@ final class FlowNostrDBTests: XCTestCase {
         defer { try? FileManager.default.removeItem(at: rootURL) }
 
         let fileManager = FlowNostrDBTestFileManager(rootURL: rootURL)
-        let database = FlowNostrDB(
-            fileManager: fileManager,
-            maxPersistedEventCount: 2
-        )
+        let database = FlowNostrDB(fileManager: fileManager)
 
         let oldest = makeTestEvent(
             id: hex("4"),
@@ -384,8 +381,6 @@ final class FlowNostrDBTests: XCTestCase {
 
         XCTAssertTrue(database.ingest(events: [oldest, middle, newest]))
         XCTAssertTrue(database.rebuild(retaining: [middle, newest]))
-        XCTAssertFalse(database.requiresRebuild())
-
         let retained = database.queryEvents(filter: NostrFilter(kinds: [1], limit: 10))
         XCTAssertEqual(retained?.map { $0.id.lowercased() }, [
             newest.id.lowercased(),
@@ -394,14 +389,14 @@ final class FlowNostrDBTests: XCTestCase {
         XCTAssertNil(database.events(ids: [oldest.id])?[oldest.id.lowercased()])
     }
 
-    func testSeenEventStoreRebuildsFlowDBFromRecentMirrorWhenThresholdExceeded() async throws {
+    func testSeenEventStoreRebuildsFlowDBFromRecentMirrorWhenDiskUsageThresholdExceeded() async throws {
         let rootURL = try makeRootURL(prefix: "FlowSeenEventStoreRebuild")
         defer { try? FileManager.default.removeItem(at: rootURL) }
 
         let fileManager = FlowNostrDBTestFileManager(rootURL: rootURL)
         let database = FlowNostrDB(
             fileManager: fileManager,
-            maxPersistedEventCount: 2
+            maxMapUsageBeforeRebuild: 0.00000001
         )
         let store = SeenEventStore(
             fileManager: fileManager,
@@ -437,8 +432,6 @@ final class FlowNostrDBTests: XCTestCase {
         await store.store(events: [oldest])
         await store.store(events: [middle])
         await store.store(events: [newest])
-
-        XCTAssertFalse(database.requiresRebuild())
 
         let retained = database.queryEvents(filter: NostrFilter(kinds: [1], limit: 10))
         XCTAssertEqual(retained?.map { $0.id.lowercased() }, [
