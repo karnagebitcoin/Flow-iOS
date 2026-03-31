@@ -11,13 +11,16 @@ actor SeenEventStore: SeenEventStoring {
     private let encoder = JSONEncoder()
     private let decoder = JSONDecoder()
     private let maxEventCount = 40_000
+    private let maxRetainedNostrDBEventCount: Int
     private var database: OpaquePointer?
 
     init(
         fileManager: FileManager = .default,
-        nostrDatabase: FlowNostrDB = .shared
+        nostrDatabase: FlowNostrDB = .shared,
+        maxRetainedNostrDBEventCount: Int = 30_000
     ) {
         self.nostrDatabase = nostrDatabase
+        self.maxRetainedNostrDBEventCount = max(1, min(maxRetainedNostrDBEventCount, maxEventCount))
         let root = fileManager.urls(for: .cachesDirectory, in: .userDomainMask).first
             ?? URL(fileURLWithPath: NSTemporaryDirectory())
         self.databaseURL = root.appendingPathComponent("x21-seen-events.sqlite", isDirectory: false)
@@ -34,12 +37,18 @@ actor SeenEventStore: SeenEventStoring {
     func store(events: [NostrEvent]) {
         guard !events.isEmpty else { return }
 
-        if nostrDatabase.ingest(events: events) {
-            return
-        }
-
         guard database != nil else { return }
 
+        persistEventsToMirror(events)
+        pruneIfNeeded()
+
+        let ingested = nostrDatabase.ingest(events: events)
+        if !ingested || nostrDatabase.requiresRebuild() {
+            rebuildNostrDatabaseFromMirror()
+        }
+    }
+
+    private func persistEventsToMirror(_ events: [NostrEvent]) {
         withTransaction {
             guard let statement = prepareStatement(
                 """
@@ -77,8 +86,12 @@ actor SeenEventStore: SeenEventStoring {
                 sqlite3_step(statement)
             }
         }
+    }
 
-        pruneIfNeeded()
+    private func rebuildNostrDatabaseFromMirror() {
+        let retainedEvents = recentEventsForNostrDB(limit: maxRetainedNostrDBEventCount)
+        guard !retainedEvents.isEmpty else { return }
+        _ = nostrDatabase.rebuild(retaining: retainedEvents)
     }
 
     func storeRecentFeed(key: String, events: [NostrEvent]) {
@@ -330,6 +343,33 @@ actor SeenEventStore: SeenEventStoring {
             );
             """
         sqlite3_exec(database, sql, nil, nil, nil)
+    }
+
+    private func recentEventsForNostrDB(limit: Int) -> [NostrEvent] {
+        guard limit > 0 else { return [] }
+        guard let statement = prepareStatement(
+            """
+            SELECT event_json
+            FROM seen_events
+            ORDER BY seen_at DESC, created_at DESC
+            LIMIT ?;
+            """
+        ) else {
+            return []
+        }
+        defer { sqlite3_finalize(statement) }
+
+        sqlite3_bind_int64(statement, 1, Int64(limit))
+
+        var events: [NostrEvent] = []
+        events.reserveCapacity(limit)
+
+        while sqlite3_step(statement) == SQLITE_ROW {
+            guard let event = decodeEvent(from: statement, column: 0) else { continue }
+            events.append(event)
+        }
+
+        return events
     }
 
     private func sqlPlaceholders(count: Int) -> String {

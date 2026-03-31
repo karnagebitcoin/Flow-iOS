@@ -308,6 +308,146 @@ final class FlowNostrDBTests: XCTestCase {
         XCTAssertNil(diagnostics.lastOpenError)
     }
 
+    func testRequiresRebuildWhenPersistedEventCountCrossesThreshold() throws {
+        let rootURL = try makeRootURL(prefix: "FlowNostrDBRetentionThreshold")
+        defer { try? FileManager.default.removeItem(at: rootURL) }
+
+        let fileManager = FlowNostrDBTestFileManager(rootURL: rootURL)
+        let database = FlowNostrDB(
+            fileManager: fileManager,
+            maxPersistedEventCount: 2
+        )
+
+        let oldest = makeTestEvent(
+            id: hex("1"),
+            pubkey: hex("a"),
+            kind: 1,
+            tags: [],
+            content: "oldest",
+            createdAt: 1_700_000_000
+        )
+        let middle = makeTestEvent(
+            id: hex("2"),
+            pubkey: hex("b"),
+            kind: 1,
+            tags: [],
+            content: "middle",
+            createdAt: 1_700_000_100
+        )
+        let newest = makeTestEvent(
+            id: hex("3"),
+            pubkey: hex("c"),
+            kind: 1,
+            tags: [],
+            content: "newest",
+            createdAt: 1_700_000_200
+        )
+
+        XCTAssertTrue(database.ingest(events: [oldest, middle, newest]))
+        XCTAssertTrue(database.requiresRebuild())
+    }
+
+    func testRebuildRetainsNewestSeedEvents() throws {
+        let rootURL = try makeRootURL(prefix: "FlowNostrDBRebuild")
+        defer { try? FileManager.default.removeItem(at: rootURL) }
+
+        let fileManager = FlowNostrDBTestFileManager(rootURL: rootURL)
+        let database = FlowNostrDB(
+            fileManager: fileManager,
+            maxPersistedEventCount: 2
+        )
+
+        let oldest = makeTestEvent(
+            id: hex("4"),
+            pubkey: hex("d"),
+            kind: 1,
+            tags: [],
+            content: "oldest",
+            createdAt: 1_700_000_000
+        )
+        let middle = makeTestEvent(
+            id: hex("5"),
+            pubkey: hex("e"),
+            kind: 1,
+            tags: [],
+            content: "middle",
+            createdAt: 1_700_000_100
+        )
+        let newest = makeTestEvent(
+            id: hex("6"),
+            pubkey: hex("f"),
+            kind: 1,
+            tags: [],
+            content: "newest",
+            createdAt: 1_700_000_200
+        )
+
+        XCTAssertTrue(database.ingest(events: [oldest, middle, newest]))
+        XCTAssertTrue(database.rebuild(retaining: [middle, newest]))
+        XCTAssertFalse(database.requiresRebuild())
+
+        let retained = database.queryEvents(filter: NostrFilter(kinds: [1], limit: 10))
+        XCTAssertEqual(retained?.map { $0.id.lowercased() }, [
+            newest.id.lowercased(),
+            middle.id.lowercased(),
+        ])
+        XCTAssertNil(database.events(ids: [oldest.id])?[oldest.id.lowercased()])
+    }
+
+    func testSeenEventStoreRebuildsFlowDBFromRecentMirrorWhenThresholdExceeded() async throws {
+        let rootURL = try makeRootURL(prefix: "FlowSeenEventStoreRebuild")
+        defer { try? FileManager.default.removeItem(at: rootURL) }
+
+        let fileManager = FlowNostrDBTestFileManager(rootURL: rootURL)
+        let database = FlowNostrDB(
+            fileManager: fileManager,
+            maxPersistedEventCount: 2
+        )
+        let store = SeenEventStore(
+            fileManager: fileManager,
+            nostrDatabase: database,
+            maxRetainedNostrDBEventCount: 2
+        )
+
+        let oldest = makeTestEvent(
+            id: hex("7"),
+            pubkey: hex("1"),
+            kind: 1,
+            tags: [],
+            content: "oldest",
+            createdAt: 1_700_000_000
+        )
+        let middle = makeTestEvent(
+            id: hex("8"),
+            pubkey: hex("2"),
+            kind: 1,
+            tags: [],
+            content: "middle",
+            createdAt: 1_700_000_100
+        )
+        let newest = makeTestEvent(
+            id: hex("9"),
+            pubkey: hex("3"),
+            kind: 1,
+            tags: [],
+            content: "newest",
+            createdAt: 1_700_000_200
+        )
+
+        await store.store(events: [oldest])
+        await store.store(events: [middle])
+        await store.store(events: [newest])
+
+        XCTAssertFalse(database.requiresRebuild())
+
+        let retained = database.queryEvents(filter: NostrFilter(kinds: [1], limit: 10))
+        XCTAssertEqual(retained?.map { $0.id.lowercased() }, [
+            newest.id.lowercased(),
+            middle.id.lowercased(),
+        ])
+        XCTAssertNil(database.events(ids: [oldest.id])?[oldest.id.lowercased()])
+    }
+
     private func makeRootURL(prefix: String) throws -> URL {
         let url = FileManager.default.temporaryDirectory
             .appendingPathComponent("\(prefix)-\(UUID().uuidString)", isDirectory: true)

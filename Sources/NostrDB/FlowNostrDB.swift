@@ -41,6 +41,8 @@ final class FlowNostrDB: @unchecked Sendable {
     private let ingestThreadCount: Int
     private let initialMapsize: size_t
     private let minimumMapsize: size_t
+    private let maxPersistedEventCount: Int
+    private let maxMapUsageBeforeRebuild: Double
     private let writerScratchBufferSize: Int32
     private let flags: Int32
     private let openDatabase: OpenDatabase
@@ -68,6 +70,8 @@ final class FlowNostrDB: @unchecked Sendable {
         fileManager: FileManager = .default,
         initialMapsize: size_t = size_t(32) * 1024 * 1024 * 1024,
         minimumMapsize: size_t = size_t(768) * 1024 * 1024,
+        maxPersistedEventCount: Int = 120_000,
+        maxMapUsageBeforeRebuild: Double = 0.72,
         openDatabase: @escaping OpenDatabase = { path, ingestThreads, mapsize, writerScratchBufferSize, flags in
             path.withCString { rawPath in
                 flow_ndb_open(
@@ -85,6 +89,8 @@ final class FlowNostrDB: @unchecked Sendable {
         self.ingestThreadCount = max(ProcessInfo.processInfo.processorCount - 1, 1)
         self.initialMapsize = max(initialMapsize, minimumMapsize)
         self.minimumMapsize = minimumMapsize
+        self.maxPersistedEventCount = max(maxPersistedEventCount, 1)
+        self.maxMapUsageBeforeRebuild = min(max(maxMapUsageBeforeRebuild, 0.1), 0.95)
         self.writerScratchBufferSize = 2 * 1024 * 1024
         self.flags = Int32(FLOW_NDB_FLAG_NO_NOTE_BLOCKS | FLOW_NDB_FLAG_NO_STATS)
         self.openDatabase = openDatabase
@@ -103,21 +109,29 @@ final class FlowNostrDB: @unchecked Sendable {
             ingestCallCount += 1
             guard openIfNeeded() else { return false }
 
-            var ingestedAny = false
-            for event in events {
-                remember(event: event)
-
-                guard let payload = encodedEventJSON(event) else { continue }
-                let ok = payload.withCString { raw in
-                    flow_ndb_ingest_note_json(handle, raw, Int32(payload.utf8.count))
-                }
-                ingestedAny = ingestedAny || ok != 0
-            }
+            let ingestedAny = ingestLocked(events: events, updateSessionCounters: true)
 
             if ingestedAny {
                 successfulIngestCallCount += 1
             }
             return ingestedAny
+        }
+    }
+
+    func requiresRebuild() -> Bool {
+        queue.sync {
+            guard openIfNeeded() else { return false }
+            return shouldRebuildLocked()
+        }
+    }
+
+    func rebuild(retaining events: [NostrEvent]) -> Bool {
+        let retainedEvents = deduplicated(events)
+        guard !retainedEvents.isEmpty else { return false }
+
+        return queue.sync {
+            guard rebuildLocked(retaining: retainedEvents) else { return false }
+            return !shouldRebuildLocked()
         }
     }
 
@@ -378,10 +392,16 @@ final class FlowNostrDB: @unchecked Sendable {
     }
 
     private func remember(event: NostrEvent) {
+        remember(event: event, updateSessionCounters: true)
+    }
+
+    private func remember(event: NostrEvent, updateSessionCounters: Bool) {
         let eventID = normalizeHexIdentifier(event.id)
         guard !eventID.isEmpty else { return }
 
-        sessionIngestedEventIDs.insert(eventID)
+        if updateSessionCounters {
+            sessionIngestedEventIDs.insert(eventID)
+        }
 
         if recentEventsByID[eventID] == nil {
             recentEventOrder.append(eventID)
@@ -396,7 +416,7 @@ final class FlowNostrDB: @unchecked Sendable {
             }
         }
 
-        rememberReplaceable(event: event)
+        rememberReplaceable(event: event, updateSessionCounters: updateSessionCounters)
     }
 
     private func encodedEventJSON(_ event: NostrEvent) -> String? {
@@ -404,13 +424,13 @@ final class FlowNostrDB: @unchecked Sendable {
         return String(data: data, encoding: .utf8)
     }
 
-    private func rememberReplaceable(event: NostrEvent) {
+    private func rememberReplaceable(event: NostrEvent, updateSessionCounters: Bool) {
         guard Self.isReplaceableKind(event.kind) else { return }
 
         let authorPubkey = normalizeHexIdentifier(event.pubkey)
         guard !authorPubkey.isEmpty else { return }
 
-        if event.kind == 0 {
+        if updateSessionCounters, event.kind == 0 {
             sessionIngestedProfilePubkeys.insert(authorPubkey)
         }
 
@@ -436,6 +456,70 @@ final class FlowNostrDB: @unchecked Sendable {
 
     private func recentReplaceableEvent(authorPubkey: String, kind: Int) -> NostrEvent? {
         recentReplaceableEventsByKey[ReplaceableKey(authorPubkey: authorPubkey, kind: kind)]
+    }
+
+    private func ingestLocked(events: [NostrEvent], updateSessionCounters: Bool) -> Bool {
+        var ingestedAny = false
+
+        for event in events {
+            remember(event: event, updateSessionCounters: updateSessionCounters)
+
+            guard let payload = encodedEventJSON(event) else { continue }
+            let ok = payload.withCString { raw in
+                flow_ndb_ingest_note_json(handle, raw, Int32(payload.utf8.count))
+            }
+            ingestedAny = ingestedAny || ok != 0
+        }
+
+        return ingestedAny
+    }
+
+    private func shouldRebuildLocked() -> Bool {
+        let retainedEventCountEstimate = max(
+            Int(flow_ndb_note_count(handle)),
+            recentEventOrder.count
+        )
+        if retainedEventCountEstimate > maxPersistedEventCount {
+            return true
+        }
+
+        guard openMapsize > 0 else { return false }
+        let usageThreshold = Int64(Double(openMapsize) * maxMapUsageBeforeRebuild)
+        guard usageThreshold > 0 else { return false }
+        return diskUsageBytes() >= usageThreshold
+    }
+
+    private func rebuildLocked(retaining events: [NostrEvent]) -> Bool {
+        let retainedEvents = events.sorted(by: Self.rebuildSort)
+
+        if let handle {
+            flow_ndb_close(handle)
+            self.handle = nil
+        }
+
+        openMapsize = 0
+        lastAttemptedMapsize = 0
+        lastOpenErrorMessage = nil
+        recentEventsByID.removeAll(keepingCapacity: false)
+        recentEventOrder.removeAll(keepingCapacity: false)
+        recentReplaceableEventsByKey.removeAll(keepingCapacity: false)
+        recentReplaceableOrder.removeAll(keepingCapacity: false)
+
+        do {
+            if fileManager.fileExists(atPath: databaseDirectoryURL.path) {
+                try fileManager.removeItem(at: databaseDirectoryURL)
+            }
+            try fileManager.createDirectory(
+                at: databaseDirectoryURL,
+                withIntermediateDirectories: true
+            )
+        } catch {
+            lastOpenErrorMessage = "Failed to reset FlowNostrDB directory: \(error.localizedDescription)"
+            return false
+        }
+
+        guard openIfNeeded() else { return false }
+        return ingestLocked(events: retainedEvents, updateSessionCounters: false)
     }
 
     private func decodeProfile(pubkeyBytes: UnsafePointer<UInt8>) -> NostrProfile? {
@@ -585,6 +669,13 @@ final class FlowNostrDB: @unchecked Sendable {
             return lhs.createdAt > rhs.createdAt
         }
         return lhs.id.lowercased() > rhs.id.lowercased()
+    }
+
+    private static func rebuildSort(lhs: NostrEvent, rhs: NostrEvent) -> Bool {
+        if lhs.createdAt != rhs.createdAt {
+            return lhs.createdAt < rhs.createdAt
+        }
+        return lhs.id.lowercased() < rhs.id.lowercased()
     }
 
     private static func event(_ event: NostrEvent, matches filter: NostrFilter) -> Bool {
