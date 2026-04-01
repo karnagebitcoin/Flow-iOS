@@ -18,13 +18,16 @@ struct ActivityView: View {
     @State private var topNavAvatarImage: UIImage?
     @StateObject private var settingsSheetState = SettingsSheetState()
     @Binding private var isRootVisible: Bool
+    private let isTabActive: Bool
 
     init(
         viewModel: ActivityViewModel,
-        isRootVisible: Binding<Bool> = .constant(true)
+        isRootVisible: Binding<Bool> = .constant(true),
+        isTabActive: Bool = true
     ) {
         self.viewModel = viewModel
         _isRootVisible = isRootVisible
+        self.isTabActive = isTabActive
     }
 
     var body: some View {
@@ -96,7 +99,8 @@ struct ActivityView: View {
             }
             .animation(.easeInOut(duration: 0.2), value: isShowingSideMenu)
             .toolbar(.hidden, for: .navigationBar)
-            .task {
+            .task(id: isTabActive) {
+                guard isTabActive else { return }
                 relaySettings.configure(
                     accountPubkey: auth.currentAccount?.pubkey,
                     nsec: auth.currentNsec

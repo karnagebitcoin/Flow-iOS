@@ -300,8 +300,8 @@ struct ComposeKlipyGIFPickerSheet: View {
             ScrollView {
                 LazyVGrid(
                     columns: [
-                        GridItem(.flexible(), spacing: 12),
-                        GridItem(.flexible(), spacing: 12)
+                        GridItem(.flexible(minimum: 0, maximum: .infinity), spacing: 12, alignment: .top),
+                        GridItem(.flexible(minimum: 0, maximum: .infinity), spacing: 12, alignment: .top)
                     ],
                     spacing: 12
                 ) {
@@ -362,62 +362,76 @@ private struct KlipyGIFGridTile: View {
     @EnvironmentObject private var appSettings: AppSettingsStore
 
     static let tileAspectRatio: CGFloat = 1.08
+    private static let cornerRadius: CGFloat = 18
 
     let item: KlipyGIFItem
 
     var body: some View {
-        ZStack(alignment: .bottomLeading) {
-            RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .fill(appSettings.themePalette.secondaryGroupedBackground)
-
-            if let previewURL = item.preferredPreviewAsset?.url {
-                AsyncImage(url: previewURL) { phase in
-                    switch phase {
-                    case .success(let image):
-                        image
-                            .resizable()
-                            .scaledToFill()
-                            .frame(maxWidth: .infinity, maxHeight: .infinity)
-                            .clipped()
-                    case .failure:
-                        fallbackTile
-                    case .empty:
-                        ProgressView()
-                            .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    @unknown default:
-                        fallbackTile
-                    }
+        RoundedRectangle(cornerRadius: Self.cornerRadius, style: .continuous)
+            .fill(appSettings.themePalette.secondaryGroupedBackground)
+            .overlay {
+                previewContent
+                    .clipShape(RoundedRectangle(cornerRadius: Self.cornerRadius, style: .continuous))
+            }
+            .overlay(alignment: .bottomLeading) {
+                LinearGradient(
+                    colors: [
+                        .clear,
+                        Color.black.opacity(0.55)
+                    ],
+                    startPoint: .top,
+                    endPoint: .bottom
+                )
+                .clipShape(RoundedRectangle(cornerRadius: Self.cornerRadius, style: .continuous))
+                .allowsHitTesting(false)
+            }
+            .overlay(alignment: .bottomLeading) {
+                if !trimmedTitle.isEmpty {
+                    Text(trimmedTitle)
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.white)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 9)
                 }
-            } else {
-                fallbackTile
             }
-
-            LinearGradient(
-                colors: [
-                    .clear,
-                    Color.black.opacity(0.55)
-                ],
-                startPoint: .top,
-                endPoint: .bottom
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .contentShape(RoundedRectangle(cornerRadius: Self.cornerRadius, style: .continuous))
+            .clipped()
+            .overlay(
+                RoundedRectangle(cornerRadius: Self.cornerRadius, style: .continuous)
+                    .stroke(appSettings.themePalette.separator.opacity(0.16), lineWidth: 0.8)
             )
-            .allowsHitTesting(false)
+    }
 
-            if !item.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                Text(item.title)
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(.white)
-                    .lineLimit(2)
-                    .multilineTextAlignment(.leading)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(10)
+    @ViewBuilder
+    private var previewContent: some View {
+        if let previewURL = item.preferredPreviewAsset?.url {
+            AsyncImage(url: previewURL) { phase in
+                switch phase {
+                case .success(let image):
+                    image
+                        .resizable()
+                        .scaledToFill()
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                case .failure:
+                    fallbackTile
+                case .empty:
+                    ProgressView()
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                @unknown default:
+                    fallbackTile
+                }
             }
+        } else {
+            fallbackTile
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .stroke(appSettings.themePalette.separator.opacity(0.16), lineWidth: 0.8)
-        )
+    }
+
+    private var trimmedTitle: String {
+        item.title.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     private var fallbackTile: some View {

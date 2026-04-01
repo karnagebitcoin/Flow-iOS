@@ -47,6 +47,20 @@ struct AppThemePalette {
     private static let sakuraSoftWhite = Color(red: 1.0, green: 0.985, blue: 0.992)
     private static let sakuraPetalWash = Color(red: 1.0, green: 0.947, blue: 0.979)
 
+    private static func adaptiveSeparator(
+        lightAlpha: CGFloat = 1,
+        darkAlpha: CGFloat
+    ) -> Color {
+        Color(
+            UIColor { traits in
+                if traits.userInterfaceStyle == .dark {
+                    return UIColor.white.withAlphaComponent(darkAlpha)
+                }
+                return UIColor.separator.withAlphaComponent(lightAlpha)
+            }
+        )
+    }
+
     let background: Color
     let chromeBackground: Color
     let chromeBorder: Color
@@ -70,7 +84,7 @@ struct AppThemePalette {
     static let system = AppThemePalette(
         background: Color(.systemBackground),
         chromeBackground: Color(.systemBackground),
-        chromeBorder: Color(.separator),
+        chromeBorder: adaptiveSeparator(darkAlpha: 0.08),
         mutedForeground: .secondary,
         secondaryBackground: Color(.secondarySystemBackground),
         quoteBackground: Color(.secondarySystemBackground),
@@ -78,12 +92,12 @@ struct AppThemePalette {
         secondaryGroupedBackground: Color(.secondarySystemGroupedBackground),
         secondaryFill: Color(.secondarySystemFill),
         tertiaryFill: Color(.tertiarySystemFill),
-        separator: Color(.separator),
+        separator: adaptiveSeparator(darkAlpha: 0.12),
         linkPreviewBackground: Color(.secondarySystemBackground),
-        linkPreviewBorder: Color(.separator),
+        linkPreviewBorder: adaptiveSeparator(darkAlpha: 0.12),
         articlePreviewBackgroundTop: Color(.secondarySystemBackground),
         articlePreviewBackgroundBottom: Color(.systemBackground),
-        articlePreviewBorder: Color(.separator).opacity(0.24),
+        articlePreviewBorder: adaptiveSeparator(lightAlpha: 0.24, darkAlpha: 0.14),
         capsuleTabStyle: nil,
         profileActionStyle: nil,
         pollStyle: nil
@@ -92,7 +106,7 @@ struct AppThemePalette {
     static let black = AppThemePalette(
         background: .black,
         chromeBackground: .black,
-        chromeBorder: Color.white.opacity(0.10),
+        chromeBorder: Color.white.opacity(0.06),
         mutedForeground: Color.white.opacity(0.58),
         secondaryBackground: Color(red: 0.11, green: 0.11, blue: 0.13),
         quoteBackground: Color(red: 0.11, green: 0.11, blue: 0.13),
@@ -100,12 +114,12 @@ struct AppThemePalette {
         secondaryGroupedBackground: Color(red: 0.12, green: 0.12, blue: 0.14),
         secondaryFill: Color.white.opacity(0.10),
         tertiaryFill: Color.white.opacity(0.06),
-        separator: Color.white.opacity(0.16),
+        separator: Color.white.opacity(0.10),
         linkPreviewBackground: Color(red: 0.11, green: 0.11, blue: 0.13),
-        linkPreviewBorder: Color.white.opacity(0.16),
+        linkPreviewBorder: Color.white.opacity(0.10),
         articlePreviewBackgroundTop: Color(red: 0.11, green: 0.11, blue: 0.13),
         articlePreviewBackgroundBottom: .black,
-        articlePreviewBorder: Color.white.opacity(0.18),
+        articlePreviewBorder: Color.white.opacity(0.12),
         capsuleTabStyle: nil,
         profileActionStyle: nil,
         pollStyle: nil

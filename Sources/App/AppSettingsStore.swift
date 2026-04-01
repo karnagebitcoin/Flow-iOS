@@ -539,7 +539,7 @@ final class AppSettingsStore: ObservableObject {
     func configure(accountPubkey: String?) {
         let normalizedAccountStorageID = Self.normalizedSettingsAccountID(accountPubkey)
         guard currentAccountStorageID != normalizedAccountStorageID else { return }
-        let allowLegacyGlobalMigration = authStore.load().accounts.count <= 1
+        let allowLegacyGlobalMigration = authStore.hasSingleAccountHint()
 
         currentAccountStorageID = normalizedAccountStorageID
 

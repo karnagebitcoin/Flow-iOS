@@ -207,7 +207,7 @@ final class AppThemeOptionTests: XCTestCase {
         assertColor(AppThemeOption.black.palette.chromeBackground, matches: .black)
         assertColor(
             AppThemeOption.black.palette.chromeBorder,
-            matches: UIColor.white.withAlphaComponent(0.10)
+            matches: UIColor.white.withAlphaComponent(0.06)
         )
     }
 

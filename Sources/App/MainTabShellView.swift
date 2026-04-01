@@ -58,7 +58,10 @@ struct MainTabShellView: View {
                     .tag(Tab.home)
                     .toolbar(.hidden, for: .tabBar)
 
-                SearchView(viewModel: searchViewModel)
+                SearchView(
+                    viewModel: searchViewModel,
+                    isActive: selectedTab == .search
+                )
                     .tag(Tab.search)
                     .toolbar(.hidden, for: .tabBar)
 
@@ -68,7 +71,8 @@ struct MainTabShellView: View {
 
                 ActivityView(
                     viewModel: activityViewModel,
-                    isRootVisible: $isActivityRootVisible
+                    isRootVisible: $isActivityRootVisible,
+                    isTabActive: selectedTab == .activity
                 )
                     .id(activityRootResetID)
                     .tag(Tab.activity)
@@ -136,7 +140,6 @@ struct MainTabShellView: View {
                 nsec: auth.currentNsec
             )
             configureActivityViewModel()
-            await activityViewModel.loadIfNeeded()
             syncActivityTabActiveState()
         }
         .onChange(of: auth.currentAccount?.pubkey) { _, _ in

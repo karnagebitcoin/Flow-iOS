@@ -321,7 +321,7 @@ final class MuteStore: ObservableObject, NIP44v2Encrypting {
         mutedKeywordLists = Self.defaultMutedKeywordLists()
         rebuildMutedWordMatchers()
 
-        syncTask = Task { [weak self] in
+        syncTask = Task(priority: .utility) { [weak self] in
             await self?.syncFromRelay(for: session)
         }
     }

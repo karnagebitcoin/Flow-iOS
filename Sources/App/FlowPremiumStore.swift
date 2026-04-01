@@ -28,11 +28,6 @@ final class FlowPremiumStore: ObservableObject {
     init(appSettings: AppSettingsStore? = nil) {
         self.appSettings = appSettings ?? AppSettingsStore.shared
         transactionUpdatesTask = observeTransactionUpdates()
-
-        Task {
-            await refreshProducts()
-            await refreshEntitlements()
-        }
     }
 
     deinit {

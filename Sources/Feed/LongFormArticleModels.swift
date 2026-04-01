@@ -299,7 +299,7 @@ enum LongFormArticleMarkdownParser {
             return nil
         }
 
-        let altStartIndex = trimmedLine.index(after: trimmedLine.startIndex)
+        let altStartIndex = trimmedLine.index(trimmedLine.startIndex, offsetBy: 2)
         let alt = String(trimmedLine[altStartIndex..<altEndIndex])
         let urlStartIndex = trimmedLine.index(altEndIndex, offsetBy: 2)
         let urlEndIndex = trimmedLine.index(before: trimmedLine.endIndex)
@@ -314,7 +314,10 @@ enum LongFormArticleMarkdownParser {
             return nil
         }
 
-        let normalizedAlt = alt.trimmingCharacters(in: .whitespacesAndNewlines)
+        var normalizedAlt = alt.trimmingCharacters(in: .whitespacesAndNewlines)
+        while normalizedAlt.hasPrefix("[") {
+            normalizedAlt.removeFirst()
+        }
         return .image(url: url, alt: normalizedAlt.isEmpty ? nil : normalizedAlt)
     }
 

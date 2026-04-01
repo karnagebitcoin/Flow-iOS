@@ -53,10 +53,13 @@ struct FlowApp: App {
             .task {
                 appSettings.configure(accountPubkey: authManager.currentAccount?.pubkey)
                 updateGlobalTypographyAppearance()
-                await premiumStore.refreshEntitlements()
                 updateBreakReminderMonitoring()
-                await appSettings.refreshNotificationAuthorizationStatus()
-                await presentPendingSharedComposeDraftIfPossible()
+
+                Task(priority: .utility) {
+                    await premiumStore.refreshEntitlements()
+                    await appSettings.refreshNotificationAuthorizationStatus()
+                    await presentPendingSharedComposeDraftIfPossible()
+                }
             }
             .onChange(of: authManager.currentAccount?.pubkey) { _, newValue in
                 appSettings.configure(accountPubkey: newValue)
@@ -89,7 +92,7 @@ struct FlowApp: App {
             .onChange(of: scenePhase) { _, newValue in
                 updateBreakReminderMonitoring()
                 guard newValue == .active else { return }
-                Task {
+                Task(priority: .utility) {
                     await premiumStore.refreshEntitlements()
                     await presentPendingSharedComposeDraftIfPossible()
                 }

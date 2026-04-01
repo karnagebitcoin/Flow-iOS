@@ -269,26 +269,6 @@ struct AuthSheetView: View {
 
     @ViewBuilder
     private var accountsSection: some View {
-        if availableTabs.contains(.signUp) || availableTabs.contains(.signIn) {
-            Section("Add Account") {
-                if availableTabs.contains(.signUp) {
-                    Button {
-                        beginAccountAddFlow(tab: .signUp)
-                    } label: {
-                        Label("Create New Account", systemImage: "person.badge.plus")
-                    }
-                }
-
-                if availableTabs.contains(.signIn) {
-                    Button {
-                        beginAccountAddFlow(tab: .signIn)
-                    } label: {
-                        Label("Add Existing Key", systemImage: "key.horizontal")
-                    }
-                }
-            }
-        }
-
         Section {
             if auth.accounts.isEmpty {
                 Text("No saved accounts yet.")
@@ -358,13 +338,6 @@ struct AuthSheetView: View {
         } catch {
             signInError = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
         }
-    }
-
-    private func beginAccountAddFlow(tab: AuthSheetTab) {
-        postAuthDestination = .accounts
-        signInError = nil
-        privateKeyInput = ""
-        selectedTab = tab
     }
 
     private func handlePostAuthenticationCompletion() {

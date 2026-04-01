@@ -6,10 +6,11 @@ final class FlowMediaCacheDiagnosticsTests: XCTestCase {
         let rootDirectoryURL = makeTemporaryDirectory()
         let urlCache = makeURLCache()
         let data = makePNGData()
+        let response = makeFetchedResponse(data: data)
         let cache = FlowImageCache(
             rootDirectoryURL: rootDirectoryURL,
             urlCache: urlCache,
-            fetchImageData: { _ in data }
+            fetchImageData: { _ in response }
         )
         let url = URL(string: "https://example.com/photo.png")!
 
@@ -32,13 +33,14 @@ final class FlowMediaCacheDiagnosticsTests: XCTestCase {
     func testDiskHitIsReportedForNewCacheInstanceUsingPersistedMedia() async {
         let rootDirectoryURL = makeTemporaryDirectory()
         let urlCache = makeURLCache()
-        let data = Data("cached-on-disk".utf8)
+        let data = makePNGData()
         let url = URL(string: "https://example.com/avatar.jpg")!
+        let response = makeFetchedResponse(data: data)
 
         let warmCache = FlowImageCache(
             rootDirectoryURL: rootDirectoryURL,
             urlCache: urlCache,
-            fetchImageData: { _ in data }
+            fetchImageData: { _ in response }
         )
         _ = await warmCache.data(for: url)
 
@@ -62,7 +64,7 @@ final class FlowMediaCacheDiagnosticsTests: XCTestCase {
     func testURLCacheHitIsReportedWithoutTouchingNetworkFetcher() async {
         let rootDirectoryURL = makeTemporaryDirectory()
         let urlCache = makeURLCache()
-        let data = Data("cached-response".utf8)
+        let data = makePNGData()
         let url = URL(string: "https://example.com/banner.webp")!
         let request = URLRequest(
             url: url,
@@ -73,7 +75,7 @@ final class FlowMediaCacheDiagnosticsTests: XCTestCase {
             url: url,
             statusCode: 200,
             httpVersion: nil,
-            headerFields: nil
+            headerFields: ["Content-Type": "image/png"]
         )!
 
         urlCache.storeCachedResponse(
@@ -103,10 +105,11 @@ final class FlowMediaCacheDiagnosticsTests: XCTestCase {
         let rootDirectoryURL = makeTemporaryDirectory()
         let urlCache = makeURLCache()
         let data = makePNGData()
+        let response = makeFetchedResponse(data: data)
         let cache = FlowImageCache(
             rootDirectoryURL: rootDirectoryURL,
             urlCache: urlCache,
-            fetchImageData: { _ in data }
+            fetchImageData: { _ in response }
         )
         let url = URL(string: "https://example.com/prefetch.png")!
 
@@ -126,10 +129,11 @@ final class FlowMediaCacheDiagnosticsTests: XCTestCase {
         let rootDirectoryURL = makeTemporaryDirectory()
         let urlCache = makeURLCache()
         let data = makeGIFData()
+        let response = makeFetchedResponse(data: data, contentType: "image/gif")
         let cache = FlowImageCache(
             rootDirectoryURL: rootDirectoryURL,
             urlCache: urlCache,
-            fetchImageData: { _ in data }
+            fetchImageData: { _ in response }
         )
         let url = URL(string: "https://example.com/animated.gif")!
 
@@ -144,11 +148,12 @@ final class FlowMediaCacheDiagnosticsTests: XCTestCase {
     func testResetDiagnosticsClearsSessionMetrics() async {
         let rootDirectoryURL = makeTemporaryDirectory()
         let urlCache = makeURLCache()
-        let data = Data("network".utf8)
+        let data = makePNGData()
+        let response = makeFetchedResponse(data: data)
         let cache = FlowImageCache(
             rootDirectoryURL: rootDirectoryURL,
             urlCache: urlCache,
-            fetchImageData: { _ in data }
+            fetchImageData: { _ in response }
         )
         let url = URL(string: "https://example.com/reset.jpg")!
 
@@ -160,6 +165,39 @@ final class FlowMediaCacheDiagnosticsTests: XCTestCase {
         XCTAssertEqual(snapshotBeforeReset.trackedRequestCount, 1)
         XCTAssertEqual(snapshotBeforeReset.networkFetchCount, 1)
         XCTAssertEqual(snapshotAfterReset, FlowMediaCacheDiagnostics())
+    }
+
+    func testInvalidHTMLResponsesAreRejectedAndNegativeCached() async {
+        let rootDirectoryURL = makeTemporaryDirectory()
+        let urlCache = makeURLCache()
+        let url = URL(string: "https://void.cat/bad-image.webp")!
+        let invalidResponseData = Data("<!DOCTYPE html><html>nope</html>".utf8)
+        let fetchCount = LockedCounter()
+        let response = makeFetchedResponse(
+            data: invalidResponseData,
+            contentType: "text/html"
+        )
+        let cache = FlowImageCache(
+            rootDirectoryURL: rootDirectoryURL,
+            urlCache: urlCache,
+            fetchImageData: { _ in
+                await fetchCount.increment()
+                return response
+            }
+        )
+
+        let firstLoad = await cache.data(for: url)
+        let secondLoad = await cache.data(for: url)
+        let snapshot = await cache.diagnosticsSnapshot()
+        let observedFetchCount = await fetchCount.value()
+
+        XCTAssertNil(firstLoad)
+        XCTAssertNil(secondLoad)
+        XCTAssertEqual(observedFetchCount, 1)
+        XCTAssertEqual(snapshot.trackedRequestCount, 2)
+        XCTAssertEqual(snapshot.networkFailureCount, 1)
+        XCTAssertEqual(snapshot.networkFetchCount, 0)
+        XCTAssertEqual(snapshot.cacheHitCount, 0)
     }
 
     private func makeTemporaryDirectory() -> URL {
@@ -189,5 +227,29 @@ final class FlowMediaCacheDiagnosticsTests: XCTestCase {
         Data(
             base64Encoded: "R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw=="
         ) ?? Data([0x47, 0x49, 0x46])
+    }
+
+    private func makeFetchedResponse(
+        data: Data,
+        statusCode: Int = 200,
+        contentType: String = "image/png"
+    ) -> FlowMediaFetchedResponse {
+        FlowMediaFetchedResponse(
+            data: data,
+            statusCode: statusCode,
+            contentType: contentType
+        )
+    }
+}
+
+private actor LockedCounter {
+    private var count = 0
+
+    func increment() {
+        count += 1
+    }
+
+    func value() -> Int {
+        count
     }
 }

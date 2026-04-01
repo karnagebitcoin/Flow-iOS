@@ -37,6 +37,7 @@ struct SourcePublishTransportError: LocalizedError, Sendable {
 
 enum RelayClientError: LocalizedError {
     case invalidRelayURL(String)
+    case coolingDown(String)
     case closed(String)
     case publishRejected(String)
     case publishTimedOut
@@ -45,6 +46,8 @@ enum RelayClientError: LocalizedError {
         switch self {
         case .invalidRelayURL(let value):
             return "Invalid source URL: \(value)"
+        case .coolingDown(let value):
+            return "Source is cooling down after repeated failures: \(value)"
         case .closed(let reason):
             return "Source closed the subscription: \(reason)"
         case .publishRejected(let reason):
@@ -55,11 +58,93 @@ enum RelayClientError: LocalizedError {
     }
 }
 
+actor RelayEndpointBackoff {
+    static let shared = RelayEndpointBackoff()
+
+    private struct Entry {
+        var failureCount: Int
+        var retryAfter: Date
+    }
+
+    private let aggressiveHosts: Set<String>
+    private let maxEntries = 64
+    private var failures: [String: Entry] = [:]
+    private var failureOrder: [String] = []
+
+    init(aggressiveHosts: Set<String> = ["relay.nostr.band", "relay.damus.io"]) {
+        self.aggressiveHosts = aggressiveHosts
+    }
+
+    func canAttempt(_ url: URL, now: Date = Date()) -> Bool {
+        clearExpiredEntries(now: now)
+
+        guard let key = endpointKey(for: url),
+              let entry = failures[key] else {
+            return true
+        }
+
+        return entry.retryAfter <= now
+    }
+
+    func recordSuccess(for url: URL) {
+        guard let key = endpointKey(for: url) else { return }
+        failures.removeValue(forKey: key)
+        failureOrder.removeAll { $0 == key }
+    }
+
+    func recordFailure(for url: URL) {
+        guard let key = endpointKey(for: url) else { return }
+
+        let baseDelay: TimeInterval = aggressiveHosts.contains(url.host?.lowercased() ?? "") ? 60 : 20
+        let nextFailureCount = (failures[key]?.failureCount ?? 0) + 1
+        let multiplier = pow(2.0, Double(min(nextFailureCount - 1, 5)))
+        let delay = min(baseDelay * multiplier, 15 * 60)
+
+        failures[key] = Entry(
+            failureCount: nextFailureCount,
+            retryAfter: Date().addingTimeInterval(delay)
+        )
+        failureOrder.removeAll { $0 == key }
+        failureOrder.append(key)
+        trimIfNeeded()
+    }
+
+    private func clearExpiredEntries(now: Date) {
+        let expiredKeys = failures.compactMap { key, entry in
+            entry.retryAfter <= now ? key : nil
+        }
+        guard !expiredKeys.isEmpty else { return }
+
+        let expiredSet = Set(expiredKeys)
+        expiredKeys.forEach { failures.removeValue(forKey: $0) }
+        failureOrder.removeAll { expiredSet.contains($0) }
+    }
+
+    private func trimIfNeeded() {
+        while failureOrder.count > maxEntries {
+            let removedKey = failureOrder.removeFirst()
+            failures.removeValue(forKey: removedKey)
+        }
+    }
+
+    private func endpointKey(for url: URL) -> String? {
+        let normalized = url.absoluteString
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+        return normalized.isEmpty ? nil : normalized
+    }
+}
+
 final class NostrRelayClient: @unchecked Sendable {
     private let session: URLSession
+    private let endpointBackoff: RelayEndpointBackoff
 
-    init(session: URLSession = .shared) {
+    init(
+        session: URLSession = .shared,
+        endpointBackoff: RelayEndpointBackoff = .shared
+    ) {
         self.session = session
+        self.endpointBackoff = endpointBackoff
     }
 
     func fetchEvents(
@@ -67,58 +152,72 @@ final class NostrRelayClient: @unchecked Sendable {
         filter: NostrFilter,
         timeout: TimeInterval = 12
     ) async throws -> [NostrEvent] {
-        let socket = session.webSocketTask(with: try validatedWebSocketRelayURL(relayURL))
-        socket.resume()
-
-        let subscriptionID = UUID().uuidString
-        let request = try serializeJSONArray(["REQ", subscriptionID, filter.jsonObject])
-        try await socket.send(.string(request))
-
-        defer {
-            Task {
-                if let close = try? serializeJSONArray(["CLOSE", subscriptionID]) {
-                    try? await socket.send(.string(close))
-                }
-                socket.cancel(with: .normalClosure, reason: nil)
-            }
+        let validatedRelayURL = try validatedWebSocketRelayURL(relayURL)
+        guard await endpointBackoff.canAttempt(validatedRelayURL) else {
+            throw RelayClientError.coolingDown(validatedRelayURL.absoluteString)
         }
 
-        var events: [NostrEvent] = []
-        let deadline = Date().addingTimeInterval(timeout)
+        do {
+            let socket = session.webSocketTask(with: validatedRelayURL)
+            socket.resume()
 
-        while Date() < deadline {
-            let remaining = deadline.timeIntervalSinceNow
-            guard remaining > 0 else { break }
+            let subscriptionID = UUID().uuidString
+            let request = try serializeJSONArray(["REQ", subscriptionID, filter.jsonObject])
+            try await socket.send(.string(request))
 
-            guard let text = try await receiveText(from: socket, timeout: remaining) else {
-                break
+            defer {
+                Task {
+                    if let close = try? serializeJSONArray(["CLOSE", subscriptionID]) {
+                        try? await socket.send(.string(close))
+                    }
+                    socket.cancel(with: .normalClosure, reason: nil)
+                }
             }
 
-            guard let message = RelayInboundMessage.parse(text) else {
-                continue
+            var events: [NostrEvent] = []
+            let deadline = Date().addingTimeInterval(timeout)
+
+            while Date() < deadline {
+                let remaining = deadline.timeIntervalSinceNow
+                guard remaining > 0 else { break }
+
+                guard let text = try await receiveText(from: socket, timeout: remaining) else {
+                    break
+                }
+
+                guard let message = RelayInboundMessage.parse(text) else {
+                    continue
+                }
+
+                switch message {
+                case .event(let id, let event):
+                    if id == subscriptionID {
+                        events.append(event)
+                    }
+                case .eose(let id):
+                    if id == subscriptionID {
+                        await endpointBackoff.recordSuccess(for: validatedRelayURL)
+                        return events
+                    }
+                case .ok:
+                    continue
+                case .closed(let id, let reason):
+                    if id == subscriptionID {
+                        throw RelayClientError.closed(reason)
+                    }
+                case .notice:
+                    continue
+                }
             }
 
-            switch message {
-            case .event(let id, let event):
-                if id == subscriptionID {
-                    events.append(event)
-                }
-            case .eose(let id):
-                if id == subscriptionID {
-                    return events
-                }
-            case .ok:
-                continue
-            case .closed(let id, let reason):
-                if id == subscriptionID {
-                    throw RelayClientError.closed(reason)
-                }
-            case .notice:
-                continue
+            await endpointBackoff.recordSuccess(for: validatedRelayURL)
+            return events
+        } catch {
+            if shouldRecordBackoff(for: error) {
+                await endpointBackoff.recordFailure(for: validatedRelayURL)
             }
+            throw error
         }
-
-        return events
     }
 
     func publishEvent(
@@ -127,47 +226,60 @@ final class NostrRelayClient: @unchecked Sendable {
         eventID: String,
         timeout: TimeInterval = 10
     ) async throws {
-        let socket = session.webSocketTask(with: try validatedWebSocketRelayURL(relayURL))
-        socket.resume()
-
-        let request = try serializeJSONArray(["EVENT", eventObject])
-        try await socket.send(.string(request))
-
-        defer {
-            socket.cancel(with: .normalClosure, reason: nil)
+        let validatedRelayURL = try validatedWebSocketRelayURL(relayURL)
+        guard await endpointBackoff.canAttempt(validatedRelayURL) else {
+            throw RelayClientError.coolingDown(validatedRelayURL.absoluteString)
         }
 
-        let deadline = Date().addingTimeInterval(timeout)
+        do {
+            let socket = session.webSocketTask(with: validatedRelayURL)
+            socket.resume()
 
-        while Date() < deadline {
-            let remaining = deadline.timeIntervalSinceNow
-            guard remaining > 0 else { break }
+            let request = try serializeJSONArray(["EVENT", eventObject])
+            try await socket.send(.string(request))
 
-            guard let text = try await receiveText(from: socket, timeout: remaining) else {
-                break
+            defer {
+                socket.cancel(with: .normalClosure, reason: nil)
             }
 
-            guard let message = RelayInboundMessage.parse(text) else {
-                continue
-            }
+            let deadline = Date().addingTimeInterval(timeout)
 
-            switch message {
-            case .ok(let ackedEventID, let accepted, let reason):
-                guard ackedEventID == eventID else { continue }
-                if accepted {
-                    return
+            while Date() < deadline {
+                let remaining = deadline.timeIntervalSinceNow
+                guard remaining > 0 else { break }
+
+                guard let text = try await receiveText(from: socket, timeout: remaining) else {
+                    break
                 }
-                throw RelayClientError.publishRejected(reason ?? "Unknown reason")
 
-            case .closed(_, let reason):
-                throw RelayClientError.closed(reason)
+                guard let message = RelayInboundMessage.parse(text) else {
+                    continue
+                }
 
-            case .notice, .event, .eose:
-                continue
+                switch message {
+                case .ok(let ackedEventID, let accepted, let reason):
+                    guard ackedEventID == eventID else { continue }
+                    if accepted {
+                        await endpointBackoff.recordSuccess(for: validatedRelayURL)
+                        return
+                    }
+                    throw RelayClientError.publishRejected(reason ?? "Unknown reason")
+
+                case .closed(_, let reason):
+                    throw RelayClientError.closed(reason)
+
+                case .notice, .event, .eose:
+                    continue
+                }
             }
-        }
 
-        throw RelayClientError.publishTimedOut
+            throw RelayClientError.publishTimedOut
+        } catch {
+            if shouldRecordBackoff(for: error) {
+                await endpointBackoff.recordFailure(for: validatedRelayURL)
+            }
+            throw error
+        }
     }
 
     func publishEvent(
@@ -241,6 +353,20 @@ final class NostrRelayClient: @unchecked Sendable {
     private func serializeJSONArray(_ value: [Any]) throws -> String {
         let data = try JSONSerialization.data(withJSONObject: value, options: [])
         return String(decoding: data, as: UTF8.self)
+    }
+
+    private func shouldRecordBackoff(for error: Error) -> Bool {
+        if let relayError = error as? RelayClientError {
+            switch relayError {
+            case .invalidRelayURL, .coolingDown, .publishRejected:
+                return false
+            case .closed, .publishTimedOut:
+                return true
+            }
+        }
+
+        let nsError = error as NSError
+        return nsError.domain == NSURLErrorDomain
     }
 }
 

@@ -230,6 +230,7 @@ final class HomeFeedViewModel: ObservableObject {
     private var liveUpdatesTask: Task<Void, Never>?
     private var resetFeedTask: Task<Void, Never>?
     private var itemHydrationTask: Task<Void, Never>?
+    private var warmStartRefreshTask: Task<Void, Never>?
     private var isPrefetchingMore = false
     private var latestRefreshRequestID = 0
 
@@ -267,6 +268,7 @@ final class HomeFeedViewModel: ObservableObject {
         liveUpdatesTask?.cancel()
         resetFeedTask?.cancel()
         itemHydrationTask?.cancel()
+        warmStartRefreshTask?.cancel()
     }
 
     var feedSourceOptions: [HomePrimaryFeedSource] {
@@ -513,8 +515,7 @@ final class HomeFeedViewModel: ObservableObject {
         if items.isEmpty {
             let loadedFromCache = await loadRecentFeedSnapshot()
             if loadedFromCache {
-                startLiveUpdatesIfNeeded()
-                await refresh(silent: true)
+                scheduleWarmStartRefresh()
             } else {
                 await refresh()
             }
@@ -1042,9 +1043,8 @@ final class HomeFeedViewModel: ObservableObject {
             Task { [weak self] in
                 guard let self else { return }
                 let loadedFromCache = await self.loadRecentFeedSnapshot()
-                self.startLiveUpdatesIfNeeded(forceRestart: true)
                 if loadedFromCache {
-                    await self.refresh(silent: true)
+                    self.scheduleWarmStartRefresh(force: false, restartLiveUpdates: true)
                 } else {
                     await self.refresh()
                 }
@@ -1075,13 +1075,26 @@ final class HomeFeedViewModel: ObservableObject {
             guard let self else { return }
             let loadedFromCache = await self.loadRecentFeedSnapshot()
             guard !Task.isCancelled else { return }
-            self.startLiveUpdatesIfNeeded(forceRestart: true)
             if loadedFromCache {
                 self.isBootstrappingFeed = false
-                await self.refresh(silent: true, force: true)
+                self.scheduleWarmStartRefresh(force: true, restartLiveUpdates: true)
             } else {
                 await self.refresh(force: true)
             }
+        }
+    }
+
+    private func scheduleWarmStartRefresh(
+        force: Bool = false,
+        restartLiveUpdates: Bool = false
+    ) {
+        warmStartRefreshTask?.cancel()
+        warmStartRefreshTask = Task(priority: .utility) { [weak self] in
+            guard let self else { return }
+            if restartLiveUpdates {
+                self.startLiveUpdatesIfNeeded(forceRestart: true)
+            }
+            await self.refresh(silent: true, force: force)
         }
     }
 

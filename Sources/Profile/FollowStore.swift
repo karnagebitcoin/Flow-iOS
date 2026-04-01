@@ -110,14 +110,14 @@ final class FollowStore: ObservableObject {
             return
         }
 
-        let allowLegacyGlobalMigration = authStore.load().accounts.count <= 1
+        let allowLegacyGlobalMigration = authStore.hasSingleAccountHint()
         followedPubkeys = loadPersistedFollowings(
             for: session.accountPubkey,
             allowLegacyGlobalMigration: allowLegacyGlobalMigration
         )
         scheduleProfileCacheUpdate(for: session, snapshot: nil)
 
-        syncTask = Task { [weak self] in
+        syncTask = Task(priority: .utility) { [weak self] in
             await self?.syncFromRelay(for: session)
         }
     }

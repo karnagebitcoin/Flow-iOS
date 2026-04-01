@@ -23,6 +23,31 @@ final class NostrRelayClientTests: XCTestCase {
         }
     }
 
+    func testFetchEventsRespectsRelayCooldownBeforeOpeningSocket() async {
+        let relayURL = URL(string: "wss://relay.nostr.band")!
+        let backoff = RelayEndpointBackoff()
+        let client = NostrRelayClient(session: .shared, endpointBackoff: backoff)
+        let filter = NostrFilter(limit: 1)
+
+        await backoff.recordFailure(for: relayURL)
+
+        do {
+            _ = try await client.fetchEvents(
+                relayURL: relayURL,
+                filter: filter,
+                timeout: 0.01
+            )
+            XCTFail("Expected cooldown error")
+        } catch let error as RelayClientError {
+            guard case .coolingDown(let value) = error else {
+                return XCTFail("Unexpected relay client error: \(error)")
+            }
+            XCTAssertEqual(value, relayURL.absoluteString)
+        } catch {
+            XCTFail("Unexpected error: \(error)")
+        }
+    }
+
     func testPublishEventToSourcesPublishesConcurrently() async {
         let firstSource = URL(string: "wss://source-one.example.com")!
         let secondSource = URL(string: "wss://source-two.example.com")!

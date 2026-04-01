@@ -17,14 +17,16 @@ struct SearchView: View {
     @State private var selectedHashtagRoute: HashtagRoute?
     @State private var selectedProfileRoute: ProfileRoute?
     @State private var shouldAutoFocusReplyInThread = false
+    private let isActive: Bool
 
-    init(viewModel: SearchViewModel? = nil) {
+    init(viewModel: SearchViewModel? = nil, isActive: Bool = true) {
         let initialRelayURL = URL(
             string: RelaySettingsStore.defaultReadRelayURLs.first ?? "wss://relay.damus.io/"
         )!
         _viewModel = StateObject(
             wrappedValue: viewModel ?? SearchViewModel(relayURL: initialRelayURL)
         )
+        self.isActive = isActive
     }
 
     var body: some View {
@@ -175,7 +177,8 @@ struct SearchView: View {
                     await viewModel.refresh()
                     MuteStore.shared.refreshFromRelay()
                 }
-                .task {
+                .task(id: isActive) {
+                    guard isActive else { return }
                     appSettings.configure(accountPubkey: auth.currentAccount?.pubkey)
                     configureStores()
                     updateSearchContext()
@@ -220,6 +223,7 @@ struct SearchView: View {
                     configureStores()
                     updateSearchContext()
                     hashtagFavoritesStore.configure(accountPubkey: auth.currentAccount?.pubkey)
+                    guard isActive else { return }
                     Task {
                         await viewModel.loadIfNeeded()
                     }
@@ -230,6 +234,7 @@ struct SearchView: View {
                 }
                 .onChange(of: followStore.followedPubkeys) { _, _ in
                     updateSearchContext()
+                    guard isActive else { return }
                     guard viewModel.searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
                     Task {
                         await viewModel.loadIfNeeded()
@@ -237,6 +242,7 @@ struct SearchView: View {
                 }
                 .onChange(of: relaySettings.readRelays) { _, _ in
                     viewModel.updateReadRelayURLs(effectiveReadRelayURLs)
+                    guard isActive else { return }
                     Task {
                         await viewModel.loadIfNeeded()
                     }
@@ -247,6 +253,7 @@ struct SearchView: View {
                 .onChange(of: appSettings.slowConnectionMode) { _, _ in
                     configureStores()
                     viewModel.updateReadRelayURLs(effectiveReadRelayURLs)
+                    guard isActive else { return }
                     Task {
                         await viewModel.refresh()
                     }

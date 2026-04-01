@@ -65,24 +65,170 @@ private enum FlowMediaCacheHitSource {
     case urlCache
 }
 
+struct FlowMediaFetchedResponse: Sendable {
+    let data: Data
+    let statusCode: Int?
+    let contentType: String?
+}
+
+private actor FlowMediaFailureBackoff {
+    private struct Entry {
+        var failureCount: Int
+        var retryAfter: Date
+    }
+
+    private let aggressiveHosts: Set<String>
+    private let maxURLEntries = 512
+    private let maxHostEntries = 128
+    private var urlFailures: [String: Entry] = [:]
+    private var urlOrder: [String] = []
+    private var hostFailures: [String: Entry] = [:]
+    private var hostOrder: [String] = []
+
+    init(aggressiveHosts: Set<String> = ["blossom.lostr.space", "void.cat"]) {
+        self.aggressiveHosts = aggressiveHosts
+    }
+
+    func canAttempt(_ url: URL, now: Date = Date()) -> Bool {
+        if let entry = urlFailures[urlKey(for: url)], entry.retryAfter > now {
+            return false
+        }
+        if let host = hostKey(for: url),
+           let entry = hostFailures[host],
+           entry.retryAfter > now {
+            return false
+        }
+        clearExpiredEntries(now: now)
+        return true
+    }
+
+    func recordSuccess(for url: URL) {
+        removeURLFailure(for: url)
+        removeHostFailure(for: url)
+    }
+
+    func recordTransportFailure(for url: URL) {
+        let baseDelay: TimeInterval = aggressiveHosts.contains(hostKey(for: url) ?? "") ? 60 : 20
+        recordURLFailure(for: url, baseDelay: baseDelay, maxDelay: 15 * 60)
+        recordHostFailure(for: url, baseDelay: baseDelay, maxDelay: 10 * 60)
+    }
+
+    func recordInvalidResponse(for url: URL) {
+        recordURLFailure(for: url, baseDelay: 10 * 60, maxDelay: 60 * 60)
+    }
+
+    private func recordURLFailure(for url: URL, baseDelay: TimeInterval, maxDelay: TimeInterval) {
+        let key = urlKey(for: url)
+        let nextEntry = advancedEntry(current: urlFailures[key], baseDelay: baseDelay, maxDelay: maxDelay)
+        urlFailures[key] = nextEntry
+        if !urlOrder.contains(key) {
+            urlOrder.append(key)
+        }
+        trimURLFailuresIfNeeded()
+    }
+
+    private func recordHostFailure(for url: URL, baseDelay: TimeInterval, maxDelay: TimeInterval) {
+        guard let key = hostKey(for: url) else { return }
+        let nextEntry = advancedEntry(current: hostFailures[key], baseDelay: baseDelay, maxDelay: maxDelay)
+        hostFailures[key] = nextEntry
+        if !hostOrder.contains(key) {
+            hostOrder.append(key)
+        }
+        trimHostFailuresIfNeeded()
+    }
+
+    private func removeURLFailure(for url: URL) {
+        let key = urlKey(for: url)
+        urlFailures.removeValue(forKey: key)
+        urlOrder.removeAll { $0 == key }
+    }
+
+    private func removeHostFailure(for url: URL) {
+        guard let key = hostKey(for: url) else { return }
+        hostFailures.removeValue(forKey: key)
+        hostOrder.removeAll { $0 == key }
+    }
+
+    private func clearExpiredEntries(now: Date) {
+        let expiredURLs = urlFailures.compactMap { key, entry in
+            entry.retryAfter <= now ? key : nil
+        }
+        for key in expiredURLs {
+            urlFailures.removeValue(forKey: key)
+        }
+        if !expiredURLs.isEmpty {
+            let expiredSet = Set(expiredURLs)
+            urlOrder.removeAll { expiredSet.contains($0) }
+        }
+
+        let expiredHosts = hostFailures.compactMap { key, entry in
+            entry.retryAfter <= now ? key : nil
+        }
+        for key in expiredHosts {
+            hostFailures.removeValue(forKey: key)
+        }
+        if !expiredHosts.isEmpty {
+            let expiredSet = Set(expiredHosts)
+            hostOrder.removeAll { expiredSet.contains($0) }
+        }
+    }
+
+    private func trimURLFailuresIfNeeded() {
+        while urlOrder.count > maxURLEntries {
+            let removedKey = urlOrder.removeFirst()
+            urlFailures.removeValue(forKey: removedKey)
+        }
+    }
+
+    private func trimHostFailuresIfNeeded() {
+        while hostOrder.count > maxHostEntries {
+            let removedKey = hostOrder.removeFirst()
+            hostFailures.removeValue(forKey: removedKey)
+        }
+    }
+
+    private func advancedEntry(
+        current: Entry?,
+        baseDelay: TimeInterval,
+        maxDelay: TimeInterval
+    ) -> Entry {
+        let nextFailureCount = (current?.failureCount ?? 0) + 1
+        let multiplier = pow(2.0, Double(min(nextFailureCount - 1, 5)))
+        let delay = min(baseDelay * multiplier, maxDelay)
+        return Entry(
+            failureCount: nextFailureCount,
+            retryAfter: Date().addingTimeInterval(delay)
+        )
+    }
+
+    private func urlKey(for url: URL) -> String {
+        url.absoluteString.lowercased()
+    }
+
+    private func hostKey(for url: URL) -> String? {
+        url.host?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+    }
+}
+
 actor FlowImageCache {
     static let shared = FlowImageCache()
-    typealias ImageDataFetcher = @Sendable (URLRequest) async -> Data?
+    typealias ImageDataFetcher = @Sendable (URLRequest) async -> FlowMediaFetchedResponse?
     private static let liveImageDataFetcher: ImageDataFetcher = { request in
-        await fetchImageData(with: request)
+        await fetchImageResponse(with: request)
     }
 
     private let fileManager: FileManager
     private let directoryURL: URL
     private let urlCache: URLCache
     private let fetchImageData: ImageDataFetcher
+    private let failureBackoff: FlowMediaFailureBackoff
     private let memoryCache = NSCache<NSURL, UIImage>()
     private let dataCache = NSCache<NSURL, NSData>()
     private let encodedByteCounts = NSCache<NSURL, NSNumber>()
     private let maxDiskBytes: Int64 = 384 * 1_024 * 1_024
     private let maxDiskEntries = 12_000
     private let maxEntryAge: TimeInterval = 60 * 60 * 24 * 30
-    private var inFlight: [URL: Task<Data?, Never>] = [:]
+    private var inFlight: [URL: Task<FlowMediaFetchedResponse?, Never>] = [:]
     private var diagnostics = FlowMediaCacheDiagnostics()
 
     init(
@@ -98,8 +244,9 @@ actor FlowImageCache {
             ?? root.appendingPathComponent("flow-media-cache", isDirectory: true)
         self.urlCache = urlCache
         self.fetchImageData = fetchImageData
-        memoryCache.totalCostLimit = FlowMediaCache.sharedURLCacheMemoryCapacity
-        dataCache.totalCostLimit = FlowMediaCache.sharedURLCacheMemoryCapacity / 2
+        self.failureBackoff = FlowMediaFailureBackoff()
+        memoryCache.totalCostLimit = (FlowMediaCache.sharedURLCacheMemoryCapacity * 3) / 4
+        dataCache.totalCostLimit = FlowMediaCache.sharedURLCacheMemoryCapacity / 4
     }
 
     func image(for url: URL) async -> UIImage? {
@@ -175,18 +322,31 @@ actor FlowImageCache {
         )
 
         if let cachedResponse = urlCache.cachedResponse(for: request) {
-            recordCacheHit(.urlCache, byteCount: cachedResponse.data.count, tracking: tracking)
-            return storeData(
-                data: cachedResponse.data,
-                for: url,
-                cacheKey: cacheKey,
-                persistToDisk: true
-            )
+            if let validatedCachedData = await validatedData(
+                from: Self.makeFetchedResponse(
+                    data: cachedResponse.data,
+                    response: cachedResponse.response
+                ),
+                for: url
+            ) {
+                recordCacheHit(.urlCache, byteCount: validatedCachedData.count, tracking: tracking)
+                return storeData(
+                    data: validatedCachedData,
+                    for: url,
+                    cacheKey: cacheKey,
+                    persistToDisk: true
+                )
+            }
+            urlCache.removeCachedResponse(for: request)
+        }
+
+        guard await failureBackoff.canAttempt(url) else {
+            return nil
         }
 
         if let existingTask = inFlight[url] {
-            let data = await existingTask.value
-            recordNetworkResult(data, tracking: tracking)
+            let response = await existingTask.value
+            let data = await validatedData(from: response, for: url)
             return storeData(data: data, for: url, cacheKey: cacheKey, persistToDisk: true)
         }
 
@@ -196,8 +356,9 @@ actor FlowImageCache {
         }
         inFlight[url] = task
 
-        let data = await task.value
+        let response = await task.value
         inFlight[url] = nil
+        let data = await validatedData(from: response, for: url)
         recordNetworkResult(data, tracking: tracking)
         return storeData(data: data, for: url, cacheKey: cacheKey, persistToDisk: true)
     }
@@ -254,6 +415,11 @@ actor FlowImageCache {
         }
 
         guard let data = try? Data(contentsOf: fileURL) else {
+            try? fileManager.removeItem(at: fileURL)
+            return nil
+        }
+
+        guard Self.isLikelyRenderableImageData(data, contentType: nil) else {
             try? fileManager.removeItem(at: fileURL)
             return nil
         }
@@ -388,6 +554,10 @@ actor FlowImageCache {
     }
 
     private func preparedImage(from data: Data, sourceURL: URL) -> UIImage? {
+        guard Self.isLikelyRenderableImageData(data, contentType: nil) else {
+            return nil
+        }
+
         guard let source = CGImageSourceCreateWithData(data as CFData, nil) else {
             guard let image = UIImage(data: data) else { return nil }
             return image.preparingForDisplay() ?? image
@@ -416,6 +586,114 @@ actor FlowImageCache {
         }
 
         return image.preparingForDisplay() ?? image
+    }
+
+    private func validatedData(
+        from response: FlowMediaFetchedResponse?,
+        for url: URL
+    ) async -> Data? {
+        guard let response else {
+            guard !Task.isCancelled else { return nil }
+            await failureBackoff.recordTransportFailure(for: url)
+            return nil
+        }
+
+        if let statusCode = response.statusCode,
+           !(200...299).contains(statusCode) {
+            await failureBackoff.recordInvalidResponse(for: url)
+            return nil
+        }
+
+        guard Self.isLikelyRenderableImageData(
+            response.data,
+            contentType: response.contentType
+        ) else {
+            await failureBackoff.recordInvalidResponse(for: url)
+            return nil
+        }
+
+        await failureBackoff.recordSuccess(for: url)
+        return response.data
+    }
+
+    private static func makeFetchedResponse(
+        data: Data,
+        response: URLResponse?
+    ) -> FlowMediaFetchedResponse {
+        let httpResponse = response as? HTTPURLResponse
+        return FlowMediaFetchedResponse(
+            data: data,
+            statusCode: httpResponse?.statusCode,
+            contentType: httpResponse?.value(forHTTPHeaderField: "Content-Type")
+        )
+    }
+
+    private static func isLikelyRenderableImageData(
+        _ data: Data,
+        contentType: String?
+    ) -> Bool {
+        guard hasSupportedImageSignature(data) else { return false }
+
+        guard let normalizedContentType = normalizedContentType(contentType) else {
+            return true
+        }
+
+        if normalizedContentType == "image/svg+xml" {
+            return false
+        }
+
+        if normalizedContentType.hasPrefix("image/") {
+            return true
+        }
+
+        switch normalizedContentType {
+        case "application/octet-stream", "binary/octet-stream", "application/binary":
+            return true
+        default:
+            return false
+        }
+    }
+
+    private static func normalizedContentType(_ contentType: String?) -> String? {
+        guard let contentType else { return nil }
+        let normalized = contentType
+            .split(separator: ";", maxSplits: 1)
+            .first?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+        return normalized?.isEmpty == true ? nil : normalized
+    }
+
+    private static func hasSupportedImageSignature(_ data: Data) -> Bool {
+        guard !data.isEmpty else { return false }
+
+        if data.starts(with: [0xFF, 0xD8, 0xFF]) {
+            return true
+        }
+
+        if data.starts(with: [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]) {
+            return true
+        }
+
+        if data.starts(with: [0x47, 0x49, 0x46, 0x38]) {
+            return true
+        }
+
+        if data.count >= 12,
+           data.starts(with: [0x52, 0x49, 0x46, 0x46]),
+           String(data: data[8..<12], encoding: .ascii) == "WEBP" {
+            return true
+        }
+
+        if data.count >= 12,
+           String(data: data[4..<8], encoding: .ascii) == "ftyp" {
+            let brand = String(data: data[8..<12], encoding: .ascii) ?? ""
+            if ["heic", "heix", "hevc", "hevx", "mif1", "msf1", "avif", "avis"].contains(brand) {
+                return true
+            }
+        }
+
+        return false
     }
 
     private func recordRequestIfNeeded(_ tracking: FlowMediaCacheDiagnosticsTracking) {
@@ -466,14 +744,10 @@ actor FlowImageCache {
         encodedByteCounts.object(forKey: cacheKey)?.intValue ?? 0
     }
 
-    private static func fetchImageData(with request: URLRequest) async -> Data? {
+    private static func fetchImageResponse(with request: URLRequest) async -> FlowMediaFetchedResponse? {
         do {
             let (data, response) = try await URLSession.shared.data(for: request)
-            if let httpResponse = response as? HTTPURLResponse,
-               !(200...399).contains(httpResponse.statusCode) {
-                return nil
-            }
-            return data
+            return makeFetchedResponse(data: data, response: response)
         } catch {
             return nil
         }

@@ -7,6 +7,283 @@ import SwiftUI
 import UIKit
 import UniformTypeIdentifiers
 
+struct ComposeMentionQuery: Equatable {
+    let range: NSRange
+    let query: String
+}
+
+struct ComposeSelectedMention: Identifiable, Equatable {
+    let pubkey: String
+    let handle: String
+    let range: NSRange
+
+    var id: String {
+        "\(pubkey)|\(range.location)|\(range.length)|\(handle)"
+    }
+
+    var replacementText: String {
+        "@\(handle)"
+    }
+
+    func shifted(by delta: Int) -> ComposeSelectedMention {
+        ComposeSelectedMention(
+            pubkey: pubkey,
+            handle: handle,
+            range: NSRange(
+                location: max(0, range.location + delta),
+                length: range.length
+            )
+        )
+    }
+}
+
+struct ComposeMentionSuggestion: Identifiable, Equatable {
+    let pubkey: String
+    let displayName: String
+    let handle: String
+    let secondaryText: String
+    let avatarURL: URL?
+
+    var id: String { pubkey }
+
+    var replacementText: String {
+        "@\(handle)"
+    }
+
+    init?(result: ProfileSearchResult) {
+        let normalizedPubkey = Self.normalizedPubkey(result.pubkey)
+        guard !normalizedPubkey.isEmpty else { return nil }
+        guard let handle = Self.handle(from: result.profile, pubkey: normalizedPubkey) else { return nil }
+
+        self.pubkey = normalizedPubkey
+        displayName = Self.displayName(from: result.profile, pubkey: normalizedPubkey)
+        self.handle = handle
+        secondaryText = "@\(handle)"
+        avatarURL = Self.avatarURL(from: result.profile)
+    }
+
+    private static func displayName(from profile: NostrProfile?, pubkey: String) -> String {
+        if let displayName = normalizedText(profile?.displayName) {
+            return displayName
+        }
+        if let name = normalizedText(profile?.name) {
+            return name
+        }
+        return shortNostrIdentifier(pubkey)
+    }
+
+    private static func avatarURL(from profile: NostrProfile?) -> URL? {
+        guard let picture = normalizedText(profile?.picture),
+              let url = URL(string: picture),
+              url.scheme != nil else {
+            return nil
+        }
+        return url
+    }
+
+    private static func handle(from profile: NostrProfile?, pubkey: String) -> String? {
+        if let handle = normalizedHandle(profile?.name) {
+            return handle
+        }
+        if let handle = normalizedHandle(profile?.displayName) {
+            return handle
+        }
+        let fallback = String(pubkey.prefix(12)).lowercased()
+        return fallback.isEmpty ? nil : fallback
+    }
+
+    private static func normalizedText(_ value: String?) -> String? {
+        let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return trimmed.isEmpty ? nil : trimmed
+    }
+
+    private static func normalizedHandle(_ value: String?) -> String? {
+        let trimmed = normalizedText(value)?
+            .replacingOccurrences(of: "@", with: "")
+            .lowercased() ?? ""
+        guard !trimmed.isEmpty else { return nil }
+
+        let filtered = trimmed.unicodeScalars.filter { scalar in
+            allowedHandleCharacters.contains(scalar)
+        }
+        let normalized = String(String.UnicodeScalarView(filtered))
+        return normalized.isEmpty ? nil : normalized
+    }
+
+    private static func normalizedPubkey(_ value: String) -> String {
+        value.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+    }
+}
+
+struct ComposeMentionInsertionResult: Equatable {
+    let text: String
+    let mentions: [ComposeSelectedMention]
+    let selectedRange: NSRange
+}
+
+struct ComposePreparedMentions: Equatable {
+    let content: String
+    let additionalTags: [[String]]
+}
+
+enum ComposeMentionSupport {
+    static func activeQuery(
+        in text: String,
+        selection: NSRange,
+        confirmedMentions: [ComposeSelectedMention]
+    ) -> ComposeMentionQuery? {
+        guard selection.length == 0 else { return nil }
+
+        let nsText = text as NSString
+        let caretLocation = min(max(selection.location, 0), nsText.length)
+        guard !confirmedMentions.contains(where: { mention in
+            caretLocation > mention.range.location &&
+            caretLocation <= mention.range.location + mention.range.length
+        }) else {
+            return nil
+        }
+
+        var cursor = caretLocation
+        while cursor > 0 {
+            let previousRange = NSRange(location: cursor - 1, length: 1)
+            let previousCharacter = nsText.substring(with: previousRange)
+
+            if previousCharacter == "@" {
+                if cursor - 1 > 0 {
+                    let leadingCharacter = nsText.substring(with: NSRange(location: cursor - 2, length: 1))
+                    if isAllowedHandleText(leadingCharacter) {
+                        return nil
+                    }
+                }
+
+                let queryRange = NSRange(location: cursor - 1, length: caretLocation - (cursor - 1))
+                let token = nsText.substring(with: queryRange)
+                let query = String(token.dropFirst())
+                guard query.unicodeScalars.allSatisfy({ allowedHandleCharacters.contains($0) }) else {
+                    return nil
+                }
+                return ComposeMentionQuery(range: queryRange, query: query)
+            }
+
+            guard isAllowedHandleText(previousCharacter) else { return nil }
+            cursor -= 1
+        }
+
+        return nil
+    }
+
+    static func updatedMentions(
+        _ mentions: [ComposeSelectedMention],
+        forEditIn range: NSRange,
+        replacementText: String
+    ) -> [ComposeSelectedMention] {
+        let replacementLength = (replacementText as NSString).length
+        let delta = replacementLength - range.length
+
+        return mentions.compactMap { mention in
+            if NSIntersectionRange(mention.range, range).length > 0 {
+                return nil
+            }
+
+            if range.location < mention.range.location {
+                return mention.shifted(by: delta)
+            }
+
+            return mention
+        }
+    }
+
+    static func insertSuggestion(
+        _ suggestion: ComposeMentionSuggestion,
+        into text: String,
+        replacing query: ComposeMentionQuery,
+        existingMentions: [ComposeSelectedMention]
+    ) -> ComposeMentionInsertionResult {
+        let replacementText = suggestion.replacementText
+        let insertedText = replacementText + " "
+        let updatedText = (text as NSString).replacingCharacters(in: query.range, with: insertedText)
+        var updatedMentions = updatedMentions(
+            existingMentions,
+            forEditIn: query.range,
+            replacementText: insertedText
+        )
+
+        updatedMentions.append(
+            ComposeSelectedMention(
+                pubkey: suggestion.pubkey,
+                handle: suggestion.handle,
+                range: NSRange(
+                    location: query.range.location,
+                    length: (replacementText as NSString).length
+                )
+            )
+        )
+        updatedMentions.sort { lhs, rhs in
+            if lhs.range.location == rhs.range.location {
+                return lhs.pubkey < rhs.pubkey
+            }
+            return lhs.range.location < rhs.range.location
+        }
+
+        return ComposeMentionInsertionResult(
+            text: updatedText,
+            mentions: updatedMentions,
+            selectedRange: NSRange(
+                location: query.range.location + (insertedText as NSString).length,
+                length: 0
+            )
+        )
+    }
+
+    static func preparedMentions(
+        from text: String,
+        selectedMentions: [ComposeSelectedMention]
+    ) -> ComposePreparedMentions {
+        guard !selectedMentions.isEmpty else {
+            return ComposePreparedMentions(content: text, additionalTags: [])
+        }
+
+        let mutableContent = NSMutableString(string: text)
+        var seenPubkeys = Set<String>()
+        var additionalTags: [[String]] = []
+
+        for mention in selectedMentions.sorted(by: { lhs, rhs in
+            lhs.range.location > rhs.range.location
+        }) {
+            let normalizedPubkey = mention.pubkey.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+            guard !normalizedPubkey.isEmpty else { continue }
+            guard let npub = PublicKey(hex: normalizedPubkey)?.npub else { continue }
+            guard mention.range.location >= 0,
+                  mention.range.location + mention.range.length <= mutableContent.length else {
+                continue
+            }
+
+            mutableContent.replaceCharacters(in: mention.range, with: "nostr:\(npub)")
+
+            if seenPubkeys.insert(normalizedPubkey).inserted {
+                additionalTags.append(["p", normalizedPubkey])
+            }
+        }
+
+        return ComposePreparedMentions(
+            content: mutableContent as String,
+            additionalTags: additionalTags
+        )
+    }
+
+    private static func isAllowedHandleText(_ value: String) -> Bool {
+        guard value.unicodeScalars.count == 1,
+              let scalar = value.unicodeScalars.first else {
+            return false
+        }
+        return allowedHandleCharacters.contains(scalar)
+    }
+}
+
+private let allowedHandleCharacters = CharacterSet.alphanumerics.union(
+    CharacterSet(charactersIn: "._-")
+)
+
 @MainActor
 final class ComposeNoteViewModel: ObservableObject {
     @Published var text: String = ""
@@ -34,6 +311,7 @@ final class ComposeNoteViewModel: ObservableObject {
     }
 
     func publish(
+        content: String? = nil,
         currentAccountPubkey: String?,
         currentNsec: String?,
         writeRelayURLs: [URL],
@@ -51,10 +329,12 @@ final class ComposeNoteViewModel: ObservableObject {
             isPublishing = false
         }
 
+        let publishContent = content ?? text
+
         do {
             if let replyTargetEvent {
                 _ = try await replyPublishingService.publishReply(
-                    content: text,
+                    content: publishContent,
                     replyingTo: replyTargetEvent,
                     currentAccountPubkey: currentAccountPubkey,
                     currentNsec: currentNsec,
@@ -67,7 +347,7 @@ final class ComposeNoteViewModel: ObservableObject {
                 return true
             } else if let pollDraft {
                 _ = try await publishingService.publishPoll(
-                    content: text,
+                    content: publishContent,
                     poll: pollDraft,
                     currentNsec: currentNsec,
                     writeRelayURLs: writeRelayURLs,
@@ -80,7 +360,7 @@ final class ComposeNoteViewModel: ObservableObject {
                 return true
             } else {
                 _ = try await publishingService.publishNote(
-                    content: text,
+                    content: publishContent,
                     currentNsec: currentNsec,
                     writeRelayURLs: writeRelayURLs,
                     additionalTags: additionalTags
@@ -298,6 +578,12 @@ struct ComposeNoteSheet: View {
     @State private var hasAppliedInitialSharedAttachments = false
     @State private var previewingMediaAttachment: ComposeMediaAttachment?
     @State private var isShowingKlipyGIFPicker = false
+    @State private var editorSelectedRange = NSRange(location: 0, length: 0)
+    @State private var selectedMentions: [ComposeSelectedMention] = []
+    @State private var activeMentionQuery: ComposeMentionQuery?
+    @State private var mentionSuggestions: [ComposeMentionSuggestion] = []
+    @State private var isLoadingMentionSuggestions = false
+    @State private var mentionLookupTask: Task<Void, Never>?
 
     private let mediaUploadService = MediaUploadService.shared
     private let klipyGIFService = KlipyGIFService.shared
@@ -346,12 +632,14 @@ struct ComposeNoteSheet: View {
             applyInitialDraftIfNeeded()
             applyInitialAttachmentsIfNeeded()
             await applyInitialSharedAttachmentsIfNeeded()
+            editorSelectedRange = NSRange(location: (viewModel.text as NSString).length, length: 0)
             isEditorFocused = true
             await refreshComposeAccountSummary()
             await refreshReplyTargetAuthorSummaryIfNeeded()
             await refreshQuotedAuthorSummaryIfNeeded()
         }
         .onDisappear {
+            mentionLookupTask?.cancel()
             cleanupInitialSharedAttachments()
         }
         .onChange(of: selectedMediaItems) { _, newValue in
@@ -500,6 +788,10 @@ struct ComposeNoteSheet: View {
                     .frame(minHeight: 180)
             }
             .background(appSettings.themePalette.secondaryGroupedBackground, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+
+            if shouldShowMentionSuggestions {
+                mentionSuggestionList
+            }
 
             if !mediaAttachments.isEmpty {
                 mediaAttachmentPreviewList
@@ -679,10 +971,63 @@ struct ComposeNoteSheet: View {
     private func composeTextView(horizontalPadding: CGFloat, verticalPadding: CGFloat) -> some View {
         ComposeMultilineTextView(
             text: $viewModel.text,
-            isFocused: $isEditorFocused
+            isFocused: $isEditorFocused,
+            selectedRange: $editorSelectedRange,
+            mentions: $selectedMentions,
+            mentionColor: UIColor(appSettings.primaryColor),
+            onMentionQueryChange: handleMentionQueryChange(_:)
         )
         .padding(.horizontal, horizontalPadding)
         .padding(.vertical, verticalPadding)
+    }
+
+    private var shouldShowMentionSuggestions: Bool {
+        guard isEditorFocused, activeMentionQuery != nil else { return false }
+        return isLoadingMentionSuggestions || !mentionSuggestions.isEmpty
+    }
+
+    private var mentionSuggestionList: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: 8) {
+                Text(activeMentionQuery?.query.isEmpty == true ? "Recent profiles" : "Mention suggestions")
+                    .font(.footnote.weight(.semibold))
+                    .foregroundStyle(.secondary)
+
+                Spacer()
+
+                if isLoadingMentionSuggestions {
+                    ProgressView()
+                        .controlSize(.small)
+                }
+            }
+            .padding(.horizontal, 14)
+            .padding(.top, 12)
+            .padding(.bottom, mentionSuggestions.isEmpty ? 12 : 8)
+
+            if !mentionSuggestions.isEmpty {
+                VStack(spacing: 0) {
+                    ForEach(Array(mentionSuggestions.enumerated()), id: \.element.id) { index, suggestion in
+                        Button {
+                            insertMentionSuggestion(suggestion)
+                        } label: {
+                            ComposeMentionSuggestionRow(suggestion: suggestion)
+                        }
+                        .buttonStyle(.plain)
+
+                        if index < mentionSuggestions.count - 1 {
+                            Divider()
+                                .padding(.leading, 60)
+                        }
+                    }
+                }
+                .padding(.bottom, 6)
+            }
+        }
+        .background(appSettings.themePalette.secondaryGroupedBackground, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .stroke(appSettings.themePalette.separator.opacity(0.18), lineWidth: 0.8)
+        }
     }
 
     private var canPublish: Bool {
@@ -700,6 +1045,74 @@ struct ComposeNoteSheet: View {
         }
 
         return !viewModel.trimmedText.isEmpty || !mediaAttachments.isEmpty || quotedEvent != nil
+    }
+
+    private func handleMentionQueryChange(_ query: ComposeMentionQuery?) {
+        activeMentionQuery = query
+        mentionLookupTask?.cancel()
+
+        guard isEditorFocused, let query else {
+            mentionSuggestions = []
+            isLoadingMentionSuggestions = false
+            return
+        }
+
+        isLoadingMentionSuggestions = true
+        mentionSuggestions = []
+        mentionLookupTask = Task {
+            await refreshMentionSuggestions(for: query)
+        }
+    }
+
+    private func refreshMentionSuggestions(for query: ComposeMentionQuery) async {
+        let profileResults: [ProfileSearchResult]
+        if query.query.isEmpty {
+            profileResults = await profileService.recentLocalProfiles(limit: 8)
+        } else {
+            profileResults = await profileService.searchProfiles(
+                query: query.query,
+                limit: 8
+            )
+        }
+
+        let excludedPubkeys = Set(selectedMentions.map(\.pubkey))
+        let normalizedCurrentPubkey = currentAccountPubkey?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+
+        let suggestions = profileResults.compactMap(ComposeMentionSuggestion.init).filter { suggestion in
+            guard !excludedPubkeys.contains(suggestion.pubkey) else { return false }
+            if let normalizedCurrentPubkey, suggestion.pubkey == normalizedCurrentPubkey {
+                return false
+            }
+            return true
+        }
+
+        guard !Task.isCancelled else { return }
+
+        await MainActor.run {
+            guard activeMentionQuery == query else { return }
+            mentionSuggestions = suggestions
+            isLoadingMentionSuggestions = false
+        }
+    }
+
+    private func insertMentionSuggestion(_ suggestion: ComposeMentionSuggestion) {
+        guard let query = activeMentionQuery else { return }
+
+        let insertion = ComposeMentionSupport.insertSuggestion(
+            suggestion,
+            into: viewModel.text,
+            replacing: query,
+            existingMentions: selectedMentions
+        )
+        viewModel.text = insertion.text
+        selectedMentions = insertion.mentions
+        editorSelectedRange = insertion.selectedRange
+        mentionSuggestions = []
+        activeMentionQuery = nil
+        isLoadingMentionSuggestions = false
+        isEditorFocused = true
     }
 
     private var canAttachPoll: Bool {
@@ -1746,9 +2159,14 @@ struct ComposeNoteSheet: View {
             return
         }
 
-        let publishTags = mediaAttachments.map(\.imetaTag) + initialAdditionalTags
+        let preparedMentions = ComposeMentionSupport.preparedMentions(
+            from: viewModel.text,
+            selectedMentions: selectedMentions
+        )
+        let publishTags = mediaAttachments.map(\.imetaTag) + initialAdditionalTags + preparedMentions.additionalTags
         let isPublishingPoll = pollDraft != nil
         let didPublish = await viewModel.publish(
+            content: preparedMentions.content,
             currentAccountPubkey: currentAccountPubkey,
             currentNsec: currentNsec,
             writeRelayURLs: writeRelayURLs,
@@ -1761,6 +2179,10 @@ struct ComposeNoteSheet: View {
 
         mediaAttachments.removeAll()
         pollDraft = nil
+        selectedMentions.removeAll()
+        activeMentionQuery = nil
+        mentionSuggestions = []
+        editorSelectedRange = NSRange(location: 0, length: 0)
         onPublished?()
         if isPublishingPoll {
             toastCenter.show("Poll posted")
@@ -1777,6 +2199,7 @@ struct ComposeNoteSheet: View {
         guard viewModel.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
         guard !initialText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
         viewModel.text = initialText
+        editorSelectedRange = NSRange(location: (initialText as NSString).length, length: 0)
     }
 
     private func applyInitialAttachmentsIfNeeded() {
@@ -2303,9 +2726,19 @@ private struct ComposeMultilineTextView: UIViewRepresentable {
     @EnvironmentObject private var appSettings: AppSettingsStore
     @Binding var text: String
     @Binding var isFocused: Bool
+    @Binding var selectedRange: NSRange
+    @Binding var mentions: [ComposeSelectedMention]
+    let mentionColor: UIColor
+    let onMentionQueryChange: (ComposeMentionQuery?) -> Void
 
     func makeCoordinator() -> Coordinator {
-        Coordinator(text: $text, isFocused: $isFocused)
+        Coordinator(
+            text: $text,
+            isFocused: $isFocused,
+            selectedRange: $selectedRange,
+            mentions: $mentions,
+            onMentionQueryChange: onMentionQueryChange
+        )
     }
 
     func makeUIView(context: Context) -> UITextView {
@@ -2334,14 +2767,30 @@ private struct ComposeMultilineTextView: UIViewRepresentable {
 
     func updateUIView(_ uiView: UITextView, context: Context) {
         let preferredFont = appSettings.appUIFont(.body)
-        if uiView.font != preferredFont {
+        let fontChanged = uiView.font != preferredFont
+        if fontChanged {
             uiView.font = preferredFont
-            uiView.typingAttributes[.font] = preferredFont
         }
 
-        if uiView.text != text {
-            uiView.text = text
-            uiView.selectedRange = NSRange(location: uiView.text.utf16.count, length: 0)
+        if (uiView.text != text || context.coordinator.lastRenderedMentions != mentions || fontChanged),
+           uiView.markedTextRange == nil {
+            context.coordinator.isApplyingProgrammaticUpdate = true
+            uiView.attributedText = Self.attributedText(
+                for: text,
+                mentions: mentions,
+                font: preferredFont,
+                mentionColor: mentionColor
+            )
+            uiView.typingAttributes = Self.typingAttributes(font: preferredFont)
+            context.coordinator.lastRenderedMentions = mentions
+            context.coordinator.isApplyingProgrammaticUpdate = false
+        } else {
+            uiView.typingAttributes = Self.typingAttributes(font: preferredFont)
+        }
+
+        let clampedRange = Self.clampedRange(selectedRange, maxLength: uiView.text.utf16.count)
+        if uiView.selectedRange != clampedRange {
+            uiView.selectedRange = clampedRange
         }
 
         if isFocused {
@@ -2356,25 +2805,180 @@ private struct ComposeMultilineTextView: UIViewRepresentable {
         }
     }
 
+    private static func attributedText(
+        for text: String,
+        mentions: [ComposeSelectedMention],
+        font: UIFont,
+        mentionColor: UIColor
+    ) -> NSAttributedString {
+        let attributed = NSMutableAttributedString(
+            string: text,
+            attributes: [
+                .font: font,
+                .foregroundColor: UIColor.label
+            ]
+        )
+
+        for mention in mentions {
+            guard mention.range.location >= 0,
+                  mention.range.location + mention.range.length <= attributed.length else {
+                continue
+            }
+            attributed.addAttribute(.foregroundColor, value: mentionColor, range: mention.range)
+        }
+
+        return attributed
+    }
+
+    private static func typingAttributes(font: UIFont) -> [NSAttributedString.Key: Any] {
+        [
+            .font: font,
+            .foregroundColor: UIColor.label
+        ]
+    }
+
+    private static func clampedRange(_ range: NSRange, maxLength: Int) -> NSRange {
+        let location = min(max(range.location, 0), maxLength)
+        let remainingLength = max(0, maxLength - location)
+        let length = min(max(range.length, 0), remainingLength)
+        return NSRange(location: location, length: length)
+    }
+
     final class Coordinator: NSObject, UITextViewDelegate {
         @Binding private var text: String
         @Binding private var isFocused: Bool
+        @Binding private var selectedRange: NSRange
+        @Binding private var mentions: [ComposeSelectedMention]
+        private let onMentionQueryChange: (ComposeMentionQuery?) -> Void
+        var isApplyingProgrammaticUpdate = false
+        var lastRenderedMentions: [ComposeSelectedMention] = []
 
-        init(text: Binding<String>, isFocused: Binding<Bool>) {
+        init(
+            text: Binding<String>,
+            isFocused: Binding<Bool>,
+            selectedRange: Binding<NSRange>,
+            mentions: Binding<[ComposeSelectedMention]>,
+            onMentionQueryChange: @escaping (ComposeMentionQuery?) -> Void
+        ) {
             _text = text
             _isFocused = isFocused
+            _selectedRange = selectedRange
+            _mentions = mentions
+            self.onMentionQueryChange = onMentionQueryChange
+        }
+
+        func textView(
+            _ textView: UITextView,
+            shouldChangeTextIn range: NSRange,
+            replacementText text: String
+        ) -> Bool {
+            mentions = ComposeMentionSupport.updatedMentions(
+                mentions,
+                forEditIn: range,
+                replacementText: text
+            )
+            return true
         }
 
         func textViewDidChange(_ textView: UITextView) {
+            guard !isApplyingProgrammaticUpdate else { return }
             text = textView.text
+            selectedRange = textView.selectedRange
+            lastRenderedMentions = mentions
+            updateMentionQuery(for: textView)
+        }
+
+        func textViewDidChangeSelection(_ textView: UITextView) {
+            guard !isApplyingProgrammaticUpdate else { return }
+            selectedRange = textView.selectedRange
+            updateMentionQuery(for: textView)
         }
 
         func textViewDidBeginEditing(_ textView: UITextView) {
             isFocused = true
+            selectedRange = textView.selectedRange
+            updateMentionQuery(for: textView)
         }
 
         func textViewDidEndEditing(_ textView: UITextView) {
             isFocused = false
+            selectedRange = textView.selectedRange
+            onMentionQueryChange(nil)
+        }
+
+        private func updateMentionQuery(for textView: UITextView) {
+            let query = ComposeMentionSupport.activeQuery(
+                in: textView.text,
+                selection: textView.selectedRange,
+                confirmedMentions: mentions
+            )
+            onMentionQueryChange(query)
+        }
+    }
+}
+
+private struct ComposeMentionSuggestionRow: View {
+    let suggestion: ComposeMentionSuggestion
+
+    var body: some View {
+        HStack(spacing: 12) {
+            ComposeMentionAvatarView(
+                url: suggestion.avatarURL,
+                fallbackText: suggestion.displayName
+            )
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(suggestion.displayName)
+                    .font(.subheadline.weight(.medium))
+                    .foregroundStyle(.primary)
+                    .lineLimit(1)
+
+                Text(suggestion.secondaryText)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+
+            Spacer(minLength: 8)
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
+        .contentShape(Rectangle())
+    }
+}
+
+private struct ComposeMentionAvatarView: View {
+    @EnvironmentObject private var appSettings: AppSettingsStore
+    let url: URL?
+    let fallbackText: String
+
+    var body: some View {
+        Group {
+            if let url {
+                AsyncImage(url: url) { phase in
+                    switch phase {
+                    case .success(let image):
+                        image
+                            .resizable()
+                            .scaledToFill()
+                    default:
+                        placeholder
+                    }
+                }
+            } else {
+                placeholder
+            }
+        }
+        .frame(width: 36, height: 36)
+        .clipShape(Circle())
+    }
+
+    private var placeholder: some View {
+        ZStack {
+            Circle().fill(appSettings.themePalette.secondaryFill)
+            Text(String(fallbackText.prefix(1)).uppercased())
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
         }
     }
 }

@@ -7,6 +7,50 @@ import NostrSDK
 import SwiftUI
 import UIKit
 
+enum FlowLayoutGuardrails {
+    private static let softBreakSeparators = CharacterSet(charactersIn: "/._-?&=#:%+")
+
+    static func softWrapped(_ value: String, maxNonBreakingRunLength: Int = 24) -> String {
+        guard value.count > 36 else { return value }
+
+        let softBreak = "\u{200B}"
+        var wrapped = ""
+        var nonBreakingRunLength = 0
+
+        for scalar in value.unicodeScalars {
+            wrapped.append(String(scalar))
+
+            if CharacterSet.whitespacesAndNewlines.contains(scalar) {
+                nonBreakingRunLength = 0
+                continue
+            }
+
+            if softBreakSeparators.contains(scalar) {
+                wrapped.append(softBreak)
+                nonBreakingRunLength = 0
+                continue
+            }
+
+            nonBreakingRunLength += 1
+            if nonBreakingRunLength >= maxNonBreakingRunLength {
+                wrapped.append(softBreak)
+                nonBreakingRunLength = 0
+            }
+        }
+
+        return wrapped
+    }
+
+    static func clampedAspectRatio(
+        _ value: CGFloat?,
+        min minRatio: CGFloat = 0.28,
+        max maxRatio: CGFloat = 3.2
+    ) -> CGFloat? {
+        guard let value, value.isFinite, value > 0 else { return nil }
+        return Swift.min(Swift.max(value, minRatio), maxRatio)
+    }
+}
+
 enum NoteContentMediaLayout {
     case feed
     case detailCarousel
@@ -584,37 +628,8 @@ struct NoteContentView: View {
         return Self.softWrapValue("@\(Self.fallbackMentionToken(for: normalized))")
     }
 
-    private static let softBreakSeparators = CharacterSet(charactersIn: "/._-?&=#:%+")
-
     private static func softWrapValue(_ value: String) -> String {
-        guard value.count > 36 else { return value }
-
-        let softBreak = "\u{200B}"
-        var wrapped = ""
-        var nonBreakingRunLength = 0
-
-        for scalar in value.unicodeScalars {
-            wrapped.append(String(scalar))
-
-            if CharacterSet.whitespacesAndNewlines.contains(scalar) {
-                nonBreakingRunLength = 0
-                continue
-            }
-
-            if softBreakSeparators.contains(scalar) {
-                wrapped.append(softBreak)
-                nonBreakingRunLength = 0
-                continue
-            }
-
-            nonBreakingRunLength += 1
-            if nonBreakingRunLength >= 24 {
-                wrapped.append(softBreak)
-                nonBreakingRunLength = 0
-            }
-        }
-
-        return wrapped
+        FlowLayoutGuardrails.softWrapped(value)
     }
 
     private func resolveMentionLabelsIfNeeded() async {
@@ -1056,6 +1071,10 @@ private struct NoteImageGalleryView: View {
         layout == .detailCarousel ? 460 : 340
     }
 
+    private var singleImageMaxHeight: CGFloat {
+        layout == .detailCarousel ? 560 : 440
+    }
+
     private var mediaCornerRadius: CGFloat {
         layout == .feed ? 18 : 12
     }
@@ -1125,6 +1144,7 @@ private struct NoteImageGalleryView: View {
                     NoteSingleImageCellView(
                         url: url,
                         cornerRadius: mediaCornerRadius,
+                        maxHeight: multiImageHeight,
                         onTap: {
                             selectedImage = SelectedImage(id: index)
                         }
@@ -1144,6 +1164,7 @@ private struct NoteImageGalleryView: View {
         NoteSingleImageCellView(
             url: url,
             cornerRadius: mediaCornerRadius,
+            maxHeight: singleImageMaxHeight,
             onTap: {
                 selectedImage = SelectedImage(id: index)
             }
@@ -1192,24 +1213,30 @@ private struct NoteFeedImageTileView: View {
 private struct NoteSingleImageCellView: View {
     let url: URL
     let cornerRadius: CGFloat
+    let maxHeight: CGFloat
     let onTap: () -> Void
 
     var body: some View {
         Button(action: onTap) {
             NoteRemoteMediaView(url: url) { asset in
                 NoteMediaAssetContentView(asset: asset, scaling: .fit)
-                    .frame(maxWidth: .infinity, alignment: .center)
-                    .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
-                    .contentShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
+                    .frame(maxWidth: .infinity, maxHeight: maxHeight, alignment: .center)
+                    .background(Color(.secondarySystemBackground))
             } placeholder: {
                 ProgressView()
-                    .frame(maxWidth: .infinity, minHeight: 180, alignment: .center)
+                    .frame(maxWidth: .infinity, minHeight: 180, maxHeight: maxHeight, alignment: .center)
+                    .background(Color(.secondarySystemBackground))
             } failure: {
                 Image(systemName: "photo")
                     .font(.title3)
                     .foregroundStyle(.secondary)
-                    .frame(maxWidth: .infinity, minHeight: 180, alignment: .center)
+                    .frame(maxWidth: .infinity, minHeight: 180, maxHeight: maxHeight, alignment: .center)
+                    .background(Color(.secondarySystemBackground))
             }
+            .frame(maxWidth: .infinity, maxHeight: maxHeight, alignment: .center)
+            .clipped()
+            .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
+            .contentShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
         }
         .buttonStyle(.plain)
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -2210,7 +2237,9 @@ private actor EmbeddedReferencedNoteCache {
         case value(FeedItem?)
     }
 
+    private let maxResolvedEntries = 512
     private var resolvedItems: [String: CachedResult] = [:]
+    private var resolvedOrder: [String] = []
     private var inFlightTasks: [String: Task<FeedItem?, Never>] = [:]
 
     func cachedValue(for key: String) -> (found: Bool, item: FeedItem?) {
@@ -2232,8 +2261,22 @@ private actor EmbeddedReferencedNoteCache {
     }
 
     func storeResolvedValue(_ item: FeedItem?, for key: String) {
+        if resolvedItems[key] == nil {
+            resolvedOrder.append(key)
+        } else {
+            resolvedOrder.removeAll { $0 == key }
+            resolvedOrder.append(key)
+        }
         resolvedItems[key] = .value(item)
         inFlightTasks[key] = nil
+
+        let overflow = resolvedOrder.count - maxResolvedEntries
+        guard overflow > 0 else { return }
+
+        for _ in 0..<overflow {
+            let removedKey = resolvedOrder.removeFirst()
+            resolvedItems.removeValue(forKey: removedKey)
+        }
     }
 }
 
@@ -2760,18 +2803,18 @@ private struct WebsiteLinkCardView: View {
                 }
 
                 VStack(alignment: .leading, spacing: 4) {
-                    Text(loader.title ?? fallbackTitle)
+                    Text(FlowLayoutGuardrails.softWrapped(loader.title ?? fallbackTitle))
                         .font(.subheadline.weight(.semibold))
                         .lineLimit(2)
                         .multilineTextAlignment(.leading)
                     if let summary = loader.summary, !summary.isEmpty {
-                        Text(summary)
+                        Text(FlowLayoutGuardrails.softWrapped(summary))
                             .font(.caption)
                             .foregroundStyle(.secondary)
                             .lineLimit(2)
                             .multilineTextAlignment(.leading)
                     }
-                    Text(loader.hostDisplay)
+                    Text(FlowLayoutGuardrails.softWrapped(loader.hostDisplay, maxNonBreakingRunLength: 18))
                         .font(.caption2)
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
@@ -2791,6 +2834,12 @@ private struct WebsiteLinkCardView: View {
             )
         }
         .buttonStyle(.plain)
+        .task(id: url) {
+            await loader.startIfNeeded()
+        }
+        .onDisappear {
+            loader.cancelPendingLoad()
+        }
     }
 
     private var fallbackTitle: String {
@@ -2798,6 +2847,98 @@ private struct WebsiteLinkCardView: View {
             return String(url.absoluteString.prefix(97)) + "..."
         }
         return url.absoluteString
+    }
+}
+
+private actor LinkPreviewLoadCoordinator {
+    enum BeginDecision: Sendable, Equatable {
+        case started
+        case atCapacity
+        case blockedByBackoff
+    }
+
+    enum Completion: Sendable, Equatable {
+        case success
+        case failure
+        case cancelled
+    }
+
+    static let shared = LinkPreviewLoadCoordinator()
+
+    private struct FailureEntry {
+        var failureCount: Int
+        var retryAfter: Date
+    }
+
+    private let maxConcurrentLoads = 2
+    private let maxTrackedHosts = 256
+    private var activeLoads = 0
+    private var hostFailures: [String: FailureEntry] = [:]
+    private var hostOrder: [String] = []
+
+    func beginLoad(for url: URL, now: Date = Date()) -> BeginDecision {
+        clearExpiredFailures(now: now)
+
+        if let host = normalizedHost(for: url),
+           let entry = hostFailures[host],
+           entry.retryAfter > now {
+            return .blockedByBackoff
+        }
+
+        guard activeLoads < maxConcurrentLoads else {
+            return .atCapacity
+        }
+
+        activeLoads += 1
+        return .started
+    }
+
+    func finishLoad(for url: URL, completion: Completion) {
+        activeLoads = max(0, activeLoads - 1)
+
+        guard let host = normalizedHost(for: url) else { return }
+
+        switch completion {
+        case .success:
+            hostFailures.removeValue(forKey: host)
+            hostOrder.removeAll { $0 == host }
+        case .failure:
+            let nextFailureCount = (hostFailures[host]?.failureCount ?? 0) + 1
+            let multiplier = pow(2.0, Double(min(nextFailureCount - 1, 4)))
+            let retryDelay = min(90 * multiplier, 30 * 60)
+            hostFailures[host] = FailureEntry(
+                failureCount: nextFailureCount,
+                retryAfter: Date().addingTimeInterval(retryDelay)
+            )
+            hostOrder.removeAll { $0 == host }
+            hostOrder.append(host)
+            trimHostsIfNeeded()
+        case .cancelled:
+            break
+        }
+    }
+
+    private func clearExpiredFailures(now: Date) {
+        let expiredHosts = hostFailures.compactMap { host, entry in
+            entry.retryAfter <= now ? host : nil
+        }
+        guard !expiredHosts.isEmpty else { return }
+
+        let expiredSet = Set(expiredHosts)
+        expiredHosts.forEach { hostFailures.removeValue(forKey: $0) }
+        hostOrder.removeAll { expiredSet.contains($0) }
+    }
+
+    private func trimHostsIfNeeded() {
+        while hostOrder.count > maxTrackedHosts {
+            let removedHost = hostOrder.removeFirst()
+            hostFailures.removeValue(forKey: removedHost)
+        }
+    }
+
+    private func normalizedHost(for url: URL) -> String? {
+        let host = url.host?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        return host?.isEmpty == false ? host : nil
     }
 }
 
@@ -2809,35 +2950,80 @@ private final class LinkMetadataLoader: ObservableObject {
 
     let hostDisplay: String
     private let url: URL
+    private var metadataProvider: LPMetadataProvider?
+    private var isLoading = false
+    private static let metadataLoadTimeoutNanoseconds: UInt64 = 8_000_000_000
+    private static let imageLoadTimeoutNanoseconds: UInt64 = 6_000_000_000
 
-    private static let metadataCache = NSCache<NSURL, LPLinkMetadata>()
-    private static let imageCache = NSCache<NSURL, UIImage>()
+    private static let metadataCache: NSCache<NSURL, LPLinkMetadata> = {
+        let cache = NSCache<NSURL, LPLinkMetadata>()
+        cache.countLimit = 96
+        return cache
+    }()
+
+    private static let imageCache: NSCache<NSURL, UIImage> = {
+        let cache = NSCache<NSURL, UIImage>()
+        cache.countLimit = 64
+        cache.totalCostLimit = 24 * 1_024 * 1_024
+        return cache
+    }()
 
     init(url: URL) {
         self.url = url
         hostDisplay = url.host ?? url.absoluteString
-        load()
     }
 
-    private func load() {
+    func startIfNeeded() async {
         let cacheKey = url as NSURL
         if let cachedMetadata = Self.metadataCache.object(forKey: cacheKey) {
             apply(metadata: cachedMetadata)
             if let cachedImage = Self.imageCache.object(forKey: cacheKey) {
                 image = cachedImage
+            } else {
+                await loadImageIfNeeded(metadata: cachedMetadata, cacheKey: cacheKey)
             }
             return
         }
 
-        let provider = LPMetadataProvider()
-        provider.startFetchingMetadata(for: url) { metadata, _ in
-            guard let metadata else { return }
-            Task { @MainActor in
-                Self.metadataCache.setObject(metadata, forKey: cacheKey)
-                self.apply(metadata: metadata)
-                self.loadImageIfNeeded(metadata: metadata, cacheKey: cacheKey)
+        guard !isLoading else { return }
+
+        var decision = await Self.coordinator.beginLoad(for: url)
+        while decision == .atCapacity && !Task.isCancelled {
+            try? await Task.sleep(nanoseconds: 200_000_000)
+            decision = await Self.coordinator.beginLoad(for: url)
+        }
+
+        guard !Task.isCancelled else { return }
+        guard decision == .started else { return }
+
+        isLoading = true
+        var completion: LinkPreviewLoadCoordinator.Completion = .failure
+        defer {
+            isLoading = false
+            metadataProvider = nil
+            let url = self.url
+            Task {
+                await Self.coordinator.finishLoad(for: url, completion: completion)
             }
         }
+
+        let provider = LPMetadataProvider()
+        metadataProvider = provider
+
+        guard let metadata = await fetchMetadata(with: provider) else {
+            completion = Task.isCancelled ? .cancelled : .failure
+            return
+        }
+
+        guard !Task.isCancelled else {
+            completion = .cancelled
+            return
+        }
+
+        Self.metadataCache.setObject(metadata, forKey: cacheKey)
+        apply(metadata: metadata)
+        completion = .success
+        await loadImageIfNeeded(metadata: metadata, cacheKey: cacheKey)
     }
 
     private func apply(metadata: LPLinkMetadata) {
@@ -2851,7 +3037,39 @@ private final class LinkMetadataLoader: ObservableObject {
         }
     }
 
-    private func loadImageIfNeeded(metadata: LPLinkMetadata, cacheKey: NSURL) {
+    func cancelPendingLoad() {
+        metadataProvider?.cancel()
+    }
+
+    private func fetchMetadata(with provider: LPMetadataProvider) async -> LPLinkMetadata? {
+        await withTaskCancellationHandler {
+            await withCheckedContinuation { (continuation: CheckedContinuation<LPLinkMetadata?, Never>) in
+                var didResume = false
+                func finish(_ metadata: LPLinkMetadata?) {
+                    guard !didResume else { return }
+                    didResume = true
+                    continuation.resume(returning: metadata)
+                }
+                let timeoutTask = Task {
+                    try? await Task.sleep(nanoseconds: Self.metadataLoadTimeoutNanoseconds)
+                    await MainActor.run {
+                        provider.cancel()
+                        finish(nil)
+                    }
+                }
+                provider.startFetchingMetadata(for: url) { metadata, _ in
+                    Task { @MainActor in
+                        timeoutTask.cancel()
+                        finish(metadata)
+                    }
+                }
+            }
+        } onCancel: {
+            provider.cancel()
+        }
+    }
+
+    private func loadImageIfNeeded(metadata: LPLinkMetadata, cacheKey: NSURL) async {
         if let cachedImage = Self.imageCache.object(forKey: cacheKey) {
             image = cachedImage
             return
@@ -2859,13 +3077,45 @@ private final class LinkMetadataLoader: ObservableObject {
         guard let provider = metadata.imageProvider else { return }
         guard provider.canLoadObject(ofClass: UIImage.self) else { return }
 
-        provider.loadObject(ofClass: UIImage.self) { object, _ in
-            guard let uiImage = object as? UIImage else { return }
-            Task { @MainActor in
-                Self.imageCache.setObject(uiImage, forKey: cacheKey)
-                self.image = uiImage
+        let loadedImage = await withCheckedContinuation { (continuation: CheckedContinuation<UIImage?, Never>) in
+            var didResume = false
+            func finish(_ image: UIImage?) {
+                guard !didResume else { return }
+                didResume = true
+                continuation.resume(returning: image)
+            }
+            let timeoutTask = Task {
+                try? await Task.sleep(nanoseconds: Self.imageLoadTimeoutNanoseconds)
+                await MainActor.run {
+                    finish(nil)
+                }
+            }
+            _ = provider.loadObject(ofClass: UIImage.self) { object, _ in
+                let loadedImage = object as? UIImage
+                Task { @MainActor in
+                    timeoutTask.cancel()
+                    finish(loadedImage)
+                }
             }
         }
+        guard let loadedImage, !Task.isCancelled else { return }
+
+        Self.imageCache.setObject(
+            loadedImage,
+            forKey: cacheKey,
+            cost: Self.imageMemoryCost(for: loadedImage)
+        )
+        image = loadedImage
+    }
+
+    private static let coordinator = LinkPreviewLoadCoordinator.shared
+
+    private static func imageMemoryCost(for image: UIImage) -> Int {
+        let scale = image.scale
+        let width = Int(image.size.width * scale)
+        let height = Int(image.size.height * scale)
+        guard width > 0, height > 0 else { return 1 }
+        return width * height * 4
     }
 }
 
@@ -2924,6 +3174,10 @@ private struct NoteMediaAssetContentView: View {
     let asset: NoteMediaAsset
     let scaling: NoteMediaScaling
 
+    private var boundedAspectRatio: CGFloat? {
+        FlowLayoutGuardrails.clampedAspectRatio(asset.aspectRatio)
+    }
+
     var body: some View {
         Group {
             switch asset {
@@ -2939,7 +3193,7 @@ private struct NoteMediaAssetContentView: View {
                 )
             }
         }
-        .aspectRatio(asset.aspectRatio, contentMode: scaling.swiftUIContentMode)
+        .aspectRatio(boundedAspectRatio, contentMode: scaling.swiftUIContentMode)
         .frame(maxWidth: .infinity, alignment: .center)
         .clipped()
     }
@@ -3310,8 +3564,8 @@ private struct NoteAnimatedGIFView: UIViewRepresentable {
     let contentMode: UIView.ContentMode
 
     func makeUIView(context: Context) -> GIFPlayerImageView {
-        let imageView = GIFPlayerImageView()
-        imageView.backgroundColor = .clear
+        let imageView = GIFPlayerImageView(frame: .zero)
+        imageView.backgroundColor = UIColor.clear
         imageView.clipsToBounds = true
         imageView.isUserInteractionEnabled = false
         return imageView
@@ -3355,6 +3609,18 @@ private final class GIFPlayerImageView: UIImageView {
     private var accumulatedTime: TimeInterval = 0
     private var lastTimestamp: CFTimeInterval?
     private var maxPixelSize: CGFloat = 0
+
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        frameCache.countLimit = 24
+        frameCache.totalCostLimit = 24 * 1_024 * 1_024
+    }
+
+    required init?(coder: NSCoder) {
+        super.init(coder: coder)
+        frameCache.countLimit = 24
+        frameCache.totalCostLimit = 24 * 1_024 * 1_024
+    }
 
     func configure(with payload: NoteGIFPayload) {
         if self.payload?.url != payload.url || self.payload?.data != payload.data {
@@ -3467,8 +3733,16 @@ private final class GIFPlayerImageView: UIImageView {
         }
 
         let image = UIImage(cgImage: cgImage)
-        frameCache.setObject(image, forKey: key)
+        frameCache.setObject(image, forKey: key, cost: Self.imageMemoryCost(for: image))
         return image
+    }
+
+    private static func imageMemoryCost(for image: UIImage) -> Int {
+        let scale = image.scale
+        let width = Int(image.size.width * scale)
+        let height = Int(image.size.height * scale)
+        guard width > 0, height > 0 else { return 1 }
+        return width * height * 4
     }
 }
 

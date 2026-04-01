@@ -47,6 +47,8 @@ final class FlowNostrDB: @unchecked Sendable {
     private let openDatabase: OpenDatabase
     private let eventOverlayLimit = 4_000
     private let replaceableOverlayLimit = 2_000
+    private let sessionEventTrackingLimit = 8_000
+    private let sessionProfileTrackingLimit = 2_000
 
     private var handle: UnsafeMutableRawPointer?
     private var openMapsize: size_t = 0
@@ -55,8 +57,12 @@ final class FlowNostrDB: @unchecked Sendable {
     private var recentEventOrder: [String] = []
     private var recentReplaceableEventsByKey: [ReplaceableKey: NostrEvent] = [:]
     private var recentReplaceableOrder: [ReplaceableKey] = []
-    private var sessionIngestedEventIDs = Set<String>()
-    private var sessionIngestedProfilePubkeys = Set<String>()
+    private var sessionIngestedEventCount = 0
+    private var sessionIngestedProfileCount = 0
+    private var recentSessionEventIDs = Set<String>()
+    private var recentSessionEventOrder: [String] = []
+    private var recentSessionProfilePubkeys = Set<String>()
+    private var recentSessionProfileOrder: [String] = []
     private var ingestCallCount = 0
     private var successfulIngestCallCount = 0
     private var eventLookupCount = 0
@@ -295,8 +301,8 @@ final class FlowNostrDB: @unchecked Sendable {
                 lastAttemptedMapsizeBytes: Int64(lastAttemptedMapsize),
                 persistedEventCount: persistedEventCount,
                 persistedProfileCount: persistedProfileCount,
-                sessionIngestedEventCount: sessionIngestedEventIDs.count,
-                sessionIngestedProfileCount: sessionIngestedProfilePubkeys.count,
+                sessionIngestedEventCount: sessionIngestedEventCount,
+                sessionIngestedProfileCount: sessionIngestedProfileCount,
                 ingestCallCount: ingestCallCount,
                 successfulIngestCallCount: successfulIngestCallCount,
                 eventLookupCount: eventLookupCount,
@@ -312,8 +318,12 @@ final class FlowNostrDB: @unchecked Sendable {
 
     func resetSessionDiagnostics() {
         queue.sync {
-            sessionIngestedEventIDs.removeAll()
-            sessionIngestedProfilePubkeys.removeAll()
+            sessionIngestedEventCount = 0
+            sessionIngestedProfileCount = 0
+            recentSessionEventIDs.removeAll(keepingCapacity: false)
+            recentSessionEventOrder.removeAll(keepingCapacity: false)
+            recentSessionProfilePubkeys.removeAll(keepingCapacity: false)
+            recentSessionProfileOrder.removeAll(keepingCapacity: false)
             ingestCallCount = 0
             successfulIngestCallCount = 0
             eventLookupCount = 0
@@ -400,7 +410,7 @@ final class FlowNostrDB: @unchecked Sendable {
         guard !eventID.isEmpty else { return }
 
         if updateSessionCounters {
-            sessionIngestedEventIDs.insert(eventID)
+            recordSessionEvent(eventID)
         }
 
         if recentEventsByID[eventID] == nil {
@@ -431,7 +441,7 @@ final class FlowNostrDB: @unchecked Sendable {
         guard !authorPubkey.isEmpty else { return }
 
         if updateSessionCounters, event.kind == 0 {
-            sessionIngestedProfilePubkeys.insert(authorPubkey)
+            recordSessionProfile(authorPubkey)
         }
 
         let key = ReplaceableKey(authorPubkey: authorPubkey, kind: event.kind)
@@ -456,6 +466,34 @@ final class FlowNostrDB: @unchecked Sendable {
 
     private func recentReplaceableEvent(authorPubkey: String, kind: Int) -> NostrEvent? {
         recentReplaceableEventsByKey[ReplaceableKey(authorPubkey: authorPubkey, kind: kind)]
+    }
+
+    private func recordSessionEvent(_ eventID: String) {
+        guard recentSessionEventIDs.insert(eventID).inserted else { return }
+        sessionIngestedEventCount += 1
+        recentSessionEventOrder.append(eventID)
+
+        let overflow = recentSessionEventOrder.count - sessionEventTrackingLimit
+        guard overflow > 0 else { return }
+
+        for _ in 0..<overflow {
+            let removedID = recentSessionEventOrder.removeFirst()
+            recentSessionEventIDs.remove(removedID)
+        }
+    }
+
+    private func recordSessionProfile(_ pubkey: String) {
+        guard recentSessionProfilePubkeys.insert(pubkey).inserted else { return }
+        sessionIngestedProfileCount += 1
+        recentSessionProfileOrder.append(pubkey)
+
+        let overflow = recentSessionProfileOrder.count - sessionProfileTrackingLimit
+        guard overflow > 0 else { return }
+
+        for _ in 0..<overflow {
+            let removedPubkey = recentSessionProfileOrder.removeFirst()
+            recentSessionProfilePubkeys.remove(removedPubkey)
+        }
     }
 
     private func ingestLocked(events: [NostrEvent], updateSessionCounters: Bool) -> Bool {

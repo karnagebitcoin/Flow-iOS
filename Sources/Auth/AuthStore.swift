@@ -12,11 +12,13 @@ final class AuthStore: @unchecked Sendable {
 
     private let defaults: UserDefaults
     private let privateKeyStore: any AuthPrivateKeyStoring
+    private let cacheLock = NSLock()
     private let accountsKey = "flow.auth.accounts"
     private let currentAccountIDKey = "flow.auth.currentAccountID"
     private let legacyAccountsKey = "x21.auth.accounts"
     private let legacyCurrentAccountIDKey = "x21.auth.currentAccountID"
     private let privateKeyRepairIDsKey = "flow.auth.privateKeyRepairIDs"
+    private var cachedLoadResult: AuthStoreLoadResult?
 
     init(
         defaults: UserDefaults = .standard,
@@ -27,6 +29,10 @@ final class AuthStore: @unchecked Sendable {
     }
 
     func load() -> AuthStoreLoadResult {
+        if let cached = cachedLoadResultValue() {
+            return cached
+        }
+
         let accountsData = defaults.data(forKey: accountsKey) ?? defaults.data(forKey: legacyAccountsKey)
         let accounts: [StoredAuthAccount]
         let usedLegacyAccountsData = defaults.data(forKey: accountsKey) == nil && accountsData != nil
@@ -92,12 +98,22 @@ final class AuthStore: @unchecked Sendable {
             )
         }
 
-        return AuthStoreLoadResult(
+        let result = AuthStoreLoadResult(
             accounts: migratedAccounts,
             currentAccountID: currentAccountID,
             transientPrivateKeysByAccountID: transientPrivateKeysByAccountID,
             accountsNeedingSecureStorageRepair: accountsNeedingSecureStorageRepair
         )
+        setCachedLoadResult(result)
+        return result
+    }
+
+    func hasSingleAccountHint() -> Bool {
+        if let cached = cachedLoadResultValue() {
+            return cached.accounts.count <= 1
+        }
+
+        return persistedAccountCountHint() <= 1
     }
 
     func save(
@@ -136,6 +152,7 @@ final class AuthStore: @unchecked Sendable {
             (accountsNeedingSecureStorageRepair ?? loadPrivateKeyRepairIDs()).sorted()
         )
         defaults.set(repairIDs, forKey: privateKeyRepairIDsKey)
+        clearCachedLoadResult()
     }
 
     func privateKey(for accountID: String) -> String? {
@@ -152,11 +169,13 @@ final class AuthStore: @unchecked Sendable {
 
     func savePrivateKey(_ nsec: String, for accountID: String, backupToICloud: Bool) throws {
         try privateKeyStore.savePrivateKey(nsec, for: accountID, backupToICloud: backupToICloud)
+        clearCachedLoadResult()
     }
 
     func removePrivateKey(for accountID: String) {
         privateKeyStore.removePrivateKey(for: accountID)
         setPrivateKeyNeedsSecureStorageRepair(false, for: accountID)
+        clearCachedLoadResult()
     }
 
     func setPrivateKeyNeedsSecureStorageRepair(_ needsRepair: Bool, for accountID: String) {
@@ -167,9 +186,37 @@ final class AuthStore: @unchecked Sendable {
             repairIDs.remove(accountID)
         }
         defaults.set(Array(repairIDs.sorted()), forKey: privateKeyRepairIDsKey)
+        clearCachedLoadResult()
     }
 
     private func loadPrivateKeyRepairIDs() -> Set<String> {
         Set(defaults.stringArray(forKey: privateKeyRepairIDsKey) ?? [])
+    }
+
+    private func persistedAccountCountHint() -> Int {
+        let accountsData = defaults.data(forKey: accountsKey) ?? defaults.data(forKey: legacyAccountsKey)
+        guard let accountsData,
+              let decoded = try? JSONDecoder().decode([StoredAuthAccount].self, from: accountsData) else {
+            return 0
+        }
+        return decoded.count
+    }
+
+    private func cachedLoadResultValue() -> AuthStoreLoadResult? {
+        cacheLock.lock()
+        defer { cacheLock.unlock() }
+        return cachedLoadResult
+    }
+
+    private func setCachedLoadResult(_ result: AuthStoreLoadResult) {
+        cacheLock.lock()
+        cachedLoadResult = result
+        cacheLock.unlock()
+    }
+
+    private func clearCachedLoadResult() {
+        cacheLock.lock()
+        cachedLoadResult = nil
+        cacheLock.unlock()
     }
 }

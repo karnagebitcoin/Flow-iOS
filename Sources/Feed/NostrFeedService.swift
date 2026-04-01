@@ -885,6 +885,29 @@ struct NostrFeedService: Sendable {
         )
     }
 
+    func recentLocalProfiles(limit: Int) async -> [ProfileSearchResult] {
+        guard limit > 0 else { return [] }
+
+        let localEvents = nostrDatabase.queryEvents(
+            filter: NostrFilter(
+                kinds: [0],
+                limit: min(max(limit * 8, 80), 400)
+            )
+        ) ?? []
+
+        let sortedEvents = deduplicateEvents(localEvents).sorted { lhs, rhs in
+            if lhs.createdAt == rhs.createdAt {
+                return lhs.id > rhs.id
+            }
+            return lhs.createdAt > rhs.createdAt
+        }
+
+        return await recentProfileResults(
+            from: sortedEvents,
+            limit: limit
+        )
+    }
+
     func searchProfiles(
         relayURLs: [URL],
         query: String,
@@ -2533,6 +2556,43 @@ struct NostrFeedService: Sendable {
         }
 
         return ordered
+    }
+
+    private func recentProfileResults(
+        from events: [NostrEvent],
+        limit: Int
+    ) async -> [ProfileSearchResult] {
+        guard limit > 0 else { return [] }
+
+        var seen = Set<String>()
+        var results: [ProfileSearchResult] = []
+        var fetchedProfiles: [String: NostrProfile] = [:]
+
+        for event in events {
+            guard let profile = NostrProfile.decode(from: event.content) else { continue }
+            let pubkey = normalizePubkey(event.pubkey)
+            guard !pubkey.isEmpty else { continue }
+            guard seen.insert(pubkey).inserted else { continue }
+
+            fetchedProfiles[pubkey] = profile
+            results.append(
+                ProfileSearchResult(
+                    pubkey: pubkey,
+                    profile: profile,
+                    createdAt: event.createdAt
+                )
+            )
+
+            if results.count >= limit {
+                break
+            }
+        }
+
+        if !fetchedProfiles.isEmpty {
+            await profileCache.store(profiles: fetchedProfiles, missed: [])
+        }
+
+        return results
     }
 
     private func deduplicateEvents(_ events: [NostrEvent]) -> [NostrEvent] {

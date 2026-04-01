@@ -11,7 +11,7 @@ struct LongFormArticlePreviewView: View {
         VStack(alignment: .leading, spacing: 14) {
             HStack(spacing: 8) {
                 metadataBadge(title: "Article", systemImage: "doc.text.image")
-                metadataBadge(title: "\(article.readingTimeMinutes) min read", systemImage: "clock")
+                metadataBadge(title: "\(article.readingTimeMinutes) min", systemImage: "clock")
 
                 Text(previewDateLabel)
                     .font(.caption)
@@ -29,18 +29,20 @@ struct LongFormArticlePreviewView: View {
             }
 
             VStack(alignment: .leading, spacing: 8) {
-                Text(article.title)
+                Text(FlowLayoutGuardrails.softWrapped(article.title))
                     .font(.title3.weight(.semibold))
                     .tracking(-0.2)
                     .foregroundStyle(.primary)
                     .multilineTextAlignment(.leading)
+                    .lineLimit(3)
                     .fixedSize(horizontal: false, vertical: true)
 
                 if let summary = article.summary, !summary.isEmpty {
-                    Text(summary)
+                    Text(FlowLayoutGuardrails.softWrapped(summary))
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
                         .multilineTextAlignment(.leading)
+                        .lineLimit(4)
                         .fixedSize(horizontal: false, vertical: true)
                 }
             }
@@ -63,6 +65,7 @@ struct LongFormArticlePreviewView: View {
                     .foregroundStyle(appSettings.primaryColor)
             }
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
         .padding(16)
         .background(previewBackground, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
         .overlay {
@@ -92,11 +95,12 @@ struct LongFormArticlePreviewView: View {
     }
 
     private func metadataBadge(title: String, systemImage: String) -> some View {
-        Label {
-            Text(title)
-        } icon: {
+        HStack(spacing: 4) {
             Image(systemName: systemImage)
+            Text(title)
         }
+        .lineLimit(1)
+        .fixedSize(horizontal: true, vertical: false)
         .font(.caption.weight(.semibold))
         .foregroundStyle(.secondary)
         .padding(.horizontal, 10)
@@ -119,9 +123,11 @@ struct LongFormArticlePreviewView: View {
     }
 
     private func chipLabel(_ tag: String) -> some View {
-        Text("#\(tag)")
+        Text(FlowLayoutGuardrails.softWrapped("#\(tag)", maxNonBreakingRunLength: 18))
             .font(.caption.weight(.medium))
             .foregroundStyle(.secondary)
+            .lineLimit(1)
+            .truncationMode(.tail)
             .padding(.horizontal, 10)
             .padding(.vertical, 6)
             .background(Color(.secondarySystemBackground), in: Capsule())
@@ -195,7 +201,7 @@ struct LongFormArticleReaderView: View {
         VStack(alignment: .leading, spacing: 18) {
             HStack(spacing: 8) {
                 readerMetaBadge(title: "Article", systemImage: "doc.text")
-                readerMetaBadge(title: "\(article.readingTimeMinutes) min read", systemImage: "clock")
+                readerMetaBadge(title: "\(article.readingTimeMinutes) min", systemImage: "clock")
 
                 Text(publishedDateLabel)
                     .font(.caption)
@@ -204,13 +210,13 @@ struct LongFormArticleReaderView: View {
             }
 
             VStack(alignment: .leading, spacing: 10) {
-                Text(article.title)
+                Text(FlowLayoutGuardrails.softWrapped(article.title))
                     .font(.system(.largeTitle, design: .rounded, weight: .bold))
                     .tracking(-0.8)
                     .fixedSize(horizontal: false, vertical: true)
 
                 if let summary = article.summary, !summary.isEmpty {
-                    Text(summary)
+                    Text(FlowLayoutGuardrails.softWrapped(summary))
                         .font(.title3)
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
@@ -430,18 +436,22 @@ struct LongFormArticleReaderView: View {
                         Button {
                             onHashtagTap(tag)
                         } label: {
-                            Text("#\(tag)")
+                            Text(FlowLayoutGuardrails.softWrapped("#\(tag)", maxNonBreakingRunLength: 18))
                                 .font(.subheadline.weight(.medium))
                                 .foregroundStyle(appSettings.primaryColor)
+                                .lineLimit(1)
+                                .truncationMode(.tail)
                                 .padding(.horizontal, 12)
                                 .padding(.vertical, 8)
                                 .background(appSettings.primaryColor.opacity(0.08), in: Capsule())
                         }
                         .buttonStyle(.plain)
                     } else {
-                        Text("#\(tag)")
+                        Text(FlowLayoutGuardrails.softWrapped("#\(tag)", maxNonBreakingRunLength: 18))
                             .font(.subheadline.weight(.medium))
                             .foregroundStyle(appSettings.primaryColor)
+                            .lineLimit(1)
+                            .truncationMode(.tail)
                             .padding(.horizontal, 12)
                             .padding(.vertical, 8)
                             .background(appSettings.primaryColor.opacity(0.08), in: Capsule())
@@ -462,11 +472,12 @@ struct LongFormArticleReaderView: View {
     }
 
     private func readerMetaBadge(title: String, systemImage: String) -> some View {
-        Label {
-            Text(title)
-        } icon: {
+        HStack(spacing: 4) {
             Image(systemName: systemImage)
+            Text(title)
         }
+        .lineLimit(1)
+        .fixedSize(horizontal: true, vertical: false)
         .font(.caption.weight(.semibold))
         .foregroundStyle(.secondary)
         .padding(.horizontal, 10)
@@ -571,6 +582,10 @@ private struct LongFormArticleRemoteImage: View {
     var aspectRatio: CGFloat? = nil
     var maxHeight: CGFloat? = nil
 
+    private var boundedAspectRatio: CGFloat? {
+        FlowLayoutGuardrails.clampedAspectRatio(aspectRatio)
+    }
+
     var body: some View {
         Group {
             if appSettings.textOnlyMode {
@@ -597,12 +612,14 @@ private struct LongFormArticleRemoteImage: View {
 
     private func renderedImage(_ image: Image) -> some View {
         Group {
-            if let aspectRatio {
+            if let boundedAspectRatio {
                 image
                     .resizable()
                     .scaledToFill()
                     .frame(maxWidth: .infinity)
-                    .aspectRatio(aspectRatio, contentMode: .fill)
+                    .aspectRatio(boundedAspectRatio, contentMode: .fill)
+                    .frame(maxHeight: maxHeight)
+                    .clipped()
             } else {
                 image
                     .resizable()
@@ -622,8 +639,9 @@ private struct LongFormArticleRemoteImage: View {
             ProgressView()
         }
         .frame(maxWidth: .infinity)
-        .frame(height: aspectRatio == nil ? 220 : nil)
-        .aspectRatio(aspectRatio, contentMode: .fit)
+        .frame(height: boundedAspectRatio == nil ? 220 : nil)
+        .aspectRatio(boundedAspectRatio, contentMode: .fit)
+        .frame(maxHeight: maxHeight)
     }
 
     private var hiddenImagePlaceholder: some View {
@@ -639,8 +657,9 @@ private struct LongFormArticleRemoteImage: View {
         }
         .padding(.horizontal, 18)
         .frame(maxWidth: .infinity)
-        .frame(height: aspectRatio == nil ? 160 : nil)
-        .aspectRatio(aspectRatio, contentMode: .fit)
+        .frame(height: boundedAspectRatio == nil ? 160 : nil)
+        .aspectRatio(boundedAspectRatio, contentMode: .fit)
+        .frame(maxHeight: maxHeight)
         .background(Color(.secondarySystemBackground))
     }
 }
@@ -654,21 +673,23 @@ private struct FlowLayout: Layout {
         cache: inout ()
     ) -> CGSize {
         let availableWidth = proposal.width ?? .greatestFiniteMagnitude
+        let measurementProposal = proposal.width.map { ProposedViewSize(width: $0, height: nil) } ?? .unspecified
         var currentX: CGFloat = 0
         var currentY: CGFloat = 0
         var rowHeight: CGFloat = 0
 
         for subview in subviews {
-            let size = subview.sizeThatFits(.unspecified)
+            let size = subview.sizeThatFits(measurementProposal)
+            let resolvedWidth = availableWidth.isFinite ? min(size.width, availableWidth) : size.width
 
-            if currentX > 0, currentX + size.width > availableWidth {
+            if currentX > 0, currentX + resolvedWidth > availableWidth {
                 currentX = 0
                 currentY += rowHeight + spacing
                 rowHeight = 0
             }
 
             rowHeight = max(rowHeight, size.height)
-            currentX += size.width + spacing
+            currentX += resolvedWidth + spacing
         }
 
         return CGSize(
@@ -686,11 +707,15 @@ private struct FlowLayout: Layout {
         var currentX = bounds.minX
         var currentY = bounds.minY
         var rowHeight: CGFloat = 0
+        let measurementProposal = bounds.width.isFinite
+            ? ProposedViewSize(width: bounds.width, height: nil)
+            : .unspecified
 
         for subview in subviews {
-            let size = subview.sizeThatFits(.unspecified)
+            let size = subview.sizeThatFits(measurementProposal)
+            let placementWidth = bounds.width.isFinite ? min(size.width, bounds.width) : size.width
 
-            if currentX > bounds.minX, currentX + size.width > bounds.maxX {
+            if currentX > bounds.minX, currentX + placementWidth > bounds.maxX {
                 currentX = bounds.minX
                 currentY += rowHeight + spacing
                 rowHeight = 0
@@ -698,10 +723,10 @@ private struct FlowLayout: Layout {
 
             subview.place(
                 at: CGPoint(x: currentX, y: currentY),
-                proposal: ProposedViewSize(width: size.width, height: size.height)
+                proposal: ProposedViewSize(width: placementWidth, height: size.height)
             )
 
-            currentX += size.width + spacing
+            currentX += placementWidth + spacing
             rowHeight = max(rowHeight, size.height)
         }
     }
