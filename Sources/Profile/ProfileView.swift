@@ -210,6 +210,8 @@ struct ProfileView: View {
         .sheet(isPresented: $isShowingProfileEditor) {
             ProfileEditorSheet(
                 initialFields: viewModel.editableFields,
+                previewHandle: viewModel.handle,
+                followingCount: viewModel.followingCount,
                 isSaving: viewModel.isSavingProfile,
                 errorMessage: viewModel.profileSaveError,
                 onSave: { fields in
@@ -220,6 +222,15 @@ struct ProfileView: View {
                     )
                 },
                 onUploadAvatar: { data, mimeType, filename in
+                    try await viewModel.uploadProfileImage(
+                        data: data,
+                        mimeType: mimeType,
+                        filename: filename,
+                        currentAccountPubkey: auth.currentAccount?.pubkey,
+                        currentNsec: auth.currentNsec
+                    )
+                },
+                onUploadBanner: { data, mimeType, filename in
                     try await viewModel.uploadProfileImage(
                         data: data,
                         mimeType: mimeType,

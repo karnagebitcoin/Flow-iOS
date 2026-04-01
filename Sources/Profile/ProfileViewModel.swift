@@ -38,7 +38,7 @@ final class ProfileViewModel: ObservableObject {
     private let pageSize: Int
     private let service: NostrFeedService
     private let profileEventService: ProfileEventService
-    private let relayClient: NostrRelayClient
+    private let relayClient: any NostrRelayEventPublishing
     private let mediaUploadService: ProfileMediaUploadService
     static let requestedFeedKinds = [1, 6, 16, 1068, 6969, 1111, 1244]
 
@@ -61,7 +61,7 @@ final class ProfileViewModel: ObservableObject {
         pageSize: Int = 70,
         service: NostrFeedService = NostrFeedService(),
         profileEventService: ProfileEventService = ProfileEventService(),
-        relayClient: NostrRelayClient = NostrRelayClient(),
+        relayClient: any NostrRelayEventPublishing = NostrRelayClient(),
         mediaUploadService: ProfileMediaUploadService = .shared
     ) {
         self.pubkey = pubkey
@@ -390,13 +390,7 @@ final class ProfileViewModel: ObservableObject {
         }
 
         do {
-            let latestSnapshot = try await fetchProfileMetadataSnapshot(
-                relayURLs: readRelayURLs,
-                pubkey: pubkey
-            )
-            guard !Task.isCancelled else { return false }
-
-            let baseSnapshot = latestSnapshot ?? metadataSnapshot
+            let baseSnapshot = metadataSnapshot
             let content = try ProfileMetadataEditing.mergedContent(
                 fields: fields,
                 baseJSON: baseSnapshot?.jsonObject ?? [:]
@@ -409,46 +403,20 @@ final class ProfileViewModel: ObservableObject {
                 .build(signedBy: keypair)
 
             let eventData = try JSONEncoder().encode(event)
-            guard let eventObject = try JSONSerialization.jsonObject(with: eventData) as? [String: Any] else {
-                throw RelayClientError.publishRejected("Malformed profile metadata")
-            }
 
-            let publishResult = await withTaskGroup(
-                of: Error?.self,
-                returning: (successfulPublishes: Int, firstError: Error?).self
-            ) { group in
-                for relayURL in writeRelayURLs {
-                    group.addTask { [relayClient] in
-                        do {
-                            try await relayClient.publishEvent(
-                                relayURL: relayURL,
-                                eventObject: eventObject,
-                                eventID: event.id
-                            )
-                            return nil
-                        } catch {
-                            return error
-                        }
-                    }
+            let targets = Self.normalizedRelayURLs(writeRelayURLs)
+            let publishOutcome = await relayClient.publishEvent(
+                to: targets,
+                eventData: eventData,
+                eventID: event.id,
+                successPolicy: .returnAfterFirstSuccess
+            )
+
+            if publishOutcome.successfulSourceCount == 0 {
+                if let firstFailureMessage = publishOutcome.firstFailureMessage {
+                    throw SourcePublishTransportError(message: firstFailureMessage)
                 }
-
-                var successfulPublishes = 0
-                var firstError: Error?
-                for await error in group {
-                    if let error {
-                        if firstError == nil {
-                            firstError = error
-                        }
-                    } else {
-                        successfulPublishes += 1
-                    }
-                }
-
-                return (successfulPublishes, firstError)
-            }
-
-            if publishResult.successfulPublishes == 0 {
-                throw publishResult.firstError ?? RelayClientError.publishRejected("Couldn't publish profile metadata")
+                throw RelayClientError.publishRejected("Couldn't publish profile metadata")
             }
 
             let updatedProfile = NostrProfile.decode(from: content)
@@ -704,7 +672,7 @@ enum ProfileMediaUploadError: LocalizedError {
         case .notActiveAccount:
             return "Only the active account can edit this profile."
         case .invalidCredentials:
-            return "Sign in with a private key to upload a profile image."
+            return "Sign in with a private key to upload profile media."
         case .invalidUploadService:
             return "Media upload service is unavailable right now."
         case .invalidUploadResponse:
@@ -712,7 +680,7 @@ enum ProfileMediaUploadError: LocalizedError {
         case .missingUploadedURL:
             return "Upload completed, but no media URL was returned."
         case .uploadFailed(let statusCode):
-            return "Image upload failed (\(statusCode))."
+            return "Media upload failed (\(statusCode))."
         case .uploadFailedWithMessage(let message):
             return message
         }

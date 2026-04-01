@@ -2,6 +2,7 @@ import Foundation
 
 struct EditableProfileFields: Equatable, Sendable {
     var avatarURLString: String
+    var bannerURLString: String
     var displayName: String
     var about: String
     var website: String
@@ -10,6 +11,7 @@ struct EditableProfileFields: Equatable, Sendable {
 
     init(
         avatarURLString: String = "",
+        bannerURLString: String = "",
         displayName: String = "",
         about: String = "",
         website: String = "",
@@ -17,6 +19,7 @@ struct EditableProfileFields: Equatable, Sendable {
         lightningAddress: String = ""
     ) {
         self.avatarURLString = avatarURLString
+        self.bannerURLString = bannerURLString
         self.displayName = displayName
         self.about = about
         self.website = website
@@ -26,6 +29,7 @@ struct EditableProfileFields: Equatable, Sendable {
 
     init(profile: NostrProfile?) {
         self.avatarURLString = profile?.picture?.trimmed ?? ""
+        self.bannerURLString = profile?.banner?.trimmed ?? ""
         self.displayName = profile?.displayName?.trimmed ?? profile?.name?.trimmed ?? ""
         self.about = profile?.about?.trimmed ?? ""
         self.website = profile?.website?.trimmed ?? ""
@@ -70,6 +74,7 @@ enum ProfileMetadataEditing {
         updated["website"] = fields.website.trimmed
         updated["nip05"] = normalizedNip05
         updated["picture"] = fields.avatarURLString.trimmed
+        updated["banner"] = fields.bannerURLString.trimmed
 
         updated.removeValue(forKey: "gallery")
         updated.removeValue(forKey: "lud16")
