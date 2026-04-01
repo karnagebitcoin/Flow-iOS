@@ -1,5 +1,6 @@
 import CryptoKit
 import Foundation
+import ImageIO
 import SwiftUI
 import UIKit
 
@@ -135,7 +136,7 @@ actor FlowImageCache {
         }
 
         guard let data = await data(for: url, tracking: tracking, countsAsRequest: false),
-              let image = preparedImage(from: data) else {
+              let image = preparedImage(from: data, sourceURL: url) else {
             return nil
         }
 
@@ -386,8 +387,34 @@ actor FlowImageCache {
         return width * height * 4
     }
 
-    private func preparedImage(from data: Data) -> UIImage? {
-        guard let image = UIImage(data: data) else { return nil }
+    private func preparedImage(from data: Data, sourceURL: URL) -> UIImage? {
+        guard let source = CGImageSourceCreateWithData(data as CFData, nil) else {
+            guard let image = UIImage(data: data) else { return nil }
+            return image.preparingForDisplay() ?? image
+        }
+
+        let frameCount = CGImageSourceGetCount(source)
+        let isGIF = sourceURL.pathExtension.lowercased() == "gif" || data.starts(with: [0x47, 0x49, 0x46])
+        let thumbnailOptions: [CFString: Any] = [
+            kCGImageSourceCreateThumbnailFromImageAlways: true,
+            kCGImageSourceCreateThumbnailWithTransform: true,
+            kCGImageSourceShouldCacheImmediately: false,
+            kCGImageSourceThumbnailMaxPixelSize: 2_048
+        ]
+
+        guard let cgImage = CGImageSourceCreateThumbnailAtIndex(
+            source,
+            0,
+            thumbnailOptions as CFDictionary
+        ) ?? CGImageSourceCreateImageAtIndex(source, 0, nil) else {
+            return nil
+        }
+
+        let image = UIImage(cgImage: cgImage)
+        if isGIF || frameCount > 1 {
+            return image
+        }
+
         return image.preparingForDisplay() ?? image
     }
 

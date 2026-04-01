@@ -2154,7 +2154,10 @@ private struct NoteNativeVideoPlayerController: UIViewControllerRepresentable {
         func configure(url: URL, controller: AVPlayerViewController) {
             guard currentURL != url || controller.player !== player else { return }
             currentURL = url
+            Self.activatePlaybackAudioSessionIfNeeded()
             controller.player = player
+            player.isMuted = false
+            player.volume = 1
             player.replaceCurrentItem(with: AVPlayerItem(url: url))
             player.play()
         }
@@ -2163,6 +2166,12 @@ private struct NoteNativeVideoPlayerController: UIViewControllerRepresentable {
             player.pause()
             player.replaceCurrentItem(with: nil)
             currentURL = nil
+        }
+
+        private static func activatePlaybackAudioSessionIfNeeded() {
+            let audioSession = AVAudioSession.sharedInstance()
+            try? audioSession.setCategory(.playback, mode: .moviePlayback, options: [])
+            try? audioSession.setActive(true, options: [])
         }
     }
 
@@ -2569,8 +2578,13 @@ private struct NostrEventReferenceCardView: View {
                 return nil
             }
 
-            let relayHints = (metadata.relays ?? [])
-                .compactMap(URL.init(string:))
+            let rawRelayHints: [String] = metadata.relays ?? []
+            let relayHints = rawRelayHints.compactMap { relay -> URL? in
+                let trimmed = relay.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !trimmed.isEmpty else { return nil }
+                guard Self.isSupportedRelayHint(trimmed) else { return nil }
+                return URL(string: trimmed)
+            }
 
             if let eventID = metadata.eventId?.lowercased(),
                Self.isHex64(eventID) {
@@ -2625,6 +2639,7 @@ private struct NostrEventReferenceCardView: View {
         var seen = Set<String>()
         var deduped: [URL] = []
         for relayURL in urls {
+            guard Self.isSupportedRelayHint(relayURL.absoluteString) else { continue }
             let key = relayURL.absoluteString.lowercased()
             guard seen.insert(key).inserted else { continue }
             deduped.append(relayURL)
@@ -2711,6 +2726,11 @@ private struct NostrEventReferenceCardView: View {
 
     private static func isHex64(_ value: String) -> Bool {
         value.range(of: "^[0-9a-f]{64}$", options: .regularExpression) != nil
+    }
+
+    private static func isSupportedRelayHint(_ value: String) -> Bool {
+        let normalized = value.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        return normalized.hasPrefix("ws://") || normalized.hasPrefix("wss://")
     }
 }
 
@@ -2859,12 +2879,14 @@ private actor CustomEmojiImageLoader {
 
 private enum NoteMediaAsset {
     case still(UIImage)
-    case animated(UIImage)
+    case gif(NoteGIFPayload)
 
     var size: CGSize {
         switch self {
-        case .still(let image), .animated(let image):
+        case .still(let image):
             return image.size
+        case .gif(let payload):
+            return payload.size
         }
     }
 
@@ -2910,14 +2932,16 @@ private struct NoteMediaAssetContentView: View {
                     .resizable()
                     .interpolation(.medium)
                     .aspectRatio(contentMode: scaling.swiftUIContentMode)
-            case .animated(let image):
-                AnimatedUIImageView(
-                    image: image,
+            case .gif(let payload):
+                NoteAnimatedGIFView(
+                    payload: payload,
                     contentMode: scaling.uiKitContentMode
                 )
             }
         }
         .aspectRatio(asset.aspectRatio, contentMode: scaling.swiftUIContentMode)
+        .frame(maxWidth: .infinity, alignment: .center)
+        .clipped()
     }
 }
 
@@ -2928,11 +2952,23 @@ private struct NoteZoomableFullscreenImageView: View {
 
     var body: some View {
         NoteRemoteMediaView(url: url) { asset in
-            NoteZoomableImageView(
-                asset: asset,
-                onZoomStateChange: onZoomStateChange
-            )
-            .padding(16)
+            switch asset {
+            case .still:
+                NoteZoomableImageView(
+                    asset: asset,
+                    onZoomStateChange: onZoomStateChange
+                )
+                .padding(16)
+            case .gif(let payload):
+                NoteAnimatedGIFView(
+                    payload: payload,
+                    contentMode: .scaleAspectFit
+                )
+                .padding(16)
+                .onAppear {
+                    onZoomStateChange(false)
+                }
+            }
         } placeholder: {
             ProgressView()
                 .tint(chromeForegroundColor)
@@ -3141,11 +3177,10 @@ private struct NoteZoomableImageView: UIViewRepresentable {
             imageView.image = nil
 
             switch asset {
-            case .still(let image), .animated(let image):
+            case .still(let image):
                 imageView.image = image
-                if image.images != nil {
-                    imageView.startAnimating()
-                }
+            case .gif(let payload):
+                imageView.image = payload.previewImage
             }
         }
 
@@ -3187,8 +3222,10 @@ private struct NoteZoomableImageView: UIViewRepresentable {
 
         private static func assetIdentifier(for asset: NoteMediaAsset) -> ObjectIdentifier {
             switch asset {
-            case .still(let image), .animated(let image):
+            case .still(let image):
                 return ObjectIdentifier(image)
+            case .gif(let payload):
+                return ObjectIdentifier(payload.previewImage)
             }
         }
     }
@@ -3203,90 +3240,58 @@ private final class LayoutAwareZoomScrollView: UIScrollView {
     }
 }
 
-private struct AnimatedUIImageView: UIViewRepresentable {
-    let image: UIImage
-    let contentMode: UIView.ContentMode
+private struct NoteGIFPayload {
+    let url: URL
+    let data: Data
+    let previewImage: UIImage
+    let frameDurations: [TimeInterval]
 
-    func makeUIView(context: Context) -> UIImageView {
-        let imageView = UIImageView()
-        imageView.backgroundColor = .clear
-        imageView.clipsToBounds = true
-        imageView.isUserInteractionEnabled = false
-        return imageView
+    var frameCount: Int {
+        frameDurations.count
     }
 
-    func updateUIView(_ imageView: UIImageView, context: Context) {
-        imageView.stopAnimating()
-        imageView.contentMode = contentMode
-        imageView.image = image
-        if image.images != nil {
-            imageView.startAnimating()
-        }
+    var size: CGSize {
+        previewImage.size
     }
 
-    static func dismantleUIView(_ imageView: UIImageView, coordinator: ()) {
-        imageView.stopAnimating()
-        imageView.image = nil
-    }
-}
-
-private actor NoteMediaAssetLoader {
-    static let shared = NoteMediaAssetLoader()
-
-    func asset(for url: URL) async -> NoteMediaAsset? {
-        if shouldAttemptAnimatedGIFDecode(for: url),
-           let data = await FlowImageCache.shared.data(for: url),
-           let decoded = UIImage.animatedGIFImage(from: data) {
-            if decoded.images != nil {
-                return .animated(decoded)
-            }
-            return .still(decoded)
-        }
-
-        guard let image = await FlowImageCache.shared.image(for: url) else {
-            return nil
-        }
-        return .still(image)
-    }
-
-    private func shouldAttemptAnimatedGIFDecode(for url: URL) -> Bool {
-        url.pathExtension.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == "gif"
-    }
-}
-
-private extension UIImage {
-    static func animatedGIFImage(from data: Data) -> UIImage? {
+    static func make(from data: Data, url: URL) -> NoteGIFPayload? {
         guard data.starts(with: [0x47, 0x49, 0x46]),
               let source = CGImageSourceCreateWithData(data as CFData, nil) else {
-            return UIImage(data: data)
+            return nil
         }
 
         let frameCount = CGImageSourceGetCount(source)
-        guard frameCount > 1 else {
-            return UIImage(data: data)
+        guard frameCount > 1 else { return nil }
+
+        let previewOptions: [CFString: Any] = [
+            kCGImageSourceCreateThumbnailFromImageAlways: true,
+            kCGImageSourceCreateThumbnailWithTransform: true,
+            kCGImageSourceShouldCacheImmediately: false,
+            kCGImageSourceThumbnailMaxPixelSize: 2_048
+        ]
+
+        guard let previewCGImage = CGImageSourceCreateThumbnailAtIndex(
+            source,
+            0,
+            previewOptions as CFDictionary
+        ) ?? CGImageSourceCreateImageAtIndex(source, 0, nil) else {
+            return nil
         }
 
-        var frames: [UIImage] = []
-        frames.reserveCapacity(frameCount)
-        var totalDuration: TimeInterval = 0
-
-        for index in 0..<frameCount {
-            guard let frame = CGImageSourceCreateImageAtIndex(source, index, nil) else { continue }
-            totalDuration += gifFrameDuration(forFrameAt: index, source: source)
-            frames.append(UIImage(cgImage: frame, scale: UIScreen.main.scale, orientation: .up))
+        let previewImage = UIImage(cgImage: previewCGImage)
+        let frameDurations = (0..<frameCount).map {
+            Self.frameDuration(forFrameAt: $0, source: source)
         }
 
-        guard !frames.isEmpty else {
-            return UIImage(data: data)
-        }
-
-        return UIImage.animatedImage(
-            with: frames,
-            duration: max(totalDuration, Double(frames.count) * 0.1)
+        return NoteGIFPayload(
+            url: url,
+            data: data,
+            previewImage: previewImage,
+            frameDurations: frameDurations
         )
     }
 
-    private static func gifFrameDuration(forFrameAt index: Int, source: CGImageSource) -> TimeInterval {
+    private static func frameDuration(forFrameAt index: Int, source: CGImageSource) -> TimeInterval {
         let defaultDelay = 0.1
         guard let properties = CGImageSourceCopyPropertiesAtIndex(source, index, nil) as? [CFString: Any],
               let gifProperties = properties[kCGImagePropertyGIFDictionary] as? [CFString: Any] else {
@@ -3297,5 +3302,193 @@ private extension UIImage {
         let delay = (gifProperties[kCGImagePropertyGIFDelayTime] as? NSNumber)?.doubleValue
         let frameDelay = unclampedDelay ?? delay ?? defaultDelay
         return frameDelay < 0.02 ? defaultDelay : frameDelay
+    }
+}
+
+private struct NoteAnimatedGIFView: UIViewRepresentable {
+    let payload: NoteGIFPayload
+    let contentMode: UIView.ContentMode
+
+    func makeUIView(context: Context) -> GIFPlayerImageView {
+        let imageView = GIFPlayerImageView()
+        imageView.backgroundColor = .clear
+        imageView.clipsToBounds = true
+        imageView.isUserInteractionEnabled = false
+        return imageView
+    }
+
+    func sizeThatFits(_ proposal: ProposedViewSize, uiView: GIFPlayerImageView, context: Context) -> CGSize? {
+        let aspectRatio = max(payload.size.width / max(payload.size.height, 1), 0.01)
+
+        if let width = proposal.width, let height = proposal.height {
+            return CGSize(width: width, height: height)
+        }
+
+        if let width = proposal.width {
+            return CGSize(width: width, height: width / aspectRatio)
+        }
+
+        if let height = proposal.height {
+            return CGSize(width: height * aspectRatio, height: height)
+        }
+
+        return payload.size
+    }
+
+    func updateUIView(_ imageView: GIFPlayerImageView, context: Context) {
+        imageView.contentMode = contentMode
+        imageView.configure(with: payload)
+    }
+
+    static func dismantleUIView(_ imageView: GIFPlayerImageView, coordinator: ()) {
+        imageView.stopAnimatingGIF()
+        imageView.image = nil
+    }
+}
+
+private final class GIFPlayerImageView: UIImageView {
+    private var payload: NoteGIFPayload?
+    private var source: CGImageSource?
+    private var displayLink: CADisplayLink?
+    private let frameCache = NSCache<NSNumber, UIImage>()
+    private var currentFrameIndex = 0
+    private var accumulatedTime: TimeInterval = 0
+    private var lastTimestamp: CFTimeInterval?
+    private var maxPixelSize: CGFloat = 0
+
+    func configure(with payload: NoteGIFPayload) {
+        if self.payload?.url != payload.url || self.payload?.data != payload.data {
+            self.payload = payload
+            source = CGImageSourceCreateWithData(payload.data as CFData, nil)
+            currentFrameIndex = 0
+            accumulatedTime = 0
+            lastTimestamp = nil
+            frameCache.removeAllObjects()
+            image = payload.previewImage
+        } else if image == nil {
+            image = payload.previewImage
+        }
+
+        updateFrameDecodingScaleIfNeeded()
+        restartIfNeeded()
+    }
+
+    override var intrinsicContentSize: CGSize {
+        .zero
+    }
+
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        updateFrameDecodingScaleIfNeeded()
+    }
+
+    override func didMoveToWindow() {
+        super.didMoveToWindow()
+        restartIfNeeded()
+    }
+
+    func stopAnimatingGIF() {
+        displayLink?.invalidate()
+        displayLink = nil
+        lastTimestamp = nil
+        accumulatedTime = 0
+    }
+
+    private func restartIfNeeded() {
+        guard window != nil,
+              let payload,
+              payload.frameCount > 1 else {
+            stopAnimatingGIF()
+            return
+        }
+
+        if displayLink == nil {
+            let link = CADisplayLink(target: self, selector: #selector(step(_:)))
+            link.add(to: .main, forMode: .common)
+            displayLink = link
+        }
+    }
+
+    private func updateFrameDecodingScaleIfNeeded() {
+        let scale = window?.screen.scale ?? UIScreen.main.scale
+        let candidate = max(bounds.width, bounds.height) * scale
+        let resolved = max(1, min(candidate, 2_048))
+        guard abs(resolved - maxPixelSize) > 1 else { return }
+        maxPixelSize = resolved
+        frameCache.removeAllObjects()
+        if let payload {
+            image = payload.previewImage
+        }
+    }
+
+    @objc
+    private func step(_ displayLink: CADisplayLink) {
+        guard let payload,
+              payload.frameCount > 1 else {
+            stopAnimatingGIF()
+            return
+        }
+
+        if lastTimestamp == nil {
+            lastTimestamp = displayLink.timestamp
+            return
+        }
+
+        let elapsed = displayLink.timestamp - (lastTimestamp ?? displayLink.timestamp)
+        lastTimestamp = displayLink.timestamp
+        accumulatedTime += elapsed
+
+        let frameDuration = payload.frameDurations[currentFrameIndex]
+        guard accumulatedTime >= frameDuration else { return }
+
+        accumulatedTime.formTruncatingRemainder(dividingBy: frameDuration)
+        currentFrameIndex = (currentFrameIndex + 1) % payload.frameCount
+        image = decodedFrame(at: currentFrameIndex) ?? payload.previewImage
+    }
+
+    private func decodedFrame(at index: Int) -> UIImage? {
+        let key = NSNumber(value: index)
+        if let cached = frameCache.object(forKey: key) {
+            return cached
+        }
+
+        guard let source,
+              let cgImage = CGImageSourceCreateThumbnailAtIndex(
+                source,
+                index,
+                [
+                    kCGImageSourceCreateThumbnailFromImageAlways: true,
+                    kCGImageSourceCreateThumbnailWithTransform: true,
+                    kCGImageSourceShouldCacheImmediately: false,
+                    kCGImageSourceThumbnailMaxPixelSize: max(maxPixelSize, 1)
+                ] as CFDictionary
+              ) ?? CGImageSourceCreateImageAtIndex(source, index, nil) else {
+            return nil
+        }
+
+        let image = UIImage(cgImage: cgImage)
+        frameCache.setObject(image, forKey: key)
+        return image
+    }
+}
+
+private actor NoteMediaAssetLoader {
+    static let shared = NoteMediaAssetLoader()
+
+    func asset(for url: URL) async -> NoteMediaAsset? {
+        if isLikelyGIF(url),
+           let data = await FlowImageCache.shared.data(for: url),
+           let payload = NoteGIFPayload.make(from: data, url: url) {
+            return .gif(payload)
+        }
+
+        guard let image = await FlowImageCache.shared.image(for: url) else {
+            return nil
+        }
+        return .still(image)
+    }
+
+    private func isLikelyGIF(_ url: URL) -> Bool {
+        url.pathExtension.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == "gif"
     }
 }

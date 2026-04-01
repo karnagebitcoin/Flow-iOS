@@ -20,7 +20,7 @@ struct MainTabShellView: View {
             switch self {
             case .home: return "house"
             case .search: return "magnifyingglass"
-            case .dms: return "message"
+            case .dms: return "bubble.left"
             case .activity: return "bell"
             }
         }

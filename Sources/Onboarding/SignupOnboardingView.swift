@@ -230,18 +230,12 @@ struct SignupOnboardingView: View {
                             .fixedSize(horizontal: false, vertical: true)
                     }
 
-                    LazyVGrid(
-                        columns: [
-                            GridItem(.flexible(minimum: 72), spacing: 10),
-                            GridItem(.flexible(minimum: 72), spacing: 10),
-                            GridItem(.flexible(minimum: 72), spacing: 10)
-                        ],
-                        spacing: 10
-                    ) {
+                    HStack(spacing: 10) {
                         ForEach(PrimaryColorOption.allCases) { option in
                             primaryColorChip(for: option)
                         }
                     }
+                    .frame(maxWidth: .infinity)
                 }
             }
         }
@@ -502,7 +496,7 @@ struct SignupOnboardingView: View {
             .padding(.vertical, 7)
             .background(
                 Capsule(style: .continuous)
-                    .fill(isSelected ? onboardingChipSelectedFill : Color(.secondarySystemBackground))
+                    .fill(isSelected ? onboardingChipSelectedFill : onboardingChipFill)
             )
             .overlay(
                 Capsule(style: .continuous)
@@ -521,15 +515,23 @@ struct SignupOnboardingView: View {
         return Button {
             selectedPrimaryColorOption = option
         } label: {
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
+            Circle()
                 .fill(option.color)
-                .frame(height: 72)
-                .overlay(alignment: .topTrailing) {
+                .frame(width: 44, height: 44)
+                .overlay {
+                    Circle()
+                        .stroke(
+                            isSelected ? Color.white.opacity(0.95) : Color.white.opacity(0.22),
+                            lineWidth: isSelected ? 2.5 : 1
+                        )
+                }
+                .overlay(alignment: .bottomTrailing) {
                     if isSelected {
                         Image(systemName: "checkmark.circle.fill")
-                            .font(.title3.weight(.semibold))
-                            .foregroundStyle(Color.white)
-                            .padding(8)
+                            .font(.footnote.weight(.bold))
+                            .foregroundStyle(Color.white, option.color.opacity(0.95))
+                            .background(Circle().fill(Color.white))
+                            .offset(x: 2, y: 2)
                     }
                 }
                 .shadow(
@@ -537,13 +539,6 @@ struct SignupOnboardingView: View {
                     radius: isSelected ? 10 : 6,
                     y: 4
                 )
-            .overlay {
-                RoundedRectangle(cornerRadius: 16, style: .continuous)
-                    .stroke(
-                        isSelected ? Color.white.opacity(0.95) : Color.white.opacity(0.22),
-                        lineWidth: isSelected ? 2.5 : 1
-                    )
-            }
         }
         .buttonStyle(.plain)
         .accessibilityLabel(option.title)
@@ -658,8 +653,12 @@ struct SignupOnboardingView: View {
         colorScheme == .dark ? .white : onboardingInk
     }
 
+    private var onboardingChipFill: Color {
+        colorScheme == .dark ? Color(.secondarySystemBackground) : Color(.systemGray6)
+    }
+
     private var onboardingChipSelectedFill: Color {
-        Color.white.opacity(0.96)
+        colorScheme == .dark ? Color.white.opacity(0.96) : Color(.systemGray4)
     }
 
     private var onboardingChipSelectedForeground: Color {
@@ -667,7 +666,7 @@ struct SignupOnboardingView: View {
     }
 
     private var onboardingChipSelectedStroke: Color {
-        Color.white.opacity(0.32)
+        colorScheme == .dark ? Color.white.opacity(0.32) : Color(.systemGray3)
     }
 
     private var normalizedDisplayName: String {

@@ -2,6 +2,27 @@ import XCTest
 @testable import Flow
 
 final class NostrRelayClientTests: XCTestCase {
+    func testFetchEventsRejectsNonWebSocketURL() async {
+        let client = NostrRelayClient(session: .shared)
+        let filter = NostrFilter(limit: 1)
+
+        do {
+            _ = try await client.fetchEvents(
+                relayURL: URL(string: "https://example.com")!,
+                filter: filter,
+                timeout: 0.01
+            )
+            XCTFail("Expected invalid relay URL error")
+        } catch let error as RelayClientError {
+            guard case .invalidRelayURL(let value) = error else {
+                return XCTFail("Unexpected relay client error: \(error)")
+            }
+            XCTAssertEqual(value, "https://example.com")
+        } catch {
+            XCTFail("Unexpected error: \(error)")
+        }
+    }
+
     func testPublishEventToSourcesPublishesConcurrently() async {
         let firstSource = URL(string: "wss://source-one.example.com")!
         let secondSource = URL(string: "wss://source-two.example.com")!

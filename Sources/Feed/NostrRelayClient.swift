@@ -67,7 +67,7 @@ final class NostrRelayClient: @unchecked Sendable {
         filter: NostrFilter,
         timeout: TimeInterval = 12
     ) async throws -> [NostrEvent] {
-        let socket = session.webSocketTask(with: relayURL)
+        let socket = session.webSocketTask(with: try validatedWebSocketRelayURL(relayURL))
         socket.resume()
 
         let subscriptionID = UUID().uuidString
@@ -127,7 +127,7 @@ final class NostrRelayClient: @unchecked Sendable {
         eventID: String,
         timeout: TimeInterval = 10
     ) async throws {
-        let socket = session.webSocketTask(with: relayURL)
+        let socket = session.webSocketTask(with: try validatedWebSocketRelayURL(relayURL))
         socket.resume()
 
         let request = try serializeJSONArray(["EVENT", eventObject])
@@ -226,6 +226,16 @@ final class NostrRelayClient: @unchecked Sendable {
             group.cancelAll()
             return value
         }
+    }
+
+    private func validatedWebSocketRelayURL(_ relayURL: URL) throws -> URL {
+        guard let scheme = relayURL.scheme?.lowercased(),
+              scheme == "ws" || scheme == "wss",
+              let host = relayURL.host,
+              !host.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            throw RelayClientError.invalidRelayURL(relayURL.absoluteString)
+        }
+        return relayURL
     }
 
     private func serializeJSONArray(_ value: [Any]) throws -> String {

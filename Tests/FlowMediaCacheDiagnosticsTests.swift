@@ -122,6 +122,25 @@ final class FlowMediaCacheDiagnosticsTests: XCTestCase {
         XCTAssertEqual(snapshotAfterTrackedLoad.cacheHitRate, 1.0, accuracy: 0.0001)
     }
 
+    func testGIFURLsDecodeToStaticImages() async {
+        let rootDirectoryURL = makeTemporaryDirectory()
+        let urlCache = makeURLCache()
+        let data = makeGIFData()
+        let cache = FlowImageCache(
+            rootDirectoryURL: rootDirectoryURL,
+            urlCache: urlCache,
+            fetchImageData: { _ in data }
+        )
+        let url = URL(string: "https://example.com/animated.gif")!
+
+        let image = await cache.image(for: url)
+
+        XCTAssertNotNil(image)
+        XCTAssertNil(image?.images)
+        XCTAssertGreaterThan(image?.size.width ?? 0, 0)
+        XCTAssertGreaterThan(image?.size.height ?? 0, 0)
+    }
+
     func testResetDiagnosticsClearsSessionMetrics() async {
         let rootDirectoryURL = makeTemporaryDirectory()
         let urlCache = makeURLCache()
@@ -164,5 +183,11 @@ final class FlowMediaCacheDiagnosticsTests: XCTestCase {
         Data(
             base64Encoded: "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAAAXNSR0IArs4c6QAAAERlWElmTU0AKgAAAAgAAYdpAAQAAAABAAAAGgAAAAAAA6ABAAMAAAABAAEAAKACAAQAAAABAAAAAaADAAQAAAABAAAAAQAAAAD5Ip3+AAAADElEQVQIHWNg+P8fAAMBAf8kN8l+AAAAAElFTkSuQmCC"
         ) ?? Data([0x89, 0x50, 0x4E, 0x47])
+    }
+
+    private func makeGIFData() -> Data {
+        Data(
+            base64Encoded: "R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw=="
+        ) ?? Data([0x47, 0x49, 0x46])
     }
 }

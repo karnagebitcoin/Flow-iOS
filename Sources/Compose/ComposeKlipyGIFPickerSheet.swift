@@ -212,9 +212,6 @@ struct ComposeKlipyGIFPickerSheet: View {
                     }
                 }
             }
-            .safeAreaInset(edge: .bottom) {
-                footer
-            }
         }
         .presentationDetents([.large])
         .presentationDragIndicator(.visible)
@@ -230,7 +227,7 @@ struct ComposeKlipyGIFPickerSheet: View {
                 .font(.system(size: 15, weight: .medium))
                 .foregroundStyle(.secondary)
 
-            TextField("Search KLIPY", text: $viewModel.searchText)
+            TextField("Search", text: $viewModel.searchText)
                 .textInputAutocapitalization(.never)
                 .autocorrectionDisabled()
                 .submitLabel(.search)
@@ -333,6 +330,7 @@ struct ComposeKlipyGIFPickerSheet: View {
                 }
             }
             .scrollIndicators(.hidden)
+            .safeAreaPadding(.bottom, 16)
         }
     }
 
@@ -355,18 +353,6 @@ struct ComposeKlipyGIFPickerSheet: View {
                 .stroke(appSettings.themePalette.separator.opacity(0.28), lineWidth: 0.8)
         )
     }
-
-    private var footer: some View {
-        HStack {
-            Spacer(minLength: 0)
-            Text("Powered by KLIPY")
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(.secondary)
-            Spacer(minLength: 0)
-        }
-        .padding(.vertical, 12)
-        .background(appSettings.themePalette.groupedBackground)
-    }
 }
 
 private struct KlipyGIFGridTile: View {
@@ -386,6 +372,7 @@ private struct KlipyGIFGridTile: View {
                         image
                             .resizable()
                             .scaledToFill()
+                            .frame(maxWidth: .infinity, maxHeight: .infinity)
                     case .failure:
                         fallbackTile
                     case .empty:
@@ -414,6 +401,7 @@ private struct KlipyGIFGridTile: View {
                     .foregroundStyle(.white)
                     .lineLimit(2)
                     .multilineTextAlignment(.leading)
+                    .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(10)
             }
         }
