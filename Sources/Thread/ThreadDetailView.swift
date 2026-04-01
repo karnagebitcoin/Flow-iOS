@@ -1,10 +1,12 @@
 import SwiftUI
+import UIKit
 
 struct ThreadDetailView: View {
     @Environment(\.colorScheme) private var colorScheme
     @EnvironmentObject private var auth: AuthManager
     @EnvironmentObject private var appSettings: AppSettingsStore
     @EnvironmentObject private var relaySettings: RelaySettingsStore
+    @EnvironmentObject private var toastCenter: AppToastCenter
     @StateObject private var viewModel: ThreadDetailViewModel
     @ObservedObject private var reactionStats = NoteReactionStatsService.shared
     @ObservedObject private var followStore = FollowStore.shared
@@ -23,9 +25,13 @@ struct ThreadDetailView: View {
     @State private var isPublishingRepost = false
     @State private var repostStatusMessage: String?
     @State private var repostStatusIsError = false
+    @State private var isShowingRootNoteOptionsSheet = false
+    @State private var isShowingRootReportSheet = false
+    @State private var isShowingRootTranslation = false
 
     private let reactionPublishService: NoteReactionPublishService
     private let reshareService: ResharePublishService
+    private let reportPublishService: NoteReportPublishService
     private let initialReplyScrollTargetID: String?
     private let initiallyFocusReplyComposer: Bool
 
@@ -37,7 +43,8 @@ struct ThreadDetailView: View {
         initiallyFocusReplyComposer: Bool = false,
         service: NostrFeedService = NostrFeedService(),
         reactionPublishService: NoteReactionPublishService = NoteReactionPublishService(),
-        reshareService: ResharePublishService = ResharePublishService()
+        reshareService: ResharePublishService = ResharePublishService(),
+        reportPublishService: NoteReportPublishService = NoteReportPublishService()
     ) {
         _viewModel = StateObject(
             wrappedValue: ThreadDetailViewModel(
@@ -49,6 +56,7 @@ struct ThreadDetailView: View {
         )
         self.reactionPublishService = reactionPublishService
         self.reshareService = reshareService
+        self.reportPublishService = reportPublishService
         self.initialReplyScrollTargetID = initialReplyScrollTargetID?
             .trimmingCharacters(in: .whitespacesAndNewlines)
             .lowercased()
@@ -157,6 +165,34 @@ struct ThreadDetailView: View {
                 }
             )
         }
+        .sheet(isPresented: $isShowingRootNoteOptionsSheet) {
+            NoteOptionsBottomSheetView(
+                onCopyLink: {
+                    UIPasteboard.general.string = rootNoteShareLink
+                },
+                showsTranslateAction: rootCanTranslateNote,
+                onTranslate: rootCanTranslateNote ? {
+                    presentRootTranslation()
+                } : nil,
+                onMute: {
+                    handleRootMuteAuthor()
+                },
+                onReport: {
+                    presentRootReportFlow()
+                }
+            )
+            .presentationDetents([.height(rootCanTranslateNote ? 435 : 380), .medium])
+            .presentationDragIndicator(.visible)
+        }
+        .sheet(isPresented: $isShowingRootReportSheet) {
+            NoteReportSheetView(noteAuthorName: viewModel.rootItem.displayName) { type, details in
+                try await submitRootReport(type: type, details: details)
+            }
+        }
+        .noteTranslationPresentation(
+            isPresented: $isShowingRootTranslation,
+            text: rootNoteTranslationText
+        )
         .safeAreaInset(edge: .bottom) {
             replyDockBar
         }
@@ -298,6 +334,8 @@ struct ThreadDetailView: View {
                             .font(.subheadline)
                             .foregroundStyle(.secondary)
                             .lineLimit(1)
+
+                        rootNoteOptionsButton
                     }
 
                     if let rootNip05Label {
@@ -308,9 +346,6 @@ struct ThreadDetailView: View {
                     }
                 }
 
-                Spacer(minLength: 8)
-
-                rootFollowButton
             }
 
             if hideNSFWEnabled && viewModel.rootItem.moderationEvents.contains(where: { $0.containsNSFWHashtag }) {
@@ -419,6 +454,20 @@ struct ThreadDetailView: View {
         }
     }
 
+    private var rootNoteOptionsButton: some View {
+        Button {
+            isShowingRootNoteOptionsSheet = true
+        } label: {
+            Image(systemName: "ellipsis")
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(appSettings.themePalette.mutedForeground)
+                .frame(width: 28, height: 28)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Note options")
+    }
+
     private var replyDockBar: some View {
         Button {
             presentReplyComposer(for: viewModel.rootItem.canonicalDisplayItem)
@@ -453,49 +502,6 @@ struct ThreadDetailView: View {
         .padding(.horizontal, 16)
         .padding(.top, 8)
         .padding(.bottom, 6)
-    }
-
-    private var rootFollowButton: some View {
-        Group {
-            if isRootOwnedByCurrentAccount {
-                Text("You")
-                    .font(.footnote.weight(.semibold))
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 6)
-                    .background(appSettings.themePalette.secondaryFill)
-                    .clipShape(Capsule())
-            } else {
-                let isFollowing = followStore.isFollowing(viewModel.rootItem.displayAuthorPubkey)
-
-                Button(isFollowing ? "Following" : "Follow") {
-                    followStore.toggleFollow(viewModel.rootItem.displayAuthorPubkey)
-                }
-                .font(.footnote.weight(.semibold))
-                .foregroundStyle(
-                    isFollowing
-                        ? Color.secondary
-                        : Color.white
-                )
-                .padding(.horizontal, 12)
-                .padding(.vertical, 7)
-                .background(
-                    isFollowing
-                        ? appSettings.themePalette.secondaryFill
-                        : Color.accentColor,
-                    in: Capsule()
-                )
-                .overlay {
-                    Capsule()
-                        .stroke(
-                            isFollowing
-                                ? appSettings.themePalette.separator.opacity(0.45)
-                                : Color.accentColor.opacity(0.85),
-                            lineWidth: 0.9
-                        )
-                }
-                .buttonStyle(.plain)
-            }
-        }
     }
 
     private var repliesSection: some View {
@@ -681,6 +687,65 @@ struct ThreadDetailView: View {
             return nil
         }
         return nip05
+    }
+
+    private var rootNoteTranslationText: String {
+        viewModel.rootItem.displayEvent.content.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private var rootCanTranslateNote: Bool {
+        guard !rootNoteTranslationText.isEmpty else { return false }
+        #if canImport(Translation)
+        if #available(iOS 18.0, *) {
+            return true
+        }
+        #endif
+        return false
+    }
+
+    private func presentRootTranslation() {
+        guard rootCanTranslateNote else { return }
+        Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 180_000_000)
+            guard !Task.isCancelled else { return }
+            isShowingRootTranslation = true
+        }
+    }
+
+    private func handleRootMuteAuthor() {
+        let wasMuted = muteStore.isMuted(viewModel.rootItem.displayAuthorPubkey)
+        muteStore.toggleMute(viewModel.rootItem.displayAuthorPubkey)
+        let isMuted = muteStore.isMuted(viewModel.rootItem.displayAuthorPubkey)
+
+        if !wasMuted && isMuted {
+            toastCenter.show("Muted \(viewModel.rootItem.displayName)")
+        } else if wasMuted && !isMuted {
+            toastCenter.show("Unmuted \(viewModel.rootItem.displayName)", style: .info)
+        } else if let errorMessage = muteStore.lastPublishError,
+                  !errorMessage.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            toastCenter.show(errorMessage, style: .error, duration: 2.8)
+        }
+    }
+
+    private func presentRootReportFlow() {
+        Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 180_000_000)
+            guard !Task.isCancelled else { return }
+            isShowingRootReportSheet = true
+        }
+    }
+
+    private func submitRootReport(type: NoteReportType, details: String) async throws {
+        try await reportPublishService.publishReport(
+            for: viewModel.rootItem.displayEvent,
+            type: type,
+            details: details,
+            currentNsec: auth.currentNsec,
+            writeRelayURLs: effectiveWriteRelayURLs
+        )
+        await MainActor.run {
+            toastCenter.show("Report sent")
+        }
     }
 
     @MainActor

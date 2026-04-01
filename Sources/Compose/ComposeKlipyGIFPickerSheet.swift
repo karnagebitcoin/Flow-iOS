@@ -312,8 +312,11 @@ struct ComposeKlipyGIFPickerSheet: View {
                             dismiss()
                         } label: {
                             KlipyGIFGridTile(item: item)
+                                .frame(maxWidth: .infinity)
+                                .aspectRatio(KlipyGIFGridTile.tileAspectRatio, contentMode: .fit)
                         }
                         .buttonStyle(.plain)
+                        .frame(maxWidth: .infinity)
                         .disabled(viewModel.selection(for: item) == nil)
                         .onAppear {
                             viewModel.loadMoreIfNeeded(currentItem: item)
@@ -358,6 +361,8 @@ struct ComposeKlipyGIFPickerSheet: View {
 private struct KlipyGIFGridTile: View {
     @EnvironmentObject private var appSettings: AppSettingsStore
 
+    static let tileAspectRatio: CGFloat = 1.08
+
     let item: KlipyGIFItem
 
     var body: some View {
@@ -373,6 +378,7 @@ private struct KlipyGIFGridTile: View {
                             .resizable()
                             .scaledToFill()
                             .frame(maxWidth: .infinity, maxHeight: .infinity)
+                            .clipped()
                     case .failure:
                         fallbackTile
                     case .empty:
@@ -394,6 +400,7 @@ private struct KlipyGIFGridTile: View {
                 startPoint: .top,
                 endPoint: .bottom
             )
+            .allowsHitTesting(false)
 
             if !item.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 Text(item.title)
@@ -405,7 +412,7 @@ private struct KlipyGIFGridTile: View {
                     .padding(10)
             }
         }
-        .frame(height: 154)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
         .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
         .overlay(
             RoundedRectangle(cornerRadius: 18, style: .continuous)

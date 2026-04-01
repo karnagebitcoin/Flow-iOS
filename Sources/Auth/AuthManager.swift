@@ -6,6 +6,7 @@ enum AuthManagerError: LocalizedError {
     case invalidNpub
     case keyGenerationFailed
     case iCloudBackupUnavailable
+    case storedPrivateKeyMismatch
 
     var errorDescription: String? {
         switch self {
@@ -17,6 +18,8 @@ enum AuthManagerError: LocalizedError {
             return "Could not generate a new keypair right now."
         case .iCloudBackupUnavailable:
             return "We couldn’t find that iCloud-backed private key on this device yet."
+        case .storedPrivateKeyMismatch:
+            return "The stored private key didn’t match this account."
         }
     }
 }
@@ -25,16 +28,20 @@ enum AuthManagerError: LocalizedError {
 final class AuthManager: ObservableObject {
     @Published private(set) var accounts: [AuthAccount] = []
     @Published private(set) var currentAccount: AuthAccount?
+    @Published private(set) var accountsNeedingSecureStorageRepair = Set<String>()
 
     private let store: AuthStore
     private var storedAccounts: [StoredAuthAccount] = []
     private var currentAccountID: String?
+    private var transientPrivateKeysByAccountID: [String: String] = [:]
 
     init(store: AuthStore = .shared) {
         self.store = store
         let loaded = store.load()
         storedAccounts = loaded.accounts
         currentAccountID = loaded.currentAccountID
+        transientPrivateKeysByAccountID = loaded.transientPrivateKeysByAccountID
+        accountsNeedingSecureStorageRepair = loaded.accountsNeedingSecureStorageRepair
         syncPublishedState()
     }
 
@@ -44,8 +51,10 @@ final class AuthManager: ObservableObject {
 
     var currentNsec: String? {
         guard let currentAccountID else { return nil }
-        return store.privateKey(for: currentAccountID)
-            ?? storedAccounts.first(where: { $0.id == currentAccountID })?.nsec
+        return validatedPrivateKey(
+            for: currentAccountID,
+            expectedPubkey: currentAccount?.pubkey
+        )
     }
 
     var currentPrivateKeyMetadata: AuthPrivateKeyMetadata? {
@@ -55,6 +64,21 @@ final class AuthManager: ObservableObject {
 
     func privateKeyMetadata(for account: AuthAccount) -> AuthPrivateKeyMetadata? {
         store.privateKeyMetadata(for: account.id)
+    }
+
+    func privateKeyNeedsSecureStorageRepair(for account: AuthAccount) -> Bool {
+        accountsNeedingSecureStorageRepair.contains(account.id)
+    }
+
+    var currentPrivateKeySecurityWarning: String? {
+        guard let currentAccount else { return nil }
+        guard privateKeyNeedsSecureStorageRepair(for: currentAccount) else { return nil }
+
+        if validatedPrivateKey(for: currentAccount.id, expectedPubkey: currentAccount.pubkey) != nil {
+            return "This private key is only available for this app session because secure storage failed previously. Sign in again with the key to save it securely."
+        }
+
+        return "This account’s private key is no longer stored securely on this device. Sign in again with the key to restore posting access."
     }
 
     func iCloudRestoreCandidates() -> [AuthICloudRestoreCandidate] {
@@ -154,8 +178,12 @@ final class AuthManager: ObservableObject {
 
     @discardableResult
     func restoreFromICloud(_ candidate: AuthICloudRestoreCandidate) throws -> AuthAccount {
-        guard store.privateKey(for: candidate.accountID) != nil else {
+        guard let privateKey = store.privateKey(for: candidate.accountID) else {
             throw AuthManagerError.iCloudBackupUnavailable
+        }
+        guard Keypair(nsec: privateKey.trimmingCharacters(in: .whitespacesAndNewlines).lowercased())?.publicKey.hex.lowercased()
+                == candidate.pubkey.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() else {
+            throw AuthManagerError.storedPrivateKeyMismatch
         }
 
         let stored = StoredAuthAccount(
@@ -189,6 +217,8 @@ final class AuthManager: ObservableObject {
 
     func removeAccount(_ account: AuthAccount) {
         storedAccounts.removeAll { $0.id == account.id }
+        transientPrivateKeysByAccountID.removeValue(forKey: account.id)
+        accountsNeedingSecureStorageRepair.remove(account.id)
         store.removePrivateKey(for: account.id)
 
         if currentAccountID == account.id {
@@ -201,12 +231,15 @@ final class AuthManager: ObservableObject {
         guard account.signerType == .nsec else { return }
         guard let index = storedAccounts.firstIndex(where: { $0.id == account.id }) else { return }
 
-        let privateKey = store.privateKey(for: account.id) ?? storedAccounts[index].nsec
+        let privateKey = validatedPrivateKey(for: account.id, expectedPubkey: account.pubkey)
         guard let privateKey else {
             throw AuthPrivateKeyStoreError.missingPrivateKey
         }
 
         try store.savePrivateKey(privateKey, for: account.id, backupToICloud: enabled)
+        transientPrivateKeysByAccountID.removeValue(forKey: account.id)
+        accountsNeedingSecureStorageRepair.remove(account.id)
+        store.setPrivateKeyNeedsSecureStorageRepair(false, for: account.id)
         storedAccounts[index] = StoredAuthAccount(
             pubkey: storedAccounts[index].pubkey,
             npub: storedAccounts[index].npub,
@@ -243,6 +276,9 @@ final class AuthManager: ObservableObject {
                 for: account.id,
                 backupToICloud: resolvedBackupSetting
             )
+            transientPrivateKeysByAccountID.removeValue(forKey: account.id)
+            accountsNeedingSecureStorageRepair.remove(account.id)
+            store.setPrivateKeyNeedsSecureStorageRepair(false, for: account.id)
         }
 
         let persistedAccount = StoredAuthAccount(
@@ -269,8 +305,32 @@ final class AuthManager: ObservableObject {
     }
 
     private func persistAndPublish() {
-        store.save(accounts: storedAccounts, currentAccountID: currentAccountID)
+        store.save(
+            accounts: storedAccounts,
+            currentAccountID: currentAccountID,
+            accountsNeedingSecureStorageRepair: accountsNeedingSecureStorageRepair
+        )
         syncPublishedState()
+    }
+
+    private func validatedPrivateKey(for accountID: String, expectedPubkey: String?) -> String? {
+        let privateKey = store.privateKey(for: accountID) ?? transientPrivateKeysByAccountID[accountID]
+        guard let privateKey else { return nil }
+
+        guard let keypair = Keypair(nsec: privateKey.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()) else {
+            return nil
+        }
+
+        guard let expectedPubkey else {
+            return privateKey
+        }
+
+        let normalizedExpected = expectedPubkey.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard keypair.publicKey.hex.lowercased() == normalizedExpected else {
+            return nil
+        }
+
+        return privateKey
     }
 
     private func syncPublishedState() {

@@ -41,9 +41,11 @@ struct FeedRowView: View {
     @State private var repostStatusMessage: String?
     @State private var repostStatusIsError = false
     @State private var isShowingNoteOptionsSheet = false
+    @State private var isShowingReportSheet = false
     @State private var isShowingTranslation = false
     private let reshareService = ResharePublishService()
     private let reactionPublishService = NoteReactionPublishService()
+    private let reportPublishService = NoteReportPublishService()
 
     private struct ReplyContextPresentation {
         let parentItem: FeedItem
@@ -216,10 +218,18 @@ struct FeedRowView: View {
                 } : nil,
                 onMute: {
                     handleMuteAuthor()
+                },
+                onReport: {
+                    presentReportFlow()
                 }
             )
-            .presentationDetents([.height(canTranslateNote ? 390 : 335), .medium])
+            .presentationDetents([.height(canTranslateNote ? 435 : 380), .medium])
             .presentationDragIndicator(.visible)
+        }
+        .sheet(isPresented: $isShowingReportSheet) {
+            NoteReportSheetView(noteAuthorName: item.displayName) { type, details in
+                try await submitReport(type: type, details: details)
+            }
         }
         .sheet(item: $quoteDraft) { draft in
             ComposeNoteSheet(
@@ -362,7 +372,14 @@ struct FeedRowView: View {
     }
 
     private var shouldShowReplyContext: Bool {
-        item.displayEvent.isReplyNote && replyContextPresentation != nil
+        guard item.displayEvent.isReplyNote, replyContextPresentation != nil else { return false }
+
+        guard let suppressedTargetID = normalizedEventID(suppressReplyContextForDirectReplyTargetEventID) else {
+            return true
+        }
+
+        let directReplyTargetID = normalizedEventID(item.displayEvent.directReplyEventReferenceID)
+        return directReplyTargetID != suppressedTargetID
     }
 
     private var replyContextPresentation: ReplyContextPresentation? {
@@ -627,15 +644,37 @@ struct FeedRowView: View {
             toastCenter.show(errorMessage, style: .error, duration: 2.8)
         }
     }
+
+    private func presentReportFlow() {
+        Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 180_000_000)
+            guard !Task.isCancelled else { return }
+            isShowingReportSheet = true
+        }
+    }
+
+    private func submitReport(type: NoteReportType, details: String) async throws {
+        try await reportPublishService.publishReport(
+            for: item.displayEvent,
+            type: type,
+            details: details,
+            currentNsec: auth.currentNsec,
+            writeRelayURLs: effectiveWriteRelayURLs
+        )
+        await MainActor.run {
+            toastCenter.show("Report sent")
+        }
+    }
 }
 
-private struct NoteOptionsBottomSheetView: View {
+struct NoteOptionsBottomSheetView: View {
     @Environment(\.dismiss) private var dismiss
 
     let onCopyLink: () -> Void
     let showsTranslateAction: Bool
     let onTranslate: (() -> Void)?
     let onMute: () -> Void
+    let onReport: () -> Void
 
     var body: some View {
         VStack(spacing: 12) {
@@ -694,9 +733,11 @@ private struct NoteOptionsBottomSheetView: View {
                 optionRow(
                     title: "Report",
                     icon: "exclamationmark.bubble",
-                    isEnabled: false,
+                    isEnabled: true,
                     tint: .red
-                )
+                ) {
+                    onReport()
+                }
             }
             .background(
                 RoundedRectangle(cornerRadius: 18, style: .continuous)
@@ -745,7 +786,7 @@ private struct NoteOptionsBottomSheetView: View {
     }
 }
 
-private extension View {
+extension View {
     @ViewBuilder
     func noteTranslationPresentation(
         isPresented: Binding<Bool>,

@@ -1,6 +1,14 @@
 import Foundation
 import Security
 
+protocol AuthPrivateKeyStoring: Sendable {
+    func privateKey(for accountID: String) -> String?
+    func privateKeyMetadata(for accountID: String) -> AuthPrivateKeyMetadata?
+    func savePrivateKey(_ nsec: String, for accountID: String, backupToICloud: Bool) throws
+    func iCloudPrivateKeyBackups() -> [AuthICloudPrivateKeyBackup]
+    func removePrivateKey(for accountID: String)
+}
+
 enum AuthPrivateKeyStoreError: LocalizedError {
     case encodingFailed
     case missingPrivateKey
@@ -221,3 +229,5 @@ final class AuthPrivateKeyStore: @unchecked Sendable {
         return lhsDate > rhsDate ? lhs : rhs
     }
 }
+
+extension AuthPrivateKeyStore: AuthPrivateKeyStoring {}

@@ -3,8 +3,11 @@ import UIKit
 
 struct KeysView: View {
     @EnvironmentObject private var auth: AuthManager
+    @Environment(\.scenePhase) private var scenePhase
     @State private var isPrivateKeyRevealed = false
     @State private var backupErrorMessage: String?
+    @State private var privateKeyAccessError: String?
+    @State private var isAuthenticatingPrivateKey = false
 
     var body: some View {
         Form {
@@ -17,6 +20,12 @@ struct KeysView: View {
         .onChange(of: auth.currentAccount?.id) { _, _ in
             isPrivateKeyRevealed = false
             backupErrorMessage = nil
+            privateKeyAccessError = nil
+        }
+        .onChange(of: scenePhase) { _, newPhase in
+            guard newPhase == .background else { return }
+            isPrivateKeyRevealed = false
+            privateKeyAccessError = nil
         }
     }
 
@@ -42,7 +51,7 @@ struct KeysView: View {
     private var privateKeySection: some View {
         Section("Private Key") {
             if let privateKey = auth.currentNsec {
-                Toggle("Reveal Private Key", isOn: $isPrivateKeyRevealed)
+                privateKeyRevealControl
 
                 if isPrivateKeyRevealed {
                     keyValueRow(
@@ -56,14 +65,35 @@ struct KeysView: View {
                 } else {
                     maskedPrivateKeyPlaceholder
                 }
+
+                if let warning = auth.currentPrivateKeySecurityWarning {
+                    Text(warning)
+                        .font(.footnote)
+                        .foregroundStyle(.orange)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+
+                if let privateKeyAccessError {
+                    Text(privateKeyAccessError)
+                        .font(.footnote)
+                        .foregroundStyle(.red)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
             } else {
-                Toggle("Reveal Private Key", isOn: .constant(false))
+                privateKeyRevealControl
                     .disabled(true)
 
-                Text("This account was created with a public key only, so there is no private key to reveal or copy.")
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
+                if let warning = auth.currentPrivateKeySecurityWarning {
+                    Text(warning)
+                        .font(.footnote)
+                        .foregroundStyle(.orange)
+                        .fixedSize(horizontal: false, vertical: true)
+                } else {
+                    Text("This account was created with a public key only, so there is no private key to reveal or copy.")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
             }
         }
     }
@@ -108,6 +138,34 @@ struct KeysView: View {
                 .fixedSize(horizontal: false, vertical: true)
         }
         .padding(.vertical, 2)
+    }
+
+    private var privateKeyRevealControl: some View {
+        Button {
+            if isPrivateKeyRevealed {
+                isPrivateKeyRevealed = false
+                privateKeyAccessError = nil
+            } else {
+                requestPrivateKeyReveal()
+            }
+        } label: {
+            HStack(spacing: 12) {
+                if isAuthenticatingPrivateKey {
+                    ProgressView()
+                        .controlSize(.small)
+                } else {
+                    Image(systemName: isPrivateKeyRevealed ? "eye.slash" : "eye")
+                        .foregroundStyle(.secondary)
+                }
+
+                Text(isPrivateKeyRevealed ? "Hide Private Key" : "Reveal Private Key")
+                    .foregroundStyle(.primary)
+
+                Spacer()
+            }
+        }
+        .buttonStyle(.plain)
+        .disabled(isAuthenticatingPrivateKey)
     }
 
     private func privateKeyBackupStatusCard(for account: AuthAccount) -> some View {
@@ -217,5 +275,28 @@ struct KeysView: View {
                 }
             }
         )
+    }
+
+    private func requestPrivateKeyReveal() {
+        guard !isAuthenticatingPrivateKey else { return }
+
+        Task { @MainActor in
+            isAuthenticatingPrivateKey = true
+            privateKeyAccessError = nil
+            defer { isAuthenticatingPrivateKey = false }
+
+            do {
+                try await DeviceOwnerAuthenticationGate.authenticate(
+                    reason: "Reveal your private key in Flow."
+                )
+                isPrivateKeyRevealed = true
+            } catch {
+                isPrivateKeyRevealed = false
+                let message = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+                if message != "Authentication was cancelled." {
+                    privateKeyAccessError = message
+                }
+            }
+        }
     }
 }
