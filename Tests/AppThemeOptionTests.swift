@@ -40,6 +40,53 @@ final class AppThemeOptionTests: XCTestCase {
     }
 
     @MainActor
+    func testDraculaRequiresFlowPlusAndUsesDarkMode() {
+        XCTAssertTrue(AppThemeOption.dracula.requiresFlowPlus)
+        XCTAssertEqual(AppThemeOption.dracula.preferredColorScheme, .dark)
+        XCTAssertNotNil(AppThemeOption.dracula.fixedPrimaryGradient)
+        XCTAssertNil(AppThemeOption.dracula.qrShareBackgroundResourceName)
+        assertColor(
+            try! XCTUnwrap(AppThemeOption.dracula.fixedPrimaryColor),
+            matches: UIColor(red: 0.773, green: 0.565, blue: 1.0, alpha: 1)
+        )
+        assertColor(
+            AppThemeOption.dracula.palette.background,
+            matches: UIColor(red: 0.157, green: 0.165, blue: 0.212, alpha: 1)
+        )
+        assertColor(
+            AppThemeOption.dracula.palette.chromeBackground,
+            matches: UIColor(red: 0.129, green: 0.133, blue: 0.173, alpha: 1)
+        )
+        assertColor(
+            AppThemeOption.dracula.palette.secondaryBackground,
+            matches: UIColor(red: 0.204, green: 0.216, blue: 0.275, alpha: 1)
+        )
+        assertColor(
+            AppThemeOption.dracula.palette.chromeBorder,
+            matches: UIColor(white: 1, alpha: 0.07)
+        )
+        assertColor(
+            AppThemeOption.dracula.palette.separator,
+            matches: UIColor(white: 1, alpha: 0.07)
+        )
+        assertColor(
+            AppThemeOption.dracula.palette.mutedForeground,
+            matches: UIColor(red: 0.537, green: 0.549, blue: 0.675, alpha: 1)
+        )
+        XCTAssertNotNil(AppThemeOption.dracula.palette.capsuleTabStyle)
+        XCTAssertNotNil(AppThemeOption.dracula.palette.profileActionStyle)
+        XCTAssertNotNil(AppThemeOption.dracula.palette.pollStyle)
+        assertColor(
+            AppThemeOption.dracula.palette.pollStyle!.optionWinningBackground,
+            matches: UIColor(red: 0.773, green: 0.565, blue: 1.0, alpha: 0.22)
+        )
+        assertColor(
+            AppThemeOption.dracula.palette.pollStyle!.optionWinningBorder,
+            matches: UIColor(red: 0.773, green: 0.565, blue: 1.0, alpha: 0.60)
+        )
+    }
+
+    @MainActor
     func testComingSoonThemesRemainDisabled() {
         XCTAssertFalse(AppThemeOption.dark.isEnabled)
         XCTAssertFalse(AppThemeOption.light.isEnabled)
@@ -125,6 +172,23 @@ final class AppThemeOptionTests: XCTestCase {
     }
 
     @MainActor
+    func testFlowPlusSessionPreviewCanSwitchBetweenPremiumThemes() {
+        let defaults = UserDefaults(suiteName: #function)!
+        defaults.removePersistentDomain(forName: #function)
+        let authStore = AuthStore(defaults: defaults)
+        let settings = AppSettingsStore(defaults: defaults, authStore: authStore)
+
+        XCTAssertTrue(settings.beginFlowPlusPreview())
+        XCTAssertTrue(settings.beginThemePreview(.sakura))
+        XCTAssertEqual(settings.activeTheme, .sakura)
+
+        XCTAssertTrue(settings.canBeginThemePreview(.dracula))
+        XCTAssertTrue(settings.beginThemePreview(.dracula))
+        XCTAssertEqual(settings.previewTheme, .dracula)
+        XCTAssertEqual(settings.activeTheme, .dracula)
+    }
+
+    @MainActor
     func testPremiumFontsRequireFlowPlusExceptSystem() {
         XCTAssertFalse(AppFontOption.system.requiresFlowPlus)
         XCTAssertTrue(AppFontOption.mono.requiresFlowPlus)
@@ -170,6 +234,38 @@ final class AppThemeOptionTests: XCTestCase {
     }
 
     @MainActor
+    func testFlowPlusPurchaseButtonDefaultsToFreeTrialCopy() {
+        let defaults = UserDefaults(suiteName: #function)!
+        defaults.removePersistentDomain(forName: #function)
+        let authStore = AuthStore(defaults: defaults)
+        let settings = AppSettingsStore(defaults: defaults, authStore: authStore)
+        let premiumStore = FlowPremiumStore(appSettings: settings)
+
+        XCTAssertEqual(premiumStore.flowPlusPurchaseButtonTitle, "Try it free for 7 days")
+    }
+
+    func testFlowPlusStoreKitConfigIncludesSevenDayFreeTrial() {
+        let repoRoot = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let storeKitURL = repoRoot.appendingPathComponent("StoreKit/FlowPlus.storekit")
+        let data = try! Data(contentsOf: storeKitURL)
+        let jsonObject = try! XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        let subscriptionGroups = try! XCTUnwrap(jsonObject["subscriptionGroups"] as? [[String: Any]])
+        let firstGroup = try! XCTUnwrap(subscriptionGroups.first)
+        XCTAssertEqual(firstGroup["name"] as? String, "Halo Plus")
+
+        let subscriptions = try! XCTUnwrap(firstGroup["subscriptions"] as? [[String: Any]])
+        let monthlyProduct = try! XCTUnwrap(subscriptions.first)
+        let introductoryOffer = try! XCTUnwrap(monthlyProduct["introductoryOffer"] as? [String: Any])
+
+        XCTAssertEqual(introductoryOffer["paymentMode"] as? String, "freeTrial")
+        XCTAssertEqual(introductoryOffer["subscriptionPeriod"] as? String, "P1W")
+        XCTAssertEqual(introductoryOffer["numberOfPeriods"] as? Int, 1)
+        XCTAssertEqual(introductoryOffer["type"] as? String, "introductory")
+    }
+
+    @MainActor
     func testBundledPremiumFontsExistInMainBundle() {
         let bundledFonts = [
             "DMSans.ttf",
@@ -207,7 +303,19 @@ final class AppThemeOptionTests: XCTestCase {
         assertColor(AppThemeOption.black.palette.chromeBackground, matches: .black)
         assertColor(
             AppThemeOption.black.palette.chromeBorder,
-            matches: UIColor.white.withAlphaComponent(0.06)
+            matches: UIColor.white.withAlphaComponent(0.08)
+        )
+        assertColor(
+            AppThemeOption.black.palette.separator,
+            matches: UIColor.white.withAlphaComponent(0.13)
+        )
+        assertColor(
+            AppThemeOption.black.palette.linkPreviewBorder,
+            matches: UIColor.white.withAlphaComponent(0.13)
+        )
+        assertColor(
+            AppThemeOption.black.palette.articlePreviewBorder,
+            matches: UIColor.white.withAlphaComponent(0.15)
         )
     }
 
@@ -217,7 +325,74 @@ final class AppThemeOptionTests: XCTestCase {
         assertColor(AppThemeOption.white.palette.chromeBackground, matches: .white)
         assertColor(
             AppThemeOption.white.palette.chromeBorder,
-            matches: UIColor.black.withAlphaComponent(0.12)
+            matches: UIColor.black.withAlphaComponent(0.10)
+        )
+        XCTAssertNotNil(AppThemeOption.white.palette.capsuleTabStyle)
+        XCTAssertNotNil(AppThemeOption.white.palette.profileActionStyle)
+        XCTAssertNotNil(AppThemeOption.white.palette.pollStyle)
+        assertColor(
+            AppThemeOption.white.palette.capsuleTabStyle!.background,
+            matches: UIColor(red: 0.965, green: 0.965, blue: 0.972, alpha: 1)
+        )
+        assertColor(
+            AppThemeOption.white.palette.profileActionStyle!.primaryBackground,
+            matches: .white
+        )
+        assertColor(
+            AppThemeOption.white.palette.pollStyle!.cardBorder,
+            matches: UIColor.black.withAlphaComponent(0.08)
+        )
+    }
+
+    @MainActor
+    func testSystemThemePreservesNativeLightSeparatorsAndUsesTunedDarkBorders() {
+        let lightTraits = UITraitCollection(userInterfaceStyle: .light)
+        let darkTraits = UITraitCollection(userInterfaceStyle: .dark)
+        let lightSeparator = UIColor.separator.resolvedColor(with: lightTraits)
+        let lightArticleBorder = lightSeparator.withAlphaComponent(lightSeparator.cgColor.alpha * 0.24)
+
+        assertColor(
+            AppThemeOption.system.palette.chromeBorder,
+            matches: lightSeparator,
+            style: .light
+        )
+        assertColor(
+            AppThemeOption.system.palette.separator,
+            matches: lightSeparator,
+            style: .light
+        )
+        assertColor(
+            AppThemeOption.system.palette.linkPreviewBorder,
+            matches: lightSeparator,
+            style: .light
+        )
+        assertColor(
+            AppThemeOption.system.palette.articlePreviewBorder,
+            matches: lightArticleBorder,
+            style: .light
+        )
+
+        XCTAssertLessThan(lightSeparator.cgColor.alpha, 1)
+
+        assertColor(
+            AppThemeOption.system.palette.chromeBorder,
+            matches: UIColor.white.withAlphaComponent(0.10),
+            style: .dark
+        )
+        assertColor(
+            AppThemeOption.system.palette.separator,
+            matches: UIColor.white.withAlphaComponent(0.14),
+            style: .dark
+        )
+        assertColor(
+            AppThemeOption.system.palette.linkPreviewBorder,
+            matches: UIColor.white.withAlphaComponent(0.14),
+            style: .dark
+        )
+        assertColor(
+            AppThemeOption.system.palette.articlePreviewBorder,
+            matches: UIColor.white.withAlphaComponent(0.16),
+            style: .dark
         )
     }
 
@@ -246,6 +421,10 @@ final class AppThemeOptionTests: XCTestCase {
             ProfileQRCodePresentationBackground.resourceName(for: .sakura),
             "sakura-share-bg.json"
         )
+        XCTAssertEqual(
+            ProfileQRCodePresentationBackground.resourceName(for: .dracula),
+            ProfileQRCodePresentationBackground.defaultResourceName
+        )
     }
 
     @MainActor
@@ -259,11 +438,13 @@ final class AppThemeOptionTests: XCTestCase {
     private func assertColor(
         _ color: Color,
         matches expected: UIColor,
+        style: UIUserInterfaceStyle = .light,
         file: StaticString = #filePath,
         line: UInt = #line
     ) {
-        let actual = UIColor(color).resolvedColor(with: UITraitCollection(userInterfaceStyle: .light))
-        let expected = expected.resolvedColor(with: UITraitCollection(userInterfaceStyle: .light))
+        let traitCollection = UITraitCollection(userInterfaceStyle: style)
+        let actual = UIColor(color).resolvedColor(with: traitCollection)
+        let expected = expected.resolvedColor(with: traitCollection)
 
         var actualRed: CGFloat = 0
         var actualGreen: CGFloat = 0

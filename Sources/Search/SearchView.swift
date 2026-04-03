@@ -233,12 +233,10 @@ struct SearchView: View {
                     updateSearchContext()
                 }
                 .onChange(of: followStore.followedPubkeys) { _, _ in
-                    updateSearchContext()
-                    guard isActive else { return }
-                    guard viewModel.searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
-                    Task {
-                        await viewModel.loadIfNeeded()
-                    }
+                    // Preserve the current suggestion list so an optimistic
+                    // follow tap only flips the button state instead of
+                    // rebuilding the entire screen.
+                    updateSearchContext(invalidatePopularProfiles: false)
                 }
                 .onChange(of: relaySettings.readRelays) { _, _ in
                     viewModel.updateReadRelayURLs(effectiveReadRelayURLs)
@@ -266,7 +264,7 @@ struct SearchView: View {
         VStack(spacing: 0) {
             HStack(spacing: 10) {
                 Image(systemName: "magnifyingglass")
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(appSettings.themePalette.mutedForeground)
 
                 TextField("Search notes, profiles, and hashtags", text: $viewModel.searchText)
                     .font(appSettings.appFont(.body))
@@ -285,7 +283,7 @@ struct SearchView: View {
                     } label: {
                         Image(systemName: "xmark.circle.fill")
                             .font(.headline)
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(appSettings.themePalette.mutedForeground)
                     }
                     .buttonStyle(.plain)
                     .accessibilityLabel("Clear search")
@@ -312,6 +310,8 @@ struct SearchView: View {
                 appSettings.themePalette.chromeBackground.opacity(0.78)
                 appSettings.primaryGradient.opacity(0.14)
             }
+        } else if appSettings.activeTheme == .dracula {
+            appSettings.themePalette.background
         } else {
             appSettings.themePalette.chromeBackground
         }
@@ -428,7 +428,7 @@ struct SearchView: View {
                     title: "You",
                     systemImage: "person.crop.circle.fill",
                     foreground: .primary,
-                    background: appSettings.themePalette.secondaryBackground
+                    background: appSettings.themePalette.secondaryGroupedBackground
                 )
             } else {
                 Button {
@@ -436,20 +436,19 @@ struct SearchView: View {
                 } label: {
                     Text(isFollowing ? "Following" : "Follow")
                         .font(.caption.weight(.semibold))
-                        .foregroundColor(isFollowing ? .secondary : .white)
+                        .foregroundStyle(isFollowing ? appSettings.themePalette.mutedForeground : Color.white)
                         .padding(.horizontal, 12)
                         .padding(.vertical, 7)
                         .background(
-                            Group {
-                                if isFollowing {
-                                    Capsule(style: .continuous)
-                                        .fill(appSettings.themePalette.secondaryBackground)
-                                } else {
-                                    Capsule(style: .continuous)
-                                        .fill(appSettings.primaryGradient)
-                                }
-                            }
+                            Capsule(style: .continuous)
+                                .fill(isFollowing ? AnyShapeStyle(appSettings.themePalette.secondaryGroupedBackground) : AnyShapeStyle(appSettings.primaryGradient))
                         )
+                        .overlay {
+                            if isFollowing {
+                                Capsule(style: .continuous)
+                                    .stroke(appSettings.themePalette.separator, lineWidth: 0.8)
+                            }
+                        }
                 }
                 .buttonStyle(.plain)
             }
@@ -627,11 +626,12 @@ struct SearchView: View {
         )
     }
 
-    private func updateSearchContext() {
+    private func updateSearchContext(invalidatePopularProfiles: Bool = true) {
         viewModel.updateSearchContext(
             currentAccountPubkey: auth.currentAccount?.pubkey,
             currentNsec: auth.currentNsec,
-            followedPubkeys: Array(followStore.followedPubkeys)
+            followedPubkeys: Array(followStore.followedPubkeys),
+            invalidatePopularProfiles: invalidatePopularProfiles
         )
     }
 

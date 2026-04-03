@@ -82,7 +82,7 @@ enum AppFontOption: String, CaseIterable, Codable, Identifiable, Hashable, Senda
     var sampleText: String {
         switch self {
         case .system:
-            return "Flow"
+            return "Halo"
         case .mono:
             return "flow://"
         case .ebGaramond:

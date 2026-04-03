@@ -4,6 +4,7 @@ struct EditableProfileFields: Equatable, Sendable {
     var avatarURLString: String
     var bannerURLString: String
     var displayName: String
+    var handle: String
     var about: String
     var website: String
     var nip05: String
@@ -13,6 +14,7 @@ struct EditableProfileFields: Equatable, Sendable {
         avatarURLString: String = "",
         bannerURLString: String = "",
         displayName: String = "",
+        handle: String = "",
         about: String = "",
         website: String = "",
         nip05: String = "",
@@ -21,6 +23,7 @@ struct EditableProfileFields: Equatable, Sendable {
         self.avatarURLString = avatarURLString
         self.bannerURLString = bannerURLString
         self.displayName = displayName
+        self.handle = handle
         self.about = about
         self.website = website
         self.nip05 = nip05
@@ -31,6 +34,7 @@ struct EditableProfileFields: Equatable, Sendable {
         self.avatarURLString = profile?.picture?.trimmed ?? ""
         self.bannerURLString = profile?.banner?.trimmed ?? ""
         self.displayName = profile?.displayName?.trimmed ?? profile?.name?.trimmed ?? ""
+        self.handle = profile?.name?.trimmed ?? ""
         self.about = profile?.about?.trimmed ?? ""
         self.website = profile?.website?.trimmed ?? ""
         self.nip05 = profile?.nip05?.trimmed ?? ""
@@ -55,6 +59,7 @@ enum EditableProfileFieldsError: LocalizedError {
 enum ProfileMetadataEditing {
     static func mergedContent(fields: EditableProfileFields, baseJSON: [String: Any]) throws -> String {
         let normalizedDisplayName = fields.displayName.trimmed
+        let normalizedHandle = normalizeHandle(fields.handle)
         let normalizedLightning = normalizeLightningAddress(fields.lightningAddress)
         let normalizedNip05 = fields.nip05.trimmed
 
@@ -69,7 +74,11 @@ enum ProfileMetadataEditing {
         var updated = baseJSON
         updated["display_name"] = normalizedDisplayName
         updated["displayName"] = normalizedDisplayName
-        updated["name"] = stringValue(baseJSON["name"]) ?? normalizedDisplayName
+        if normalizedHandle.isEmpty {
+            updated.removeValue(forKey: "name")
+        } else {
+            updated["name"] = normalizedHandle
+        }
         updated["about"] = fields.about.trimmed
         updated["website"] = fields.website.trimmed
         updated["nip05"] = normalizedNip05
@@ -101,6 +110,17 @@ enum ProfileMetadataEditing {
         let prefix = "lightning:"
         if trimmed.lowercased().hasPrefix(prefix) {
             return String(trimmed.dropFirst(prefix.count)).trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        return trimmed
+    }
+
+    static func normalizeHandle(_ value: String?) -> String {
+        guard let value else { return "" }
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return "" }
+
+        if trimmed.hasPrefix("@") {
+            return String(trimmed.dropFirst()).trimmingCharacters(in: .whitespacesAndNewlines)
         }
         return trimmed
     }

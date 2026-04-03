@@ -39,6 +39,7 @@ final class ProfileViewModel: ObservableObject {
     private let service: NostrFeedService
     private let profileEventService: ProfileEventService
     private let relayClient: any NostrRelayEventPublishing
+    private let seenEventStore: any SeenEventStoring
     private let mediaUploadService: ProfileMediaUploadService
     static let requestedFeedKinds = [1, 6, 16, 1068, 6969, 1111, 1244]
 
@@ -62,6 +63,7 @@ final class ProfileViewModel: ObservableObject {
         service: NostrFeedService = NostrFeedService(),
         profileEventService: ProfileEventService = ProfileEventService(),
         relayClient: any NostrRelayEventPublishing = NostrRelayClient(),
+        seenEventStore: any SeenEventStoring = SeenEventStore.shared,
         mediaUploadService: ProfileMediaUploadService = .shared
     ) {
         self.pubkey = pubkey
@@ -82,6 +84,7 @@ final class ProfileViewModel: ObservableObject {
         self.service = service
         self.profileEventService = profileEventService
         self.relayClient = relayClient
+        self.seenEventStore = seenEventStore
         self.mediaUploadService = mediaUploadService
     }
 
@@ -419,8 +422,15 @@ final class ProfileViewModel: ObservableObject {
                 throw RelayClientError.publishRejected("Couldn't publish profile metadata")
             }
 
+            let localEvent = Self.localEvent(from: event)
+            await seenEventStore.store(events: [localEvent])
+
             let updatedProfile = NostrProfile.decode(from: content)
-            metadataSnapshot = ProfileMetadataSnapshot(content: content, tags: baseSnapshot?.tags ?? [])
+            metadataSnapshot = ProfileMetadataSnapshot(
+                content: content,
+                tags: localEvent.tags,
+                createdAt: localEvent.createdAt
+            )
             profile = updatedProfile
             if let updatedProfile {
                 await ProfileCache.shared.store(profiles: [pubkey: updatedProfile], missed: [])
@@ -518,6 +528,18 @@ final class ProfileViewModel: ObservableObject {
     private func clearVisibleItemsCache() {
         visibleItemsCacheKey = nil
         visibleItemsCache = []
+    }
+
+    private static func localEvent(from event: NostrSDK.NostrEvent) -> NostrEvent {
+        NostrEvent(
+            id: event.id.lowercased(),
+            pubkey: event.pubkey.lowercased(),
+            createdAt: Int(event.createdAt),
+            kind: event.kind.rawValue,
+            tags: event.tags.map { [$0.name, $0.value] + $0.otherParameters },
+            content: event.content,
+            sig: event.signature ?? ""
+        )
     }
 
     private struct FeedWindow {

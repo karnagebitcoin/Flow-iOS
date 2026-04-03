@@ -48,7 +48,7 @@ struct ActivityView: View {
                                 items: ActivityFilter.allCases,
                                 title: { $0.title }
                             )
-                            .accessibilityLabel("Activity filter")
+                            .accessibilityLabel("Pulse filter")
                         }
                         .listRowSeparator(.hidden)
                         .listRowBackground(Color.clear)
@@ -201,7 +201,7 @@ struct ActivityView: View {
 
     private var topNavigationBar: some View {
         ZStack {
-            Text("Activity")
+            Text("Pulse")
                 .font(appSettings.appFont(.headline, weight: .semibold))
                 .lineLimit(1)
 
@@ -221,7 +221,7 @@ struct ActivityView: View {
                 } label: {
                     Image(systemName: "slider.horizontal.3")
                         .font(.system(size: 16, weight: .semibold))
-                        .foregroundStyle(.primary)
+                        .foregroundStyle(appSettings.themePalette.mutedForeground)
                         .frame(width: 34, height: 34)
                         .background(topNavigationControlFill)
                         .clipShape(Circle())
@@ -247,6 +247,8 @@ struct ActivityView: View {
                 appSettings.themePalette.chromeBackground.opacity(0.78)
                 appSettings.primaryGradient.opacity(0.14)
             }
+        } else if appSettings.activeTheme == .dracula {
+            appSettings.themePalette.background
         } else {
             appSettings.themePalette.chromeBackground
         }
@@ -285,7 +287,7 @@ struct ActivityView: View {
                 .fill(topNavigationControlFill)
             Image(systemName: "person.fill")
                 .font(.system(size: 14, weight: .semibold))
-                .foregroundStyle(.secondary)
+                .foregroundStyle(appSettings.themePalette.mutedForeground)
         }
     }
 
@@ -335,7 +337,7 @@ struct ActivityView: View {
 
     private var notificationSettingsSheet: some View {
         NavigationStack {
-            NotificationPreferencesView(navigationTitleText: "Notification Settings", titleDisplayMode: .inline)
+            NotificationPreferencesView(navigationTitleText: "Pulse Alerts", titleDisplayMode: .inline)
                 .toolbar {
                     ToolbarItem(placement: .topBarTrailing) {
                         Button("Done") {

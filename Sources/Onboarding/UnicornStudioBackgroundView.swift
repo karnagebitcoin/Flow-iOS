@@ -42,6 +42,7 @@ struct UnicornStudioBackgroundView: View {
     let source: Source
     var opacity: Double = 1
     var backgroundStyle: BackgroundStyle = .dark
+    var allowsInteraction = false
 
     var body: some View {
         GeometryReader { proxy in
@@ -53,13 +54,14 @@ struct UnicornStudioBackgroundView: View {
             UnicornStudioWebView(
                 source: source,
                 renderSize: renderSize,
-                backgroundStyle: backgroundStyle
+                backgroundStyle: backgroundStyle,
+                allowsInteraction: allowsInteraction
             )
             .frame(width: proxy.size.width, height: proxy.size.height)
             .opacity(opacity)
             .clipped()
         }
-        .allowsHitTesting(false)
+        .allowsHitTesting(allowsInteraction)
         .accessibilityHidden(true)
     }
 }
@@ -68,6 +70,7 @@ private struct UnicornStudioWebView: UIViewRepresentable {
     let source: UnicornStudioBackgroundView.Source
     let renderSize: CGSize
     let backgroundStyle: UnicornStudioBackgroundView.BackgroundStyle
+    let allowsInteraction: Bool
 
     func makeCoordinator() -> Coordinator {
         Coordinator()
@@ -86,7 +89,7 @@ private struct UnicornStudioWebView: UIViewRepresentable {
         webView.scrollView.isScrollEnabled = false
         webView.scrollView.bounces = false
         webView.scrollView.contentInsetAdjustmentBehavior = .never
-        webView.isUserInteractionEnabled = false
+        webView.isUserInteractionEnabled = allowsInteraction
         webView.allowsLinkPreview = false
         webView.navigationDelegate = context.coordinator
 
@@ -97,12 +100,14 @@ private struct UnicornStudioWebView: UIViewRepresentable {
         let html = UnicornStudioEmbedHTML.document(
             source: source,
             renderSize: renderSize,
-            backgroundStyle: backgroundStyle
+            backgroundStyle: backgroundStyle,
+            allowsInteraction: allowsInteraction
         )
 
         webView.isOpaque = backgroundStyle.isOpaque
         webView.backgroundColor = backgroundStyle.uiColor
         webView.scrollView.backgroundColor = backgroundStyle.uiColor
+        webView.isUserInteractionEnabled = allowsInteraction
 
         guard context.coordinator.lastHTML != html else {
             context.coordinator.applySize(renderSize, to: webView)
@@ -143,7 +148,8 @@ private enum UnicornStudioEmbedHTML {
     static func document(
         source: UnicornStudioBackgroundView.Source,
         renderSize: CGSize,
-        backgroundStyle: UnicornStudioBackgroundView.BackgroundStyle
+        backgroundStyle: UnicornStudioBackgroundView.BackgroundStyle,
+        allowsInteraction: Bool
     ) -> String {
         let sceneBootScript: String
         let initialWidth = Int(renderSize.width.rounded(.up))
@@ -168,7 +174,8 @@ private enum UnicornStudioEmbedHTML {
                 sceneBootScript: sceneBootScript,
                 initialWidth: initialWidth,
                 initialHeight: initialHeight,
-                backgroundColorValue: backgroundColorValue
+                backgroundColorValue: backgroundColorValue,
+                allowsInteraction: allowsInteraction
             )
         case .bundledJSON(let resourceName):
             guard let sceneJSONString = bundledJSONString(named: resourceName),
@@ -178,7 +185,8 @@ private enum UnicornStudioEmbedHTML {
                     sceneBootScript: "const startScene = function() {};",
                     initialWidth: initialWidth,
                     initialHeight: initialHeight,
-                    backgroundColorValue: backgroundColorValue
+                    backgroundColorValue: backgroundColorValue,
+                    allowsInteraction: allowsInteraction
                 )
             }
 
@@ -192,13 +200,9 @@ private enum UnicornStudioEmbedHTML {
                 window.UnicornStudio.addScene({
                   elementId: "scene",
                   filePath: sceneURL,
-                  scale: 1,
-                  dpi: 1.5,
-                  fps: 60,
                   lazyLoad: false,
-                  production: false,
-                  altText: "Flow background animation",
-                  ariaLabel: "Flow background animation"
+                  altText: "Halo background animation",
+                  ariaLabel: "Halo background animation"
                 });
                 requestAnimationFrame(function() {
                   applySize(\(initialWidth), \(initialHeight));
@@ -211,7 +215,8 @@ private enum UnicornStudioEmbedHTML {
                 sceneBootScript: sceneBootScript,
                 initialWidth: initialWidth,
                 initialHeight: initialHeight,
-                backgroundColorValue: backgroundColorValue
+                backgroundColorValue: backgroundColorValue,
+                allowsInteraction: allowsInteraction
             )
         }
     }
@@ -221,8 +226,131 @@ private enum UnicornStudioEmbedHTML {
         sceneBootScript: String,
         initialWidth: Int,
         initialHeight: Int,
-        backgroundColorValue: String
+        backgroundColorValue: String,
+        allowsInteraction: Bool
     ) -> String {
+        let scenePointerEvents = allowsInteraction ? "auto" : "none"
+        let sceneTouchAction = allowsInteraction ? "none" : "auto"
+        let interactionBootstrap = allowsInteraction ? """
+              function createSyntheticTouchEvent(type, clientX, clientY) {
+                var scene = document.getElementById("scene");
+                if (!scene) { return null; }
+
+                var pageX = clientX + window.scrollX;
+                var pageY = clientY + window.scrollY;
+                var touchFallback = {
+                  identifier: 1,
+                  target: scene,
+                  clientX: clientX,
+                  clientY: clientY,
+                  pageX: pageX,
+                  pageY: pageY,
+                  screenX: clientX,
+                  screenY: clientY,
+                  radiusX: 1,
+                  radiusY: 1,
+                  rotationAngle: 0,
+                  force: 1
+                };
+                var activeTouches = (type === "touchend" || type === "touchcancel") ? [] : [touchFallback];
+
+                try {
+                  var touch = new Touch(touchFallback);
+                  activeTouches = (type === "touchend" || type === "touchcancel") ? [] : [touch];
+                  return new TouchEvent(type, {
+                    bubbles: true,
+                    cancelable: true,
+                    touches: activeTouches,
+                    targetTouches: activeTouches,
+                    changedTouches: [touch]
+                  });
+                } catch (error) {
+                  var fallbackEvent = new Event(type, {
+                    bubbles: true,
+                    cancelable: true
+                  });
+                  Object.defineProperty(fallbackEvent, "touches", { value: activeTouches });
+                  Object.defineProperty(fallbackEvent, "targetTouches", { value: activeTouches });
+                  Object.defineProperty(fallbackEvent, "changedTouches", { value: [activeTouches[0] || touchFallback] });
+                  Object.defineProperty(fallbackEvent, "pageX", { value: pageX });
+                  Object.defineProperty(fallbackEvent, "pageY", { value: pageY });
+                  Object.defineProperty(fallbackEvent, "clientX", { value: clientX });
+                  Object.defineProperty(fallbackEvent, "clientY", { value: clientY });
+                  return fallbackEvent;
+                }
+              }
+
+              function relayPointerEvent(type, clientX, clientY) {
+                var scene = document.getElementById("scene");
+                if (!scene) { return; }
+
+                var baseInit = {
+                  clientX: clientX,
+                  clientY: clientY,
+                  bubbles: true,
+                  cancelable: true,
+                  view: window
+                };
+
+                try {
+                  var pointerInit = Object.assign({
+                    pointerType: "touch",
+                    isPrimary: true,
+                    pointerId: 1
+                  }, baseInit);
+                  scene.dispatchEvent(new PointerEvent(type, pointerInit));
+                  window.dispatchEvent(new PointerEvent(type, pointerInit));
+                } catch (error) {
+                  var mouseType = "mousemove";
+                  if (type === "pointerdown") { mouseType = "mousedown"; }
+                  if (type === "pointerup" || type === "pointercancel") { mouseType = "mouseup"; }
+
+                  scene.dispatchEvent(new MouseEvent(mouseType, baseInit));
+                  window.dispatchEvent(new MouseEvent(mouseType, baseInit));
+                }
+              }
+
+              function installTouchBridge() {
+                var scene = document.getElementById("scene");
+                if (!scene) { return; }
+
+                var eventTypeForTouch = function(eventType) {
+                  if (eventType === "touchstart") { return "pointerdown"; }
+                  if (eventType === "touchend") { return "pointerup"; }
+                  if (eventType === "touchcancel") { return "pointercancel"; }
+                  return "pointermove";
+                };
+
+                var handleTouch = function(event) {
+                  var touch = (event.touches && event.touches[0]) || (event.changedTouches && event.changedTouches[0]);
+                  if (!touch) { return; }
+                  var syntheticTouchEvent = createSyntheticTouchEvent(event.type, touch.clientX, touch.clientY);
+                  if (syntheticTouchEvent) {
+                    window.dispatchEvent(syntheticTouchEvent);
+                  }
+                  relayPointerEvent(eventTypeForTouch(event.type), touch.clientX, touch.clientY);
+                };
+
+                var touchOptions = { passive: false };
+                scene.addEventListener("touchstart", function(event) {
+                  event.preventDefault();
+                  handleTouch(event);
+                }, touchOptions);
+                scene.addEventListener("touchmove", function(event) {
+                  event.preventDefault();
+                  handleTouch(event);
+                }, touchOptions);
+                scene.addEventListener("touchend", function(event) {
+                  event.preventDefault();
+                  handleTouch(event);
+                }, touchOptions);
+                scene.addEventListener("touchcancel", function(event) {
+                  event.preventDefault();
+                  handleTouch(event);
+                }, touchOptions);
+              }
+        """ : ""
+
         return """
         <!doctype html>
         <html>
@@ -257,13 +385,15 @@ private enum UnicornStudioEmbedHTML {
               inset: 0;
               width: var(--scene-width);
               height: var(--scene-height);
-              pointer-events: none;
+              pointer-events: \(scenePointerEvents);
+              touch-action: \(sceneTouchAction);
               background: \(backgroundColorValue);
               overflow: hidden;
             }
 
             canvas {
               background: \(backgroundColorValue) !important;
+              pointer-events: \(scenePointerEvents);
             }
           </style>
         </head>
@@ -296,10 +426,12 @@ private enum UnicornStudioEmbedHTML {
               window.__flowApplySize = applySize;
               applySize(\(initialWidth), \(initialHeight));
 
+              \(interactionBootstrap)
               \(sceneBootScript)
 
               var u = window.UnicornStudio;
               function boot() {
+                \(allowsInteraction ? "installTouchBridge();" : "")
                 startScene();
               }
 
@@ -312,7 +444,7 @@ private enum UnicornStudioEmbedHTML {
               } else {
                 window.UnicornStudio = { isInitialized: false };
                 var i = document.createElement("script");
-                i.src = "https://cdn.jsdelivr.net/gh/hiunicornstudio/unicornstudio.js@v2.1.5/dist/unicornStudio.umd.js";
+                i.src = "https://cdn.jsdelivr.net/gh/hiunicornstudio/unicornstudio.js@v2.1.6/dist/unicornStudio.umd.js";
                 i.onload = function() {
                   u = window.UnicornStudio;
                   if (document.readyState === "loading") {

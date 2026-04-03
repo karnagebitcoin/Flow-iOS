@@ -117,7 +117,7 @@ struct KeysView: View {
                 Text(
                     account.privateKeyBackupEnabled
                         ? "This confirms the key was added to iCloud Keychain on this device. Apple does not expose the exact cross-device sync time. On another device, go to Sign In and choose Restore from iCloud."
-                        : "This private key stays only on this device until you turn on iCloud backup. New Flow-created accounts back this up automatically."
+                        : "This private key stays only on this device until you turn on iCloud backup. New Halo-created accounts back this up automatically."
                 )
             }
         }
@@ -287,7 +287,7 @@ struct KeysView: View {
 
             do {
                 try await DeviceOwnerAuthenticationGate.authenticate(
-                    reason: "Reveal your private key in Flow."
+                    reason: "Reveal your private key in Halo."
                 )
                 isPrivateKeyRevealed = true
             } catch {

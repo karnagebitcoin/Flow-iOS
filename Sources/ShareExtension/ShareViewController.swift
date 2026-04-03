@@ -14,7 +14,7 @@ final class ShareViewController: UIViewController {
         var errorDescription: String? {
             switch self {
             case .noSupportedMedia:
-                return "Flow can only accept photos and videos here."
+                return "Halo can only accept photos and videos here."
             case .failedToLoadMedia:
                 return "Couldn't prepare the selected media."
             }
@@ -97,7 +97,7 @@ final class ShareViewController: UIViewController {
         view.backgroundColor = .systemBackground
 
         titleLabel.translatesAutoresizingMaskIntoConstraints = false
-        titleLabel.text = "Opening Flow"
+        titleLabel.text = "Opening Halo"
         titleLabel.font = .preferredFont(forTextStyle: .title2)
         titleLabel.textAlignment = .center
 
@@ -154,12 +154,12 @@ final class ShareViewController: UIViewController {
 
     private func showOpenFlowFallback(attachmentCount: Int) {
         activityIndicator.stopAnimating()
-        titleLabel.text = "Open Flow"
+        titleLabel.text = "Open Halo"
         detailLabel.text = attachmentCount == 1
-            ? "Your attachment is ready. Tap below to open the composer in Flow."
-            : "Your attachments are ready. Tap below to open the composer in Flow."
+            ? "Your attachment is ready. Tap below to open the composer in Halo."
+            : "Your attachments are ready. Tap below to open the composer in Halo."
         actionButtonMode = .openFlow
-        actionButton.setTitle("Open Flow", for: .normal)
+        actionButton.setTitle("Open Halo", for: .normal)
         actionButton.isHidden = false
     }
 
@@ -178,7 +178,7 @@ final class ShareViewController: UIViewController {
                     extensionContext?.completeRequest(returningItems: nil)
                 } else {
                     actionButtonMode = .close
-                    showFailure(message: "Couldn't open Flow right now.")
+                    showFailure(message: "Couldn't open Halo right now.")
                 }
             }
         }

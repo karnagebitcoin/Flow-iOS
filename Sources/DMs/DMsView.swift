@@ -10,11 +10,11 @@ struct DMsView: View {
                     .font(.system(size: 34, weight: .semibold))
                     .foregroundStyle(.secondary)
 
-                Text("Messages coming soon")
+                Text("Halo Link coming soon")
                     .font(appSettings.appFont(.headline, weight: .semibold))
                     .foregroundStyle(.primary)
 
-                Text("This tab is a placeholder while messaging is being built.")
+                Text("This tab is a placeholder while Halo Link is being built.")
                     .font(appSettings.appFont(.subheadline))
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
@@ -22,7 +22,7 @@ struct DMsView: View {
             .padding(.horizontal, 24)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .background(appSettings.themePalette.background)
-            .navigationTitle("Messages")
+            .navigationTitle("Halo Link")
         }
     }
 }

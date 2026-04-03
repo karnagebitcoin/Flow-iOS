@@ -56,7 +56,7 @@ struct HomeSlideoutMenuView: View {
                     )
 
                     menuButton(
-                        title: "Settings",
+                        title: "Core",
                         icon: "gearshape",
                         action: onManageSettings
                     )
@@ -115,7 +115,13 @@ struct HomeSlideoutMenuView: View {
         let resolvedName = resolvedAccountName(for: account)
 
         return HStack(spacing: 12) {
-            accountHeaderAvatar(fallbackName: resolvedName)
+            Button {
+                onViewProfile()
+            } label: {
+                accountHeaderAvatar(fallbackName: resolvedName)
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("View profile")
 
             VStack(alignment: .leading, spacing: 4) {
                 Text(resolvedName)
@@ -145,7 +151,7 @@ struct HomeSlideoutMenuView: View {
     }
 
     private func accountHeaderAvatar(fallbackName: String) -> some View {
-        AvatarView(url: accountHeaderAvatarURL, fallback: fallbackName, size: 52)
+        AvatarView(url: accountHeaderAvatarURL, fallback: fallbackName, size: 60)
     }
 
     private func accountHeaderFallbackAvatar(fallbackName: String) -> some View {

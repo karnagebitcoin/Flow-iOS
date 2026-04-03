@@ -66,6 +66,281 @@ struct ProfileSearchResult: Identifiable, Hashable, Sendable {
     var id: String { pubkey }
 }
 
+private struct LocalProfileSearchDocument: Sendable {
+    let pubkey: String
+    let profile: NostrProfile
+    let createdAt: Int
+    let searchableFields: [String]
+    let searchTokens: Set<String>
+}
+
+private enum ProfileSearchSupport {
+    static func normalizedPubkey(_ value: String?) -> String {
+        (value ?? "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+    }
+
+    static func score(profile: NostrProfile, pubkey: String, query: String) -> Int? {
+        let searchableFields = fields(for: profile)
+        return score(
+            searchableFields: searchableFields,
+            searchTokens: Set(searchableFields.flatMap(tokens(from:))),
+            pubkey: pubkey,
+            query: query
+        )
+    }
+
+    static func score(
+        searchableFields: [String],
+        searchTokens: Set<String>,
+        pubkey: String,
+        query: String
+    ) -> Int? {
+        let normalizedQuery = query.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !normalizedQuery.isEmpty else { return nil }
+
+        if pubkey == normalizedQuery {
+            return 1_000
+        }
+
+        if pubkey.hasPrefix(normalizedQuery) {
+            return 920
+        }
+
+        guard !searchableFields.isEmpty else { return nil }
+
+        let queryTokens = tokens(from: normalizedQuery)
+
+        if searchableFields.contains(normalizedQuery) {
+            return 900
+        }
+
+        if searchTokens.contains(normalizedQuery) {
+            return 860
+        }
+
+        if searchableFields.contains(where: { $0.hasPrefix(normalizedQuery) }) {
+            return 820
+        }
+
+        if searchTokens.contains(where: { $0.hasPrefix(normalizedQuery) }) {
+            return 780
+        }
+
+        if queryTokens.count > 1 {
+            if queryTokens.allSatisfy(searchTokens.contains) {
+                return 760
+            }
+
+            if queryTokens.allSatisfy({ queryToken in
+                searchTokens.contains(where: { $0.hasPrefix(queryToken) })
+            }) {
+                return 720
+            }
+        }
+
+        guard normalizedQuery.count >= 2 else { return nil }
+
+        if searchableFields.contains(where: { $0.contains(normalizedQuery) }) {
+            return 700
+        }
+
+        if searchTokens.contains(where: { $0.contains(normalizedQuery) }) {
+            return 660
+        }
+
+        return nil
+    }
+
+    static func fields(for profile: NostrProfile) -> [String] {
+        let rawFields: [String] = [
+            profile.displayName,
+            profile.name,
+            profile.nip05,
+            profile.lud16,
+            profile.lud06
+        ]
+        .compactMap { value in
+            let normalized = value?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() ?? ""
+            return normalized.isEmpty ? nil : normalized
+        }
+
+        var expandedFields: [String] = []
+        var seen = Set<String>()
+
+        for field in rawFields {
+            if seen.insert(field).inserted {
+                expandedFields.append(field)
+            }
+
+            let compact = field.replacingOccurrences(of: " ", with: "")
+            if !compact.isEmpty, seen.insert(compact).inserted {
+                expandedFields.append(compact)
+            }
+
+            if field.hasPrefix("@") {
+                let dropped = String(field.dropFirst())
+                if !dropped.isEmpty, seen.insert(dropped).inserted {
+                    expandedFields.append(dropped)
+                }
+            }
+
+            if let atIndex = field.firstIndex(of: "@"), atIndex > field.startIndex {
+                let localPart = String(field[..<atIndex])
+                if !localPart.isEmpty, seen.insert(localPart).inserted {
+                    expandedFields.append(localPart)
+                }
+            }
+        }
+
+        return expandedFields
+    }
+
+    static func tokens(from field: String) -> [String] {
+        field.split(whereSeparator: { character in
+            !character.isLetter && !character.isNumber
+        })
+        .map(String.init)
+        .filter { !$0.isEmpty }
+    }
+}
+
+private actor LocalProfileSearchIndex {
+    static let shared = LocalProfileSearchIndex()
+
+    private struct Signature: Equatable {
+        let persistedProfileCount: Int
+        let sessionIngestedProfileCount: Int
+    }
+
+    private struct Entry {
+        let documents: [LocalProfileSearchDocument]
+        let storedAt: Date
+        let signature: Signature
+    }
+
+    private let ttl: TimeInterval = 30
+    private var entries: [ObjectIdentifier: Entry] = [:]
+    private var inFlightLoads: [ObjectIdentifier: Task<[LocalProfileSearchDocument], Never>] = [:]
+
+    func search(
+        query: String,
+        limit: Int,
+        nostrDatabase: FlowNostrDB
+    ) async -> [ProfileSearchResult] {
+        guard limit > 0 else { return [] }
+        let documents = await documents(for: nostrDatabase)
+        guard !documents.isEmpty else { return [] }
+
+        let scoredMatches: [(result: ProfileSearchResult, score: Int)] = documents.compactMap { document in
+            guard let score = ProfileSearchSupport.score(
+                searchableFields: document.searchableFields,
+                searchTokens: document.searchTokens,
+                pubkey: document.pubkey,
+                query: query
+            ) else {
+                return nil
+            }
+
+            return (
+                result: ProfileSearchResult(
+                    pubkey: document.pubkey,
+                    profile: document.profile,
+                    createdAt: document.createdAt
+                ),
+                score: score
+            )
+        }
+
+        return scoredMatches
+            .sorted { lhs, rhs in
+                if lhs.score == rhs.score {
+                    if lhs.result.createdAt == rhs.result.createdAt {
+                        return lhs.result.pubkey < rhs.result.pubkey
+                    }
+                    return lhs.result.createdAt > rhs.result.createdAt
+                }
+                return lhs.score > rhs.score
+            }
+            .prefix(limit)
+            .map(\.result)
+    }
+
+    private func documents(for nostrDatabase: FlowNostrDB) async -> [LocalProfileSearchDocument] {
+        let key = ObjectIdentifier(nostrDatabase)
+        let signature = Self.signature(for: nostrDatabase)
+
+        if let cached = entries[key],
+           !cached.documents.isEmpty,
+           cached.signature == signature,
+           Date().timeIntervalSince(cached.storedAt) < ttl {
+            return cached.documents
+        }
+
+        if let task = inFlightLoads[key] {
+            return await task.value
+        }
+
+        let task = Task {
+            Self.loadDocuments(from: nostrDatabase)
+        }
+        inFlightLoads[key] = task
+
+        let documents = await task.value
+        entries[key] = Entry(documents: documents, storedAt: Date(), signature: signature)
+        inFlightLoads[key] = nil
+        return documents
+    }
+
+    private static func signature(for nostrDatabase: FlowNostrDB) -> Signature {
+        let diagnostics = nostrDatabase.diagnosticsSnapshot()
+        return Signature(
+            persistedProfileCount: diagnostics.persistedProfileCount,
+            sessionIngestedProfileCount: diagnostics.sessionIngestedProfileCount
+        )
+    }
+
+    private static func loadDocuments(from nostrDatabase: FlowNostrDB) -> [LocalProfileSearchDocument] {
+        let localEvents = nostrDatabase.queryEvents(
+            filter: NostrFilter(kinds: [0])
+        ) ?? []
+
+        let sortedEvents = localEvents.sorted { lhs, rhs in
+            if lhs.createdAt == rhs.createdAt {
+                return lhs.id > rhs.id
+            }
+            return lhs.createdAt > rhs.createdAt
+        }
+
+        var seenPubkeys = Set<String>()
+        var documents: [LocalProfileSearchDocument] = []
+        documents.reserveCapacity(sortedEvents.count)
+
+        for event in sortedEvents {
+            let pubkey = ProfileSearchSupport.normalizedPubkey(event.pubkey)
+            guard !pubkey.isEmpty else { continue }
+            guard seenPubkeys.insert(pubkey).inserted else { continue }
+            guard let profile = NostrProfile.decode(from: event.content) else { continue }
+
+            let searchableFields = ProfileSearchSupport.fields(for: profile)
+            guard !searchableFields.isEmpty else { continue }
+
+            documents.append(
+                LocalProfileSearchDocument(
+                    pubkey: pubkey,
+                    profile: profile,
+                    createdAt: event.createdAt,
+                    searchableFields: searchableFields,
+                    searchTokens: Set(searchableFields.flatMap(ProfileSearchSupport.tokens(from:)))
+                )
+            )
+        }
+
+        return documents
+    }
+}
+
 enum VertexProfileSearchError: LocalizedError {
     case invalidCredentials
     case queryTooShort
@@ -856,32 +1131,10 @@ struct NostrFeedService: Sendable {
         let normalizedQuery = query.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         guard !normalizedQuery.isEmpty else { return [] }
 
-        let searchLimited = NostrFilter(
-            kinds: [0],
-            search: normalizedQuery,
-            limit: min(max(limit * 6, 120), 400)
-        )
-        let broadLocalScanLimit = normalizedQuery.count <= 1 ? 500 : 1_500
-        let broadLocalScan = NostrFilter(
-            kinds: [0],
-            limit: broadLocalScanLimit
-        )
-
-        let localEvents = nostrDatabase.queryEvents(
-            filters: [searchLimited, broadLocalScan]
-        ) ?? []
-
-        let sortedEvents = deduplicateEvents(localEvents).sorted { lhs, rhs in
-            if lhs.createdAt == rhs.createdAt {
-                return lhs.id > rhs.id
-            }
-            return lhs.createdAt > rhs.createdAt
-        }
-
-        return await matchedProfileResults(
-            from: sortedEvents,
+        return await LocalProfileSearchIndex.shared.search(
             query: normalizedQuery,
-            limit: limit
+            limit: limit,
+            nostrDatabase: nostrDatabase
         )
     }
 
@@ -2390,105 +2643,11 @@ struct NostrFeedService: Sendable {
     }
 
     private func profileMatchesQuery(profile: NostrProfile, pubkey: String, query: String) -> Bool {
-        profileSearchScore(profile: profile, pubkey: pubkey, query: query) != nil
+        Self.profileSearchScore(profile: profile, pubkey: pubkey, query: query) != nil
     }
 
-    private func profileSearchScore(profile: NostrProfile, pubkey: String, query: String) -> Int? {
-        let normalizedQuery = query.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        guard !normalizedQuery.isEmpty else { return nil }
-
-        if pubkey == normalizedQuery {
-            return 1_000
-        }
-
-        if pubkey.hasPrefix(normalizedQuery) {
-            return 920
-        }
-
-        let searchableFields = profileSearchFields(for: profile)
-        guard !searchableFields.isEmpty else { return nil }
-
-        let tokenSet = Set(searchableFields.flatMap(profileSearchTokens(from:)))
-
-        if searchableFields.contains(normalizedQuery) {
-            return 900
-        }
-
-        if tokenSet.contains(normalizedQuery) {
-            return 860
-        }
-
-        if searchableFields.contains(where: { $0.hasPrefix(normalizedQuery) }) {
-            return 820
-        }
-
-        if tokenSet.contains(where: { $0.hasPrefix(normalizedQuery) }) {
-            return 780
-        }
-
-        guard normalizedQuery.count >= 2 else { return nil }
-
-        if searchableFields.contains(where: { $0.contains(normalizedQuery) }) {
-            return 700
-        }
-
-        if tokenSet.contains(where: { $0.contains(normalizedQuery) }) {
-            return 660
-        }
-
-        return nil
-    }
-
-    private func profileSearchFields(for profile: NostrProfile) -> [String] {
-        let rawFields: [String] = [
-            profile.displayName,
-            profile.name,
-            profile.nip05,
-            profile.lud16,
-            profile.lud06
-        ]
-        .compactMap { value in
-            let normalized = value?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() ?? ""
-            return normalized.isEmpty ? nil : normalized
-        }
-
-        var expandedFields: [String] = []
-        var seen = Set<String>()
-
-        for field in rawFields {
-            if seen.insert(field).inserted {
-                expandedFields.append(field)
-            }
-
-            let compact = field.replacingOccurrences(of: " ", with: "")
-            if !compact.isEmpty, seen.insert(compact).inserted {
-                expandedFields.append(compact)
-            }
-
-            if field.hasPrefix("@") {
-                let dropped = String(field.dropFirst())
-                if !dropped.isEmpty, seen.insert(dropped).inserted {
-                    expandedFields.append(dropped)
-                }
-            }
-
-            if let atIndex = field.firstIndex(of: "@"), atIndex > field.startIndex {
-                let localPart = String(field[..<atIndex])
-                if !localPart.isEmpty, seen.insert(localPart).inserted {
-                    expandedFields.append(localPart)
-                }
-            }
-        }
-
-        return expandedFields
-    }
-
-    private func profileSearchTokens(from field: String) -> [String] {
-        field.split(whereSeparator: { character in
-            !character.isLetter && !character.isNumber
-        })
-        .map(String.init)
-        .filter { !$0.isEmpty }
+    private static func profileSearchScore(profile: NostrProfile, pubkey: String, query: String) -> Int? {
+        ProfileSearchSupport.score(profile: profile, pubkey: pubkey, query: query)
     }
 
     private func matchedProfileResults(
@@ -2507,7 +2666,7 @@ struct NostrFeedService: Sendable {
             let pubkey = normalizePubkey(event.pubkey)
             guard !pubkey.isEmpty else { continue }
             guard seen.insert(pubkey).inserted else { continue }
-            guard let score = profileSearchScore(profile: profile, pubkey: pubkey, query: query) else { continue }
+            guard let score = Self.profileSearchScore(profile: profile, pubkey: pubkey, query: query) else { continue }
 
             fetchedProfiles[pubkey] = profile
             matches.append((

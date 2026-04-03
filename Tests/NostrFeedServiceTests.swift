@@ -184,6 +184,128 @@ final class NostrFeedServiceTests: XCTestCase {
         XCTAssertEqual(fetchCount, 0)
     }
 
+    func testLocalProfileSearchScansFullLocalMetadataSetForNormalizedHandleMatches() async throws {
+        let rootURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("FlowFullLocalProfileSearch-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: rootURL, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: rootURL) }
+
+        let fileManager = TestFileManager(rootURL: rootURL)
+        let nostrDatabase = FlowNostrDB(fileManager: fileManager)
+        let service = makeFeedService(
+            relayClient: SpyRelayClient(),
+            fileManager: fileManager,
+            nostrDatabase: nostrDatabase
+        )
+
+        func paddedHex(_ value: Int) -> String {
+            String(format: "%064x", value)
+        }
+
+        let targetPubkey = paddedHex(1)
+        let targetEvent = makeEvent(
+            id: paddedHex(10_001),
+            pubkey: targetPubkey,
+            kind: 0,
+            tags: [],
+            content: #"{"name":"Fiat Jaf","display_name":"Fiat Jaf"}"#,
+            createdAt: 1_700_000_000
+        )
+
+        var metadataEvents = [targetEvent]
+        metadataEvents.reserveCapacity(1_702)
+
+        for index in 0..<1_700 {
+            metadataEvents.append(
+                makeEvent(
+                    id: paddedHex(20_000 + index),
+                    pubkey: paddedHex(30_000 + index),
+                    kind: 0,
+                    tags: [],
+                    content: #"{"name":"user\#(index)","display_name":"User \#(index)"}"#,
+                    createdAt: 1_700_000_100 + index
+                )
+            )
+        }
+
+        XCTAssertTrue(nostrDatabase.ingest(events: metadataEvents))
+
+        let compactResults = await service.searchProfiles(query: "fiatjaf", limit: 8)
+        let spacedResults = await service.searchProfiles(query: "fiat jaf", limit: 8)
+
+        XCTAssertEqual(compactResults.first?.pubkey, targetPubkey)
+        XCTAssertEqual(compactResults.first?.profile?.displayName, "Fiat Jaf")
+        XCTAssertEqual(spacedResults.first?.pubkey, targetPubkey)
+        XCTAssertEqual(spacedResults.first?.profile?.displayName, "Fiat Jaf")
+    }
+
+    func testLocalProfileSearchMatchesTokenizedDisplayNames() async throws {
+        let rootURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("FlowTokenizedLocalProfileSearch-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: rootURL, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: rootURL) }
+
+        let fileManager = TestFileManager(rootURL: rootURL)
+        let nostrDatabase = FlowNostrDB(fileManager: fileManager)
+        let service = makeFeedService(
+            relayClient: SpyRelayClient(),
+            fileManager: fileManager,
+            nostrDatabase: nostrDatabase
+        )
+
+        let targetPubkey = String(format: "%064x", 4_242)
+        let targetEvent = makeEvent(
+            id: String(format: "%064x", 9_999),
+            pubkey: targetPubkey,
+            kind: 0,
+            tags: [],
+            content: #"{"name":"Michael J. Saylor","display_name":"Michael J. Saylor"}"#,
+            createdAt: 1_700_000_500
+        )
+
+        XCTAssertTrue(nostrDatabase.ingest(events: [targetEvent]))
+
+        let results = await service.searchProfiles(query: "michael saylor", limit: 8)
+
+        XCTAssertEqual(results.first?.pubkey, targetPubkey)
+        XCTAssertEqual(results.first?.profile?.displayName, "Michael J. Saylor")
+    }
+
+    func testLocalProfileSearchRefreshesAfterNewMetadataIngest() async throws {
+        let rootURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("FlowRefreshingLocalProfileSearch-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: rootURL, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: rootURL) }
+
+        let fileManager = TestFileManager(rootURL: rootURL)
+        let nostrDatabase = FlowNostrDB(fileManager: fileManager)
+        let service = makeFeedService(
+            relayClient: SpyRelayClient(),
+            fileManager: fileManager,
+            nostrDatabase: nostrDatabase
+        )
+
+        let initialResults = await service.searchProfiles(query: "hal", limit: 8)
+        XCTAssertTrue(initialResults.isEmpty)
+
+        let targetPubkey = String(format: "%064x", 7_777)
+        let targetEvent = makeEvent(
+            id: String(format: "%064x", 8_888),
+            pubkey: targetPubkey,
+            kind: 0,
+            tags: [],
+            content: #"{"name":"hal","display_name":"Hal Finney"}"#,
+            createdAt: 1_700_000_700
+        )
+
+        XCTAssertTrue(nostrDatabase.ingest(events: [targetEvent]))
+
+        let refreshedResults = await service.searchProfiles(query: "hal", limit: 8)
+
+        XCTAssertEqual(refreshedResults.first?.pubkey, targetPubkey)
+        XCTAssertEqual(refreshedResults.first?.profile?.displayName, "Hal Finney")
+    }
+
     func testStoreFollowListSnapshotLocallyCachesSnapshot() async throws {
         let rootURL = FileManager.default.temporaryDirectory
             .appendingPathComponent("FlowFollowSnapshotStore-\(UUID().uuidString)", isDirectory: true)

@@ -20,6 +20,7 @@ final class FlowPremiumStore: ObservableObject {
     @Published private(set) var isFlowPlusActive = false
     @Published private(set) var isLoadingProducts = false
     @Published private(set) var isRestoringPurchases = false
+    @Published private(set) var isEligibleForFlowPlusIntroOffer = false
     @Published var lastErrorMessage: String?
 
     private let appSettings: AppSettingsStore
@@ -38,16 +39,35 @@ final class FlowPremiumStore: ObservableObject {
         products.first(where: { $0.id == FlowPlusProduct.monthly.rawValue }) ?? products.first
     }
 
+    var flowPlusIntroOffer: Product.SubscriptionOffer? {
+        flowPlusProduct?.subscription?.introductoryOffer
+    }
+
+    var flowPlusTrialMarketingText: String? {
+        guard isEligibleForFlowPlusIntroOffer, let offer = flowPlusIntroOffer else { return nil }
+        return offer.flowPlusTrialMarketingText
+    }
+
+    var flowPlusMonthlyPriceText: String {
+        flowPlusProduct?.displayPrice ?? "$5.99"
+    }
+
+    var flowPlusPurchaseButtonTitle: String {
+        "Try it free for 7 days"
+    }
+
     func refreshProducts() async {
         isLoadingProducts = true
         defer { isLoadingProducts = false }
 
         do {
             products = try await Product.products(for: FlowPlusProduct.allCases.map(\.rawValue))
+            await refreshIntroOfferEligibility()
             lastErrorMessage = nil
         } catch {
             products = []
-            lastErrorMessage = "Couldn't load Flow Plus pricing right now."
+            isEligibleForFlowPlusIntroOffer = false
+            lastErrorMessage = "Couldn't load Halo Plus pricing right now."
         }
     }
 
@@ -85,7 +105,7 @@ final class FlowPremiumStore: ObservableObject {
             case .userCancelled:
                 return .cancelled
             @unknown default:
-                lastErrorMessage = "Flow Plus purchase status is unavailable."
+                lastErrorMessage = "Halo Plus purchase status is unavailable."
                 return .failed
             }
         } catch {
@@ -100,7 +120,7 @@ final class FlowPremiumStore: ObservableObject {
         }
 
         guard let product = flowPlusProduct else {
-            lastErrorMessage = "Flow Plus pricing isn’t available yet."
+            lastErrorMessage = "Couldn't load Halo Plus pricing right now. Please try again in a moment."
             return .failed
         }
 
@@ -116,8 +136,21 @@ final class FlowPremiumStore: ObservableObject {
             lastErrorMessage = nil
             await refreshEntitlements()
         } catch {
-            lastErrorMessage = "Couldn't restore Flow Plus purchases right now."
+            lastErrorMessage = "Couldn't restore Halo Plus purchases right now."
         }
+    }
+
+    private func refreshIntroOfferEligibility() async {
+        guard
+            let subscription = flowPlusProduct?.subscription,
+            let offer = subscription.introductoryOffer,
+            offer.paymentMode == .freeTrial
+        else {
+            isEligibleForFlowPlusIntroOffer = false
+            return
+        }
+
+        isEligibleForFlowPlusIntroOffer = await subscription.isEligibleForIntroOffer
     }
 
     private func observeTransactionUpdates() -> Task<Void, Never> {
@@ -150,8 +183,36 @@ final class FlowPremiumStore: ObservableObject {
         var errorDescription: String? {
             switch self {
             case .failedVerification:
-                return "We couldn't verify your Flow Plus purchase."
+                return "We couldn't verify your Halo Plus purchase."
             }
+        }
+    }
+}
+
+private extension Product.SubscriptionOffer {
+    var flowPlusTrialMarketingText: String? {
+        guard paymentMode == .freeTrial else { return nil }
+
+        switch period.unit {
+        case .week where period.value * max(periodCount, 1) == 1:
+            return "7-day free trial"
+        default:
+            let totalValue = period.value * max(periodCount, 1)
+            let unitLabel: String
+            switch period.unit {
+            case .day:
+                unitLabel = "day"
+            case .week:
+                unitLabel = "week"
+            case .month:
+                unitLabel = "month"
+            case .year:
+                unitLabel = "year"
+            @unknown default:
+                unitLabel = "period"
+            }
+            let durationText = totalValue == 1 ? "1 \(unitLabel)" : "\(totalValue) \(unitLabel)s"
+            return "\(durationText) free trial"
         }
     }
 }

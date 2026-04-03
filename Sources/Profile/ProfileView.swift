@@ -5,7 +5,7 @@ struct ProfileView: View {
     private static let feedHorizontalInset: CGFloat = 14
     private static let bottomScrollClearance: CGFloat = 110
     private static let profileBannerHeight: CGFloat = 220
-    private static let profileAvatarSize: CGFloat = 96
+    private static let profileAvatarSize: CGFloat = 104
     private static let profileContentHorizontalPadding: CGFloat = 16
     @EnvironmentObject private var auth: AuthManager
     @EnvironmentObject private var appSettings: AppSettingsStore
@@ -48,106 +48,64 @@ struct ProfileView: View {
         let visibleItems = viewModel.visibleItems
         let visibleReplyCounts = ReplyCountEstimator.counts(for: visibleItems)
 
-        List {
-            Section {
-                if isInitialProfileMetadataLoading {
-                    profileHeaderSkeleton
-                } else {
-                    profileHeader
-                }
-            }
-            .listRowSeparator(.hidden)
-            .listRowInsets(EdgeInsets())
-            .listRowBackground(Color.clear)
+        ZStack {
+            AppThemeBackgroundView()
+                .ignoresSafeArea()
 
-            Section {
-                VStack(alignment: .leading, spacing: 10) {
-                    FlowCapsuleTabBar(
-                        selection: $viewModel.mode,
-                        items: FeedMode.allCases,
-                        title: { $0.title }
-                    )
-                }
-                .padding(.vertical, 4)
-            }
-            .listRowSeparator(.hidden)
-            .listRowBackground(Color.clear)
-
-            if viewModel.isLoading && visibleItems.isEmpty {
-                ForEach(0..<6, id: \.self) { _ in
-                    loadingRow
-                        .listRowInsets(
-                            EdgeInsets(
-                                top: 0,
-                                leading: Self.feedHorizontalInset,
-                                bottom: 0,
-                                trailing: Self.feedHorizontalInset
-                            )
-                        )
-                        .listRowSeparator(.hidden)
-                }
-            } else if visibleItems.isEmpty {
-                VStack(spacing: 8) {
-                    if let errorMessage = viewModel.errorMessage {
-                        Text(errorMessage)
-                            .font(.body)
-                            .multilineTextAlignment(.center)
-                            .foregroundStyle(.secondary)
+            List {
+                Section {
+                    if isInitialProfileMetadataLoading {
+                        profileHeaderSkeleton
                     } else {
-                        Text(viewModel.mode == .posts ? "No posts yet" : "No replies yet")
-                            .font(.body)
-                            .foregroundStyle(.secondary)
+                        profileHeader
                     }
                 }
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 24)
-                .listRowInsets(
-                    EdgeInsets(
-                        top: 0,
-                        leading: Self.feedHorizontalInset,
-                        bottom: 0,
-                        trailing: Self.feedHorizontalInset
-                    )
-                )
                 .listRowSeparator(.hidden)
-            } else {
-                ForEach(visibleItems) { item in
-                    FeedRowView(
-                        item: item,
-                        reactionCount: reactionStats.reactionCount(for: item.displayEventID),
-                        isLikedByCurrentUser: reactionStats.isReactedByCurrentUser(
-                            for: item.displayEventID,
-                            currentPubkey: auth.currentAccount?.pubkey
-                        ),
-                        commentCount: visibleReplyCounts[item.displayEventID.lowercased()] ?? 0,
-                        showReactions: appSettings.reactionsVisibleInFeeds,
-                        avatarMenuActions: .init(
-                            followLabel: followStore.isFollowing(item.displayAuthorPubkey) ? "Unfollow" : "Follow",
-                            onFollowToggle: {
-                                followStore.toggleFollow(item.displayAuthorPubkey)
-                            },
-                            onViewProfile: {
-                                openProfile(pubkey: item.displayAuthorPubkey)
-                            }
-                        ),
-                        onHashtagTap: { hashtag in
-                            openHashtagFeed(hashtag: hashtag)
-                        },
-                        onProfileTap: { pubkey in
-                            openProfile(pubkey: pubkey)
-                        },
-                        onOpenThread: {
-                            shouldAutoFocusReplyInThread = false
-                            selectedThreadItem = item.threadNavigationItem
-                        },
-                        onRepostActorTap: { pubkey in
-                            openProfile(pubkey: pubkey)
-                        },
-                        onReferencedEventTap: { referencedItem in
-                            shouldAutoFocusReplyInThread = false
-                            selectedThreadItem = referencedItem.threadNavigationItem
+                .listRowInsets(EdgeInsets())
+                .listRowBackground(Color.clear)
+
+                Section {
+                    VStack(alignment: .leading, spacing: 10) {
+                        FlowCapsuleTabBar(
+                            selection: $viewModel.mode,
+                            items: FeedMode.allCases,
+                            title: { $0.title }
+                        )
+                    }
+                    .padding(.vertical, 4)
+                }
+                .listRowSeparator(.hidden)
+                .listRowBackground(Color.clear)
+
+                if viewModel.isLoading && visibleItems.isEmpty {
+                    ForEach(0..<6, id: \.self) { _ in
+                        loadingRow
+                            .listRowInsets(
+                                EdgeInsets(
+                                    top: 0,
+                                    leading: Self.feedHorizontalInset,
+                                    bottom: 0,
+                                    trailing: Self.feedHorizontalInset
+                                )
+                            )
+                            .listRowSeparator(.hidden)
+                            .listRowBackground(Color.clear)
+                    }
+                } else if visibleItems.isEmpty {
+                    VStack(spacing: 8) {
+                        if let errorMessage = viewModel.errorMessage {
+                            Text(errorMessage)
+                                .font(.body)
+                                .multilineTextAlignment(.center)
+                                .foregroundStyle(.secondary)
+                        } else {
+                            Text(viewModel.mode == .posts ? "No posts yet" : "No replies yet")
+                                .font(.body)
+                                .foregroundStyle(.secondary)
                         }
-                    )
+                    }
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 24)
                     .listRowInsets(
                         EdgeInsets(
                             top: 0,
@@ -156,52 +114,106 @@ struct ProfileView: View {
                             trailing: Self.feedHorizontalInset
                         )
                     )
-                    .listRowSeparator(.visible)
-                    .onAppear {
-                        if appSettings.reactionsVisibleInFeeds {
-                            reactionStats.prefetch(events: [item.displayEvent], relayURLs: effectiveReadRelayURLs)
-                        }
-                        Task {
-                            await viewModel.loadMoreIfNeeded(currentItem: item)
+                    .listRowSeparator(.hidden)
+                    .listRowBackground(Color.clear)
+                } else {
+                    ForEach(visibleItems) { item in
+                        FeedRowView(
+                            item: item,
+                            reactionCount: reactionStats.reactionCount(for: item.displayEventID),
+                            isLikedByCurrentUser: reactionStats.isReactedByCurrentUser(
+                                for: item.displayEventID,
+                                currentPubkey: auth.currentAccount?.pubkey
+                            ),
+                            commentCount: visibleReplyCounts[item.displayEventID.lowercased()] ?? 0,
+                            showReactions: appSettings.reactionsVisibleInFeeds,
+                            avatarMenuActions: .init(
+                                followLabel: followStore.isFollowing(item.displayAuthorPubkey) ? "Unfollow" : "Follow",
+                                onFollowToggle: {
+                                    followStore.toggleFollow(item.displayAuthorPubkey)
+                                },
+                                onViewProfile: {
+                                    openProfile(pubkey: item.displayAuthorPubkey)
+                                }
+                            ),
+                            onHashtagTap: { hashtag in
+                                openHashtagFeed(hashtag: hashtag)
+                            },
+                            onProfileTap: { pubkey in
+                                openProfile(pubkey: pubkey)
+                            },
+                            onOpenThread: {
+                                shouldAutoFocusReplyInThread = false
+                                selectedThreadItem = item.threadNavigationItem
+                            },
+                            onRepostActorTap: { pubkey in
+                                openProfile(pubkey: pubkey)
+                            },
+                            onReferencedEventTap: { referencedItem in
+                                shouldAutoFocusReplyInThread = false
+                                selectedThreadItem = referencedItem.threadNavigationItem
+                            }
+                        )
+                        .listRowInsets(
+                            EdgeInsets(
+                                top: 0,
+                                leading: Self.feedHorizontalInset,
+                                bottom: 0,
+                                trailing: Self.feedHorizontalInset
+                            )
+                        )
+                        .listRowSeparator(.visible)
+                        .listRowSeparatorTint(appSettings.themePalette.separator)
+                        .listRowBackground(Color.clear)
+                        .onAppear {
+                            if appSettings.reactionsVisibleInFeeds {
+                                reactionStats.prefetch(events: [item.displayEvent], relayURLs: effectiveReadRelayURLs)
+                            }
+                            Task {
+                                await viewModel.loadMoreIfNeeded(currentItem: item)
+                            }
                         }
                     }
                 }
-            }
 
-            if viewModel.isLoadingMore {
-                HStack {
-                    Spacer()
-                    ProgressView()
-                    Spacer()
-                }
-                .padding(.vertical, 8)
-                .listRowInsets(
-                    EdgeInsets(
-                        top: 0,
-                        leading: Self.feedHorizontalInset,
-                        bottom: 0,
-                        trailing: Self.feedHorizontalInset
+                if viewModel.isLoadingMore {
+                    HStack {
+                        Spacer()
+                        ProgressView()
+                        Spacer()
+                    }
+                    .padding(.vertical, 8)
+                    .listRowInsets(
+                        EdgeInsets(
+                            top: 0,
+                            leading: Self.feedHorizontalInset,
+                            bottom: 0,
+                            trailing: Self.feedHorizontalInset
+                        )
                     )
-                )
-                .listRowSeparator(.hidden)
-            }
-
-            if !visibleItems.isEmpty || viewModel.isLoadingMore {
-                Color.clear
-                    .frame(height: Self.bottomScrollClearance)
-                    .listRowInsets(EdgeInsets())
                     .listRowSeparator(.hidden)
                     .listRowBackground(Color.clear)
+                }
+
+                if !visibleItems.isEmpty || viewModel.isLoadingMore {
+                    Color.clear
+                        .frame(height: Self.bottomScrollClearance)
+                        .listRowInsets(EdgeInsets())
+                        .listRowSeparator(.hidden)
+                        .listRowBackground(Color.clear)
+                }
+            }
+            .listStyle(.plain)
+            .scrollContentBackground(.hidden)
+            .background(Color.clear)
+            .refreshable {
+                await viewModel.refresh()
+                await viewModel.refreshFollowRelationship(currentAccountPubkey: auth.currentAccount?.pubkey)
+                muteStore.refreshFromRelay()
             }
         }
-        .listStyle(.plain)
         .navigationTitle("")
         .toolbar(.hidden, for: .navigationBar)
-        .refreshable {
-            await viewModel.refresh()
-            await viewModel.refreshFollowRelationship(currentAccountPubkey: auth.currentAccount?.pubkey)
-            muteStore.refreshFromRelay()
-        }
         .task {
             configureStores()
             await viewModel.loadIfNeeded()
@@ -394,7 +406,7 @@ struct ProfileView: View {
     private var profileHeaderSkeleton: some View {
         VStack(alignment: .leading, spacing: 0) {
             Rectangle()
-                .fill(Color(.secondarySystemFill))
+                .fill(appSettings.themePalette.secondaryFill)
                 .frame(height: Self.profileBannerHeight)
                 .overlay(alignment: .topLeading) {
                     profileBackButton
@@ -404,7 +416,7 @@ struct ProfileView: View {
                 }
                 .overlay(alignment: .topTrailing) {
                     Circle()
-                        .fill(Color(.tertiarySystemFill))
+                        .fill(appSettings.themePalette.tertiaryFill)
                         .frame(width: 36, height: 36)
                         .padding(.trailing, 16)
                         .padding(.top, 12)
@@ -414,23 +426,23 @@ struct ProfileView: View {
             VStack(alignment: .leading, spacing: 14) {
                 HStack(alignment: .bottom, spacing: 16) {
                     Circle()
-                        .fill(Color(.secondarySystemFill))
+                        .fill(appSettings.themePalette.secondaryFill)
                         .frame(width: Self.profileAvatarSize, height: Self.profileAvatarSize)
 
                     Spacer(minLength: 0)
 
                     HStack(spacing: 10) {
                         Capsule()
-                            .fill(Color(.secondarySystemFill))
+                            .fill(appSettings.themePalette.secondaryFill)
                             .frame(width: 44, height: 40)
                         Capsule()
-                            .fill(Color(.secondarySystemFill))
+                            .fill(appSettings.themePalette.secondaryFill)
                             .frame(width: 44, height: 40)
                         Capsule()
-                            .fill(Color(.secondarySystemFill))
+                            .fill(appSettings.themePalette.secondaryFill)
                             .frame(width: 44, height: 40)
                         Capsule()
-                            .fill(Color(.secondarySystemFill))
+                            .fill(appSettings.themePalette.secondaryFill)
                             .frame(width: 44, height: 40)
                     }
                 }
@@ -438,27 +450,27 @@ struct ProfileView: View {
 
                 VStack(alignment: .leading, spacing: 10) {
                     RoundedRectangle(cornerRadius: 8, style: .continuous)
-                        .fill(Color(.secondarySystemFill))
+                        .fill(appSettings.themePalette.secondaryFill)
                         .frame(width: 210, height: 32)
 
                     RoundedRectangle(cornerRadius: 6, style: .continuous)
-                        .fill(Color(.secondarySystemFill))
+                        .fill(appSettings.themePalette.secondaryFill)
                         .frame(width: 150, height: 20)
 
                     RoundedRectangle(cornerRadius: 6, style: .continuous)
-                        .fill(Color(.secondarySystemFill))
+                        .fill(appSettings.themePalette.secondaryFill)
                         .frame(width: 120, height: 16)
                 }
 
                 VStack(alignment: .leading, spacing: 8) {
                     RoundedRectangle(cornerRadius: 6, style: .continuous)
-                        .fill(Color(.secondarySystemFill))
+                        .fill(appSettings.themePalette.secondaryFill)
                         .frame(height: 15)
                     RoundedRectangle(cornerRadius: 6, style: .continuous)
-                        .fill(Color(.secondarySystemFill))
+                        .fill(appSettings.themePalette.secondaryFill)
                         .frame(height: 15)
                     RoundedRectangle(cornerRadius: 6, style: .continuous)
-                        .fill(Color(.secondarySystemFill))
+                        .fill(appSettings.themePalette.secondaryFill)
                         .frame(width: 236, height: 15)
                 }
 
@@ -652,7 +664,7 @@ struct ProfileView: View {
             Circle().stroke(appSettings.themePalette.background, lineWidth: 4)
         }
         .overlay {
-            Circle().stroke(Color(.separator).opacity(0.22), lineWidth: 0.8)
+            Circle().stroke(appSettings.themePalette.separator.opacity(0.72), lineWidth: 0.8)
         }
         .shadow(color: Color.black.opacity(0.12), radius: 14, x: 0, y: 8)
     }
@@ -664,7 +676,7 @@ struct ProfileView: View {
                     LinearGradient(
                         colors: [
                             Color.accentColor.opacity(0.9),
-                            Color(.tertiarySystemFill)
+                            appSettings.themePalette.tertiaryFill
                         ],
                         startPoint: .topLeading,
                         endPoint: .bottomTrailing
@@ -805,20 +817,20 @@ struct ProfileView: View {
     private var loadingRow: some View {
         HStack(alignment: .top, spacing: 12) {
             Circle()
-                .fill(Color(.secondarySystemFill))
+                .fill(appSettings.themePalette.secondaryFill)
                 .frame(width: 44, height: 44)
 
             VStack(alignment: .leading, spacing: 8) {
                 RoundedRectangle(cornerRadius: 4)
-                    .fill(Color(.secondarySystemFill))
+                    .fill(appSettings.themePalette.secondaryFill)
                     .frame(width: 150, height: 14)
 
                 RoundedRectangle(cornerRadius: 4)
-                    .fill(Color(.secondarySystemFill))
+                    .fill(appSettings.themePalette.secondaryFill)
                     .frame(height: 14)
 
                 RoundedRectangle(cornerRadius: 4)
-                    .fill(Color(.secondarySystemFill))
+                    .fill(appSettings.themePalette.secondaryFill)
                     .frame(width: 180, height: 14)
             }
         }
@@ -874,10 +886,10 @@ struct ProfileView: View {
         let disabledOpacity = isDisabled ? 0.48 : 1.0
         let foreground = isPrimary
             ? (style?.primaryForeground ?? Color.white)
-            : (style?.foreground ?? (isDisabled ? Color.secondary : Color.primary))
+            : (style?.foreground ?? (isDisabled ? appSettings.themePalette.mutedForeground : Color.primary))
         let background = isPrimary
             ? (style?.primaryBackground ?? Color.accentColor)
-            : (style?.background ?? Color(.secondarySystemBackground))
+            : (style?.background ?? appSettings.themePalette.secondaryGroupedBackground)
         let borderColor = isPrimary ? style?.primaryBorder : style?.border
 
         return Button(action: action) {
@@ -897,7 +909,7 @@ struct ProfileView: View {
                             .stroke(borderColor.opacity(disabledOpacity), lineWidth: 0.8)
                     } else if !isPrimary {
                         Capsule()
-                            .stroke(Color(.separator).opacity(0.35), lineWidth: 0.8)
+                            .stroke(appSettings.themePalette.separator.opacity(0.7), lineWidth: 0.8)
                     }
                 }
         }
@@ -925,10 +937,10 @@ struct ProfileView: View {
     private func skeletonInfoRow(width: CGFloat) -> some View {
         HStack(spacing: 8) {
             Circle()
-                .fill(Color(.secondarySystemFill))
+                .fill(appSettings.themePalette.secondaryFill)
                 .frame(width: 12, height: 12)
             RoundedRectangle(cornerRadius: 5, style: .continuous)
-                .fill(Color(.secondarySystemFill))
+                .fill(appSettings.themePalette.secondaryFill)
                 .frame(width: width, height: 12)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -1008,7 +1020,7 @@ struct ProfileView: View {
     }
 
     private var profileBannerButtonBorder: Color {
-        appSettings.themePalette.profileActionStyle?.bannerBorder ?? Color.white.opacity(0.24)
+        appSettings.themePalette.profileActionStyle?.bannerBorder ?? appSettings.themePalette.separator.opacity(0.88)
     }
 
     @ViewBuilder

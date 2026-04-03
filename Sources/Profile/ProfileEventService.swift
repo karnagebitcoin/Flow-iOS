@@ -3,6 +3,7 @@ import Foundation
 struct ProfileMetadataSnapshot: Sendable {
     let content: String
     let tags: [[String]]
+    let createdAt: Int?
 
     var jsonObject: [String: Any] {
         guard let data = content.data(using: .utf8),
@@ -54,7 +55,11 @@ struct ProfileEventService {
             return nil
         }
 
-        return ProfileMetadataSnapshot(content: event.content, tags: event.tags)
+        return ProfileMetadataSnapshot(
+            content: event.content,
+            tags: event.tags,
+            createdAt: event.createdAt
+        )
     }
 
     func fetchMuteListSnapshot(relayURL: URL, pubkey: String) async throws -> MuteListSnapshot? {

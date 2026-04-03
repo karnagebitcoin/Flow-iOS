@@ -13,6 +13,8 @@
 		064EA2E56841A005EFBA1B89 /* AuthStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 98FAC17906D393F287394FBD /* AuthStore.swift */; };
 		0855B937E7108501D9BE61AB /* HashtagFavoritesStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7E1A0D446E96339734859F0F /* HashtagFavoritesStore.swift */; };
 		09567A15BABAB8FA8BE15F47 /* welcome_onboarding_unicorn.json in Resources */ = {isa = PBXBuildFile; fileRef = AD38ADD0555295271C55F01F /* welcome_onboarding_unicorn.json */; };
+		A1F7C2016B5342FA9E3D4101 /* welcome_intro_unicorn.json in Resources */ = {isa = PBXBuildFile; fileRef = A1F7C2026B5342FA9E3D4101 /* welcome_intro_unicorn.json */; };
+		B4E1AA4C2D7F48E6A2C19501 /* sign_in_background.json in Resources */ = {isa = PBXBuildFile; fileRef = B4E1AA4C2D7F48E6A2C19502 /* sign_in_background.json */; };
 		09ACD29A39ACB01B3B0379CA /* PollModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = A34E396AA961290CFC2A1B4F /* PollModels.swift */; };
 		0A3981CFDB4B11AD524F5048 /* SpaceGrotesk.ttf in Resources */ = {isa = PBXBuildFile; fileRef = 0799BCF380BFFF7B4339FE90 /* SpaceGrotesk.ttf */; };
 		0B1B3CE64991DA949BFD425B /* FlowPlusPaywallView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8467D457DCF59811885D322C /* FlowPlusPaywallView.swift */; };
@@ -58,6 +60,7 @@
 		45014213AF9757F51F46A68F /* Nacelle-Bold.otf in Resources */ = {isa = PBXBuildFile; fileRef = 89FC9F78F91139C80A90BADD /* Nacelle-Bold.otf */; };
 		471D2A71946F997761A9907A /* SettingsFlowPlusView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E06B001C9CF614F66BD2C92B /* SettingsFlowPlusView.swift */; };
 		47CE76B972995AF553AE736A /* SearchViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 668778178F4FBD32B9CAB751 /* SearchViewModel.swift */; };
+		4F2C4F1A7B6D4E5FA1C2B3D4 /* NoteContentLinkResolverTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4F2C4F197B6D4E5FA1C2B3D4 /* NoteContentLinkResolverTests.swift */; };
 		49A33778F8CC7699D01EA0C8 /* InterestFeedStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 21DF8275F493101456489799 /* InterestFeedStore.swift */; };
 		51C692A0B2D75FC091A58283 /* KlipyGIFServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3BBC297781EB6C719EE31929 /* KlipyGIFServiceTests.swift */; };
 		52C61C33CE36A6629F3F83C3 /* NostrRelayClientTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D6D17F2EC311D3203D8950E1 /* NostrRelayClientTests.swift */; };
@@ -221,6 +224,7 @@
 		0C79C9AF2B774553CEEF8299 /* FollowStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FollowStore.swift; sourceTree = "<group>"; };
 		0D212FF62CC30CCC5E53F0F0 /* KeysView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeysView.swift; sourceTree = "<group>"; };
 		0DC4E19A67E04EC434706C3A /* sakura-share-bg.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = "sakura-share-bg.json"; sourceTree = "<group>"; };
+		B4E1AA4C2D7F48E6A2C19502 /* sign_in_background.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = sign_in_background.json; sourceTree = "<group>"; };
 		0EE40B5E9E9E6CABD9470246 /* ProfileAboutTextView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProfileAboutTextView.swift; sourceTree = "<group>"; };
 		1179EFC9888CA4803C582715 /* ComposeNoteSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ComposeNoteSheet.swift; sourceTree = "<group>"; };
 		1480B5E7A53CAE02D9D677C1 /* ProfileViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProfileViewModel.swift; sourceTree = "<group>"; };
@@ -267,6 +271,7 @@
 		4C415B7E3F07575507ED1F2B /* ActivityView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ActivityView.swift; sourceTree = "<group>"; };
 		4CA581A5CD530A9751921793 /* PollVotePublishService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PollVotePublishService.swift; sourceTree = "<group>"; };
 		4DE8EBF20CE78C8EC67DDEF4 /* MainTabShellView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MainTabShellView.swift; sourceTree = "<group>"; };
+		4F2C4F197B6D4E5FA1C2B3D4 /* NoteContentLinkResolverTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NoteContentLinkResolverTests.swift; sourceTree = "<group>"; };
 		505A7CDC9E3F0A15A1C4F5F8 /* NoteReportSheetView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NoteReportSheetView.swift; sourceTree = "<group>"; };
 		50E99A9AA7D7B4F0E714BF3C /* refmap.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = refmap.c; sourceTree = "<group>"; };
 		5130C5E28589F7074F4584BF /* verifier.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = verifier.c; sourceTree = "<group>"; };
@@ -332,6 +337,7 @@
 		A7C3D2374006CBDD8781E1A7 /* tal.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = tal.c; sourceTree = "<group>"; };
 		A986D586CC5154F59A114A37 /* ActivityModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ActivityModels.swift; sourceTree = "<group>"; };
 		AA1B291DA499152538A295F6 /* HomeSlideoutMenuView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HomeSlideoutMenuView.swift; sourceTree = "<group>"; };
+		A1F7C2026B5342FA9E3D4101 /* welcome_intro_unicorn.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = welcome_intro_unicorn.json; sourceTree = "<group>"; };
 		AD38ADD0555295271C55F01F /* welcome_onboarding_unicorn.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = welcome_onboarding_unicorn.json; sourceTree = "<group>"; };
 		AED0817A296804831BD0F16D /* KlipyGIFService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KlipyGIFService.swift; sourceTree = "<group>"; };
 		AFABF13735545F8FDEA81317 /* RelativeTimestampFormatter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RelativeTimestampFormatter.swift; sourceTree = "<group>"; };
@@ -492,6 +498,8 @@
 				34E0E4C03AE499A85957C356 /* aura.json */,
 				B05785D04DB8CEBA2BD42EA2 /* Info.plist */,
 				0DC4E19A67E04EC434706C3A /* sakura-share-bg.json */,
+				B4E1AA4C2D7F48E6A2C19502 /* sign_in_background.json */,
+				A1F7C2026B5342FA9E3D4101 /* welcome_intro_unicorn.json */,
 				AD38ADD0555295271C55F01F /* welcome_onboarding_unicorn.json */,
 				C8E76337FCB2BD11C7DE3ED6 /* Fonts */,
 			);
@@ -547,6 +555,7 @@
 				425996BFC8F1FE946E745146 /* LongFormArticleModelsTests.swift */,
 				58C5041AD8041427E01D7B42 /* NostrFeedServiceTests.swift */,
 				D6D17F2EC311D3203D8950E1 /* NostrRelayClientTests.swift */,
+				4F2C4F197B6D4E5FA1C2B3D4 /* NoteContentLinkResolverTests.swift */,
 				8EB3D526182A01F061DF4B07 /* NoteReportPublishServiceTests.swift */,
 				151A65BB15F10295225A7D6A /* PollModelsTests.swift */,
 				392BF0CBA726B8A166A0B0AB /* PollResultsStoreTests.swift */,
@@ -996,6 +1005,8 @@
 				0A3981CFDB4B11AD524F5048 /* SpaceGrotesk.ttf in Resources */,
 				679EE6C0E5E8931989A28074 /* aura.json in Resources */,
 				CAE8CAC091355CB1117C4D90 /* sakura-share-bg.json in Resources */,
+				B4E1AA4C2D7F48E6A2C19501 /* sign_in_background.json in Resources */,
+				A1F7C2016B5342FA9E3D4101 /* welcome_intro_unicorn.json in Resources */,
 				09567A15BABAB8FA8BE15F47 /* welcome_onboarding_unicorn.json in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -1166,6 +1177,7 @@
 				3526AA8C857820567D62575C /* LongFormArticleModelsTests.swift in Sources */,
 				DF564A10D83D14512B25E8FE /* NostrFeedServiceTests.swift in Sources */,
 				52C61C33CE36A6629F3F83C3 /* NostrRelayClientTests.swift in Sources */,
+				4F2C4F1A7B6D4E5FA1C2B3D4 /* NoteContentLinkResolverTests.swift in Sources */,
 				0C8214656677648979E643C1 /* NoteReportPublishServiceTests.swift in Sources */,
 				27FD0AAFE54262EB93C36527 /* PollModelsTests.swift in Sources */,
 				DF34D77127C1E15D244F7474 /* PollResultsStoreTests.swift in Sources */,

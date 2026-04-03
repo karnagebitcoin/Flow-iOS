@@ -2,7 +2,7 @@ import Foundation
 
 enum FlowClientAttribution {
     static let tagName = "client"
-    static let displayName = "Flow"
+    static let displayName = "Halo"
     static let handlerAddress: String? = nil
     static let handlerRelayHint: String? = nil
 

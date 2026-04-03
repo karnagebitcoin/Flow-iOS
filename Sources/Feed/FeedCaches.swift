@@ -537,6 +537,18 @@ actor ProfileCache: ProfileCaching {
         var snapshotsToPersist: [String: PersistedProfileSnapshot] = [:]
 
         if !unresolved.isEmpty {
+            let persisted = await snapshotStore.getMany(pubkeys: unresolved)
+            for (pubkey, snapshot) in persisted {
+                profiles[pubkey] = snapshot
+                hits[pubkey] = snapshot.profile
+                knownMisses.removeValue(forKey: pubkey)
+                touch(pubkey)
+            }
+            unresolved.removeAll(where: { persisted[$0] != nil })
+            pruneOverflowIfNeeded()
+        }
+
+        if !unresolved.isEmpty {
             if let nostrProfiles = nostrDatabase.profiles(pubkeys: unresolved), !nostrProfiles.isEmpty {
                 for (pubkey, profile) in nostrProfiles {
                     let snapshot = PersistedProfileSnapshot(profile: profile, fetchedAt: now)
@@ -548,17 +560,6 @@ actor ProfileCache: ProfileCaching {
                 }
                 unresolved.removeAll(where: { nostrProfiles[$0] != nil })
             }
-        }
-
-        if !unresolved.isEmpty {
-            let persisted = await snapshotStore.getMany(pubkeys: unresolved)
-            for (pubkey, snapshot) in persisted {
-                profiles[pubkey] = snapshot
-                hits[pubkey] = snapshot.profile
-                knownMisses.removeValue(forKey: pubkey)
-                touch(pubkey)
-            }
-            pruneOverflowIfNeeded()
         }
 
         if !snapshotsToPersist.isEmpty {

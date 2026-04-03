@@ -108,7 +108,7 @@ struct RelaySettingsView: View {
                         VStack(alignment: .leading, spacing: 4) {
                             Text("Data Sources")
                                 .font(.headline)
-                            Text("Advanced controls for where Flow receives from and publishes to.")
+                            Text("Advanced controls for where Halo receives from and publishes to.")
                                 .font(.footnote)
                                 .foregroundStyle(.secondary)
                         }
@@ -267,7 +267,7 @@ struct RelaySettingsView: View {
         if dataSources.isEmpty {
             return "Add a source to start receiving and publishing data."
         }
-        return "Flow is currently using your configured data sources."
+        return "Halo is currently using your configured data sources."
     }
 
     private var dataSources: [DataSourceItem] {
@@ -375,12 +375,12 @@ struct RelaySettingsView: View {
                 Text("What are sources?")
                     .font(.custom("SF Pro Display", size: 28).weight(.semibold))
 
-                Text("Flow does not operate any servers and collects no data. All information is fetched in real time from public servers operated by other people.")
+                Text("Halo does not operate any servers and collects no data. All information is fetched in real time from public servers operated by other people.")
                     .font(.body)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
 
-                Text("Your connection settings decide which public sources Flow reads from and where your posts, follows, and reactions get published.")
+                Text("Your connection settings decide which public sources Halo reads from and where your posts, follows, and reactions get published.")
                     .font(.body)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)

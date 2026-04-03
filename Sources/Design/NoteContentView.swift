@@ -70,6 +70,30 @@ enum NoteContentPollPlacement {
     }
 }
 
+enum NoteContentLinkResolver {
+    static func linkURL(
+        for token: NoteContentToken,
+        allowsInAppProfileRouting: Bool
+    ) -> URL? {
+        switch token.type {
+        case .url:
+            return URL(string: token.value)
+        case .nostrMention:
+            let normalized = NoteContentView.normalizeMentionIdentifier(token.value)
+            if allowsInAppProfileRouting,
+               let pubkey = NoteContentView.mentionedPubkey(from: normalized),
+               let actionURL = NoteContentParser.profileActionURL(for: pubkey) {
+                return actionURL
+            }
+            return NoteContentParser.njumpURL(for: normalized)
+        case .hashtag:
+            return NoteContentParser.hashtagActionURL(for: token.value)
+        case .text, .websocketURL, .emoji, .nostrEvent, .image, .video, .audio:
+            return nil
+        }
+    }
+}
+
 struct NoteContentView: View {
     private enum RenderPart {
         case inlineTokens([NoteContentToken])
@@ -247,6 +271,7 @@ struct NoteContentView: View {
                                     nostrURI: nostrURI,
                                     embedDepth: embedDepth + 1,
                                     onHashtagTap: onHashtagTap,
+                                    onProfileTap: onProfileTap,
                                     onOpenThread: onReferencedEventTap
                                 )
                             } else {
@@ -585,23 +610,26 @@ struct NoteContentView: View {
 
         switch token.type {
         case .url:
-            if let url = URL(string: token.value) {
+            if let url = NoteContentLinkResolver.linkURL(
+                for: token,
+                allowsInAppProfileRouting: onProfileTap != nil
+            ) {
                 segment.link = url
                 segment.foregroundColor = .accentColor
             }
         case .nostrMention:
-            let normalized = Self.normalizeMentionIdentifier(token.value)
-            if let pubkey = Self.mentionedPubkey(from: normalized),
-               let actionURL = NoteContentParser.profileActionURL(for: pubkey),
-               onProfileTap != nil {
-                segment.link = actionURL
-                segment.foregroundColor = .accentColor
-            } else if let url = NoteContentParser.njumpURL(for: normalized) {
+            if let url = NoteContentLinkResolver.linkURL(
+                for: token,
+                allowsInAppProfileRouting: onProfileTap != nil
+            ) {
                 segment.link = url
                 segment.foregroundColor = .accentColor
             }
         case .hashtag:
-            if let url = NoteContentParser.hashtagActionURL(for: token.value) {
+            if let url = NoteContentLinkResolver.linkURL(
+                for: token,
+                allowsInAppProfileRouting: onProfileTap != nil
+            ) {
                 segment.link = url
                 segment.foregroundColor = .accentColor
             }
@@ -828,7 +856,7 @@ struct NoteContentView: View {
         )
     }
 
-    private static func normalizeMentionIdentifier(_ raw: String) -> String {
+    fileprivate static func normalizeMentionIdentifier(_ raw: String) -> String {
         let lowered = raw
             .trimmingCharacters(in: .whitespacesAndNewlines)
             .lowercased()
@@ -838,7 +866,7 @@ struct NoteContentView: View {
         return lowered
     }
 
-    private static func mentionedPubkey(from identifier: String) -> String? {
+    fileprivate static func mentionedPubkey(from identifier: String) -> String? {
         let normalized = normalizeMentionIdentifier(identifier)
         if normalized.hasPrefix("npub1") {
             return PublicKey(npub: normalized)?.hex.lowercased()
@@ -1071,10 +1099,6 @@ private struct NoteImageGalleryView: View {
         layout == .detailCarousel ? 460 : 340
     }
 
-    private var singleImageMaxHeight: CGFloat {
-        layout == .detailCarousel ? 560 : 440
-    }
-
     private var mediaCornerRadius: CGFloat {
         layout == .feed ? 18 : 12
     }
@@ -1164,7 +1188,6 @@ private struct NoteImageGalleryView: View {
         NoteSingleImageCellView(
             url: url,
             cornerRadius: mediaCornerRadius,
-            maxHeight: singleImageMaxHeight,
             onTap: {
                 selectedImage = SelectedImage(id: index)
             }
@@ -1213,33 +1236,57 @@ private struct NoteFeedImageTileView: View {
 private struct NoteSingleImageCellView: View {
     let url: URL
     let cornerRadius: CGFloat
-    let maxHeight: CGFloat
+    var maxHeight: CGFloat? = nil
     let onTap: () -> Void
+    @EnvironmentObject private var appSettings: AppSettingsStore
+
+    private var placeholderHeight: CGFloat {
+        maxHeight ?? 180
+    }
+
+    private var mediaBackgroundColor: Color {
+        if appSettings.activeTheme == .dracula {
+            return appSettings.themePalette.background
+        }
+        return Color(.secondarySystemBackground)
+    }
 
     var body: some View {
         Button(action: onTap) {
             NoteRemoteMediaView(url: url) { asset in
-                NoteMediaAssetContentView(asset: asset, scaling: .fit)
-                    .frame(maxWidth: .infinity, maxHeight: maxHeight, alignment: .center)
-                    .background(Color(.secondarySystemBackground))
+                mediaContent(asset: asset)
             } placeholder: {
                 ProgressView()
-                    .frame(maxWidth: .infinity, minHeight: 180, maxHeight: maxHeight, alignment: .center)
-                    .background(Color(.secondarySystemBackground))
+                    .frame(maxWidth: .infinity, minHeight: 180, maxHeight: placeholderHeight, alignment: .center)
+                    .background(mediaBackgroundColor)
             } failure: {
                 Image(systemName: "photo")
                     .font(.title3)
                     .foregroundStyle(.secondary)
-                    .frame(maxWidth: .infinity, minHeight: 180, maxHeight: maxHeight, alignment: .center)
-                    .background(Color(.secondarySystemBackground))
+                    .frame(maxWidth: .infinity, minHeight: 180, maxHeight: placeholderHeight, alignment: .center)
+                    .background(mediaBackgroundColor)
             }
-            .frame(maxWidth: .infinity, maxHeight: maxHeight, alignment: .center)
             .clipped()
             .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
             .contentShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
         }
         .buttonStyle(.plain)
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    @ViewBuilder
+    private func mediaContent(asset: NoteMediaAsset) -> some View {
+        let base = NoteMediaAssetContentView(asset: asset, scaling: .fit)
+
+        if let maxHeight {
+            base
+                .frame(maxWidth: .infinity, maxHeight: maxHeight, alignment: .center)
+                .background(mediaBackgroundColor)
+                .frame(maxWidth: .infinity, maxHeight: maxHeight, alignment: .center)
+        } else {
+            base
+                .background(mediaBackgroundColor)
+        }
     }
 }
 
@@ -1461,11 +1508,17 @@ private struct NoteImageFullscreenViewer: View {
     }
 
     private var viewerBackgroundColor: Color {
-        colorScheme == .dark ? .black : Color(.systemBackground)
+        if appSettings.activeTheme == .dracula {
+            return appSettings.themePalette.background
+        }
+        return colorScheme == .dark ? .black : Color(.systemBackground)
     }
 
     private var viewerNavigationBarColor: Color {
-        colorScheme == .dark ? .black : Color(.systemBackground)
+        if appSettings.activeTheme == .dracula {
+            return appSettings.themePalette.background
+        }
+        return colorScheme == .dark ? .black : Color(.systemBackground)
     }
 
     private var chromeForegroundColor: Color {
@@ -2366,6 +2419,7 @@ private struct NostrEventReferenceCardView: View {
     let nostrURI: String
     let embedDepth: Int
     let onHashtagTap: ((String) -> Void)?
+    let onProfileTap: ((String) -> Void)?
     let onOpenThread: ((FeedItem) -> Void)?
     @EnvironmentObject private var appSettings: AppSettingsStore
 
@@ -2473,6 +2527,7 @@ private struct NostrEventReferenceCardView: View {
                 event: item.displayEvent,
                 embedDepth: embedDepth,
                 onHashtagTap: onHashtagTap,
+                onProfileTap: onProfileTap,
                 onReferencedEventTap: onOpenThread
             )
         }
@@ -3127,7 +3182,7 @@ private actor CustomEmojiImageLoader {
     }
 }
 
-private enum NoteMediaAsset {
+enum NoteMediaAsset {
     case still(UIImage)
     case gif(NoteGIFPayload)
 
@@ -3147,7 +3202,7 @@ private enum NoteMediaAsset {
     }
 }
 
-private enum NoteMediaScaling {
+enum NoteMediaScaling {
     case fill
     case fit
 
@@ -3170,7 +3225,7 @@ private enum NoteMediaScaling {
     }
 }
 
-private struct NoteMediaAssetContentView: View {
+struct NoteMediaAssetContentView: View {
     let asset: NoteMediaAsset
     let scaling: NoteMediaScaling
 
@@ -3240,7 +3295,7 @@ private struct NoteZoomableFullscreenImageView: View {
     }
 }
 
-private struct NoteRemoteMediaView<Content: View, Placeholder: View, Failure: View>: View {
+struct NoteRemoteMediaView<Content: View, Placeholder: View, Failure: View>: View {
     let url: URL
     @ViewBuilder let content: (NoteMediaAsset) -> Content
     @ViewBuilder let placeholder: () -> Placeholder
@@ -3494,7 +3549,7 @@ private final class LayoutAwareZoomScrollView: UIScrollView {
     }
 }
 
-private struct NoteGIFPayload {
+struct NoteGIFPayload {
     let url: URL
     let data: Data
     let previewImage: UIImage

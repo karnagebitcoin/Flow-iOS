@@ -224,7 +224,8 @@ final class SearchViewModel: ObservableObject {
     func updateSearchContext(
         currentAccountPubkey: String?,
         currentNsec: String?,
-        followedPubkeys: [String]
+        followedPubkeys: [String],
+        invalidatePopularProfiles: Bool = true
     ) {
         let normalizedAccountPubkey = normalizedPubkey(currentAccountPubkey)
         let nextAccountPubkey = normalizedAccountPubkey.isEmpty ? nil : normalizedAccountPubkey
@@ -240,7 +241,7 @@ final class SearchViewModel: ObservableObject {
         self.currentNsec = nextNsec
         self.followedAuthorPubkeys = nextFollowedPubkeys
 
-        guard didChange, !isSearching else { return }
+        guard didChange, !isSearching, invalidatePopularProfiles else { return }
         popularProfiles = []
         errorMessage = nil
     }

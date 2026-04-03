@@ -536,6 +536,8 @@ struct HomeFeedView: View {
                     endPoint: .bottomTrailing
                 )
             }
+        } else if appSettings.activeTheme == .dracula {
+            appSettings.themePalette.background
         } else {
             appSettings.themePalette.chromeBackground
         }
@@ -598,7 +600,7 @@ struct HomeFeedView: View {
         } label: {
             Image(systemName: "line.3.horizontal.decrease")
                 .font(.system(size: 21, weight: .regular))
-                .foregroundStyle(.secondary)
+                .foregroundStyle(appSettings.themePalette.mutedForeground)
                 .frame(width: 46, height: 46)
                 .contentShape(Rectangle())
         }
@@ -751,7 +753,7 @@ struct HomeFeedView: View {
             } else if viewModel.interestsFeedHasNoHashtags {
                 Text("No interests selected yet")
                     .font(.headline)
-                Text("Add topic hashtags in Settings > Feeds > Interests.")
+                Text("Add topic hashtags in Core > Feeds > Interests.")
                     .font(.subheadline)
                     .multilineTextAlignment(.center)
                     .foregroundStyle(.secondary)
@@ -919,7 +921,7 @@ struct HomeFeedView: View {
                 .fill(topNavigationControlFill)
             Image(systemName: "person.fill")
                 .font(.system(size: 14, weight: .semibold))
-                .foregroundStyle(.secondary)
+                .foregroundStyle(appSettings.themePalette.mutedForeground)
         }
     }
 

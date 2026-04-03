@@ -148,24 +148,32 @@ enum ComposeMentionSupport {
             let previousRange = NSRange(location: cursor - 1, length: 1)
             let previousCharacter = nsText.substring(with: previousRange)
 
+            if confirmedMentions.contains(where: { mention in
+                cursor - 1 >= mention.range.location &&
+                cursor - 1 < mention.range.location + mention.range.length
+            }) {
+                return nil
+            }
+
             if previousCharacter == "@" {
                 if cursor - 1 > 0 {
                     let leadingCharacter = nsText.substring(with: NSRange(location: cursor - 2, length: 1))
-                    if isAllowedHandleText(leadingCharacter) {
-                        return nil
+                    if isMentionStartContinuationText(leadingCharacter) {
+                        cursor -= 1
+                        continue
                     }
                 }
 
                 let queryRange = NSRange(location: cursor - 1, length: caretLocation - (cursor - 1))
                 let token = nsText.substring(with: queryRange)
-                let query = String(token.dropFirst())
-                guard query.unicodeScalars.allSatisfy({ allowedHandleCharacters.contains($0) }) else {
+                let query = normalizedSearchQuery(String(token.dropFirst()))
+                guard isReasonableSearchQuery(query) else {
                     return nil
                 }
                 return ComposeMentionQuery(range: queryRange, query: query)
             }
 
-            guard isAllowedHandleText(previousCharacter) else { return nil }
+            guard isAllowedSearchQueryText(previousCharacter) else { return nil }
             cursor -= 1
         }
 
@@ -271,18 +279,47 @@ enum ComposeMentionSupport {
         )
     }
 
-    private static func isAllowedHandleText(_ value: String) -> Bool {
+    private static func isAllowedSearchQueryText(_ value: String) -> Bool {
         guard value.unicodeScalars.count == 1,
               let scalar = value.unicodeScalars.first else {
             return false
         }
-        return allowedHandleCharacters.contains(scalar)
+        guard !CharacterSet.newlines.contains(scalar) else { return false }
+        return !mentionSearchTerminatorCharacters.contains(scalar)
+    }
+
+    private static func isMentionStartContinuationText(_ value: String) -> Bool {
+        guard value.unicodeScalars.count == 1,
+              let scalar = value.unicodeScalars.first else {
+            return false
+        }
+        return mentionStartContinuationCharacters.contains(scalar)
+    }
+
+    private static func normalizedSearchQuery(_ value: String) -> String {
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return "" }
+
+        return trimmed.replacingOccurrences(
+            of: "\\s+",
+            with: " ",
+            options: .regularExpression
+        )
+    }
+
+    private static func isReasonableSearchQuery(_ value: String) -> Bool {
+        guard !value.isEmpty, value.count <= 48 else { return false }
+        return value.split(whereSeparator: { $0.isWhitespace }).count <= 3
     }
 }
 
 private let allowedHandleCharacters = CharacterSet.alphanumerics.union(
     CharacterSet(charactersIn: "._-")
 )
+private let mentionStartContinuationCharacters = CharacterSet.alphanumerics.union(
+    CharacterSet(charactersIn: "._-")
+)
+private let mentionSearchTerminatorCharacters = CharacterSet(charactersIn: ",;:!?()[]{}<>/\\|`~\"")
 
 @MainActor
 final class ComposeNoteViewModel: ObservableObject {
@@ -989,7 +1026,7 @@ struct ComposeNoteSheet: View {
     private var mentionSuggestionList: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: 8) {
-                Text(activeMentionQuery?.query.isEmpty == true ? "Recent profiles" : "Mention suggestions")
+                Text("Mention suggestions")
                     .font(.footnote.weight(.semibold))
                     .foregroundStyle(.secondary)
 
@@ -1060,20 +1097,28 @@ struct ComposeNoteSheet: View {
         isLoadingMentionSuggestions = true
         mentionSuggestions = []
         mentionLookupTask = Task {
+            try? await Task.sleep(nanoseconds: 120_000_000)
+            guard !Task.isCancelled else { return }
             await refreshMentionSuggestions(for: query)
         }
     }
 
     private func refreshMentionSuggestions(for query: ComposeMentionQuery) async {
-        let profileResults: [ProfileSearchResult]
-        if query.query.isEmpty {
-            profileResults = await profileService.recentLocalProfiles(limit: 8)
-        } else {
-            profileResults = await profileService.searchProfiles(
-                query: query.query,
-                limit: 8
-            )
+        let normalizedQuery = query.query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !normalizedQuery.isEmpty else {
+            await MainActor.run {
+                guard activeMentionQuery == query else { return }
+                mentionSuggestions = []
+                isLoadingMentionSuggestions = false
+            }
+            return
         }
+
+        let profileResults: [ProfileSearchResult]
+        profileResults = await profileService.searchProfiles(
+            query: normalizedQuery,
+            limit: 12
+        )
 
         let excludedPubkeys = Set(selectedMentions.map(\.pubkey))
         let normalizedCurrentPubkey = currentAccountPubkey?

@@ -1288,7 +1288,7 @@ private enum ImageRemixFilterPreset: String, CaseIterable, Identifiable {
         case .metallicChrome:
             return "Metallic Chrome"
         case .liquidMetalFlow:
-            return "Liquid Metal Flow"
+            return "Liquid Metal Halo"
         case .hologram:
             return "Hologram"
         case .prismDispersion:

@@ -77,7 +77,7 @@ enum FlowSharedComposeDraftStoreError: LocalizedError {
     var errorDescription: String? {
         switch self {
         case .unavailableAppGroupContainer:
-            return "Flow couldn't access its shared container."
+            return "Halo couldn't access its shared container."
         case .missingSourceFileData:
             return "The selected media couldn't be prepared for sharing."
         }

@@ -2,7 +2,7 @@ import SwiftUI
 import UIKit
 
 enum AppBrand {
-    static let displayName = "Flow"
+    static let displayName = "Halo"
 }
 
 @main
@@ -56,6 +56,7 @@ struct FlowApp: App {
                 updateBreakReminderMonitoring()
 
                 Task(priority: .utility) {
+                    await premiumStore.refreshProducts()
                     await premiumStore.refreshEntitlements()
                     await appSettings.refreshNotificationAuthorizationStatus()
                     await presentPendingSharedComposeDraftIfPossible()
@@ -93,6 +94,7 @@ struct FlowApp: App {
                 updateBreakReminderMonitoring()
                 guard newValue == .active else { return }
                 Task(priority: .utility) {
+                    await premiumStore.refreshProducts()
                     await premiumStore.refreshEntitlements()
                     await presentPendingSharedComposeDraftIfPossible()
                 }

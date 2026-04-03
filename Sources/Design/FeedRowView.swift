@@ -209,8 +209,14 @@ struct FeedRowView: View {
         }
         .sheet(isPresented: $isShowingNoteOptionsSheet) {
             NoteOptionsBottomSheetView(
+                canCopyText: hasCopyableNoteText,
+                onCopyText: {
+                    UIPasteboard.general.string = copyableNoteText
+                    toastCenter.show("Copied text")
+                },
                 onCopyLink: {
                     UIPasteboard.general.string = copyableNoteLink
+                    toastCenter.show("Copied link")
                 },
                 showsTranslateAction: canTranslateNote,
                 onTranslate: canTranslateNote ? {
@@ -223,7 +229,7 @@ struct FeedRowView: View {
                     presentReportFlow()
                 }
             )
-            .presentationDetents([.height(canTranslateNote ? 435 : 380), .medium])
+            .presentationDetents([.height(canTranslateNote ? 490 : 435), .medium])
             .presentationDragIndicator(.visible)
         }
         .sheet(isPresented: $isShowingReportSheet) {
@@ -335,7 +341,7 @@ struct FeedRowView: View {
                 if let followBadgeIconName {
                     ZStack {
                         Circle()
-                            .fill(Color(.systemBackground))
+                            .fill(appSettings.themePalette.background)
                             .frame(width: 18, height: 18)
 
                         Image(systemName: followBadgeIconName)
@@ -603,6 +609,14 @@ struct FeedRowView: View {
         item.displayEvent.content.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
+    private var copyableNoteText: String {
+        item.displayEvent.content.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private var hasCopyableNoteText: Bool {
+        !copyableNoteText.isEmpty
+    }
+
     private var canTranslateNote: Bool {
         guard !noteTranslationText.isEmpty else { return false }
         #if canImport(Translation)
@@ -669,7 +683,10 @@ struct FeedRowView: View {
 
 struct NoteOptionsBottomSheetView: View {
     @Environment(\.dismiss) private var dismiss
+    @EnvironmentObject private var appSettings: AppSettingsStore
 
+    let canCopyText: Bool
+    let onCopyText: () -> Void
     let onCopyLink: () -> Void
     let showsTranslateAction: Bool
     let onTranslate: (() -> Void)?
@@ -680,6 +697,17 @@ struct NoteOptionsBottomSheetView: View {
         VStack(spacing: 12) {
             VStack(spacing: 0) {
                 optionRow(
+                    title: "Copy Text",
+                    icon: "text.alignleft",
+                    isEnabled: canCopyText,
+                    tint: .primary
+                ) {
+                    onCopyText()
+                }
+
+                sheetDivider
+
+                optionRow(
                     title: "Copy Link",
                     icon: "link",
                     isEnabled: true,
@@ -689,8 +717,7 @@ struct NoteOptionsBottomSheetView: View {
                 }
 
                 if showsTranslateAction {
-                    Divider()
-                        .padding(.leading, 16)
+                    sheetDivider
 
                     optionRow(
                         title: "Translate Note",
@@ -704,7 +731,7 @@ struct NoteOptionsBottomSheetView: View {
             }
             .background(
                 RoundedRectangle(cornerRadius: 18, style: .continuous)
-                    .fill(Color(.secondarySystemBackground))
+                    .fill(appSettings.themePalette.secondaryGroupedBackground)
             )
 
             VStack(spacing: 0) {
@@ -715,8 +742,7 @@ struct NoteOptionsBottomSheetView: View {
                     tint: .secondary
                 )
 
-                Divider()
-                    .padding(.leading, 16)
+                sheetDivider
 
                 optionRow(
                     title: "Mute",
@@ -727,8 +753,7 @@ struct NoteOptionsBottomSheetView: View {
                     onMute()
                 }
 
-                Divider()
-                    .padding(.leading, 16)
+                sheetDivider
 
                 optionRow(
                     title: "Report",
@@ -741,7 +766,7 @@ struct NoteOptionsBottomSheetView: View {
             }
             .background(
                 RoundedRectangle(cornerRadius: 18, style: .continuous)
-                    .fill(Color(.secondarySystemBackground))
+                    .fill(appSettings.themePalette.secondaryGroupedBackground)
             )
 
             Spacer(minLength: 0)
@@ -749,7 +774,14 @@ struct NoteOptionsBottomSheetView: View {
         .padding(.horizontal, 16)
         .padding(.top, 8)
         .padding(.bottom, 16)
-        .background(Color(.systemGroupedBackground))
+        .background(appSettings.themePalette.groupedBackground)
+    }
+
+    private var sheetDivider: some View {
+        Rectangle()
+            .fill(appSettings.themePalette.separator)
+            .frame(height: 0.75)
+            .padding(.leading, 16)
     }
 
     @ViewBuilder
@@ -768,13 +800,13 @@ struct NoteOptionsBottomSheetView: View {
             HStack(spacing: 12) {
                 Text(title)
                     .font(.body.weight(.medium))
-                    .foregroundStyle(isEnabled ? tint : Color.secondary)
+                    .foregroundStyle(isEnabled ? tint : appSettings.themePalette.mutedForeground)
 
                 Spacer(minLength: 0)
 
                 Image(systemName: icon)
                     .font(.body.weight(.semibold))
-                    .foregroundStyle(isEnabled ? tint : Color.secondary)
+                    .foregroundStyle(isEnabled ? tint : appSettings.themePalette.mutedForeground)
             }
             .padding(.horizontal, 16)
             .padding(.vertical, 15)
@@ -832,16 +864,16 @@ struct AvatarView: View {
         .frame(width: size, height: size)
         .clipShape(Circle())
         .overlay {
-            Circle().stroke(Color(.separator), lineWidth: 0.5)
+            Circle().stroke(appSettings.themePalette.separator, lineWidth: 0.5)
         }
     }
 
     private var fallbackAvatar: some View {
         ZStack {
-            Circle().fill(Color(.secondarySystemFill))
+            Circle().fill(appSettings.themePalette.secondaryFill)
             Text(String(fallback.prefix(1)).uppercased())
                 .font(size >= 32 ? .headline : .caption.weight(.semibold))
-                .foregroundStyle(.secondary)
+                .foregroundStyle(appSettings.themePalette.mutedForeground)
         }
     }
 }

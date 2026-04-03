@@ -12,14 +12,13 @@ struct FlowPlusPaywallView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 20) {
                     heroCard
-                    previewCard
                     featureCard
                     pricingSection
                 }
                 .padding(16)
             }
             .background(AppThemePalette.sakura.groupedBackground.ignoresSafeArea())
-            .navigationTitle("Flow Plus")
+            .navigationTitle("Halo Plus")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
@@ -37,14 +36,10 @@ struct FlowPlusPaywallView: View {
             guard isActive else { return }
             dismiss()
         }
-    }
-
-    private var isPreviewingSakura: Bool {
-        appSettings.previewTheme == .sakura && !premiumStore.isFlowPlusActive
-    }
-
-    private var canPreviewSakura: Bool {
-        premiumStore.isFlowPlusActive || appSettings.canBeginThemePreview(.sakura)
+        .onChange(of: appSettings.hasFlowPlusCustomizationAccess) { _, hasAccess in
+            guard hasAccess else { return }
+            dismiss()
+        }
     }
 
     private var sakuraAccentGradient: LinearGradient {
@@ -62,15 +57,19 @@ struct FlowPlusPaywallView: View {
         AppThemeOption.sakura.fixedPrimaryColor ?? Color(red: 1.0, green: 0.404, blue: 0.941)
     }
 
+    private var monthlyPriceText: String {
+        premiumStore.flowPlusMonthlyPriceText
+    }
+
     private var heroCard: some View {
         VStack(alignment: .leading, spacing: 14) {
             HStack(alignment: .top) {
                 VStack(alignment: .leading, spacing: 8) {
-                    Text("Unlock premium themes and custom fonts for Flow.")
+                    Text("Unlock premium themes and custom fonts for Halo.")
                         .font(appSettings.appFont(size: 30, weight: .bold))
                         .foregroundStyle(Color(red: 0.33, green: 0.18, blue: 0.25))
 
-                    Text("Flow Plus starts with Sakura, a light-only look built around paper whites, gradient blossom pinks, and soft cherry tones, then layers in curated mono, serif, and sans font choices for the whole app.")
+                    Text("Halo Plus includes premium themes like Sakura and Dracula, plus curated mono, serif, and sans font choices for the whole app.")
                         .font(appSettings.appFont(.body))
                         .foregroundStyle(Color(red: 0.45, green: 0.27, blue: 0.35))
                 }
@@ -84,6 +83,10 @@ struct FlowPlusPaywallView: View {
                     .padding(.vertical, 7)
                     .background(Color.white.opacity(0.72), in: Capsule())
             }
+
+            Label("Try it free for 7 days. Then \(monthlyPriceText)/month.", systemImage: "gift.fill")
+                .font(appSettings.appFont(.subheadline, weight: .semibold))
+                .foregroundStyle(Color(red: 0.45, green: 0.21, blue: 0.32))
 
             RoundedRectangle(cornerRadius: 26, style: .continuous)
                 .fill(
@@ -155,9 +158,11 @@ struct FlowPlusPaywallView: View {
                 .font(appSettings.appFont(.headline, weight: .semibold))
                 .foregroundStyle(Color(red: 0.45, green: 0.21, blue: 0.32))
 
-            flowPlusFeature("Sakura theme with a dedicated light palette and a signature pink gradient accent.")
+            flowPlusFeature("Sakura and Dracula each ship with a dedicated palette, accent treatment, and premium look.")
             flowPlusFeature("A premium font library with mono, serif, and modern sans options that can restyle the feed, composer, and settings.")
-            flowPlusFeature("Future premium looks will unlock automatically with the same monthly Flow Plus subscription.")
+            flowPlusFeature("Try it free for 7 days before billing begins.")
+            flowPlusFeature("After the free trial ends, Halo Plus renews at \(monthlyPriceText)/month until canceled.")
+            flowPlusFeature("Future premium looks will unlock automatically with the same monthly Halo Plus subscription.")
             flowPlusFeature("Theme access stays tied to your App Store subscription and restores with Apple.")
 
             if let error = premiumStore.lastErrorMessage, !error.isEmpty {
@@ -175,57 +180,10 @@ struct FlowPlusPaywallView: View {
         }
     }
 
-    private var previewCard: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Label("Try Sakura first", systemImage: "eye")
-                .font(appSettings.appFont(.headline, weight: .semibold))
-                .foregroundStyle(Color(red: 0.45, green: 0.21, blue: 0.32))
-
-            Text("Preview Sakura across the app before you subscribe. The preview is temporary until you unlock Flow Plus.")
-                .font(appSettings.appFont(.subheadline))
-                .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
-
-            Button {
-                guard appSettings.beginThemePreview(.sakura) else { return }
-                dismiss()
-            } label: {
-                Text("Preview")
-                    .font(appSettings.appFont(.subheadline, weight: .semibold))
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 12)
-                    .background(
-                        sakuraAccentGradient,
-                        in: RoundedRectangle(cornerRadius: 16, style: .continuous)
-                    )
-                    .foregroundStyle(.white)
-            }
-            .buttonStyle(.plain)
-            .disabled(!canPreviewSakura)
-            .opacity(canPreviewSakura ? 1 : 0.6)
-
-            if isPreviewingSakura {
-                Text("Sakura preview is active for this session.")
-                    .font(appSettings.appFont(.footnote))
-                    .foregroundStyle(.secondary)
-            } else if !appSettings.canBeginThemePreview(.sakura) && !premiumStore.isFlowPlusActive {
-                Text("Preview already used this session.")
-                    .font(appSettings.appFont(.footnote))
-                    .foregroundStyle(.secondary)
-            }
-        }
-        .padding(18)
-        .background(Color.white.opacity(0.84), in: RoundedRectangle(cornerRadius: 24, style: .continuous))
-        .overlay {
-            RoundedRectangle(cornerRadius: 24, style: .continuous)
-                .stroke(Color.white.opacity(0.9), lineWidth: 1)
-        }
-    }
-
     private var pricingSection: some View {
         VStack(alignment: .leading, spacing: 12) {
             if premiumStore.isFlowPlusActive {
-                Label("Flow Plus is active", systemImage: "checkmark.seal.fill")
+                Label("Halo Plus is active", systemImage: "checkmark.seal.fill")
                     .font(appSettings.appFont(.headline, weight: .semibold))
                     .foregroundStyle(Color(red: 0.33, green: 0.55, blue: 0.41))
 
@@ -236,22 +194,33 @@ struct FlowPlusPaywallView: View {
             } else if premiumStore.isLoadingProducts && premiumStore.flowPlusProduct == nil {
                 HStack(spacing: 10) {
                     ProgressView()
-                    Text("Loading Flow Plus pricing…")
+                    Text("Loading Halo Plus pricing…")
                         .font(appSettings.appFont(.body))
                         .foregroundStyle(.secondary)
                 }
             } else if premiumStore.flowPlusProduct == nil {
-                Text("Flow Plus pricing isn’t available yet. Finish the App Store Connect setup for the monthly subscription and try again.")
-                    .font(appSettings.appFont(.footnote))
-                    .foregroundStyle(.secondary)
+                VStack(alignment: .leading, spacing: 10) {
+                    Text("Couldn't load Halo Plus pricing right now. Please try again in a moment.")
+                        .font(appSettings.appFont(.footnote))
+                        .foregroundStyle(.secondary)
+
+                    temporaryTestingUnlockButton
+                }
             } else {
-                Text("Monthly membership")
+                Text("Try it free for 7 days")
                     .font(appSettings.appFont(.headline, weight: .semibold))
                     .foregroundStyle(Color(red: 0.45, green: 0.21, blue: 0.32))
+
+                Text("No charge today. Then \(monthlyPriceText)/month after the 7-day free trial.")
+                    .font(appSettings.appFont(.footnote))
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
 
                 if let product = premiumStore.flowPlusProduct {
                     planButton(for: product)
                 }
+
+                temporaryTestingUnlockButton
             }
 
             Button {
@@ -296,8 +265,27 @@ struct FlowPlusPaywallView: View {
             Text(text)
                 .font(appSettings.appFont(.subheadline))
                 .foregroundStyle(.primary)
-                .fixedSize(horizontal: false, vertical: true)
+            .fixedSize(horizontal: false, vertical: true)
         }
+    }
+
+    @ViewBuilder
+    private var temporaryTestingUnlockButton: some View {
+        #if DEBUG
+        if !premiumStore.isFlowPlusActive && !appSettings.hasFlowPlusCustomizationAccess {
+            Button {
+                _ = appSettings.beginFlowPlusPreview()
+                premiumStore.lastErrorMessage = nil
+            } label: {
+                Text("Temporarily Unlock for Testing")
+                    .font(appSettings.appFont(.subheadline, weight: .semibold))
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 12)
+            }
+            .buttonStyle(.bordered)
+            .tint(Color(red: 0.73, green: 0.30, blue: 0.50))
+        }
+        #endif
     }
 
     private var manageSubscriptionsURL: URL {
@@ -333,7 +321,11 @@ struct FlowPlusPaywallView: View {
                         .font(appSettings.appFont(.headline, weight: .semibold))
                         .foregroundStyle(.primary)
 
-                    Text(product.subscriptionPeriodDescription ?? "Monthly subscription")
+                    Text(
+                        product.flowPlusPlanSubtitle(
+                            eligibleIntroOffer: premiumStore.isEligibleForFlowPlusIntroOffer
+                        ) ?? "Monthly subscription"
+                    )
                         .font(appSettings.appFont(.footnote))
                         .foregroundStyle(.secondary)
                 }
@@ -346,10 +338,18 @@ struct FlowPlusPaywallView: View {
                         .tint(.white)
                 } else {
                     VStack(alignment: .trailing, spacing: 3) {
-                        Text(product.displayPrice)
+                        Text(
+                            premiumStore.isEligibleForFlowPlusIntroOffer && product.hasFreeTrialIntroOffer
+                                ? "Free"
+                                : product.displayPrice
+                        )
                             .font(appSettings.appFont(.headline, weight: .semibold))
                             .foregroundStyle(.white)
-                        Text(product.pricePerPeriodDescription)
+                        Text(
+                            product.flowPlusPriceCaption(
+                                eligibleIntroOffer: premiumStore.isEligibleForFlowPlusIntroOffer
+                            )
+                        )
                             .font(appSettings.appFont(.caption2, weight: .medium))
                             .foregroundStyle(.white.opacity(0.82))
                     }
@@ -376,9 +376,48 @@ private extension Product {
         subscription?.subscriptionPeriod.flowPlusDisplayString
     }
 
+    var hasFreeTrialIntroOffer: Bool {
+        subscription?.introductoryOffer?.paymentMode == .freeTrial
+    }
+
+    func flowPlusPlanSubtitle(eligibleIntroOffer: Bool) -> String? {
+        guard eligibleIntroOffer, let trialText = subscription?.introductoryOffer?.flowPlusTrialMarketingText else {
+            return subscriptionPeriodDescription
+        }
+        return "\(trialText.capitalized), then \(pricePerPeriodDescription)"
+    }
+
+    func flowPlusPricingDetail(eligibleIntroOffer: Bool) -> String? {
+        guard eligibleIntroOffer, let trialText = subscription?.introductoryOffer?.flowPlusTrialMarketingText else {
+            return nil
+        }
+        return "\(trialText.capitalized), then \(displayPrice) per \(subscription?.subscriptionPeriod.flowPlusUnitLabel ?? "period"). Cancel anytime."
+    }
+
+    func flowPlusPriceCaption(eligibleIntroOffer: Bool) -> String {
+        guard eligibleIntroOffer, hasFreeTrialIntroOffer else { return pricePerPeriodDescription }
+        return "then \(pricePerPeriodDescription)"
+    }
+
     var pricePerPeriodDescription: String {
         guard let period = subscription?.subscriptionPeriod else { return "Billed by Apple" }
         return "per \(period.flowPlusUnitLabel)"
+    }
+}
+
+private extension Product.SubscriptionOffer {
+    var flowPlusTrialMarketingText: String? {
+        guard paymentMode == .freeTrial else { return nil }
+
+        switch period.unit {
+        case .week where period.value * max(periodCount, 1) == 1:
+            return "7-day free trial"
+        default:
+            let totalValue = period.value * max(periodCount, 1)
+            let unitLabel = period.flowPlusUnitLabel
+            let durationText = totalValue == 1 ? "1 \(unitLabel)" : "\(totalValue) \(unitLabel)s"
+            return "\(durationText) free trial"
+        }
     }
 }
 

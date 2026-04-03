@@ -360,6 +360,7 @@ struct ComposeKlipyGIFPickerSheet: View {
 
 private struct KlipyGIFGridTile: View {
     @EnvironmentObject private var appSettings: AppSettingsStore
+    @State private var isVisible = false
 
     static let tileAspectRatio: CGFloat = 1.08
     private static let cornerRadius: CGFloat = 18
@@ -404,10 +405,41 @@ private struct KlipyGIFGridTile: View {
                 RoundedRectangle(cornerRadius: Self.cornerRadius, style: .continuous)
                     .stroke(appSettings.themePalette.separator.opacity(0.16), lineWidth: 0.8)
             )
+            .onAppear {
+                isVisible = true
+            }
+            .onDisappear {
+                isVisible = false
+            }
     }
 
     @ViewBuilder
     private var previewContent: some View {
+        if isVisible, let animatedURL = item.preferredAnimatedPreviewAsset?.url {
+            KlipyAnimatedGIFGridPreview(
+                animatedURL: animatedURL,
+                fallbackPreviewURL: item.preferredPreviewAsset?.url
+            )
+        } else {
+            staticPreviewContent
+        }
+    }
+
+    private var trimmedTitle: String {
+        item.title.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private var fallbackTile: some View {
+        appSettings.themePalette.tertiaryFill
+            .overlay {
+                Image(systemName: "photo.on.rectangle.angled")
+                    .font(.system(size: 22, weight: .medium))
+                    .foregroundStyle(.secondary)
+            }
+    }
+
+    @ViewBuilder
+    private var staticPreviewContent: some View {
         if let previewURL = item.preferredPreviewAsset?.url {
             AsyncImage(url: previewURL) { phase in
                 switch phase {
@@ -429,17 +461,68 @@ private struct KlipyGIFGridTile: View {
             fallbackTile
         }
     }
+}
 
-    private var trimmedTitle: String {
-        item.title.trimmingCharacters(in: .whitespacesAndNewlines)
+private struct KlipyAnimatedGIFGridPreview: View {
+    let animatedURL: URL
+    let fallbackPreviewURL: URL?
+
+    var body: some View {
+        NoteRemoteMediaView(url: animatedURL) { asset in
+            NoteMediaAssetContentView(asset: asset, scaling: .fill)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+        } placeholder: {
+            animatedPlaceholder
+        } failure: {
+            animatedFallback
+        }
     }
 
-    private var fallbackTile: some View {
-        appSettings.themePalette.tertiaryFill
-            .overlay {
-                Image(systemName: "photo.on.rectangle.angled")
-                    .font(.system(size: 22, weight: .medium))
-                    .foregroundStyle(.secondary)
+    @ViewBuilder
+    private var animatedPlaceholder: some View {
+        if let fallbackPreviewURL {
+            AsyncImage(url: fallbackPreviewURL) { phase in
+                switch phase {
+                case .success(let image):
+                    image
+                        .resizable()
+                        .scaledToFill()
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                case .failure:
+                    ProgressView()
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                case .empty:
+                    ProgressView()
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                @unknown default:
+                    ProgressView()
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                }
             }
+        } else {
+            ProgressView()
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+    }
+
+    @ViewBuilder
+    private var animatedFallback: some View {
+        if let fallbackPreviewURL {
+            AsyncImage(url: fallbackPreviewURL) { phase in
+                switch phase {
+                case .success(let image):
+                    image
+                        .resizable()
+                        .scaledToFill()
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                case .failure, .empty:
+                    Color.clear
+                @unknown default:
+                    Color.clear
+                }
+            }
+        } else {
+            Color.clear
+        }
     }
 }

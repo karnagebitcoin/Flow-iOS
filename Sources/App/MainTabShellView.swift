@@ -11,8 +11,8 @@ struct MainTabShellView: View {
             switch self {
             case .home: return "Home"
             case .search: return "Search"
-            case .dms: return "Messages"
-            case .activity: return "Activity"
+            case .dms: return "Halo Link"
+            case .activity: return "Pulse"
             }
         }
 
@@ -216,7 +216,11 @@ struct MainTabShellView: View {
             ZStack(alignment: .topTrailing) {
                 Image(systemName: tab.symbolName)
                     .font(.system(size: 21, weight: .regular))
-                    .foregroundStyle(isHighlighted ? appSettings.primaryColor : .secondary)
+                    .foregroundStyle(
+                        isHighlighted
+                            ? appSettings.primaryColor
+                            : appSettings.themePalette.mutedForeground
+                    )
                     .frame(maxWidth: .infinity)
                     .frame(height: 46)
                     .contentShape(Rectangle())

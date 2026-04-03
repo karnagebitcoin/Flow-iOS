@@ -33,7 +33,7 @@ final class NoteReportPublishServiceTests: XCTestCase {
         XCTAssertEqual(event.content, "looks automated")
         XCTAssertEqual(firstTag(named: "p", in: event), ["p", target.pubkey, "spam"])
         XCTAssertEqual(firstTag(named: "e", in: event), ["e", target.id, "spam"])
-        XCTAssertEqual(firstTag(named: "client", in: event), ["client", "Flow"])
+        XCTAssertEqual(firstTag(named: "client", in: event), ["client", "Halo"])
     }
 
     func testPublishReportRequiresPrivateKey() async throws {

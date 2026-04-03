@@ -17,46 +17,46 @@ struct SignupOnboardingView: View {
     }
 
     private enum PrimaryColorOption: String, CaseIterable, Identifiable {
-        case vividOrange
-        case vividBlue
-        case vividGreen
-        case vividPurple
-        case vividRed
-        case vividPink
+        case sandstone
+        case indigo
+        case sage
+        case orchid
+        case rose
+        case sky
 
         var id: String { rawValue }
 
         var title: String {
             switch self {
-            case .vividOrange:
-                return "Vivid Orange"
-            case .vividBlue:
-                return "Vivid Blue"
-            case .vividGreen:
-                return "Vivid Green"
-            case .vividPurple:
-                return "Vivid Purple"
-            case .vividRed:
-                return "Vivid Red"
-            case .vividPink:
-                return "Vivid Pink"
+            case .sandstone:
+                return "Sandstone"
+            case .indigo:
+                return "Indigo"
+            case .sage:
+                return "Sage"
+            case .orchid:
+                return "Orchid"
+            case .rose:
+                return "Rose"
+            case .sky:
+                return "Sky"
             }
         }
 
         var color: Color {
             switch self {
-            case .vividOrange:
-                return Color(red: 1.0, green: 0.42, blue: 0.0)
-            case .vividBlue:
-                return Color(red: 0.05, green: 0.52, blue: 1.0)
-            case .vividGreen:
-                return Color(red: 0.20, green: 0.78, blue: 0.35)
-            case .vividPurple:
-                return Color(red: 0.58, green: 0.34, blue: 0.96)
-            case .vividRed:
-                return Color(red: 1.0, green: 0.27, blue: 0.23)
-            case .vividPink:
-                return Color(red: 0.93, green: 0.26, blue: 0.60)
+            case .sandstone:
+                return Color(red: 0.843, green: 0.663, blue: 0.463)
+            case .indigo:
+                return Color(red: 0.349, green: 0.239, blue: 0.596)
+            case .sage:
+                return Color(red: 0.498, green: 0.682, blue: 0.541)
+            case .orchid:
+                return Color(red: 0.827, green: 0.561, blue: 0.953)
+            case .rose:
+                return Color(red: 0.953, green: 0.561, blue: 0.627)
+            case .sky:
+                return Color(red: 0.204, green: 0.631, blue: 0.863)
             }
         }
     }
@@ -75,7 +75,7 @@ struct SignupOnboardingView: View {
     @State private var displayName = ""
     @State private var handle = ""
     @State private var about = ""
-    @State private var selectedPrimaryColorOption: PrimaryColorOption = .vividOrange
+    @State private var selectedPrimaryColorOption: PrimaryColorOption = .sandstone
     @State private var hasEditedHandle = false
     @State private var selectedTopics = Set<InterestTopic>()
     @State private var selectedAvatarItem: PhotosPickerItem?
@@ -224,7 +224,7 @@ struct SignupOnboardingView: View {
                 VStack(alignment: .leading, spacing: 14) {
                     VStack(alignment: .leading, spacing: 4) {
                         fieldLabel("Primary Color")
-                        Text("Choose a color for Flow. You can change it later in Settings.")
+                        Text("Choose a color for Halo. You can change it later in Core.")
                             .font(.footnote)
                             .foregroundStyle(.secondary)
                             .fixedSize(horizontal: false, vertical: true)
@@ -333,7 +333,7 @@ struct SignupOnboardingView: View {
         VStack(alignment: .leading, spacing: 18) {
             stepIntro(
                 title: "Notifications",
-                subtitle: "Your Interests feed is ready. Turn on notifications now, or skip and change this later in Settings."
+                subtitle: "Your Interests feed is ready. Turn on notifications now, or skip and change this later in Core."
             )
 
             onboardingFieldCard {
@@ -345,7 +345,7 @@ struct SignupOnboardingView: View {
                             .frame(width: 28)
 
                         VStack(alignment: .leading, spacing: 4) {
-                            Text("Stay in the Flow")
+                            Text("Stay in Halo")
                                 .font(.headline)
 
                             Text("Enable notifications here and iOS will ask for permission right away.")
@@ -881,6 +881,7 @@ struct SignupOnboardingView: View {
         let fields = EditableProfileFields(
             avatarURLString: avatarURLString ?? "",
             displayName: displayName,
+            handle: handle,
             about: about,
             website: "",
             nip05: "",
@@ -922,6 +923,17 @@ struct SignupOnboardingView: View {
         }
 
         _ = try await publishCoordinator.waitForFirstSuccess()
+
+        let localEvent = NostrEvent(
+            id: event.id.lowercased(),
+            pubkey: event.pubkey.lowercased(),
+            createdAt: Int(event.createdAt),
+            kind: event.kind.rawValue,
+            tags: event.tags.map { [$0.name, $0.value] + $0.otherParameters },
+            content: event.content,
+            sig: event.signature ?? ""
+        )
+        await SeenEventStore.shared.store(events: [localEvent])
 
         if let profile = NostrProfile.decode(from: content) {
             await ProfileCache.shared.store(profiles: [account.pubkey.lowercased(): profile], missed: [])

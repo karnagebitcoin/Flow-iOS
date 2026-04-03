@@ -3,6 +3,35 @@ import NostrSDK
 @testable import Flow
 
 final class ComposeNotePublishServiceTests: XCTestCase {
+    @MainActor
+    func testSaveProfileStoresPublishedMetadataEventLocally() async throws {
+        let keypair = try XCTUnwrap(Keypair())
+        let pubkey = keypair.publicKey.hex.lowercased()
+        let relayClient = RecordingRelayPublisher()
+        let viewModel = ProfileViewModel(
+            pubkey: pubkey,
+            relayURL: URL(string: "wss://relay.example.com")!,
+            writeRelayURLs: [URL(string: "wss://relay.example.com")!],
+            relayClient: relayClient
+        )
+
+        let didSave = await viewModel.saveProfile(
+            fields: EditableProfileFields(
+                displayName: "Halo User",
+                about: "Testing metadata persistence"
+            ),
+            currentAccountPubkey: pubkey,
+            currentNsec: keypair.privateKey.nsec
+        )
+
+        XCTAssertTrue(didSave)
+
+        let coldCache = ProfileCache(snapshotStore: .shared, nostrDatabase: .shared)
+        let storedProfile = await coldCache.cachedProfile(pubkey: pubkey)
+
+        XCTAssertEqual(storedProfile?.displayName, "Halo User")
+    }
+
     func testPublishNoteAddsClientTag() async throws {
         let relayClient = RecordingRelayPublisher()
         let service = ComposeNotePublishService(relayClient: relayClient)
@@ -20,8 +49,8 @@ final class ComposeNotePublishServiceTests: XCTestCase {
         let eventData = try XCTUnwrap(capture.eventData)
         let event = try JSONDecoder().decode(Flow.NostrEvent.self, from: eventData)
 
-        XCTAssertEqual(firstTag(named: "client", in: event), ["client", "Flow"])
-        XCTAssertEqual(event.clientName, "Flow")
+        XCTAssertEqual(firstTag(named: "client", in: event), ["client", "Halo"])
+        XCTAssertEqual(event.clientName, "Halo")
     }
 
     func testPublishPollEncodesOptionsPollTypeAndRelayTags() async throws {
@@ -90,7 +119,7 @@ final class ComposeNotePublishServiceTests: XCTestCase {
             "wss://relay-three.example.com",
             "wss://relay-four.example.com"
         ])
-        XCTAssertEqual(firstTag(named: "client", in: event), ["client", "Flow"])
+        XCTAssertEqual(firstTag(named: "client", in: event), ["client", "Halo"])
     }
 
     func testPublishPollRejectsDraftWithoutTwoOptions() async throws {

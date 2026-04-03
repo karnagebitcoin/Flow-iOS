@@ -167,8 +167,14 @@ struct ThreadDetailView: View {
         }
         .sheet(isPresented: $isShowingRootNoteOptionsSheet) {
             NoteOptionsBottomSheetView(
+                canCopyText: rootHasCopyableNoteText,
+                onCopyText: {
+                    UIPasteboard.general.string = rootCopyableNoteText
+                    toastCenter.show("Copied text")
+                },
                 onCopyLink: {
                     UIPasteboard.general.string = rootNoteShareLink
+                    toastCenter.show("Copied link")
                 },
                 showsTranslateAction: rootCanTranslateNote,
                 onTranslate: rootCanTranslateNote ? {
@@ -181,7 +187,7 @@ struct ThreadDetailView: View {
                     presentRootReportFlow()
                 }
             )
-            .presentationDetents([.height(rootCanTranslateNote ? 435 : 380), .medium])
+            .presentationDetents([.height(rootCanTranslateNote ? 490 : 435), .medium])
             .presentationDragIndicator(.visible)
         }
         .sheet(isPresented: $isShowingRootReportSheet) {
@@ -691,6 +697,14 @@ struct ThreadDetailView: View {
 
     private var rootNoteTranslationText: String {
         viewModel.rootItem.displayEvent.content.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private var rootCopyableNoteText: String {
+        viewModel.rootItem.displayEvent.content.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private var rootHasCopyableNoteText: Bool {
+        !rootCopyableNoteText.isEmpty
     }
 
     private var rootCanTranslateNote: Bool {

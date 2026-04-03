@@ -6,40 +6,50 @@ struct SettingsFlowPlusView: View {
     @State private var isPurchasingFlowPlus = false
 
     var body: some View {
-        Form {
-            Section {
-                membershipCard
-            }
+        ZStack {
+            AppThemeBackgroundView()
+                .ignoresSafeArea()
 
-            Section("Customize") {
-                FlowPlusDestinationRow(
-                    title: "Themes",
-                    subtitle: currentThemeSummary,
-                    systemImage: "sparkles",
-                    isEnabled: hasFlowPlusCustomizationAccess
-                ) {
-                    SettingsFlowPlusThemesView()
-                }
-
-                FlowPlusDestinationRow(
-                    title: "Typography",
-                    subtitle: currentTypographySummary,
-                    systemImage: "textformat",
-                    isEnabled: hasFlowPlusCustomizationAccess
-                ) {
-                    SettingsFlowPlusTypographyView()
-                }
-            }
-
-            if let error = premiumStore.lastErrorMessage, !error.isEmpty {
+            Form {
                 Section {
-                    Text(error)
-                        .font(appSettings.appFont(.footnote))
-                        .foregroundStyle(.red)
+                    membershipCard
+                }
+                .listRowBackground(appSettings.themePalette.secondaryGroupedBackground)
+
+                Section("Customize") {
+                    FlowPlusDestinationRow(
+                        title: "Themes",
+                        subtitle: currentThemeSummary,
+                        systemImage: "sparkles",
+                        isEnabled: hasFlowPlusCustomizationAccess
+                    ) {
+                        SettingsFlowPlusThemesView()
+                    }
+
+                    FlowPlusDestinationRow(
+                        title: "Typography",
+                        subtitle: currentTypographySummary,
+                        systemImage: "textformat",
+                        isEnabled: hasFlowPlusCustomizationAccess
+                    ) {
+                        SettingsFlowPlusTypographyView()
+                    }
+                }
+                .listRowBackground(appSettings.themePalette.secondaryGroupedBackground)
+
+                if let error = premiumStore.lastErrorMessage, !error.isEmpty {
+                    Section {
+                        Text(error)
+                            .font(appSettings.appFont(.footnote))
+                            .foregroundStyle(.red)
+                    }
+                    .listRowBackground(appSettings.themePalette.secondaryGroupedBackground)
                 }
             }
+            .scrollContentBackground(.hidden)
+            .background(Color.clear)
         }
-        .navigationTitle("Flow Plus")
+        .navigationTitle("Halo Plus")
         .navigationBarTitleDisplayMode(.large)
         .task {
             await premiumStore.refreshProducts()
@@ -48,16 +58,20 @@ struct SettingsFlowPlusView: View {
     }
 
     private var unlockButtonTitle: String {
-        "Unlock for \(premiumStore.flowPlusProduct?.displayPrice ?? "$5.99")"
+        premiumStore.flowPlusPurchaseButtonTitle
     }
 
     private var hasFlowPlusCustomizationAccess: Bool {
-        premiumStore.isFlowPlusActive || appSettings.hasFlowPlusCustomizationAccess
+        appSettings.hasFlowPlusCustomizationAccess
+    }
+
+    private var isTemporaryTestingUnlockActive: Bool {
+        hasFlowPlusCustomizationAccess && !premiumStore.isFlowPlusActive
     }
 
     private var currentThemeSummary: String {
         guard hasFlowPlusCustomizationAccess else {
-            return "Unlock Flow Plus to open"
+            return "Try it free for 7 days"
         }
 
         if appSettings.activeTheme.requiresFlowPlus {
@@ -68,7 +82,7 @@ struct SettingsFlowPlusView: View {
 
     private var currentTypographySummary: String {
         guard hasFlowPlusCustomizationAccess else {
-            return "Unlock Flow Plus to open"
+            return "Try it free for 7 days"
         }
 
         if appSettings.activeFontOption.requiresFlowPlus {
@@ -77,36 +91,35 @@ struct SettingsFlowPlusView: View {
         return "Choose a premium font"
     }
 
-    private var canPreviewFlowPlus: Bool {
-        premiumStore.isFlowPlusActive || appSettings.canBeginFlowPlusPreview()
+    private var monthlyPriceText: String {
+        premiumStore.flowPlusMonthlyPriceText
     }
 
-    private var previewStatusText: String {
+    private var membershipDetailText: String {
         if premiumStore.isFlowPlusActive {
             return "Themes and typography are unlocked."
         }
-
-        if appSettings.isFlowPlusPreviewUnlocked {
-            return "Theme and typography previews are unlocked for this session."
+        if isTemporaryTestingUnlockActive {
+            return "Premium themes and fonts are temporarily unlocked for this session."
         }
-
-        if appSettings.canBeginFlowPlusPreview() {
-            return "Preview themes and typography once per session before unlocking."
-        }
-
-        return "Preview already used this session."
+        return "Try it free for 7 days, then \(monthlyPriceText)/month."
     }
 
     private var membershipCard: some View {
         VStack(alignment: .leading, spacing: 14) {
             HStack(alignment: .top, spacing: 12) {
                 VStack(alignment: .leading, spacing: 6) {
-                    Text("Flow Plus")
+                    Text("Halo Plus")
                         .font(appSettings.appFont(.title3, weight: .semibold))
 
-                    Text("Unlock new themes, fonts and other fun enhancements with Flow Plus.")
+                    Text("Unlock new themes, fonts and other fun enhancements with Halo Plus.")
                         .font(appSettings.appFont(.footnote))
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(appSettings.themePalette.mutedForeground)
+                        .fixedSize(horizontal: false, vertical: true)
+
+                    Text("Try it free for 7 days. Then \(monthlyPriceText)/month.")
+                        .font(appSettings.appFont(.caption1, weight: .semibold))
+                        .foregroundStyle(appSettings.primaryColor)
                         .fixedSize(horizontal: false, vertical: true)
                 }
 
@@ -121,7 +134,7 @@ struct SettingsFlowPlusView: View {
                 }
                 .buttonStyle(.plain)
             } else {
-                HStack(spacing: 10) {
+                VStack(spacing: 10) {
                     Button {
                         guard !isPurchasingFlowPlus else { return }
                         Task { @MainActor in
@@ -144,28 +157,13 @@ struct SettingsFlowPlusView: View {
                     .buttonStyle(.plain)
                     .disabled(isPurchasingFlowPlus)
 
-                    Button {
-                        _ = appSettings.beginFlowPlusPreview()
-                    } label: {
-                        Text("Preview")
-                            .font(appSettings.appFont(.subheadline, weight: .semibold))
-                            .frame(maxWidth: .infinity)
-                            .padding(.vertical, 12)
-                            .background(
-                                appSettings.themePalette.secondaryBackground,
-                                in: RoundedRectangle(cornerRadius: 14, style: .continuous)
-                            )
-                            .foregroundStyle(.primary)
-                    }
-                    .buttonStyle(.plain)
-                    .disabled(!canPreviewFlowPlus)
-                    .opacity(canPreviewFlowPlus ? 1 : 0.6)
+                    temporaryTestingUnlockButton
                 }
             }
 
-            Text(previewStatusText)
+            Text(membershipDetailText)
                 .font(appSettings.appFont(.footnote))
-                .foregroundStyle(.secondary)
+                .foregroundStyle(appSettings.themePalette.mutedForeground)
                 .fixedSize(horizontal: false, vertical: true)
         }
         .padding(.vertical, 4)
@@ -177,12 +175,12 @@ struct SettingsFlowPlusView: View {
             Label("Active", systemImage: "checkmark.seal.fill")
                 .font(appSettings.appFont(.caption1, weight: .semibold))
                 .foregroundStyle(.green)
-        } else if appSettings.isFlowPlusPreviewUnlocked {
-            Label("Preview", systemImage: "eye.fill")
+        } else if isTemporaryTestingUnlockActive {
+            Label("Testing Unlock", systemImage: "testtube.2")
                 .font(appSettings.appFont(.caption1, weight: .semibold))
                 .foregroundStyle(appSettings.primaryColor)
         } else {
-            Label("Locked", systemImage: "sparkles")
+            Label("7-Day Free Trial", systemImage: "gift.fill")
                 .font(appSettings.appFont(.caption1, weight: .semibold))
                 .foregroundStyle(appSettings.primaryColor)
         }
@@ -211,6 +209,25 @@ struct SettingsFlowPlusView: View {
             )
             .foregroundStyle(.white)
     }
+
+    @ViewBuilder
+    private var temporaryTestingUnlockButton: some View {
+        #if DEBUG
+        if !premiumStore.isFlowPlusActive && !hasFlowPlusCustomizationAccess {
+            Button {
+                _ = appSettings.beginFlowPlusPreview()
+                premiumStore.lastErrorMessage = nil
+            } label: {
+                Text("Temporarily Unlock for Testing")
+                    .font(appSettings.appFont(.subheadline, weight: .semibold))
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 12)
+            }
+            .buttonStyle(.bordered)
+            .tint(appSettings.primaryColor)
+        }
+        #endif
+    }
 }
 
 private struct SettingsFlowPlusThemesView: View {
@@ -236,7 +253,10 @@ private struct SettingsFlowPlusThemesView: View {
                 }
                 .padding(.vertical, 2)
             }
+            .listRowBackground(appSettings.themePalette.secondaryGroupedBackground)
         }
+        .scrollContentBackground(.hidden)
+        .background(AppThemeBackgroundView().ignoresSafeArea())
         .navigationTitle("Themes")
         .navigationBarTitleDisplayMode(.inline)
     }
@@ -246,6 +266,7 @@ private struct SettingsFlowPlusThemesView: View {
 
         return Button {
             if option.requiresFlowPlus && !premiumStore.isFlowPlusActive {
+                guard appSettings.hasFlowPlusCustomizationAccess else { return }
                 _ = appSettings.beginThemePreview(option)
             } else {
                 appSettings.theme = option
@@ -304,6 +325,15 @@ private struct SettingsFlowPlusThemesView: View {
                 startPoint: .topLeading,
                 endPoint: .bottomTrailing
             )
+        case .dracula:
+            return AppThemeOption.dracula.fixedPrimaryGradient ?? LinearGradient(
+                colors: [
+                    Color(red: 0.741, green: 0.576, blue: 0.976),
+                    Color(red: 1.0, green: 0.475, blue: 0.776)
+                ],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
         case .black:
             return LinearGradient(
                 colors: [Color(red: 0.08, green: 0.08, blue: 0.10), Color.black],
@@ -343,6 +373,8 @@ private struct SettingsFlowPlusThemesView: View {
             return Color(.label).opacity(0.75)
         case .sakura:
             return Color(red: 0.45, green: 0.21, blue: 0.32)
+        case .dracula:
+            return Color(red: 0.973, green: 0.973, blue: 0.949).opacity(0.92)
         case .black, .dark:
             return .white.opacity(0.85)
         }
@@ -372,7 +404,10 @@ private struct SettingsFlowPlusTypographyView: View {
                 }
                 .padding(.vertical, 2)
             }
+            .listRowBackground(appSettings.themePalette.secondaryGroupedBackground)
         }
+        .scrollContentBackground(.hidden)
+        .background(AppThemeBackgroundView().ignoresSafeArea())
         .navigationTitle("Typography")
         .navigationBarTitleDisplayMode(.inline)
     }
@@ -382,6 +417,7 @@ private struct SettingsFlowPlusTypographyView: View {
 
         return Button {
             if option.requiresFlowPlus && !premiumStore.isFlowPlusActive {
+                guard appSettings.hasFlowPlusCustomizationAccess else { return }
                 appSettings.beginFontPreview(option)
             } else {
                 appSettings.fontOption = option
@@ -472,7 +508,7 @@ private struct FlowPlusDestinationRow<Destination: View>: View {
 
                 Text(subtitle)
                     .font(appSettings.appFont(.footnote))
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(appSettings.themePalette.mutedForeground)
             }
 
             Spacer(minLength: 8)
@@ -480,7 +516,7 @@ private struct FlowPlusDestinationRow<Destination: View>: View {
             if !isEnabled {
                 Image(systemName: "lock.fill")
                     .font(.footnote.weight(.semibold))
-                    .foregroundStyle(.tertiary)
+                    .foregroundStyle(appSettings.themePalette.mutedForeground)
             }
         }
     }

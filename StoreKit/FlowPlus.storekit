@@ -67,7 +67,7 @@
       "localizations" : [
 
       ],
-      "name" : "Flow Plus",
+      "name" : "Halo Plus",
       "subscriptions" : [
         {
           "adHocOffers" : [
@@ -80,17 +80,24 @@
           "familyShareable" : false,
           "groupNumber" : 1,
           "internalID" : "2000000002",
-          "introductoryOffer" : null,
+          "introductoryOffer" : {
+            "displayPrice" : "0.00",
+            "internalID" : "2000000003",
+            "numberOfPeriods" : 1,
+            "paymentMode" : "freeTrial",
+            "subscriptionPeriod" : "P1W",
+            "type" : "introductory"
+          },
           "localizations" : [
             {
-              "description" : "Unlock Sakura and future premium themes for Flow with a monthly membership.",
-              "displayName" : "Flow Plus Monthly",
+              "description" : "Unlock Sakura, Dracula, and future premium themes for Halo with a monthly membership.",
+              "displayName" : "Halo Plus Monthly",
               "locale" : "en_US"
             }
           ],
           "productID" : "com.21media.flow.flowplus.monthly",
           "recurringSubscriptionPeriod" : "P1M",
-          "referenceName" : "Flow Plus Monthly",
+          "referenceName" : "Halo Plus Monthly",
           "subscriptionGroupID" : "2000000001",
           "type" : "RecurringSubscription"
         }

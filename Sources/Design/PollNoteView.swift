@@ -143,7 +143,7 @@ struct PollNoteView: View {
         }
 
         if poll.isLegacyZapPoll {
-            lines.append("Zap poll voting isn't supported in Flow yet.")
+            lines.append("Zap poll voting isn't supported in Halo yet.")
         } else if currentNsec == nil && !hasVoted && !isExpired {
             lines.append("Sign in with a private key to vote.")
         }

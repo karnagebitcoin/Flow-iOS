@@ -42,8 +42,8 @@ struct ProfileQRScannerFlowView: View {
                     feedbackContent(
                         systemImage: "camera.fill.badge.ellipsis",
                         title: "Camera access is off",
-                        message: "Allow camera access in Settings to scan profile QR codes.",
-                        primaryTitle: "Open Settings",
+                        message: "Allow camera access in System Settings to scan profile QR codes.",
+                        primaryTitle: "Open System Settings",
                         primaryAction: openAppSettings,
                         secondaryTitle: "Try Again",
                         secondaryAction: { phase = .scanner }
@@ -92,7 +92,7 @@ struct ProfileQRScannerFlowView: View {
                     .font(.custom("SF Pro Display", size: 28).weight(.semibold))
                     .foregroundStyle(.white)
 
-                Text("Point your camera at another Flow profile to open or follow them instantly.")
+                Text("Point your camera at another Halo profile to open or follow them instantly.")
                     .font(.body)
                     .foregroundStyle(.white.opacity(0.72))
                     .multilineTextAlignment(.center)
@@ -125,7 +125,7 @@ struct ProfileQRScannerFlowView: View {
             .padding(.horizontal, 24)
             .shadow(color: Color.black.opacity(0.35), radius: 28, x: 0, y: 16)
 
-            Text("Flow and Nostr profile codes are supported.")
+            Text("Halo and Nostr profile codes are supported.")
                 .font(.footnote)
                 .foregroundStyle(.white.opacity(0.6))
 
@@ -345,7 +345,7 @@ struct ProfileQRScannerFlowView: View {
     private func resolveScannedCode(_ rawValue: String) async {
         guard let pubkey = resolvedProfilePubkey(from: rawValue) else {
             await MainActor.run {
-                phase = .invalid("That QR code doesn’t look like a Flow or Nostr profile.")
+                phase = .invalid("That QR code doesn’t look like a Halo or Nostr profile.")
             }
             return
         }

@@ -9,91 +9,67 @@ struct WelcomeOnboardingView: View {
 
     var body: some View {
         ZStack {
-            Color.black
+            welcomeBackdropColor
                 .ignoresSafeArea()
 
             UnicornStudioBackgroundView(
-                source: .bundledJSON("welcome_onboarding_unicorn.json"),
-                opacity: 1
+                source: .bundledJSON("welcome_intro_unicorn.json"),
+                opacity: 1,
+                backgroundStyle: .light,
+                allowsInteraction: true
             )
             .ignoresSafeArea()
+            .zIndex(0)
+
+            welcomeActionTouchBlocker
+                .zIndex(1)
 
             LinearGradient(
                 colors: [
-                    Color.black.opacity(0.12),
-                    Color.black.opacity(0.20),
+                    Color.black.opacity(0.10),
+                    Color.black.opacity(0.06),
+                    Color.black.opacity(0.14),
                     Color.black.opacity(0.28)
                 ],
                 startPoint: .top,
                 endPoint: .bottom
             )
             .ignoresSafeArea()
+            .allowsHitTesting(false)
+            .zIndex(2)
 
             VStack(spacing: 0) {
                 Spacer(minLength: 56)
 
                 VStack(spacing: 14) {
-                    Text("Flow")
+                    Text("Halo")
                         .font(.custom("SF Pro Display", size: 56).weight(.bold))
                         .foregroundStyle(.white.opacity(0.97))
                         .kerning(-1.1)
+                        .shadow(color: Color.black.opacity(0.24), radius: 18, y: 10)
 
                     Text("Social, with more control.")
                         .font(.custom("SF Pro Display", size: 24).weight(.medium))
                         .foregroundStyle(.white.opacity(0.78))
                         .multilineTextAlignment(.center)
+                        .shadow(color: Color.black.opacity(0.18), radius: 14, y: 8)
                 }
                 .padding(.horizontal, 32)
                 .opacity(hasAnimatedIn ? 1 : 0)
                 .offset(y: hasAnimatedIn ? 0 : 22)
 
                 Spacer(minLength: 0)
-
-                VStack(spacing: 12) {
-                    Button {
-                        openAuth(tab: .signUp)
-                    } label: {
-                        Text("Get Started")
-                            .font(.headline.weight(.semibold))
-                            .frame(maxWidth: .infinity)
-                            .padding(.vertical, 17)
-                            .foregroundStyle(Color(red: 0.06, green: 0.10, blue: 0.18))
-                            .background(
-                                Capsule(style: .continuous)
-                                    .fill(Color.white.opacity(0.96))
-                            )
-                            .shadow(color: Color.black.opacity(0.14), radius: 18, y: 10)
-                    }
-                    .buttonStyle(.plain)
-                    .opacity(hasAnimatedIn ? 1 : 0)
-                    .offset(y: hasAnimatedIn ? 0 : 28)
-
-                    Button {
-                        openAuth(tab: .signIn)
-                    } label: {
-                        Text("I Already Have a Key")
-                            .font(.headline.weight(.semibold))
-                            .frame(maxWidth: .infinity)
-                            .padding(.vertical, 17)
-                            .foregroundStyle(.white)
-                            .background(
-                                Capsule(style: .continuous)
-                                    .fill(Color.white.opacity(0.12))
-                            )
-                            .overlay {
-                                Capsule(style: .continuous)
-                                    .stroke(Color.white.opacity(0.24), lineWidth: 1)
-                            }
-                    }
-                    .buttonStyle(.plain)
-                    .opacity(hasAnimatedIn ? 1 : 0)
-                    .offset(y: hasAnimatedIn ? 0 : 34)
-                }
-                .padding(.horizontal, 24)
-                .frame(maxWidth: 520)
-                .padding(.bottom, 20)
             }
             .padding(.vertical, 32)
+            .allowsHitTesting(false)
+            .zIndex(3)
+
+            welcomeActions
+                .padding(.horizontal, 24)
+                .frame(maxWidth: 520)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
+                .padding(.bottom, 52)
+                .zIndex(4)
         }
         .task {
             guard !hasAnimatedIn else { return }
@@ -116,6 +92,92 @@ struct WelcomeOnboardingView: View {
 
     private func openAuth(tab: AuthSheetTab) {
         presentedAuthTab = tab
+    }
+
+    private var welcomeBackdropColor: Color {
+        Color(red: 1.0, green: 0.894, blue: 0.886)
+    }
+
+    private var welcomeActionTouchBlocker: some View {
+        WelcomeBackgroundTouchBlocker()
+            .frame(height: 248)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
+    }
+
+    private var welcomeActions: some View {
+        VStack(spacing: 12) {
+            Button {
+                openAuth(tab: .signUp)
+            } label: {
+                welcomeButtonLabel("Get Started")
+                    .foregroundStyle(.white)
+                    .background(
+                        Capsule(style: .continuous)
+                            .fill(Color.black.opacity(0.80))
+                    )
+                    .overlay {
+                        Capsule(style: .continuous)
+                            .stroke(Color.white.opacity(0.10), lineWidth: 0.8)
+                    }
+                    .shadow(color: Color.black.opacity(0.22), radius: 18, y: 10)
+            }
+            .buttonStyle(.plain)
+            .opacity(hasAnimatedIn ? 1 : 0)
+            .offset(y: hasAnimatedIn ? 0 : 28)
+
+            Button {
+                openAuth(tab: .signIn)
+            } label: {
+                welcomeButtonLabel("I Already Have a Key")
+                    .foregroundStyle(.black)
+                    .background(
+                        Capsule(style: .continuous)
+                            .fill(Color.white.opacity(0.80))
+                    )
+                    .overlay {
+                        Capsule(style: .continuous)
+                            .stroke(Color.black.opacity(0.08), lineWidth: 0.8)
+                    }
+                    .shadow(color: Color.black.opacity(0.10), radius: 16, y: 8)
+            }
+            .buttonStyle(.plain)
+            .opacity(hasAnimatedIn ? 1 : 0)
+            .offset(y: hasAnimatedIn ? 0 : 34)
+        }
+    }
+
+    private func welcomeButtonLabel(_ title: String) -> some View {
+        Text(title)
+            .font(.headline.weight(.semibold))
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 17)
+    }
+
+}
+
+private struct WelcomeBackgroundTouchBlocker: UIViewRepresentable {
+    func makeUIView(context: Context) -> TouchBlockingView {
+        TouchBlockingView()
+    }
+
+    func updateUIView(_ uiView: TouchBlockingView, context: Context) {}
+
+    final class TouchBlockingView: UIView {
+        override init(frame: CGRect) {
+            super.init(frame: frame)
+            isOpaque = false
+            backgroundColor = .clear
+            isUserInteractionEnabled = true
+        }
+
+        @available(*, unavailable)
+        required init?(coder: NSCoder) {
+            fatalError("init(coder:) has not been implemented")
+        }
+
+        override func point(inside point: CGPoint, with event: UIEvent?) -> Bool {
+            true
+        }
     }
 }
 

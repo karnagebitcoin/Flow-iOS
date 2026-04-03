@@ -3,6 +3,7 @@ import SwiftUI
 import UIKit
 
 struct SettingsView: View {
+    @Environment(\.colorScheme) private var colorScheme
     @Environment(\.dismiss) private var dismiss
     @EnvironmentObject private var appSettings: AppSettingsStore
     @EnvironmentObject private var premiumStore: FlowPremiumStore
@@ -11,103 +12,134 @@ struct SettingsView: View {
     @ObservedObject var sheetState: SettingsSheetState
 
     var body: some View {
-        NavigationStack(path: navigationPathBinding) {
-            Form {
-                Section {
-                    SettingsValueNavigationRow(
-                        title: "General",
-                        systemImage: "slider.horizontal.3",
-                        value: .general
-                    )
+        ZStack {
+            coreSheetBackground
+                .ignoresSafeArea()
 
-                    SettingsValueNavigationRow(
-                        title: "Appearance",
-                        systemImage: "paintbrush",
-                        value: .appearance
-                    )
+            NavigationStack(path: navigationPathBinding) {
+                Form {
+                    Section {
+                        SettingsValueNavigationRow(
+                            title: "General",
+                            systemImage: "slider.horizontal.3",
+                            value: .general
+                        )
 
-                    SettingsValueNavigationRow(
-                        title: "Feeds",
-                        systemImage: "newspaper",
-                        value: .feeds
-                    )
+                        SettingsValueNavigationRow(
+                            title: "Appearance",
+                            systemImage: "paintbrush",
+                            value: .appearance
+                        )
 
-                    SettingsValueNavigationRow(
-                        title: "Notifications",
-                        systemImage: "bell.badge",
-                        value: .notifications
-                    )
+                        SettingsValueNavigationRow(
+                            title: "Feeds",
+                            systemImage: "newspaper",
+                            value: .feeds
+                        )
 
-                    SettingsValueNavigationRow(
-                        title: "Media",
-                        systemImage: "photo.on.rectangle.angled",
-                        value: .media
-                    )
+                        SettingsValueNavigationRow(
+                            title: "Notifications",
+                            systemImage: "bell.badge",
+                            value: .notifications
+                        )
 
-                    SettingsValueNavigationRow(
-                        title: "Muted Content",
-                        systemImage: "speaker.slash",
-                        value: .mutedContent
-                    )
+                        SettingsValueNavigationRow(
+                            title: "Media",
+                            systemImage: "photo.on.rectangle.angled",
+                            value: .media
+                        )
 
-                    SettingsValueNavigationRow(
-                        title: "Keys",
-                        systemImage: "key",
-                        value: .keys
-                    )
+                        SettingsValueNavigationRow(
+                            title: "Muted Content",
+                            systemImage: "speaker.slash",
+                            value: .mutedContent
+                        )
 
-                    SettingsValueNavigationRow(
-                        title: "Connection",
-                        subtitle: connectionSummaryText,
-                        systemImage: "dot.radiowaves.left.and.right",
-                        value: .connection
-                    )
+                        SettingsValueNavigationRow(
+                            title: "Keys",
+                            systemImage: "key",
+                            value: .keys
+                        )
+
+                        SettingsValueNavigationRow(
+                            title: "Connection",
+                            subtitle: connectionSummaryText,
+                            systemImage: "dot.radiowaves.left.and.right",
+                            value: .connection
+                        )
+                    }
+                    .listRowBackground(coreSheetCardBackground)
+
+                    Section {
+                        SettingsValueNavigationRow(
+                            title: "Halo Plus",
+                            subtitle: flowPlusSummaryText,
+                            systemImage: "sparkles",
+                            value: .flowPlus
+                        )
+                    }
+                    .listRowBackground(coreSheetCardBackground)
                 }
-
-                Section {
-                    SettingsValueNavigationRow(
-                        title: "Flow Plus",
-                        subtitle: flowPlusSummaryText,
-                        systemImage: "sparkles",
-                        value: .flowPlus
-                    )
+                .scrollContentBackground(.hidden)
+                .background(Color.clear)
+                .navigationTitle("Core")
+                .navigationBarTitleDisplayMode(.large)
+                .navigationDestination(for: SettingsDestination.self) { destination in
+                    settingsDestinationView(for: destination)
                 }
-            }
-            .navigationTitle("Settings")
-            .navigationBarTitleDisplayMode(.large)
-            .navigationDestination(for: SettingsDestination.self) { destination in
-                settingsDestinationView(for: destination)
-            }
-            .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button("Done") {
-                        dismiss()
+                .toolbar {
+                    ToolbarItem(placement: .topBarTrailing) {
+                        Button("Done") {
+                            dismiss()
+                        }
                     }
                 }
-            }
-            .overlay {
-                BreakReminderOverlayHost(coordinator: breakReminderCoordinator)
-            }
-            .task {
-                await appSettings.refreshNotificationAuthorizationStatus()
-            }
-            .sheet(isPresented: isShowingPrimaryColorPickerBinding) {
-                SettingsNativeColorPicker(
-                    title: "Primary Color",
-                    color: Binding(
-                        get: { appSettings.primaryColor },
-                        set: { appSettings.primaryColor = $0 }
-                    ),
-                    onDismiss: {
-                        sheetState.isShowingPrimaryColorPicker = false
-                    }
-                )
-                .preferredColorScheme(appSettings.preferredColorScheme)
+                .overlay {
+                    BreakReminderOverlayHost(coordinator: breakReminderCoordinator)
+                }
+                .task {
+                    await appSettings.refreshNotificationAuthorizationStatus()
+                }
+                .sheet(isPresented: isShowingPrimaryColorPickerBinding) {
+                    SettingsNativeColorPicker(
+                        title: "Primary Color",
+                        color: Binding(
+                            get: { appSettings.primaryColor },
+                            set: { appSettings.primaryColor = $0 }
+                        ),
+                        onDismiss: {
+                            sheetState.isShowingPrimaryColorPicker = false
+                        }
+                    )
+                    .preferredColorScheme(appSettings.preferredColorScheme)
+                }
             }
         }
-        .background(appSettings.themePalette.background)
-        .presentationBackground(appSettings.themePalette.background)
+        .presentationBackground(coreSheetBackground)
         .preferredColorScheme(appSettings.preferredColorScheme)
+    }
+
+    private var usesLightCoreSheetSurfaces: Bool {
+        switch appSettings.activeTheme {
+        case .white, .light, .sakura:
+            return true
+        case .system:
+            return colorScheme == .light
+        case .black, .dark, .dracula:
+            return false
+        }
+    }
+
+    private var coreSheetBackground: Color {
+        usesLightCoreSheetSurfaces
+            ? appSettings.themePalette.secondaryGroupedBackground
+            : appSettings.themePalette.background
+    }
+
+    private var coreSheetCardBackground: Color {
+        usesLightCoreSheetSurfaces
+            ? .white
+            : appSettings.themePalette.secondaryGroupedBackground
     }
 
     private var connectionSummaryText: String {
@@ -120,8 +152,12 @@ struct SettingsView: View {
             return "Themes and typography unlocked"
         }
 
-        if appSettings.previewTheme == .sakura {
-            return "Previewing Sakura"
+        if let previewTheme = appSettings.previewTheme, previewTheme.requiresFlowPlus {
+            return "Previewing \(previewTheme.title)"
+        }
+
+        if appSettings.hasFlowPlusCustomizationAccess {
+            return "Temporary testing unlock active"
         }
 
         return "Themes, typography, and extras"
@@ -231,7 +267,7 @@ private struct SettingsNavigationRow<Destination: View>: View {
                     if let subtitle, !subtitle.isEmpty {
                         Text(subtitle)
                             .font(appSettings.appFont(.footnote))
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(appSettings.themePalette.mutedForeground)
                     }
                 }
 
@@ -277,7 +313,7 @@ private struct SettingsValueNavigationRow: View {
                     if let subtitle, !subtitle.isEmpty {
                         Text(subtitle)
                             .font(appSettings.appFont(.footnote))
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(appSettings.themePalette.mutedForeground)
                     }
                 }
 
@@ -288,6 +324,7 @@ private struct SettingsValueNavigationRow: View {
 }
 
 private struct SettingsToggleRow: View {
+    @EnvironmentObject private var appSettings: AppSettingsStore
     let title: String
     @Binding var isOn: Bool
     let footer: String
@@ -298,7 +335,7 @@ private struct SettingsToggleRow: View {
 
             Text(footer)
                 .font(.footnote)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(appSettings.themePalette.mutedForeground)
                 .fixedSize(horizontal: false, vertical: true)
         }
         .padding(.vertical, 4)
@@ -350,9 +387,9 @@ struct NotificationPreferencesView: View {
                     set: { appSettings.activityQuoteShareNotificationsEnabled = $0 }
                 ))
             } header: {
-                Text("Activity Alerts")
+                Text("Pulse Alerts")
             } footer: {
-                Text("These controls decide which activity types trigger the in-app bell badge and future notification delivery.")
+                Text("These controls decide which Pulse events trigger the in-app bell badge and future notification delivery.")
             }
         }
         .navigationTitle(navigationTitleText)
@@ -364,6 +401,7 @@ struct NotificationPreferencesView: View {
 }
 
 private struct NotificationPreferencesToggleRow: View {
+    @EnvironmentObject private var appSettings: AppSettingsStore
     let title: String
     @Binding var isOn: Bool
     let footer: String
@@ -374,7 +412,7 @@ private struct NotificationPreferencesToggleRow: View {
 
             Text(footer)
                 .font(.footnote)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(appSettings.themePalette.mutedForeground)
                 .fixedSize(horizontal: false, vertical: true)
         }
         .padding(.vertical, 4)
@@ -609,6 +647,15 @@ private struct SettingsAppearanceView: View {
                 startPoint: .topLeading,
                 endPoint: .bottomTrailing
             )
+        case .dracula:
+            return AppThemeOption.dracula.fixedPrimaryGradient ?? LinearGradient(
+                colors: [
+                    Color(red: 0.741, green: 0.576, blue: 0.976),
+                    Color(red: 1.0, green: 0.475, blue: 0.776)
+                ],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
         case .dark:
             return LinearGradient(
                 colors: [Color(red: 0.19, green: 0.16, blue: 0.28), Color(red: 0.09, green: 0.08, blue: 0.14)],
@@ -630,6 +677,8 @@ private struct SettingsAppearanceView: View {
             return Color(.label).opacity(0.75)
         case .sakura:
             return Color(red: 0.45, green: 0.21, blue: 0.32)
+        case .dracula:
+            return Color(red: 0.973, green: 0.973, blue: 0.949).opacity(0.92)
         case .black, .dark:
             return .white.opacity(0.85)
         }
@@ -723,7 +772,7 @@ private struct SettingsGeneralView: View {
                         get: { appSettings.liveReactsEnabled },
                         set: { appSettings.liveReactsEnabled = $0 }
                     ),
-                    footer: "Animate incoming reactions from the Activity tab area in real time while Flow is open."
+                    footer: "Animate incoming reactions from the Pulse tab area in real time while Halo is open."
                 )
 
                 Button {
@@ -761,7 +810,7 @@ private struct SettingsGeneralView: View {
             } header: {
                 Text("General")
             } footer: {
-                Text("When enabled, Flow shows a gentle break reminder after the app has stayed open continuously for this long. Leaving the app or closing the reminder resets the timer. Use Preview to test the sheet right away.")
+                Text("When enabled, Halo shows a gentle break reminder after the app has stayed open continuously for this long. Leaving the app or closing the reminder resets the timer. Use Preview to test the sheet right away.")
             }
         }
         .navigationTitle("General")
@@ -936,7 +985,7 @@ private struct SettingsMediaDiagnosticsView: View {
             } header: {
                 Text("Overview")
             } footer: {
-                Text("Counts the current app session for on-demand requests that go through the shared Flow media cache. Background prefetch warmups are excluded.")
+                Text("Counts the current app session for on-demand requests that go through the shared Halo media cache. Background prefetch warmups are excluded.")
             }
 
             Section {
@@ -967,7 +1016,7 @@ private struct SettingsMediaDiagnosticsView: View {
             } header: {
                 Text("Request Sources")
             } footer: {
-                Text("This covers the shared Flow media cache path. Some screens still use system image loading, and video playback has its own pipeline.")
+                Text("This covers the shared Halo media cache path. Some screens still use system image loading, and video playback has its own pipeline.")
             }
 
             Section {
@@ -1055,7 +1104,7 @@ private struct SettingsMediaDiagnosticsView: View {
                     value: byteDescription(flowDBDiagnostics.diskUsageBytes)
                 )
             } header: {
-                Text("Flow DB")
+                Text("Halo DB")
             } footer: {
                 VStack(alignment: .leading, spacing: 4) {
                     Text("Persisted values reflect what is already committed into the local nostrdb store. Session ingested values reflect what the current app run has pushed through the ingester, even if writer threads have not finished compacting everything yet.")

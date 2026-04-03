@@ -55,29 +55,40 @@ struct AuthSheetView: View {
                             handlePostAuthenticationCompletion()
                         }
                     )
+                } else if selectedTab == .signIn {
+                    signInExperience
                 } else {
-                    Form {
-                        if availableTabs.count > 1 {
-                            FlowCapsuleTabBar(
-                                selection: $selectedTab,
-                                items: availableTabs,
-                                title: { $0.rawValue }
-                            )
-                        }
+                    ZStack {
+                        AppThemeBackgroundView()
+                            .ignoresSafeArea()
 
-                        switch selectedTab {
-                        case .signIn:
-                            signInSection
-                        case .signUp:
-                            EmptyView()
-                        case .accounts:
-                            accountsSection
+                        Form {
+                            if availableTabs.count > 1 {
+                                FlowCapsuleTabBar(
+                                    selection: $selectedTab,
+                                    items: availableTabs,
+                                    title: { $0.rawValue }
+                                )
+                                .listRowBackground(appSettings.themePalette.secondaryGroupedBackground)
+                            }
+
+                            switch selectedTab {
+                            case .signIn:
+                                signInSection
+                            case .signUp:
+                                EmptyView()
+                            case .accounts:
+                                accountsSection
+                            }
                         }
+                        .scrollContentBackground(.hidden)
+                        .background(Color.clear)
                     }
                 }
             }
             .navigationTitle(selectedTab == .signUp ? "Create Account" : "Account")
             .navigationBarTitleDisplayMode(.inline)
+            .toolbar(selectedTab == .signIn ? .hidden : .visible, for: .navigationBar)
             .onAppear {
                 let resolvedInitialTab = availableTabs.contains(initialTab) ? initialTab : availableTabs[0]
                 if selectedTab != resolvedInitialTab {
@@ -102,22 +113,10 @@ struct AuthSheetView: View {
                 }
             }
             .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button {
-                        dismiss()
-                    } label: {
-                        Text("Close")
-                            .font(.subheadline.weight(.semibold))
-                            .foregroundStyle(closeButtonForeground)
-                            .padding(.horizontal, 14)
-                            .padding(.vertical, 10)
-                            .background(closeButtonBackground, in: Capsule(style: .continuous))
-                            .overlay {
-                                Capsule(style: .continuous)
-                                    .stroke(closeButtonBorder, lineWidth: 1)
-                            }
+                if selectedTab != .signIn {
+                    ToolbarItem(placement: .topBarTrailing) {
+                        closeToolbarButton
                     }
-                    .buttonStyle(.plain)
                 }
             }
             .confirmationDialog(
@@ -148,6 +147,58 @@ struct AuthSheetView: View {
                 if let pendingAccountRemoval {
                     Text("Remove \(accountDisplayName(for: pendingAccountRemoval)) from this device?")
                 }
+            }
+        }
+    }
+
+    private var signInExperience: some View {
+        ZStack {
+            signInBackdrop
+
+            ScrollView(showsIndicators: false) {
+                VStack(spacing: 18) {
+                    if availableTabs.count > 1 {
+                        signInTabBarCard
+                    }
+
+                    if #available(iOS 26.0, *) {
+                        VStack(spacing: 24) {
+                            signInGlassCard
+                            signInRestoreCard
+                        }
+                    } else {
+                        VStack(spacing: 18) {
+                            legacySignInCard
+                            legacyRestoreCard
+                        }
+                    }
+
+                    signInFooterNote
+                }
+                .padding(.horizontal, 20)
+                .padding(.bottom, 48)
+            }
+            .safeAreaInset(edge: .top, spacing: 0) {
+                signInHeader
+                    .padding(.horizontal, 16)
+                    .padding(.top, 8)
+                    .padding(.bottom, 14)
+            }
+            .safeAreaInset(edge: .bottom) {
+                Color.clear.frame(height: 18)
+            }
+        }
+    }
+
+    private var signInHeader: some View {
+        ZStack {
+            Text("Account")
+                .font(.headline.weight(.semibold))
+                .foregroundStyle(.primary)
+
+            HStack {
+                Spacer()
+                closeToolbarButton
             }
         }
     }
@@ -239,6 +290,257 @@ struct AuthSheetView: View {
         }
     }
 
+    private var signInBackdrop: some View {
+        ZStack {
+            UnicornStudioBackgroundView(
+                source: .bundledJSON("sign_in_background.json"),
+                opacity: 1,
+                backgroundStyle: .clear,
+                allowsInteraction: false
+            )
+            .ignoresSafeArea()
+
+            LinearGradient(
+                colors: [
+                    Color.clear,
+                    Color.clear,
+                    Color.white.opacity(0.02),
+                    Color.black.opacity(0.08),
+                    Color.black.opacity(0.14)
+                ],
+                startPoint: .top,
+                endPoint: .bottom
+            )
+            .ignoresSafeArea()
+        }
+    }
+
+    @available(iOS 26.0, *)
+    private var signInGlassCard: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Text("Sign in with your private key")
+                .font(.footnote.weight(.semibold))
+                .foregroundStyle(authInk.opacity(0.78))
+
+            signInPrivateKeyField
+
+            if let signInError {
+                Text(signInError)
+                    .font(.footnote)
+                    .foregroundStyle(.red)
+            }
+
+            signInPrimaryButton
+        }
+        .padding(18)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(authBlurCardBackground(cornerRadius: 28))
+    }
+
+    private var signInTabBarCard: some View {
+        Group {
+            if #available(iOS 26.0, *) {
+                FlowCapsuleTabBar(
+                    selection: $selectedTab,
+                    items: availableTabs,
+                    title: { $0.rawValue }
+                )
+                .padding(.horizontal, 10)
+                .padding(.vertical, 10)
+                .background(authBlurCapsuleBackground)
+            } else {
+                FlowCapsuleTabBar(
+                    selection: $selectedTab,
+                    items: availableTabs,
+                    title: { $0.rawValue }
+                )
+                .padding(.horizontal, 10)
+                .padding(.vertical, 10)
+                .background(.ultraThinMaterial, in: Capsule(style: .continuous))
+            }
+        }
+    }
+
+    private var signInPrivateKeyField: some View {
+        SecureField("Private key", text: $privateKeyInput)
+            .textInputAutocapitalization(.never)
+            .autocorrectionDisabled()
+            .padding(.horizontal, 16)
+            .padding(.vertical, 16)
+            .background(
+                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    .fill(Color.white.opacity(colorScheme == .dark ? 0.10 : 0.22))
+            )
+            .overlay {
+                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    .stroke(Color.white.opacity(colorScheme == .dark ? 0.18 : 0.34), lineWidth: 1.15)
+            }
+    }
+
+    private var signInPrimaryButton: some View {
+        Group {
+            if #available(iOS 26.0, *) {
+                Button {
+                    handleSignIn()
+                } label: {
+                    Text("Sign In")
+                        .font(.headline.weight(.semibold))
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 17)
+                        .foregroundStyle(authInk)
+                }
+                .buttonStyle(.plain)
+                .glassEffect(
+                    .regular
+                        .tint(Color.white.opacity(0.44))
+                        .interactive(),
+                    in: Capsule(style: .continuous)
+                )
+            } else {
+                Button {
+                    handleSignIn()
+                } label: {
+                    Text("Sign In")
+                        .font(.headline.weight(.semibold))
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 17)
+                        .foregroundStyle(authPrimaryButtonForeground)
+                        .background(
+                            Capsule(style: .continuous)
+                                .fill(authPrimaryButtonFill)
+                        )
+                        .overlay {
+                            Capsule(style: .continuous)
+                                .stroke(authPrimaryButtonBorder, lineWidth: 1)
+                        }
+                        .shadow(
+                            color: colorScheme == .light ? Color.black.opacity(0.08) : .clear,
+                            radius: colorScheme == .light ? 10 : 0,
+                            y: colorScheme == .light ? 5 : 0
+                        )
+                }
+                .buttonStyle(.plain)
+            }
+        }
+    }
+
+    private var signInRestoreCard: some View {
+        Group {
+            if #available(iOS 26.0, *) {
+                NavigationLink {
+                    ICloudKeyRestoreView {
+                        dismiss()
+                    }
+                } label: {
+                    signInRestoreLabel
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 14)
+                }
+                .buttonStyle(.plain)
+                .background(authBlurCardBackground(cornerRadius: 24))
+            } else {
+                legacyRestoreCard
+            }
+        }
+    }
+
+    private var signInRestoreLabel: some View {
+        HStack(spacing: 10) {
+            Image(systemName: "icloud.and.arrow.down")
+                .font(.subheadline.weight(.semibold))
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Restore from iCloud")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.primary)
+                Text("Use a private key already backed up to iCloud Keychain.")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            }
+            Spacer()
+        }
+    }
+
+    private var signInFooterNote: some View {
+        Text("Use private-key sign in to enable posting, reactions, and replies. If your key was backed up before, you can restore it from iCloud here.")
+            .font(.footnote)
+            .foregroundStyle(Color.white.opacity(colorScheme == .dark ? 0.80 : 0.92))
+            .multilineTextAlignment(.center)
+            .padding(.horizontal, 12)
+            .shadow(color: Color.black.opacity(0.18), radius: 10, y: 6)
+    }
+
+    private var legacySignInCard: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Text("Sign in with your private key")
+                .font(.footnote.weight(.semibold))
+                .foregroundStyle(.secondary)
+
+            signInPrivateKeyField
+
+            if let signInError {
+                Text(signInError)
+                    .font(.footnote)
+                    .foregroundStyle(.red)
+            }
+
+            signInPrimaryButton
+        }
+        .padding(18)
+        .background(authBlurCardBackground(cornerRadius: 28))
+    }
+
+    private var legacyRestoreCard: some View {
+        NavigationLink {
+            ICloudKeyRestoreView {
+                dismiss()
+            }
+        } label: {
+            signInRestoreLabel
+                .padding(.horizontal, 16)
+                .padding(.vertical, 14)
+                .background(authBlurCardBackground(cornerRadius: 24))
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func authBlurCardBackground(cornerRadius: CGFloat) -> some View {
+        let shape = RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+
+        return shape
+            .fill(.ultraThinMaterial)
+            .overlay {
+                shape
+                    .fill(Color.white.opacity(colorScheme == .dark ? 0.05 : 0.12))
+            }
+            .overlay {
+                shape
+                    .stroke(Color.white.opacity(colorScheme == .dark ? 0.16 : 0.34), lineWidth: 0.9)
+            }
+            .shadow(
+                color: Color.black.opacity(colorScheme == .dark ? 0.16 : 0.08),
+                radius: colorScheme == .dark ? 20 : 16,
+                y: colorScheme == .dark ? 10 : 8
+            )
+    }
+
+    private var authBlurCapsuleBackground: some View {
+        Capsule(style: .continuous)
+            .fill(.ultraThinMaterial)
+            .overlay {
+                Capsule(style: .continuous)
+                    .fill(Color.white.opacity(colorScheme == .dark ? 0.05 : 0.10))
+            }
+            .overlay {
+                Capsule(style: .continuous)
+                    .stroke(Color.white.opacity(colorScheme == .dark ? 0.16 : 0.32), lineWidth: 0.9)
+            }
+            .shadow(
+                color: Color.black.opacity(colorScheme == .dark ? 0.14 : 0.06),
+                radius: colorScheme == .dark ? 18 : 14,
+                y: colorScheme == .dark ? 9 : 7
+            )
+    }
+
     private var authInk: Color {
         Color(red: 0.06, green: 0.10, blue: 0.18)
     }
@@ -260,11 +562,50 @@ struct AuthSheetView: View {
     }
 
     private var closeButtonBackground: Color {
-        colorScheme == .dark ? Color.white.opacity(0.12) : Color(.secondarySystemBackground)
+        appSettings.themePalette.secondaryGroupedBackground
     }
 
     private var closeButtonBorder: Color {
-        colorScheme == .dark ? Color.white.opacity(0.10) : Color(.separator).opacity(0.20)
+        appSettings.themePalette.separator.opacity(colorScheme == .dark ? 0.92 : 0.72)
+    }
+
+    private var closeToolbarButton: some View {
+        Group {
+            if #available(iOS 26.0, *), selectedTab == .signIn {
+                Button {
+                    dismiss()
+                } label: {
+                    Text("Close")
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(authInk)
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 10)
+                }
+                .buttonStyle(.plain)
+                .glassEffect(
+                    .regular
+                        .tint(Color.white.opacity(0.22))
+                        .interactive(),
+                    in: Capsule(style: .continuous)
+                )
+            } else {
+                Button {
+                    dismiss()
+                } label: {
+                    Text("Close")
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(closeButtonForeground)
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 10)
+                        .background(closeButtonBackground, in: Capsule(style: .continuous))
+                        .overlay {
+                            Capsule(style: .continuous)
+                                .stroke(closeButtonBorder, lineWidth: 1)
+                        }
+                }
+                .buttonStyle(.plain)
+            }
+        }
     }
 
     @ViewBuilder
@@ -272,7 +613,8 @@ struct AuthSheetView: View {
         Section {
             if auth.accounts.isEmpty {
                 Text("No saved accounts yet.")
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(appSettings.themePalette.mutedForeground)
+                    .listRowBackground(appSettings.themePalette.secondaryGroupedBackground)
             } else {
                 ForEach(auth.accounts) { account in
                     HStack(spacing: 12) {
@@ -290,17 +632,17 @@ struct AuthSheetView: View {
                                     if let handle = accountHandle(for: account) {
                                         Text(handle)
                                             .font(.caption)
-                                            .foregroundStyle(.secondary)
+                                            .foregroundStyle(appSettings.themePalette.mutedForeground)
                                             .lineLimit(1)
                                     }
                                     Text(accountBackupLabel(for: account))
                                         .font(.caption2)
-                                        .foregroundStyle(.secondary)
+                                        .foregroundStyle(appSettings.themePalette.mutedForeground)
                                 }
                                 Spacer()
                                 if auth.currentAccount?.id == account.id {
                                     Image(systemName: "checkmark.circle.fill")
-                                        .foregroundStyle(.tint)
+                                        .foregroundStyle(appSettings.primaryColor)
                                 }
                             }
                         }
@@ -316,6 +658,7 @@ struct AuthSheetView: View {
                         .buttonStyle(.plain)
                         .accessibilityLabel("Remove account")
                     }
+                    .listRowBackground(appSettings.themePalette.secondaryGroupedBackground)
                 }
             }
         }
@@ -326,6 +669,7 @@ struct AuthSheetView: View {
                     auth.logout()
                 }
             }
+            .listRowBackground(appSettings.themePalette.secondaryGroupedBackground)
         }
     }
 
@@ -470,10 +814,10 @@ struct AuthSheetView: View {
     private func accountAvatarFallback(name: String) -> some View {
         ZStack {
             Circle()
-                .fill(Color(.secondarySystemBackground))
+                .fill(appSettings.themePalette.secondaryBackground)
             Text(String(name.prefix(1)).uppercased())
                 .font(.subheadline.weight(.semibold))
-                .foregroundStyle(.secondary)
+                .foregroundStyle(appSettings.themePalette.mutedForeground)
         }
         .frame(width: 42, height: 42)
     }

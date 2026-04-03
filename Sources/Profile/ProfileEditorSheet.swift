@@ -157,7 +157,7 @@ struct ProfileEditorSheet: View {
         VStack(alignment: .leading, spacing: 12) {
             sectionHeader(
                 title: "Profile",
-                subtitle: "Your name and bio update the preview in real time."
+                subtitle: "Your name, handle, and bio update the preview in real time."
             )
 
             editorCard {
@@ -165,6 +165,12 @@ struct ProfileEditorSheet: View {
                     labeledField("Display Name", systemImage: "person") {
                         TextField("Display Name", text: $fields.displayName)
                             .textInputAutocapitalization(.words)
+                            .autocorrectionDisabled()
+                    }
+
+                    labeledField("Handle", systemImage: "at") {
+                        TextField("Handle", text: $fields.handle)
+                            .textInputAutocapitalization(.never)
                             .autocorrectionDisabled()
                     }
 
@@ -577,10 +583,20 @@ private struct ProfileEditorPreviewCard: View {
     }
 
     private var resolvedHandle: String {
+        let editedHandle = ProfileMetadataEditing.normalizeHandle(fields.handle)
+        if !editedHandle.isEmpty {
+            return "@\(editedHandle.replacingOccurrences(of: " ", with: "").lowercased())"
+        }
+
         let trimmedHandle = previewHandle.trimmingCharacters(in: .whitespacesAndNewlines)
         if !trimmedHandle.isEmpty {
             return trimmedHandle
         }
+
+        if let displayName = normalizedValue(fields.displayName) {
+            return "@\(displayName.replacingOccurrences(of: " ", with: "").lowercased())"
+        }
+
         return "@flow"
     }
 

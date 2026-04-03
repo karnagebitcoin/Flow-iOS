@@ -112,6 +112,10 @@ public struct KlipyGIFItem: Decodable, Hashable, Identifiable, Sendable {
             ?? preferredAnimatedAsset
     }
 
+    var preferredAnimatedPreviewAsset: KlipyGIFAsset? {
+        preferredAnimatedAsset
+    }
+
     private var preferredAnimatedAsset: KlipyGIFAsset? {
         asset(format: "gif", preferredSizes: ["md", "sm", "xs", "tiny", "hd"])
     }

@@ -5,6 +5,7 @@ import UIKit
 struct ProfileQRCodeSheet: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.colorScheme) private var colorScheme
+    @EnvironmentObject private var appSettings: AppSettingsStore
     @EnvironmentObject private var toastCenter: AppToastCenter
 
     let npub: String
@@ -27,15 +28,8 @@ struct ProfileQRCodeSheet: View {
     var body: some View {
         NavigationStack {
             ZStack {
-                LinearGradient(
-                    colors: [
-                        Color(.systemBackground),
-                        Color(.secondarySystemBackground)
-                    ],
-                    startPoint: .top,
-                    endPoint: .bottom
-                )
-                .ignoresSafeArea()
+                appSettings.themePalette.background
+                    .ignoresSafeArea()
 
                 ScrollView(showsIndicators: false) {
                     VStack(spacing: 18) {
@@ -64,6 +58,7 @@ struct ProfileQRCodeSheet: View {
         }
         .presentationDetents([.large])
         .presentationDragIndicator(.visible)
+        .presentationBackground(appSettings.themePalette.background)
         .fullScreenCover(isPresented: $isShowingScanner) {
             ProfileQRScannerFlowView(
                 onOpenProfile: { pubkey in
@@ -163,12 +158,15 @@ struct ProfileQRCodeSheet: View {
                 .multilineTextAlignment(.center)
         }
         .padding(16)
-        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 26, style: .continuous))
+        .background(
+            appSettings.themePalette.secondaryBackground,
+            in: RoundedRectangle(cornerRadius: 26, style: .continuous)
+        )
         .overlay(
             RoundedRectangle(cornerRadius: 26, style: .continuous)
-                .stroke(Color.white.opacity(colorScheme == .dark ? 0.2 : 0.45), lineWidth: 0.8)
+                .stroke(appSettings.themePalette.separator.opacity(colorScheme == .dark ? 0.9 : 0.75), lineWidth: 0.8)
         )
-        .shadow(color: Color.black.opacity(colorScheme == .dark ? 0.28 : 0.1), radius: 18, x: 0, y: 8)
+        .shadow(color: Color.black.opacity(colorScheme == .dark ? 0.18 : 0.08), radius: 18, x: 0, y: 8)
     }
 
     private var actionRow: some View {
@@ -185,11 +183,11 @@ struct ProfileQRCodeSheet: View {
                         .foregroundStyle(.primary)
                         .background(
                             Capsule()
-                                .fill(Color(.secondarySystemBackground))
+                                .fill(appSettings.themePalette.secondaryBackground)
                         )
                         .overlay(
                             Capsule()
-                                .stroke(Color(.separator).opacity(0.35), lineWidth: 0.8)
+                                .stroke(appSettings.themePalette.separator.opacity(0.6), lineWidth: 0.8)
                         )
                 }
                 .buttonStyle(.plain)
@@ -200,7 +198,7 @@ struct ProfileQRCodeSheet: View {
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 10)
                         .foregroundStyle(.white)
-                        .background(Capsule().fill(Color.accentColor))
+                        .background(appSettings.primaryGradient, in: Capsule())
                 }
                 .buttonStyle(.plain)
             }
@@ -215,11 +213,11 @@ struct ProfileQRCodeSheet: View {
                     .foregroundStyle(.primary)
                     .background(
                         Capsule()
-                            .fill(Color(.secondarySystemBackground))
+                            .fill(appSettings.themePalette.secondaryBackground)
                     )
                     .overlay(
                         Capsule()
-                            .stroke(Color(.separator).opacity(0.35), lineWidth: 0.8)
+                            .stroke(appSettings.themePalette.separator.opacity(0.6), lineWidth: 0.8)
                     )
             }
             .buttonStyle(.plain)
@@ -542,7 +540,7 @@ private enum AutomaticEntrancePhase {
 }
 
 struct ProfileQRCodePresentationBackground: View {
-    static let defaultResourceName = "welcome_onboarding_unicorn.json"
+    static let defaultResourceName = "welcome_intro_unicorn.json"
 
     let resourceName: String
 
@@ -552,6 +550,10 @@ struct ProfileQRCodePresentationBackground: View {
 
     private var isSakuraBackground: Bool {
         resourceName == AppThemeOption.sakura.qrShareBackgroundResourceName
+    }
+
+    private var usesLightBackdrop: Bool {
+        isSakuraBackground || resourceName == Self.defaultResourceName
     }
 
     var body: some View {
@@ -567,6 +569,9 @@ struct ProfileQRCodePresentationBackground: View {
                     endPoint: .bottomTrailing
                 )
                 .ignoresSafeArea()
+            } else if usesLightBackdrop {
+                Color(red: 1.0, green: 0.894, blue: 0.886)
+                    .ignoresSafeArea()
             } else {
                 Color.black
                     .ignoresSafeArea()
@@ -574,16 +579,23 @@ struct ProfileQRCodePresentationBackground: View {
 
             UnicornStudioBackgroundView(
                 source: .bundledJSON(resourceName),
-                opacity: 1
+                opacity: 1,
+                backgroundStyle: usesLightBackdrop ? .light : .dark
             )
             .scaleEffect(isSakuraBackground ? 1.18 : 1)
             .ignoresSafeArea()
 
             LinearGradient(
                 colors: [
-                    isSakuraBackground ? Color.white.opacity(0.03) : Color.black.opacity(0.12),
-                    isSakuraBackground ? Color(red: 0.53, green: 0.16, blue: 0.42).opacity(0.10) : Color.black.opacity(0.20),
-                    isSakuraBackground ? Color(red: 0.41, green: 0.08, blue: 0.30).opacity(0.18) : Color.black.opacity(0.28)
+                    isSakuraBackground
+                        ? Color.white.opacity(0.03)
+                        : (usesLightBackdrop ? Color.black.opacity(0.04) : Color.black.opacity(0.12)),
+                    isSakuraBackground
+                        ? Color(red: 0.53, green: 0.16, blue: 0.42).opacity(0.10)
+                        : (usesLightBackdrop ? Color.black.opacity(0.08) : Color.black.opacity(0.20)),
+                    isSakuraBackground
+                        ? Color(red: 0.41, green: 0.08, blue: 0.30).opacity(0.18)
+                        : (usesLightBackdrop ? Color.black.opacity(0.18) : Color.black.opacity(0.28))
                 ],
                 startPoint: .top,
                 endPoint: .bottom
