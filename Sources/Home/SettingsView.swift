@@ -16,78 +16,81 @@ struct SettingsView: View {
                 .ignoresSafeArea()
 
             NavigationStack(path: navigationPathBinding) {
-                ThemedSettingsForm {
-                    ThemedSettingsSection {
-                        SettingsValueNavigationRow(
-                            title: "General",
-                            systemImage: "slider.horizontal.3",
-                            value: .general
-                        )
-
-                        SettingsValueNavigationRow(
-                            title: "Appearance",
-                            systemImage: "paintbrush",
-                            value: .appearance
-                        )
-
-                        SettingsValueNavigationRow(
-                            title: "Feeds",
-                            systemImage: "newspaper",
-                            value: .feeds
-                        )
-
-                        SettingsValueNavigationRow(
-                            title: "Notifications",
-                            systemImage: "bell.badge",
-                            value: .notifications
-                        )
-
-                        SettingsValueNavigationRow(
-                            title: "Media",
-                            systemImage: "photo.on.rectangle.angled",
-                            value: .media
-                        )
-
-                        SettingsValueNavigationRow(
-                            title: "Muted Content",
-                            systemImage: "speaker.slash",
-                            value: .mutedContent
-                        )
-
-                        SettingsValueNavigationRow(
-                            title: "Keys",
-                            systemImage: "key",
-                            value: .keys
-                        )
-
-                        SettingsValueNavigationRow(
-                            title: "Connection",
-                            subtitle: connectionSummaryText,
-                            systemImage: "dot.radiowaves.left.and.right",
-                            value: .connection
-                        )
-                    }
-
-                    ThemedSettingsSection {
-                        SettingsValueNavigationRow(
-                            title: "Halo Plus",
-                            subtitle: flowPlusSummaryText,
-                            systemImage: "sparkles",
-                            value: .flowPlus
-                        )
-                    }
-                }
-                .navigationTitle("Settings")
-                .navigationBarTitleDisplayMode(.large)
-                .navigationDestination(for: SettingsDestination.self) { destination in
-                    settingsDestinationView(for: destination)
-                }
-                .toolbar {
-                    ToolbarItem(placement: .topBarTrailing) {
+                VStack(spacing: 0) {
+                    ThemedSettingsTitleHeader("Settings") {
                         ThemedToolbarDoneButton {
                             dismiss()
                         }
                     }
+
+                    ThemedSettingsForm {
+                        ThemedSettingsSection {
+                            SettingsValueNavigationRow(
+                                title: "General",
+                                systemImage: "slider.horizontal.3",
+                                value: .general
+                            )
+
+                            SettingsValueNavigationRow(
+                                title: "Appearance",
+                                systemImage: "paintbrush",
+                                value: .appearance
+                            )
+
+                            SettingsValueNavigationRow(
+                                title: "Feeds",
+                                systemImage: "newspaper",
+                                value: .feeds
+                            )
+
+                            SettingsValueNavigationRow(
+                                title: "Notifications",
+                                systemImage: "bell.badge",
+                                value: .notifications
+                            )
+
+                            SettingsValueNavigationRow(
+                                title: "Media",
+                                systemImage: "photo.on.rectangle.angled",
+                                value: .media
+                            )
+
+                            SettingsValueNavigationRow(
+                                title: "Muted Content",
+                                systemImage: "speaker.slash",
+                                value: .mutedContent
+                            )
+
+                            SettingsValueNavigationRow(
+                                title: "Keys",
+                                systemImage: "key",
+                                value: .keys
+                            )
+
+                            SettingsValueNavigationRow(
+                                title: "Connection",
+                                subtitle: connectionSummaryText,
+                                systemImage: "dot.radiowaves.left.and.right",
+                                value: .connection
+                            )
+                        }
+
+                        ThemedSettingsSection {
+                            SettingsValueNavigationRow(
+                                title: "Halo Plus",
+                                subtitle: flowPlusSummaryText,
+                                systemImage: "sparkles",
+                                value: .flowPlus
+                            )
+                        }
+                    }
+                    .padding(.top, -10)
+                }
+                .navigationTitle("Settings")
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbar(sheetState.navigationPath.isEmpty ? .hidden : .visible, for: .navigationBar)
+                .navigationDestination(for: SettingsDestination.self) { destination in
+                    settingsDestinationView(for: destination)
                 }
                 .overlay {
                     BreakReminderOverlayHost(coordinator: breakReminderCoordinator)
@@ -318,7 +321,6 @@ struct NotificationPreferencesView: View {
     @EnvironmentObject private var appSettings: AppSettingsStore
 
     var navigationTitleText: String = "Notifications"
-    var titleDisplayMode: NavigationBarItem.TitleDisplayMode = .large
 
     var body: some View {
         ThemedSettingsForm {
@@ -365,7 +367,7 @@ struct NotificationPreferencesView: View {
             }
         }
         .navigationTitle(navigationTitleText)
-        .navigationBarTitleDisplayMode(titleDisplayMode)
+        .navigationBarTitleDisplayMode(.inline)
         .task {
             await appSettings.refreshNotificationAuthorizationStatus()
         }
@@ -427,6 +429,46 @@ struct ThemedSettingsForm<Content: View>: View {
         .toolbarColorScheme(effectiveColorScheme, for: .navigationBar)
         .presentationBackground(surfaceStyle.formBackground)
         .preferredColorScheme(appSettings.preferredColorScheme)
+    }
+}
+
+struct ThemedSettingsTitleHeader<Trailing: View>: View {
+    @EnvironmentObject private var appSettings: AppSettingsStore
+
+    private let title: String
+    private let trailing: Trailing
+
+    init(
+        _ title: String,
+        @ViewBuilder trailing: () -> Trailing
+    ) {
+        self.title = title
+        self.trailing = trailing()
+    }
+
+    var body: some View {
+        HStack(alignment: .center, spacing: 16) {
+            Text(title)
+                .font(appSettings.appFont(.largeTitle, weight: .bold))
+                .foregroundStyle(appSettings.themePalette.foreground)
+                .lineLimit(2)
+                .minimumScaleFactor(0.8)
+                .accessibilityAddTraits(.isHeader)
+
+            Spacer(minLength: 12)
+
+            trailing
+        }
+        .padding(.horizontal, 16)
+        .padding(.top, 20)
+        .padding(.bottom, 2)
+        .background(appSettings.themePalette.sheetBackground)
+    }
+}
+
+extension ThemedSettingsTitleHeader where Trailing == EmptyView {
+    init(_ title: String) {
+        self.init(title) { EmptyView() }
     }
 }
 
@@ -630,7 +672,7 @@ private struct SettingsAppearanceView: View {
             }
         }
         .navigationTitle("Appearance")
-        .navigationBarTitleDisplayMode(.large)
+        .navigationBarTitleDisplayMode(.inline)
     }
 
     private var notePreviewCard: some View {
@@ -942,7 +984,7 @@ private struct SettingsGeneralView: View {
             }
         }
         .navigationTitle("General")
-        .navigationBarTitleDisplayMode(.large)
+        .navigationBarTitleDisplayMode(.inline)
         .overlay {
             if let previewQuote {
                 BreakReminderOverlayPresentation(
@@ -1048,7 +1090,7 @@ private struct SettingsMediaView: View {
             }
         }
         .navigationTitle("Media")
-        .navigationBarTitleDisplayMode(.large)
+        .navigationBarTitleDisplayMode(.inline)
         .alert("Clear Media Cache?", isPresented: $isShowingClearMediaCacheConfirmation) {
             Button("Cancel", role: .cancel) {}
             Button("Clear", role: .destructive) {
@@ -1320,7 +1362,7 @@ private struct SettingsFeedsView: View {
             }
         }
         .navigationTitle("Feeds")
-        .navigationBarTitleDisplayMode(.large)
+        .navigationBarTitleDisplayMode(.inline)
     }
 }
 
@@ -2692,7 +2734,7 @@ private struct SettingsMutedContentView: View {
             }
         }
         .navigationTitle("Muted Content")
-        .navigationBarTitleDisplayMode(.large)
+        .navigationBarTitleDisplayMode(.inline)
         .task {
             muteStore.configure(
                 accountPubkey: auth.currentAccount?.pubkey,

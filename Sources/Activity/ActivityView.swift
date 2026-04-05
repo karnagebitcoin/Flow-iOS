@@ -345,7 +345,7 @@ struct ActivityView: View {
 
     private var notificationSettingsSheet: some View {
         NavigationStack {
-            NotificationPreferencesView(navigationTitleText: "Pulse Alerts", titleDisplayMode: .inline)
+            NotificationPreferencesView(navigationTitleText: "Pulse Alerts")
                 .toolbar {
                     ToolbarItem(placement: .topBarTrailing) {
                         ThemedToolbarDoneButton {

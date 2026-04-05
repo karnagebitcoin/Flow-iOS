@@ -20,6 +20,8 @@ private enum RelayAddScope: String, CaseIterable, Identifiable {
 }
 
 struct RelaySettingsView: View {
+    @Environment(\.colorScheme) private var colorScheme
+    @EnvironmentObject private var appSettings: AppSettingsStore
     @EnvironmentObject private var relaySettings: RelaySettingsStore
 
     @State private var relayInput = ""
@@ -29,7 +31,7 @@ struct RelaySettingsView: View {
     @State private var isShowingSourcesInfo = false
 
     var body: some View {
-        Form {
+        ThemedSettingsForm {
             Section {
                 VStack(alignment: .leading, spacing: 14) {
                     HStack(alignment: .top, spacing: 12) {
@@ -60,7 +62,7 @@ struct RelaySettingsView: View {
                                 .font(.title3)
                                 .foregroundStyle(.secondary)
                                 .frame(width: 32, height: 32)
-                                .background(Color(.systemBackground).opacity(0.8), in: Circle())
+                                .background(settingsSurfaceStyle.controlBackground.opacity(0.9), in: Circle())
                         }
                         .buttonStyle(.plain)
                         .accessibilityLabel("What are sources?")
@@ -69,11 +71,11 @@ struct RelaySettingsView: View {
                 .padding(14)
                 .background(
                     RoundedRectangle(cornerRadius: 20, style: .continuous)
-                        .fill(Color(.secondarySystemBackground))
+                        .fill(settingsSurfaceStyle.cardBackground)
                 )
                 .overlay(
                     RoundedRectangle(cornerRadius: 20, style: .continuous)
-                        .stroke(Color(.separator).opacity(0.14), lineWidth: 1)
+                        .stroke(appSettings.themePalette.separator.opacity(0.14), lineWidth: 1)
                 )
                 .padding(.vertical, 4)
                 .listRowInsets(EdgeInsets(top: 8, leading: 0, bottom: 4, trailing: 0))
@@ -117,11 +119,11 @@ struct RelaySettingsView: View {
                 .padding(14)
                 .background(
                     RoundedRectangle(cornerRadius: 20, style: .continuous)
-                        .fill(Color(.secondarySystemBackground))
+                        .fill(settingsSurfaceStyle.cardBackground)
                 )
                 .overlay(
                     RoundedRectangle(cornerRadius: 20, style: .continuous)
-                        .stroke(Color(.separator).opacity(0.14), lineWidth: 1)
+                        .stroke(appSettings.themePalette.separator.opacity(0.14), lineWidth: 1)
                 )
                 .padding(.vertical, 4)
                 .listRowInsets(EdgeInsets(top: 4, leading: 0, bottom: 8, trailing: 0))
@@ -129,10 +131,14 @@ struct RelaySettingsView: View {
             }
         }
         .navigationTitle("Connection")
-        .navigationBarTitleDisplayMode(.large)
+        .navigationBarTitleDisplayMode(.inline)
         .sheet(isPresented: $isShowingSourcesInfo) {
             sourcesInfoSheet
         }
+    }
+
+    private var settingsSurfaceStyle: SettingsFormSurfaceStyle {
+        appSettings.settingsFormSurfaceStyle(for: colorScheme)
     }
 
     private var sourceList: some View {
@@ -196,11 +202,11 @@ struct RelaySettingsView: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .background(
                         RoundedRectangle(cornerRadius: 16, style: .continuous)
-                            .fill(Color(.tertiarySystemBackground))
+                            .fill(settingsSurfaceStyle.subcardBackground)
                     )
                     .overlay(
                         RoundedRectangle(cornerRadius: 16, style: .continuous)
-                            .stroke(Color(.separator).opacity(0.12), lineWidth: 1)
+                            .stroke(appSettings.themePalette.separator.opacity(0.12), lineWidth: 1)
                     )
                 }
             }
@@ -213,7 +219,7 @@ struct RelaySettingsView: View {
             .foregroundStyle(.secondary)
             .padding(.horizontal, 10)
             .padding(.vertical, 6)
-            .background(Color(.systemBackground), in: Capsule(style: .continuous))
+            .background(settingsSurfaceStyle.controlBackground, in: Capsule(style: .continuous))
     }
 
     private var addSourceControls: some View {
@@ -228,11 +234,11 @@ struct RelaySettingsView: View {
                 .padding(.vertical, 12)
                 .background(
                     RoundedRectangle(cornerRadius: 14, style: .continuous)
-                        .fill(Color(.systemBackground))
+                        .fill(settingsSurfaceStyle.controlBackground)
                 )
                 .overlay(
                     RoundedRectangle(cornerRadius: 14, style: .continuous)
-                        .stroke(Color(.separator).opacity(0.2), lineWidth: 1)
+                        .stroke(appSettings.themePalette.separator.opacity(0.2), lineWidth: 1)
                 )
 
             FlowCapsuleTabBar(
@@ -250,11 +256,11 @@ struct RelaySettingsView: View {
         .padding(14)
         .background(
             RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .fill(Color(.systemBackground).opacity(0.45))
+                .fill(settingsSurfaceStyle.subcardBackground)
         )
         .overlay(
             RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .stroke(Color(.separator).opacity(0.12), lineWidth: 1)
+                .stroke(appSettings.themePalette.separator.opacity(0.12), lineWidth: 1)
         )
     }
 
@@ -361,11 +367,11 @@ struct RelaySettingsView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(
             RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .fill(Color(.systemBackground).opacity(0.45))
+                .fill(settingsSurfaceStyle.subcardBackground)
         )
         .overlay(
             RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .stroke(Color(.separator).opacity(0.12), lineWidth: 1)
+                .stroke(appSettings.themePalette.separator.opacity(0.12), lineWidth: 1)
         )
     }
 

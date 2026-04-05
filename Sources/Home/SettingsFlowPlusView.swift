@@ -49,7 +49,7 @@ struct SettingsFlowPlusView: View {
             }
         }
         .navigationTitle("Halo Plus")
-        .navigationBarTitleDisplayMode(.large)
+        .navigationBarTitleDisplayMode(.inline)
         .task {
             await premiumStore.refreshProducts()
             await premiumStore.refreshEntitlements()

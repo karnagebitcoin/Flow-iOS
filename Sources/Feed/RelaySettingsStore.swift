@@ -38,7 +38,8 @@ final class RelaySettingsStore: ObservableObject {
 
     static let defaultWriteRelayURLs = [
         "wss://relay.damus.io/",
-        "wss://relay.primal.net/"
+        "wss://relay.primal.net/",
+        "wss://sendit.nosflare.com/"
     ]
 
     private static let bootstrapPublishRelayURLs = [

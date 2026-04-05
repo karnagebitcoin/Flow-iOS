@@ -159,11 +159,13 @@ struct FeedRowView: View {
 
                             ReactionButton(
                                 isLiked: isLikedByCurrentUser,
+                                isBonusReaction: isBonusReactionByCurrentUser,
                                 count: visibleReactionCount,
+                                bonusActiveColor: appSettings.primaryColor,
                                 inactiveColor: mutedChromeColor
-                            ) {
+                            ) { bonusCount in
                                 Task {
-                                    await handleReactionTap()
+                                    await handleReactionTap(bonusCount: bonusCount)
                                 }
                             }
 
@@ -265,6 +267,13 @@ struct FeedRowView: View {
 
     private var visibleReactionCount: Int {
         reactionCount
+    }
+
+    private var isBonusReactionByCurrentUser: Bool {
+        reactionStats.currentUserReaction(
+            for: item.displayEventID,
+            currentPubkey: auth.currentAccount?.pubkey
+        )?.bonusCount ?? 0 > 0
     }
 
     private var mutedChromeColor: Color {
@@ -505,7 +514,7 @@ struct FeedRowView: View {
     }
 
     @MainActor
-    private func handleReactionTap() async {
+    private func handleReactionTap(bonusCount: Int = 0) async {
         let eventID = item.displayEventID
         guard reactionStats.beginPublishingReaction(for: eventID) else { return }
         let existingReaction = reactionStats.currentUserReaction(
@@ -514,7 +523,8 @@ struct FeedRowView: View {
         )
         let optimisticToggle = reactionStats.applyOptimisticToggle(
             for: eventID,
-            currentPubkey: auth.currentAccount?.pubkey
+            currentPubkey: auth.currentAccount?.pubkey,
+            bonusCount: bonusCount
         )
         defer {
             reactionStats.endPublishingReaction(for: eventID)
@@ -524,6 +534,7 @@ struct FeedRowView: View {
             let result = try await reactionPublishService.toggleReaction(
                 for: item.displayEvent,
                 existingReactionID: existingReaction?.id,
+                bonusCount: bonusCount,
                 currentNsec: auth.currentNsec,
                 writeRelayURLs: effectiveWriteRelayURLs,
                 relayHintURL: effectiveReadRelayURLs.first

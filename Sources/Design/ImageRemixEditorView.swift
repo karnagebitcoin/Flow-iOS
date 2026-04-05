@@ -800,7 +800,6 @@ struct ImageRemixEditorView: View {
                     onSelect: {
                         selectedOverlayID = overlay.id
                         selectedTool = .text
-                        isToolPanelExpanded = true
                     },
                     onMove: { normalizedPosition in
                         updateTextOverlay(id: overlay.id) { mutableOverlay in
@@ -820,7 +819,6 @@ struct ImageRemixEditorView: View {
                     onSelect: {
                         selectedOverlayID = overlay.id
                         selectedTool = .stickers
-                        isToolPanelExpanded = true
                     },
                     onMove: { normalizedPosition in
                         updateStickerOverlay(id: overlay.id) { mutableOverlay in

@@ -30,14 +30,16 @@ struct ReactionButton: View {
     @Environment(\.isEnabled) private var isEnabled
 
     let isLiked: Bool
+    var isBonusReaction: Bool = false
     let count: Int
     var activeColor: Color = .red
+    var bonusActiveColor: Color? = nil
     var inactiveColor: Color = .secondary
     var minWidth: CGFloat = 34
     var minHeight: CGFloat = 28
     var alignment: Alignment = .leading
     var accessibilityLabel: String = "Like"
-    let action: () -> Void
+    let action: (_ bonusCount: Int) -> Void
 
     @State private var heartScale: CGFloat = 1
     @State private var burstTrigger = 0
@@ -60,7 +62,7 @@ struct ReactionButton: View {
             ZStack {
                 floatingHeartOverlay
                 ReactionSparkleBurstView(trigger: burstTrigger, tint: activeColor)
-                Image(systemName: isLiked ? "heart.fill" : "heart")
+                Image(systemName: resolvedIsLiked ? "heart.fill" : "heart")
                     .scaleEffect(heartScale)
             }
             .frame(width: 20, height: 20)
@@ -69,7 +71,7 @@ struct ReactionButton: View {
                 Text("+\(visibleBurstCount)")
                     .font(.footnote.monospacedDigit())
                     .fontWeight(.semibold)
-                    .foregroundStyle(activeColor)
+                    .foregroundStyle(resolvedActiveColor)
                     .transition(.asymmetric(
                         insertion: .scale(scale: 0.82).combined(with: .opacity),
                         removal: .opacity
@@ -81,14 +83,14 @@ struct ReactionButton: View {
         }
         .frame(minWidth: minWidth, minHeight: minHeight, alignment: alignment)
         .buttonStyle(.plain)
-        .foregroundStyle(isLiked ? activeColor : inactiveColor)
+        .foregroundStyle(resolvedIsLiked ? resolvedActiveColor : inactiveColor)
         .contentShape(Rectangle())
         .accessibilityLabel(accessibilityLabel)
         .accessibilityAddTraits(.isButton)
         .accessibilityAction {
             guard isEnabled else { return }
             AppHaptics.reactionTap()
-            action()
+            action(0)
         }
         .onChange(of: isLiked) { oldValue, newValue in
             guard newValue && !oldValue else { return }
@@ -107,13 +109,16 @@ struct ReactionButton: View {
                         return
                     }
                     let translation = value.translation
+                    let chargedBonusCount = longHoldActivated ? max(longHoldBurstCount, 1) : nil
                     let shouldTriggerTap = !longHoldActivated
                         && abs(translation.width) <= maxTapTranslation
                         && abs(translation.height) <= maxTapTranslation
                     resetPressState()
-                    if shouldTriggerTap {
+                    if let chargedBonusCount {
+                        action(chargedBonusCount)
+                    } else if shouldTriggerTap {
                         AppHaptics.reactionTap()
-                        action()
+                        action(0)
                     }
                 }
         )
@@ -159,6 +164,7 @@ struct ReactionButton: View {
         displayedBurstCount = nil
         burstDisplayResetTask?.cancel()
         burstDisplayResetTask = nil
+        guard !isLiked else { return }
         startHoldActivationTask()
         startHoldChargeTask()
     }
@@ -174,9 +180,6 @@ struct ReactionButton: View {
                 longHoldActivated = true
                 AppHaptics.reactionChargeCompleted()
                 startFloatingHeartLoop()
-                if !isLiked {
-                    action()
-                }
             }
         }
     }
@@ -279,6 +282,14 @@ struct ReactionButton: View {
             displayedBurstCount = nil
             burstDisplayResetTask = nil
         }
+    }
+
+    private var resolvedIsLiked: Bool {
+        isLiked || (isPressing && longHoldActivated)
+    }
+
+    private var resolvedActiveColor: Color {
+        (isBonusReaction || (isPressing && longHoldActivated)) ? (bonusActiveColor ?? activeColor) : activeColor
     }
 }
 

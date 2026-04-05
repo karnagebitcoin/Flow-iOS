@@ -415,11 +415,13 @@ struct ThreadDetailView: View {
 
             ReactionButton(
                 isLiked: isRootLikedByCurrentUser,
+                isBonusReaction: isRootBonusReactionByCurrentUser,
                 count: rootReactionCount,
+                bonusActiveColor: appSettings.primaryColor,
                 minHeight: 30
-            ) {
+            ) { bonusCount in
                 Task {
-                    await handleRootReactionTap()
+                    await handleRootReactionTap(bonusCount: bonusCount)
                 }
             }
 
@@ -672,6 +674,13 @@ struct ThreadDetailView: View {
         )
     }
 
+    private var isRootBonusReactionByCurrentUser: Bool {
+        reactionStats.currentUserReaction(
+            for: viewModel.rootItem.displayEventID,
+            currentPubkey: auth.currentAccount?.pubkey
+        )?.bonusCount ?? 0 > 0
+    }
+
     private var isRootOwnedByCurrentAccount: Bool {
         guard let currentPubkey = auth.currentAccount?.pubkey else {
             return false
@@ -813,7 +822,7 @@ struct ThreadDetailView: View {
     }
 
     @MainActor
-    private func handleRootReactionTap() async {
+    private func handleRootReactionTap(bonusCount: Int = 0) async {
         let eventID = viewModel.rootItem.displayEventID
         guard reactionStats.beginPublishingReaction(for: eventID) else { return }
         let existingReaction = reactionStats.currentUserReaction(
@@ -822,7 +831,8 @@ struct ThreadDetailView: View {
         )
         let optimisticToggle = reactionStats.applyOptimisticToggle(
             for: eventID,
-            currentPubkey: auth.currentAccount?.pubkey
+            currentPubkey: auth.currentAccount?.pubkey,
+            bonusCount: bonusCount
         )
         defer {
             reactionStats.endPublishingReaction(for: eventID)
@@ -832,6 +842,7 @@ struct ThreadDetailView: View {
             let result = try await reactionPublishService.toggleReaction(
                 for: viewModel.rootItem.displayEvent,
                 existingReactionID: existingReaction?.id,
+                bonusCount: bonusCount,
                 currentNsec: auth.currentNsec,
                 writeRelayURLs: effectiveWriteRelayURLs,
                 relayHintURL: effectiveReadRelayURLs.first

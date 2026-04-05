@@ -1,3 +1,4 @@
+import AVFoundation
 import CryptoKit
 import Foundation
 import ImageIO
@@ -280,6 +281,12 @@ actor FlowImageCache {
                 tracking: tracking
             )
             return cached
+        }
+
+        if Self.isLikelyVideoURL(url),
+           let thumbnail = await videoThumbnail(for: url) {
+            memoryCache.setObject(thumbnail, forKey: cacheKey, cost: memoryCost(for: thumbnail))
+            return thumbnail
         }
 
         guard let data = await data(for: url, tracking: tracking, countsAsRequest: false),
@@ -588,6 +595,23 @@ actor FlowImageCache {
         return image.preparingForDisplay() ?? image
     }
 
+    private func videoThumbnail(for url: URL) async -> UIImage? {
+        await Task.detached(priority: .utility) {
+            let asset = AVURLAsset(url: url)
+            let generator = AVAssetImageGenerator(asset: asset)
+            generator.appliesPreferredTrackTransform = true
+            generator.maximumSize = CGSize(width: 768, height: 768)
+
+            let time = CMTime(seconds: 0.15, preferredTimescale: 600)
+            guard let cgImage = try? generator.copyCGImage(at: time, actualTime: nil) else {
+                return nil
+            }
+
+            let image = UIImage(cgImage: cgImage)
+            return image.preparingForDisplay() ?? image
+        }.value
+    }
+
     private func validatedData(
         from response: FlowMediaFetchedResponse?,
         for url: URL
@@ -648,6 +672,15 @@ actor FlowImageCache {
 
         switch normalizedContentType {
         case "application/octet-stream", "binary/octet-stream", "application/binary":
+            return true
+        default:
+            return false
+        }
+    }
+
+    private static func isLikelyVideoURL(_ url: URL) -> Bool {
+        switch url.pathExtension.lowercased() {
+        case "mp4", "mov", "m4v", "webm", "mkv":
             return true
         default:
             return false

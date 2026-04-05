@@ -220,6 +220,11 @@ private actor LocalProfileSearchIndex {
         let signature: Signature
     }
 
+    private struct RankedMatch {
+        let result: ProfileSearchResult
+        let score: Int
+    }
+
     private let ttl: TimeInterval = 30
     private var entries: [ObjectIdentifier: Entry] = [:]
     private var inFlightLoads: [ObjectIdentifier: Task<[LocalProfileSearchDocument], Never>] = [:]
@@ -233,17 +238,20 @@ private actor LocalProfileSearchIndex {
         let documents = await documents(for: nostrDatabase)
         guard !documents.isEmpty else { return [] }
 
-        let scoredMatches: [(result: ProfileSearchResult, score: Int)] = documents.compactMap { document in
+        var topMatches: [RankedMatch] = []
+        topMatches.reserveCapacity(limit)
+
+        for document in documents {
             guard let score = ProfileSearchSupport.score(
                 searchableFields: document.searchableFields,
                 searchTokens: document.searchTokens,
                 pubkey: document.pubkey,
                 query: query
             ) else {
-                return nil
+                continue
             }
 
-            return (
+            let candidate = RankedMatch(
                 result: ProfileSearchResult(
                     pubkey: document.pubkey,
                     profile: document.profile,
@@ -251,20 +259,40 @@ private actor LocalProfileSearchIndex {
                 ),
                 score: score
             )
+            Self.insert(candidate, into: &topMatches, limit: limit)
         }
 
-        return scoredMatches
-            .sorted { lhs, rhs in
-                if lhs.score == rhs.score {
-                    if lhs.result.createdAt == rhs.result.createdAt {
-                        return lhs.result.pubkey < rhs.result.pubkey
-                    }
-                    return lhs.result.createdAt > rhs.result.createdAt
-                }
-                return lhs.score > rhs.score
+        return topMatches.map(\.result)
+    }
+
+    private static func insert(
+        _ candidate: RankedMatch,
+        into topMatches: inout [RankedMatch],
+        limit: Int
+    ) {
+        guard limit > 0 else { return }
+
+        if let insertionIndex = topMatches.firstIndex(where: { prefers(candidate, over: $0) }) {
+            topMatches.insert(candidate, at: insertionIndex)
+        } else if topMatches.count < limit {
+            topMatches.append(candidate)
+        } else {
+            return
+        }
+
+        if topMatches.count > limit {
+            topMatches.removeLast()
+        }
+    }
+
+    private static func prefers(_ lhs: RankedMatch, over rhs: RankedMatch) -> Bool {
+        if lhs.score == rhs.score {
+            if lhs.result.createdAt == rhs.result.createdAt {
+                return lhs.result.pubkey < rhs.result.pubkey
             }
-            .prefix(limit)
-            .map(\.result)
+            return lhs.result.createdAt > rhs.result.createdAt
+        }
+        return lhs.score > rhs.score
     }
 
     private func documents(for nostrDatabase: FlowNostrDB) async -> [LocalProfileSearchDocument] {

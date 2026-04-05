@@ -69,7 +69,9 @@ final class NoteReactionStatsService: ObservableObject {
     }
 
     func reactionCount(for eventID: String) -> Int {
-        statsByEventID[normalizedEventID(eventID)]?.reactions.count ?? 0
+        statsByEventID[normalizedEventID(eventID)]?.reactions.reduce(0) { partialResult, reaction in
+            partialResult + reaction.totalWeight
+        } ?? 0
     }
 
     func currentUserReaction(for eventID: String, currentPubkey: String?) -> NoteReaction? {
@@ -99,7 +101,11 @@ final class NoteReactionStatsService: ObservableObject {
         publishingEventIDs.remove(normalizedEventID(eventID))
     }
 
-    func applyOptimisticToggle(for eventID: String, currentPubkey: String?) -> OptimisticToggleState? {
+    func applyOptimisticToggle(
+        for eventID: String,
+        currentPubkey: String?,
+        bonusCount: Int = 0
+    ) -> OptimisticToggleState? {
         let normalizedTargetEventID = normalizedEventID(eventID)
         guard !normalizedTargetEventID.isEmpty,
               let normalizedCurrentPubkey = normalizePubkey(currentPubkey) else {
@@ -117,9 +123,11 @@ final class NoteReactionStatsService: ObservableObject {
         if let previousReaction {
             suppressedReactionIDs.insert(normalizedEventID(previousReaction.id))
             removeReaction(id: previousReaction.id, from: &stats)
-            stats.updatedAt = now
-            statsByEventID[normalizedTargetEventID] = stats
-            return OptimisticToggleState(previousReaction: previousReaction, optimisticReactionID: nil)
+            if ReactionBonusTag.normalizedBonusCount(bonusCount) == 0 {
+                stats.updatedAt = now
+                statsByEventID[normalizedTargetEventID] = stats
+                return OptimisticToggleState(previousReaction: previousReaction, optimisticReactionID: nil)
+            }
         }
 
         let optimisticReactionID = "\(optimisticReactionPrefix)\(UUID().uuidString.lowercased())"
@@ -129,7 +137,8 @@ final class NoteReactionStatsService: ObservableObject {
                 id: optimisticReactionID,
                 pubkey: normalizedCurrentPubkey,
                 createdAt: now,
-                emoji: "+"
+                emoji: "+",
+                bonusCount: bonusCount
             ),
             in: &stats
         )
@@ -360,7 +369,8 @@ final class NoteReactionStatsService: ObservableObject {
                     id: normalizedReactionID,
                     pubkey: normalizedPubkey,
                     createdAt: event.createdAt,
-                    emoji: emoji
+                    emoji: emoji,
+                    bonusCount: ReactionBonusTag.bonusCount(in: event.tags)
                 ),
                 in: &stats
             )

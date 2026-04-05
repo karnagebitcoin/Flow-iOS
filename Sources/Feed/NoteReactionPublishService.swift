@@ -42,6 +42,7 @@ final class NoteReactionPublishService {
     func toggleReaction(
         for targetEvent: NostrEvent,
         existingReactionID: String?,
+        bonusCount: Int = 0,
         currentNsec: String?,
         writeRelayURLs: [URL],
         relayHintURL: URL?
@@ -68,6 +69,7 @@ final class NoteReactionPublishService {
         let reactionEvent = try makeReactionEvent(
             targetEvent: targetEvent,
             keypair: keypair,
+            bonusCount: bonusCount,
             relayHintURL: relayHintURL
         )
         try await publish(event: reactionEvent, to: targets)
@@ -77,6 +79,7 @@ final class NoteReactionPublishService {
     private func makeReactionEvent(
         targetEvent: NostrEvent,
         keypair: Keypair,
+        bonusCount: Int,
         relayHintURL: URL?
     ) throws -> NostrSDK.NostrEvent {
         guard let targetEventID = normalizedIdentifier(targetEvent.id),
@@ -92,6 +95,9 @@ final class NoteReactionPublishService {
         }
         rawTags.append(["p", targetPubkey])
         rawTags.append(["k", "\(targetEvent.kind)"])
+        if let bonusTag = ReactionBonusTag.bonusTag(for: bonusCount) {
+            rawTags.append(bonusTag)
+        }
 
         let sdkTags = FlowClientAttribution.appending(to: rawTags).compactMap(decodeSDKTag(from:))
         let reactionEvent = try NostrSDK.NostrEvent.Builder<NostrSDK.NostrEvent>(kind: .unknown(7))

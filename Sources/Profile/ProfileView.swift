@@ -1,3 +1,5 @@
+import AVFoundation
+import Photos
 import SwiftUI
 import UIKit
 
@@ -25,6 +27,7 @@ struct ProfileView: View {
     @State private var isShowingProfileQR = false
     @State private var isShowingAvatarViewer = false
     @State private var shouldAutoFocusReplyInThread = false
+    @State private var isSavingProfileImage = false
 
     init(
         pubkey: String,
@@ -632,6 +635,16 @@ struct ProfileView: View {
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel("View profile image")
+                .contextMenu {
+                    Button {
+                        Task {
+                            await saveProfileAvatar()
+                        }
+                    } label: {
+                        Label("Save Image", systemImage: "square.and.arrow.down")
+                    }
+                    .disabled(isSavingProfileImage)
+                }
             } else {
                 profileAvatarContent
             }
@@ -643,14 +656,24 @@ struct ProfileView: View {
             if appSettings.textOnlyMode {
                 profileAvatarFallback
             } else if let avatarURL = viewModel.avatarURL {
-                CachedAsyncImage(url: avatarURL) { phase in
-                    switch phase {
-                    case .success(let image):
-                        image
-                            .resizable()
-                            .scaledToFill()
-                    default:
+                if isLoopingProfileVideoURL(avatarURL) {
+                    ZStack {
                         profileAvatarFallback
+                        ProfileLoopingVideoView(
+                            url: avatarURL,
+                            videoGravity: .resizeAspectFill
+                        )
+                    }
+                } else {
+                    CachedAsyncImage(url: avatarURL) { phase in
+                        switch phase {
+                        case .success(let image):
+                            image
+                                .resizable()
+                                .scaledToFill()
+                        default:
+                            profileAvatarFallback
+                        }
                     }
                 }
             } else {
@@ -875,6 +898,36 @@ struct ProfileView: View {
         toastCenter.show("Copied")
     }
 
+    @MainActor
+    private func saveProfileAvatar() async {
+        guard !isSavingProfileImage else { return }
+        guard let avatarURL = viewModel.avatarURL else { return }
+        isSavingProfileImage = true
+        defer { isSavingProfileImage = false }
+
+        let authorizationStatus = await ProfilePhotoLibrarySave.requestWriteAuthorizationIfNeeded()
+        guard authorizationStatus == .authorized || authorizationStatus == .limited else {
+            toastCenter.show("Photos access is needed to save.", style: .error, duration: 2.8)
+            return
+        }
+
+        guard let image = await FlowImageCache.shared.image(for: avatarURL) else {
+            toastCenter.show("Couldn't load that image right now.", style: .error, duration: 2.8)
+            return
+        }
+
+        do {
+            try await ProfilePhotoLibrarySave.save(image: image)
+            toastCenter.show("Saved to Photos")
+        } catch {
+            toastCenter.show(
+                (error as? LocalizedError)?.errorDescription ?? "Couldn't save that image right now.",
+                style: .error,
+                duration: 2.8
+            )
+        }
+    }
+
     private func iconActionButton(
         systemImage: String,
         isPrimary: Bool,
@@ -886,7 +939,7 @@ struct ProfileView: View {
         let disabledOpacity = isDisabled ? 0.48 : 1.0
         let foreground = isPrimary
             ? (style?.primaryForeground ?? Color.white)
-            : (style?.foreground ?? (isDisabled ? appSettings.themePalette.mutedForeground : Color.primary))
+            : (style?.foreground ?? (isDisabled ? appSettings.themePalette.mutedForeground : appSettings.themePalette.foreground))
         let background = isPrimary
             ? (style?.primaryBackground ?? Color.accentColor)
             : (style?.background ?? appSettings.themePalette.secondaryGroupedBackground)
@@ -1016,7 +1069,7 @@ struct ProfileView: View {
     }
 
     private var profileBannerButtonForeground: Color {
-        appSettings.themePalette.profileActionStyle?.bannerForeground ?? .primary
+        appSettings.themePalette.profileActionStyle?.bannerForeground ?? appSettings.themePalette.foreground
     }
 
     private var profileBannerButtonBorder: Color {
@@ -1028,7 +1081,7 @@ struct ProfileView: View {
         if let style = appSettings.themePalette.profileActionStyle {
             Circle().fill(style.bannerBackground)
         } else {
-            Circle().fill(.ultraThinMaterial)
+            Circle().fill(appSettings.themePalette.modalBackground)
         }
     }
 
@@ -1064,6 +1117,15 @@ struct ProfileView: View {
     private var effectivePrimaryRelayURL: URL {
         effectiveReadRelayURLs.first ?? AppSettingsStore.slowModeRelayURL
     }
+
+    private func isLoopingProfileVideoURL(_ url: URL) -> Bool {
+        switch url.pathExtension.lowercased() {
+        case "mp4", "mov", "m4v", "webm", "mkv":
+            return true
+        default:
+            return false
+        }
+    }
 }
 
 private struct ProfileAvatarFullscreenViewer: View {
@@ -1078,22 +1140,30 @@ private struct ProfileAvatarFullscreenViewer: View {
                 Color.black
                     .ignoresSafeArea()
 
-                AsyncImage(url: url) { phase in
-                    switch phase {
-                    case .success(let image):
-                        image
-                            .resizable()
-                            .scaledToFit()
-                            .padding(16)
-                    case .failure:
-                        Image(systemName: "person.crop.circle.badge.exclamationmark")
-                            .font(.largeTitle)
-                            .foregroundStyle(.white.opacity(0.8))
-                    case .empty:
-                        ProgressView()
-                            .tint(.white)
-                    @unknown default:
-                        EmptyView()
+                if isLoopingProfileVideoURL(url) {
+                    ProfileLoopingVideoView(
+                        url: url,
+                        videoGravity: .resizeAspect
+                    )
+                    .padding(16)
+                } else {
+                    AsyncImage(url: url) { phase in
+                        switch phase {
+                        case .success(let image):
+                            image
+                                .resizable()
+                                .scaledToFit()
+                                .padding(16)
+                        case .failure:
+                            Image(systemName: "person.crop.circle.badge.exclamationmark")
+                                .font(.largeTitle)
+                                .foregroundStyle(.white.opacity(0.8))
+                        case .empty:
+                            ProgressView()
+                                .tint(.white)
+                        @unknown default:
+                            EmptyView()
+                        }
                     }
                 }
             }
@@ -1101,13 +1171,130 @@ private struct ProfileAvatarFullscreenViewer: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button("Done") {
+                    ThemedToolbarDoneButton {
                         dismiss()
                     }
                 }
             }
             .toolbarBackground(.visible, for: .navigationBar)
             .toolbarColorScheme(.dark, for: .navigationBar)
+        }
+    }
+
+    private func isLoopingProfileVideoURL(_ url: URL) -> Bool {
+        switch url.pathExtension.lowercased() {
+        case "mp4", "mov", "m4v", "webm", "mkv":
+            return true
+        default:
+            return false
+        }
+    }
+}
+
+private struct ProfileLoopingVideoView: UIViewRepresentable {
+    let url: URL
+    let videoGravity: AVLayerVideoGravity
+
+    final class Coordinator {
+        let player = AVQueuePlayer()
+        var looper: AVPlayerLooper?
+        var currentURL: URL?
+
+        init() {
+            player.isMuted = true
+            player.actionAtItemEnd = .none
+        }
+
+        func configure(url: URL) {
+            guard currentURL != url else {
+                player.play()
+                return
+            }
+
+            currentURL = url
+            player.removeAllItems()
+            looper = AVPlayerLooper(player: player, templateItem: AVPlayerItem(url: url))
+            player.play()
+        }
+
+        func stop() {
+            player.pause()
+            looper = nil
+            currentURL = nil
+            player.removeAllItems()
+        }
+    }
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator()
+    }
+
+    func makeUIView(context: Context) -> ProfileLoopingVideoPlayerContainerView {
+        let view = ProfileLoopingVideoPlayerContainerView()
+        view.playerLayer.videoGravity = videoGravity
+        view.playerLayer.player = context.coordinator.player
+        context.coordinator.configure(url: url)
+        return view
+    }
+
+    func updateUIView(_ uiView: ProfileLoopingVideoPlayerContainerView, context: Context) {
+        uiView.playerLayer.videoGravity = videoGravity
+        uiView.playerLayer.player = context.coordinator.player
+        context.coordinator.configure(url: url)
+    }
+
+    static func dismantleUIView(_ uiView: ProfileLoopingVideoPlayerContainerView, coordinator: Coordinator) {
+        uiView.playerLayer.player = nil
+        coordinator.stop()
+    }
+}
+
+private final class ProfileLoopingVideoPlayerContainerView: UIView {
+    override class var layerClass: AnyClass {
+        AVPlayerLayer.self
+    }
+
+    var playerLayer: AVPlayerLayer {
+        layer as! AVPlayerLayer
+    }
+}
+
+private enum ProfilePhotoLibrarySave {
+    private enum SaveError: LocalizedError {
+        case failed
+
+        var errorDescription: String? {
+            "Couldn't save that image right now."
+        }
+    }
+
+    static func requestWriteAuthorizationIfNeeded() async -> PHAuthorizationStatus {
+        let current = PHPhotoLibrary.authorizationStatus(for: .addOnly)
+        switch current {
+        case .notDetermined:
+            return await withCheckedContinuation { continuation in
+                PHPhotoLibrary.requestAuthorization(for: .addOnly) { status in
+                    continuation.resume(returning: status)
+                }
+            }
+        default:
+            return current
+        }
+    }
+
+    static func save(image: UIImage) async throws {
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+            PHPhotoLibrary.shared().performChanges({
+                PHAssetChangeRequest.creationRequestForAsset(from: image)
+            }) { success, error in
+                if let error {
+                    continuation.resume(throwing: error)
+                } else if success {
+                    continuation.resume(returning: ())
+                } else {
+                    continuation.resume(throwing: SaveError.failed)
+                }
+            }
         }
     }
 }

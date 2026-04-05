@@ -21,6 +21,12 @@ struct ProfileEditorSheet: View {
     @State private var isUploadingBanner = false
     @State private var avatarUploadError: String?
     @State private var bannerUploadError: String?
+    @State private var avatarPreparedByteCount: Int?
+    @State private var bannerPreparedByteCount: Int?
+    @State private var avatarRemoteByteCount: Int?
+    @State private var bannerRemoteByteCount: Int?
+    @State private var isLoadingAvatarRemoteSize = false
+    @State private var isLoadingBannerRemoteSize = false
 
     let previewHandle: String
     let followingCount: Int
@@ -64,9 +70,11 @@ struct ProfileEditorSheet: View {
                 .padding(.top, 18)
                 .padding(.bottom, 120)
             }
-            .background(appSettings.themePalette.groupedBackground.ignoresSafeArea())
+            .background(appSettings.themePalette.sheetBackground.ignoresSafeArea())
             .navigationTitle("Edit Profile")
             .navigationBarTitleDisplayMode(.inline)
+            .toolbarBackground(appSettings.themePalette.sheetBackground, for: .navigationBar)
+            .toolbarBackground(.visible, for: .navigationBar)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Close") {
@@ -81,6 +89,7 @@ struct ProfileEditorSheet: View {
         }
         .presentationDetents([.large])
         .presentationDragIndicator(.visible)
+        .presentationBackground(appSettings.themePalette.sheetBackground)
         .onChange(of: selectedAvatarItem) { _, newItem in
             guard let newItem else { return }
             Task {
@@ -92,6 +101,12 @@ struct ProfileEditorSheet: View {
             Task {
                 await uploadImage(from: newItem, target: .banner)
             }
+        }
+        .task(id: avatarRemoteAssetLookupID) {
+            await refreshRemoteAssetSize(for: .avatar)
+        }
+        .task(id: bannerRemoteAssetLookupID) {
+            await refreshRemoteAssetSize(for: .banner)
         }
     }
 
@@ -120,7 +135,7 @@ struct ProfileEditorSheet: View {
         VStack(alignment: .leading, spacing: 12) {
             sectionHeader(
                 title: "Images",
-                subtitle: "Upload or paste links for your avatar and banner."
+                subtitle: "Upload images through Halo so we can resize and compress them properly."
             )
 
             editorCard {
@@ -128,12 +143,17 @@ struct ProfileEditorSheet: View {
                     imageUploadRow(
                         title: "Banner",
                         systemImage: "photo.stack",
-                        placeholder: "Banner URL",
-                        text: $fields.bannerURLString,
+                        previewImage: bannerPreviewImage,
+                        remoteURLString: fields.bannerURLString,
+                        byteCount: bannerByteCount,
+                        isLoadingRemoteSize: isLoadingBannerRemoteSize,
                         isUploading: isUploadingBanner,
                         errorMessage: bannerUploadError,
                         selection: $selectedBannerItem,
-                        accessibilityLabel: "Upload profile banner"
+                        accessibilityLabel: "Upload profile banner",
+                        recommendedHint: "Recommended size: 1200×580. Halo uploads banners at this size and keeps them under 500 KB when possible.",
+                        emptyStateText: "No banner uploaded yet.",
+                        usesCircularPreview: false
                     )
 
                     Divider()
@@ -141,12 +161,17 @@ struct ProfileEditorSheet: View {
                     imageUploadRow(
                         title: "Profile Photo",
                         systemImage: "person.crop.circle",
-                        placeholder: "Avatar URL",
-                        text: $fields.avatarURLString,
+                        previewImage: avatarPreviewImage,
+                        remoteURLString: fields.avatarURLString,
+                        byteCount: avatarByteCount,
+                        isLoadingRemoteSize: isLoadingAvatarRemoteSize,
                         isUploading: isUploadingAvatar,
                         errorMessage: avatarUploadError,
                         selection: $selectedAvatarItem,
-                        accessibilityLabel: "Upload profile photo"
+                        accessibilityLabel: "Upload profile photo",
+                        recommendedHint: "Halo resizes profile photos to a compact square so they load quickly across the app.",
+                        emptyStateText: "No profile photo uploaded yet.",
+                        usesCircularPreview: true
                     )
                 }
             }
@@ -256,35 +281,33 @@ struct ProfileEditorSheet: View {
         .padding(.horizontal, 16)
         .padding(.top, 10)
         .padding(.bottom, 14)
-        .background(.ultraThinMaterial)
+        .background(appSettings.themePalette.sheetBackground)
     }
 
     private var saveButtonBackground: Color {
-        isBusy ? Color(.tertiarySystemFill) : appSettings.primaryColor
+        isBusy ? appSettings.themePalette.tertiaryFill : appSettings.primaryColor
     }
 
     private var saveButtonForeground: Color {
         if isBusy {
-            return Color(.secondaryLabel)
+            return appSettings.themePalette.secondaryForeground
         }
         return colorScheme == .dark ? .black : .white
     }
 
     private var saveButtonBorder: Color {
-        colorScheme == .dark
-            ? Color.white.opacity(0.08)
-            : Color.black.opacity(0.08)
+        appSettings.themePalette.separator
     }
 
     private func sectionHeader(title: String, subtitle: String) -> some View {
         VStack(alignment: .leading, spacing: 4) {
             Text(title)
                 .font(appSettings.appFont(.headline, weight: .bold))
-                .foregroundStyle(.primary)
+                .foregroundStyle(appSettings.themePalette.foreground)
 
             Text(subtitle)
                 .font(appSettings.appFont(.footnote))
-                .foregroundStyle(.secondary)
+                .foregroundStyle(appSettings.themePalette.secondaryForeground)
                 .fixedSize(horizontal: false, vertical: true)
         }
     }
@@ -294,7 +317,7 @@ struct ProfileEditorSheet: View {
             .padding(16)
             .background(
                 RoundedRectangle(cornerRadius: 24, style: .continuous)
-                    .fill(appSettings.themePalette.secondaryGroupedBackground)
+                    .fill(appSettings.themePalette.sheetCardBackground)
             )
             .overlay {
                 RoundedRectangle(cornerRadius: 24, style: .continuous)
@@ -311,14 +334,14 @@ struct ProfileEditorSheet: View {
         HStack(alignment: topAligned ? .top : .center, spacing: 12) {
             Image(systemName: systemImage)
                 .font(.subheadline.weight(.semibold))
-                .foregroundStyle(.secondary)
+                .foregroundStyle(appSettings.themePalette.iconMutedForeground)
                 .frame(width: 18)
                 .padding(.top, topAligned ? 4 : 0)
 
             VStack(alignment: .leading, spacing: 8) {
                 Text(title)
                     .font(appSettings.appFont(.footnote, weight: .semibold))
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(appSettings.themePalette.secondaryForeground)
 
                 content()
                     .font(appSettings.appFont(.body))
@@ -330,31 +353,63 @@ struct ProfileEditorSheet: View {
     private func imageUploadRow(
         title: String,
         systemImage: String,
-        placeholder: String,
-        text: Binding<String>,
+        previewImage: UIImage?,
+        remoteURLString: String,
+        byteCount: Int?,
+        isLoadingRemoteSize: Bool,
         isUploading: Bool,
         errorMessage: String?,
         selection: Binding<PhotosPickerItem?>,
-        accessibilityLabel: String
+        accessibilityLabel: String,
+        recommendedHint: String,
+        emptyStateText: String,
+        usesCircularPreview: Bool
     ) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack(spacing: 12) {
-                Image(systemName: systemImage)
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(.secondary)
-                    .frame(width: 18)
+        let uploadButtonFont = appSettings.appFont(.footnote, weight: .semibold)
+        let uploadButtonBackground = appSettings.themePalette.tertiaryFill
 
-                VStack(alignment: .leading, spacing: 8) {
+        return VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 12) {
+                imageUploadThumbnail(
+                    previewImage: previewImage,
+                    remoteURLString: remoteURLString,
+                    title: title,
+                    systemImage: systemImage,
+                    usesCircularPreview: usesCircularPreview
+                )
+
+                VStack(alignment: .leading, spacing: 6) {
                     Text(title)
                         .font(appSettings.appFont(.footnote, weight: .semibold))
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(appSettings.themePalette.secondaryForeground)
 
-                    TextField(placeholder, text: text)
-                        .textInputAutocapitalization(.never)
-                        .keyboardType(.URL)
-                        .autocorrectionDisabled()
-                        .font(appSettings.appFont(.body))
+                    Text(imageStatusText(
+                        byteCount: byteCount,
+                        isLoadingRemoteSize: isLoadingRemoteSize,
+                        hasImage: hasImage(previewImage: previewImage, remoteURLString: remoteURLString)
+                    ))
+                    .font(appSettings.appFont(.body))
+                    .foregroundStyle(appSettings.themePalette.foreground)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                    Text(recommendedHint)
+                        .font(appSettings.appFont(.caption1))
+                        .foregroundStyle(appSettings.themePalette.secondaryForeground)
+                        .fixedSize(horizontal: false, vertical: true)
+
+                    if let byteCount, byteCount > maximumRecommendedProfileAssetBytes {
+                        Text("This image is over 500 KB. Re-upload it with Halo so we can resize and compress it properly.")
+                            .font(appSettings.appFont(.caption1, weight: .semibold))
+                            .foregroundStyle(.orange)
+                            .fixedSize(horizontal: false, vertical: true)
+                    } else if !hasImage(previewImage: previewImage, remoteURLString: remoteURLString) {
+                        Text(emptyStateText)
+                            .font(appSettings.appFont(.caption1))
+                            .foregroundStyle(appSettings.themePalette.secondaryForeground)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
                 }
+                .frame(maxWidth: .infinity, alignment: .leading)
 
                 PhotosPicker(selection: selection, matching: .images) {
                     HStack(spacing: 6) {
@@ -367,12 +422,12 @@ struct ProfileEditorSheet: View {
 
                         Text(isUploading ? "Uploading" : "Upload")
                     }
-                    .font(appSettings.appFont(.footnote, weight: .semibold))
+                    .font(uploadButtonFont)
                     .padding(.horizontal, 12)
                     .padding(.vertical, 10)
                     .background(
                         Capsule(style: .continuous)
-                            .fill(appSettings.themePalette.tertiaryFill)
+                            .fill(uploadButtonBackground)
                     )
                 }
                 .buttonStyle(.plain)
@@ -396,14 +451,14 @@ struct ProfileEditorSheet: View {
 
             Text(message)
                 .font(appSettings.appFont(.footnote))
-                .foregroundStyle(.secondary)
+                .foregroundStyle(appSettings.themePalette.secondaryForeground)
 
             Spacer(minLength: 0)
         }
         .padding(14)
         .background(
             RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .fill(appSettings.themePalette.secondaryGroupedBackground)
+                .fill(appSettings.themePalette.sheetCardBackground)
         )
         .overlay {
             RoundedRectangle(cornerRadius: 18, style: .continuous)
@@ -445,12 +500,18 @@ struct ProfileEditorSheet: View {
         }
 
         do {
-            let preparedMedia = try await MediaUploadPreparation.prepareUploadMedia(from: item)
+            let preparedMedia: PreparedUploadMedia
+            switch target {
+            case .avatar:
+                preparedMedia = try await MediaUploadPreparation.prepareProfileImageUpload(from: item)
+            case .banner:
+                preparedMedia = try await MediaUploadPreparation.prepareProfileBannerUpload(from: item)
+            }
             let timestamp = Int(Date().timeIntervalSince1970)
             let filenamePrefix = target == .avatar ? "profile" : "profile-banner"
             let filename = "\(filenamePrefix)-\(timestamp).\(preparedMedia.fileExtension)"
 
-            if let previewImage = UIImage(data: preparedMedia.data) {
+            if let previewImage = preparedMedia.previewImage ?? UIImage(data: preparedMedia.data) {
                 switch target {
                 case .avatar:
                     avatarPreviewImage = previewImage
@@ -462,6 +523,8 @@ struct ProfileEditorSheet: View {
             let uploadedURL: String
             switch target {
             case .avatar:
+                avatarPreparedByteCount = preparedMedia.data.count
+                avatarRemoteByteCount = nil
                 uploadedURL = try await onUploadAvatar(
                     preparedMedia.data,
                     preparedMedia.mimeType,
@@ -470,6 +533,8 @@ struct ProfileEditorSheet: View {
                 fields.avatarURLString = uploadedURL
                 avatarUploadError = nil
             case .banner:
+                bannerPreparedByteCount = preparedMedia.data.count
+                bannerRemoteByteCount = nil
                 uploadedURL = try await onUploadBanner(
                     preparedMedia.data,
                     preparedMedia.mimeType,
@@ -485,6 +550,209 @@ struct ProfileEditorSheet: View {
                 avatarUploadError = resolvedError
             case .banner:
                 bannerUploadError = resolvedError
+            }
+        }
+    }
+
+    private let maximumRecommendedProfileAssetBytes = 500 * 1_024
+
+    private var avatarByteCount: Int? {
+        avatarPreparedByteCount ?? avatarRemoteByteCount
+    }
+
+    private var bannerByteCount: Int? {
+        bannerPreparedByteCount ?? bannerRemoteByteCount
+    }
+
+    private var avatarRemoteAssetLookupID: String {
+        fields.avatarURLString.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private var bannerRemoteAssetLookupID: String {
+        fields.bannerURLString.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    @MainActor
+    private func refreshRemoteAssetSize(for target: UploadTarget) async {
+        let urlString: String
+        let previewImage: UIImage?
+
+        switch target {
+        case .avatar:
+            urlString = fields.avatarURLString.trimmingCharacters(in: .whitespacesAndNewlines)
+            previewImage = avatarPreviewImage
+            if previewImage != nil, avatarPreparedByteCount != nil {
+                avatarRemoteByteCount = nil
+                isLoadingAvatarRemoteSize = false
+                return
+            }
+        case .banner:
+            urlString = fields.bannerURLString.trimmingCharacters(in: .whitespacesAndNewlines)
+            previewImage = bannerPreviewImage
+            if previewImage != nil, bannerPreparedByteCount != nil {
+                bannerRemoteByteCount = nil
+                isLoadingBannerRemoteSize = false
+                return
+            }
+        }
+
+        guard let url = URL(string: urlString), !urlString.isEmpty else {
+            switch target {
+            case .avatar:
+                avatarRemoteByteCount = nil
+                isLoadingAvatarRemoteSize = false
+            case .banner:
+                bannerRemoteByteCount = nil
+                isLoadingBannerRemoteSize = false
+            }
+            return
+        }
+
+        switch target {
+        case .avatar:
+            isLoadingAvatarRemoteSize = true
+        case .banner:
+            isLoadingBannerRemoteSize = true
+        }
+
+        let byteCount = await remoteFileSize(for: url)
+        guard !Task.isCancelled else { return }
+
+        switch target {
+        case .avatar:
+            guard fields.avatarURLString.trimmingCharacters(in: .whitespacesAndNewlines) == urlString else { return }
+            avatarRemoteByteCount = byteCount
+            isLoadingAvatarRemoteSize = false
+        case .banner:
+            guard fields.bannerURLString.trimmingCharacters(in: .whitespacesAndNewlines) == urlString else { return }
+            bannerRemoteByteCount = byteCount
+            isLoadingBannerRemoteSize = false
+        }
+    }
+
+    private func remoteFileSize(for url: URL) async -> Int? {
+        var headRequest = URLRequest(url: url)
+        headRequest.httpMethod = "HEAD"
+        headRequest.timeoutInterval = 12
+
+        if let byteCount = await expectedRemoteContentLength(for: headRequest) {
+            return byteCount
+        }
+
+        var rangeRequest = URLRequest(url: url)
+        rangeRequest.httpMethod = "GET"
+        rangeRequest.timeoutInterval = 12
+        rangeRequest.setValue("bytes=0-0", forHTTPHeaderField: "Range")
+
+        return await expectedRemoteContentLength(for: rangeRequest)
+    }
+
+    private func expectedRemoteContentLength(for request: URLRequest) async -> Int? {
+        do {
+            let (_, response) = try await URLSession.shared.data(for: request)
+            guard let httpResponse = response as? HTTPURLResponse else { return nil }
+
+            if let contentRange = httpResponse.value(forHTTPHeaderField: "Content-Range"),
+               let totalBytes = contentRange.split(separator: "/").last,
+               let parsed = Int(totalBytes) {
+                return parsed
+            }
+
+            if let contentLength = httpResponse.value(forHTTPHeaderField: "Content-Length"),
+               let parsed = Int(contentLength) {
+                return parsed
+            }
+
+            let expected = response.expectedContentLength
+            return expected > 0 ? Int(expected) : nil
+        } catch {
+            return nil
+        }
+    }
+
+    private func imageStatusText(
+        byteCount: Int?,
+        isLoadingRemoteSize: Bool,
+        hasImage: Bool
+    ) -> String {
+        if let byteCount {
+            let sizeDescription = ByteCountFormatter.string(
+                fromByteCount: Int64(byteCount),
+                countStyle: .file
+            )
+            return byteCount > maximumRecommendedProfileAssetBytes
+                ? "Current file: \(sizeDescription)"
+                : "Current file: \(sizeDescription)"
+        }
+
+        if isLoadingRemoteSize {
+            return "Checking current size..."
+        }
+
+        return hasImage ? "Current image found" : "Upload an image"
+    }
+
+    private func hasImage(previewImage: UIImage?, remoteURLString: String) -> Bool {
+        if previewImage != nil {
+            return true
+        }
+
+        return !remoteURLString.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    @ViewBuilder
+    private func imageUploadThumbnail(
+        previewImage: UIImage?,
+        remoteURLString: String,
+        title: String,
+        systemImage: String,
+        usesCircularPreview: Bool
+    ) -> some View {
+        let thumbnailWidth: CGFloat = usesCircularPreview ? 56 : 96
+        let thumbnailHeight: CGFloat = usesCircularPreview ? 56 : 56
+        let shape = RoundedRectangle(cornerRadius: usesCircularPreview ? thumbnailWidth / 2 : 14, style: .continuous)
+
+        Group {
+            if let previewImage {
+                Image(uiImage: previewImage)
+                    .resizable()
+                    .scaledToFill()
+            } else if let remoteURL = URL(string: remoteURLString.trimmingCharacters(in: .whitespacesAndNewlines)),
+                      !remoteURLString.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                CachedAsyncImage(url: remoteURL) { phase in
+                    switch phase {
+                    case .success(let image):
+                        image
+                            .resizable()
+                            .scaledToFill()
+                    default:
+                        imageUploadThumbnailFallback(title: title, systemImage: systemImage)
+                    }
+                }
+            } else {
+                imageUploadThumbnailFallback(title: title, systemImage: systemImage)
+            }
+        }
+        .frame(width: thumbnailWidth, height: thumbnailHeight)
+        .background(appSettings.themePalette.secondaryBackground, in: shape)
+        .clipShape(shape)
+        .overlay {
+            shape.stroke(appSettings.themePalette.separator.opacity(0.22), lineWidth: 0.8)
+        }
+    }
+
+    private func imageUploadThumbnailFallback(title: String, systemImage: String) -> some View {
+        ZStack {
+            appSettings.themePalette.tertiaryFill
+
+            VStack(spacing: 4) {
+                Image(systemName: systemImage)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(appSettings.themePalette.iconMutedForeground)
+
+                Text(String(title.prefix(1)).uppercased())
+                    .font(appSettings.appFont(.caption1, weight: .semibold))
+                    .foregroundStyle(appSettings.themePalette.secondaryForeground)
             }
         }
     }
@@ -520,7 +788,7 @@ private struct ProfileEditorPreviewCard: View {
                 VStack(alignment: .leading, spacing: 6) {
                     Text(resolvedDisplayName)
                         .font(appSettings.appFont(size: 28, weight: .heavy))
-                        .foregroundStyle(.primary)
+                        .foregroundStyle(appSettings.themePalette.foreground)
                         .lineLimit(2)
                         .fixedSize(horizontal: false, vertical: true)
 
@@ -569,7 +837,7 @@ private struct ProfileEditorPreviewCard: View {
         }
         .background(
             RoundedRectangle(cornerRadius: 30, style: .continuous)
-                .fill(appSettings.themePalette.secondaryGroupedBackground)
+                .fill(appSettings.themePalette.sheetCardBackground)
         )
         .overlay {
             RoundedRectangle(cornerRadius: 30, style: .continuous)
@@ -710,7 +978,7 @@ private struct ProfileEditorPreviewCard: View {
             Circle().stroke(appSettings.themePalette.background, lineWidth: 4)
         }
         .overlay {
-            Circle().stroke(Color(.separator).opacity(0.22), lineWidth: 0.8)
+            Circle().stroke(appSettings.themePalette.separator.opacity(0.22), lineWidth: 0.8)
         }
         .shadow(color: Color.black.opacity(0.12), radius: 14, x: 0, y: 8)
     }
@@ -722,7 +990,7 @@ private struct ProfileEditorPreviewCard: View {
                     LinearGradient(
                         colors: [
                             appSettings.primaryColor.opacity(0.9),
-                            Color(.tertiarySystemFill)
+                            appSettings.themePalette.tertiaryFill
                         ],
                         startPoint: .topLeading,
                         endPoint: .bottomTrailing
@@ -746,7 +1014,7 @@ private struct ProfileEditorPreviewCard: View {
     private func previewActionCapsule(systemImage: String) -> some View {
         Image(systemName: systemImage)
             .font(.system(size: 15, weight: .semibold))
-            .foregroundStyle(.primary)
+            .foregroundStyle(appSettings.themePalette.foreground)
             .frame(width: 42, height: 40)
             .background(
                 Capsule(style: .continuous)

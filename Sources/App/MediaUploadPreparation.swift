@@ -11,6 +11,19 @@ struct PreparedUploadMedia {
     let data: Data
     let mimeType: String
     let fileExtension: String
+    let previewImage: UIImage?
+
+    init(
+        data: Data,
+        mimeType: String,
+        fileExtension: String,
+        previewImage: UIImage? = nil
+    ) {
+        self.data = data
+        self.mimeType = mimeType
+        self.fileExtension = fileExtension
+        self.previewImage = previewImage
+    }
 }
 
 enum MediaUploadPreparationError: LocalizedError {
@@ -35,6 +48,11 @@ enum MediaUploadPreparation {
     private static let aggressiveCompressionThresholdBytes = 80 * 1_024 * 1_024
     private static let imageCompressionThresholdBytes = 2 * 1_024 * 1_024
     private static let maxStillImageDimension: CGFloat = 2_400
+    private static let maxProfileImageDimension: CGFloat = 460
+    private static let profileBannerTargetSize = CGSize(width: 1_200, height: 580)
+    private static let maxProfileBannerBytes = 500 * 1_024
+    private static let animatedProfileGIFVideoThresholdBytes = 1 * 1_024 * 1_024
+    private static let animatedProfileVideoBitRate = 420_000
 
     static func prepareUploadMedia(from item: PhotosPickerItem) async throws -> PreparedUploadMedia {
         let contentType = preferredContentType(for: item)
@@ -95,6 +113,173 @@ enum MediaUploadPreparation {
         fileExtension: String
     ) async throws -> PreparedUploadMedia {
         try await prepareVideoUpload(from: fileURL, mimeType: mimeType, fallbackFileExtension: fileExtension)
+    }
+
+    static func prepareProfileImageUpload(from item: PhotosPickerItem) async throws -> PreparedUploadMedia {
+        let contentType = preferredContentType(for: item)
+        let mimeType = contentType.preferredMIMEType ?? fallbackMimeType(for: contentType)
+        let fileExtension = contentType.preferredFilenameExtension ?? defaultFileExtension(for: mimeType)
+
+        guard let data = try await item.loadTransferable(type: Data.self), !data.isEmpty else {
+            throw MediaUploadError.missingFileData
+        }
+
+        return try await prepareProfileImageUpload(
+            data: data,
+            mimeType: mimeType,
+            fileExtension: fileExtension
+        )
+    }
+
+    static func prepareProfileImageUpload(
+        data: Data,
+        mimeType: String,
+        fileExtension: String
+    ) async throws -> PreparedUploadMedia {
+        guard !data.isEmpty else {
+            throw MediaUploadError.missingFileData
+        }
+
+        let contentType = UTType(mimeType: mimeType) ?? UTType(filenameExtension: fileExtension)
+        if isGIFAsset(mimeType: mimeType, fileExtension: fileExtension) {
+            if let optimizedVideo = await optimizedProfileGIFVideoPayload(
+                from: data,
+                contentType: contentType
+            ) {
+                return optimizedVideo
+            }
+
+            return PreparedUploadMedia(
+                data: data,
+                mimeType: mimeType,
+                fileExtension: fileExtension.lowercased()
+            )
+        }
+
+        if let optimized = optimizedProfileImagePayload(
+            from: data,
+            contentType: contentType,
+            originalMimeType: mimeType,
+            originalFileExtension: fileExtension
+        ) {
+            return optimized
+        }
+
+        return try prepareUploadMedia(
+            data: data,
+            mimeType: mimeType,
+            fileExtension: fileExtension
+        )
+    }
+
+    static func prepareProfileBannerUpload(from item: PhotosPickerItem) async throws -> PreparedUploadMedia {
+        let contentType = preferredContentType(for: item)
+        let mimeType = contentType.preferredMIMEType ?? fallbackMimeType(for: contentType)
+        let fileExtension = contentType.preferredFilenameExtension ?? defaultFileExtension(for: mimeType)
+
+        guard let data = try await item.loadTransferable(type: Data.self), !data.isEmpty else {
+            throw MediaUploadError.missingFileData
+        }
+
+        return try prepareProfileBannerUpload(
+            data: data,
+            mimeType: mimeType,
+            fileExtension: fileExtension
+        )
+    }
+
+    static func prepareProfileBannerUpload(
+        data: Data,
+        mimeType: String,
+        fileExtension: String
+    ) throws -> PreparedUploadMedia {
+        guard !data.isEmpty else {
+            throw MediaUploadError.missingFileData
+        }
+
+        let contentType = UTType(mimeType: mimeType) ?? UTType(filenameExtension: fileExtension)
+        if let optimized = optimizedProfileBannerPayload(
+            from: data,
+            contentType: contentType,
+            originalMimeType: mimeType,
+            originalFileExtension: fileExtension
+        ) {
+            return optimized
+        }
+
+        return try prepareUploadMedia(
+            data: data,
+            mimeType: mimeType,
+            fileExtension: fileExtension
+        )
+    }
+
+    private static func isGIFAsset(
+        mimeType: String,
+        fileExtension: String
+    ) -> Bool {
+        let normalizedMimeType = mimeType.lowercased()
+        let normalizedExtension = fileExtension.lowercased()
+        return normalizedExtension == "gif" ||
+            normalizedMimeType.contains("gif")
+    }
+
+    private static func optimizedProfileGIFVideoPayload(
+        from data: Data,
+        contentType: UTType?
+    ) async -> PreparedUploadMedia? {
+        if let contentType, contentType.conforms(to: .movie) {
+            return nil
+        }
+
+        guard let source = CGImageSourceCreateWithData(data as CFData, nil) else {
+            return nil
+        }
+
+        let frameCount = CGImageSourceGetCount(source)
+        guard frameCount > 1 else {
+            return nil
+        }
+
+        let sourceProperties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any]
+        let pixelWidth = (sourceProperties?[kCGImagePropertyPixelWidth] as? NSNumber)?.doubleValue ?? 0
+        let pixelHeight = (sourceProperties?[kCGImagePropertyPixelHeight] as? NSNumber)?.doubleValue ?? 0
+        let longestEdge = max(pixelWidth, pixelHeight)
+        guard data.count >= animatedProfileGIFVideoThresholdBytes || longestEdge > maxProfileImageDimension else {
+            return nil
+        }
+
+        let outputURL = temporaryFileURL(prefix: "profile-gif-", fileExtension: "mp4")
+        defer {
+            try? FileManager.default.removeItem(at: outputURL)
+        }
+
+        let previewImage = profileGIFPreviewImage(from: source, targetMaxDimension: maxProfileImageDimension)
+
+        do {
+            try await transcodeProfileGIFToVideo(
+                source: source,
+                outputURL: outputURL,
+                originalWidth: pixelWidth,
+                originalHeight: pixelHeight,
+                frameCount: frameCount
+            )
+        } catch {
+            return nil
+        }
+
+        guard let outputData = try? Data(contentsOf: outputURL),
+              !outputData.isEmpty,
+              outputData.count < data.count else {
+            return nil
+        }
+
+        return PreparedUploadMedia(
+            data: outputData,
+            mimeType: "video/mp4",
+            fileExtension: "mp4",
+            previewImage: previewImage
+        )
     }
 
     private static func prepareVideoUpload(
@@ -413,6 +598,351 @@ enum MediaUploadPreparation {
         )
     }
 
+    private static func optimizedProfileImagePayload(
+        from data: Data,
+        contentType: UTType?,
+        originalMimeType: String,
+        originalFileExtension: String
+    ) -> PreparedUploadMedia? {
+        let normalizedMimeType = originalMimeType.lowercased()
+        let normalizedExtension = originalFileExtension.lowercased()
+
+        if let contentType, contentType.conforms(to: .movie) {
+            return nil
+        }
+        if ["gif", "webp", "svg", "pdf"].contains(normalizedExtension) {
+            return nil
+        }
+        if normalizedMimeType.contains("gif") || normalizedMimeType.contains("webp") || normalizedMimeType.contains("svg") {
+            return nil
+        }
+        guard contentType?.conforms(to: .image) != false || normalizedMimeType.hasPrefix("image/") else {
+            return nil
+        }
+
+        guard let source = CGImageSourceCreateWithData(data as CFData, nil) else {
+            return nil
+        }
+        guard CGImageSourceGetCount(source) <= 1 else {
+            return nil
+        }
+
+        let sourceProperties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any]
+        let pixelWidth = (sourceProperties?[kCGImagePropertyPixelWidth] as? NSNumber)?.doubleValue ?? 0
+        let pixelHeight = (sourceProperties?[kCGImagePropertyPixelHeight] as? NSNumber)?.doubleValue ?? 0
+        let longestEdge = max(pixelWidth, pixelHeight)
+        let shouldResize = longestEdge > maxProfileImageDimension
+
+        let thumbnailOptions: [CFString: Any] = [
+            kCGImageSourceCreateThumbnailFromImageAlways: true,
+            kCGImageSourceCreateThumbnailWithTransform: true,
+            kCGImageSourceThumbnailMaxPixelSize: maxProfileImageDimension,
+            kCGImageSourceShouldCacheImmediately: false
+        ]
+
+        let cgImage: CGImage?
+        if shouldResize {
+            cgImage = CGImageSourceCreateThumbnailAtIndex(source, 0, thumbnailOptions as CFDictionary)
+        } else {
+            cgImage = CGImageSourceCreateImageAtIndex(source, 0, nil)
+        }
+
+        guard let cgImage else {
+            return nil
+        }
+
+        let hasAlphaChannel = cgImage.hasAlphaChannel
+        let renderedImage = renderedStillImage(from: cgImage, hasAlphaChannel: hasAlphaChannel)
+
+        if hasAlphaChannel {
+            guard let pngData = renderedImage.pngData() else {
+                return nil
+            }
+            return PreparedUploadMedia(
+                data: pngData,
+                mimeType: "image/png",
+                fileExtension: "png",
+                previewImage: renderedImage
+            )
+        }
+
+        guard let jpegData = renderedImage.jpegData(compressionQuality: 0.86) else {
+            return nil
+        }
+
+        return PreparedUploadMedia(
+            data: jpegData,
+            mimeType: "image/jpeg",
+            fileExtension: "jpg",
+            previewImage: renderedImage
+        )
+    }
+
+    private static func optimizedProfileBannerPayload(
+        from data: Data,
+        contentType: UTType?,
+        originalMimeType: String,
+        originalFileExtension: String
+    ) -> PreparedUploadMedia? {
+        let normalizedMimeType = originalMimeType.lowercased()
+        let normalizedExtension = originalFileExtension.lowercased()
+
+        if let contentType, contentType.conforms(to: .movie) {
+            return nil
+        }
+        if ["svg", "pdf"].contains(normalizedExtension) || normalizedMimeType.contains("svg") {
+            return nil
+        }
+        guard contentType?.conforms(to: .image) != false || normalizedMimeType.hasPrefix("image/") else {
+            return nil
+        }
+
+        guard let source = CGImageSourceCreateWithData(data as CFData, nil),
+              let cgImage = CGImageSourceCreateImageAtIndex(source, 0, nil) else {
+            return nil
+        }
+
+        let transparentRender = renderedBannerImage(
+            from: cgImage,
+            targetSize: profileBannerTargetSize,
+            opaque: false
+        )
+
+        if cgImage.hasAlphaChannel,
+           let pngData = transparentRender.pngData(),
+           pngData.count <= maxProfileBannerBytes {
+            return PreparedUploadMedia(
+                data: pngData,
+                mimeType: "image/png",
+                fileExtension: "png",
+                previewImage: transparentRender
+            )
+        }
+
+        let opaqueRender = renderedBannerImage(
+            from: cgImage,
+            targetSize: profileBannerTargetSize,
+            opaque: true
+        )
+
+        let compressionQualities: [CGFloat] = [0.84, 0.76, 0.68, 0.60, 0.52, 0.44]
+        for quality in compressionQualities {
+            guard let jpegData = opaqueRender.jpegData(compressionQuality: quality) else {
+                continue
+            }
+
+            if jpegData.count <= maxProfileBannerBytes || quality == compressionQualities.last {
+                return PreparedUploadMedia(
+                    data: jpegData,
+                    mimeType: "image/jpeg",
+                    fileExtension: "jpg",
+                    previewImage: opaqueRender
+                )
+            }
+        }
+
+        return nil
+    }
+
+    private static func transcodeProfileGIFToVideo(
+        source: CGImageSource,
+        outputURL: URL,
+        originalWidth: Double,
+        originalHeight: Double,
+        frameCount: Int
+    ) async throws {
+        let outputSize = profileVideoOutputSize(
+            originalWidth: originalWidth,
+            originalHeight: originalHeight
+        )
+
+        let writer = try AVAssetWriter(outputURL: outputURL, fileType: .mp4)
+        let outputSettings: [String: Any] = [
+            AVVideoCodecKey: AVVideoCodecType.h264,
+            AVVideoWidthKey: outputSize.width,
+            AVVideoHeightKey: outputSize.height,
+            AVVideoCompressionPropertiesKey: [
+                AVVideoAverageBitRateKey: animatedProfileVideoBitRate,
+                AVVideoExpectedSourceFrameRateKey: 15,
+                AVVideoMaxKeyFrameIntervalKey: 15,
+                AVVideoProfileLevelKey: AVVideoProfileLevelH264HighAutoLevel
+            ]
+        ]
+
+        let input = AVAssetWriterInput(mediaType: .video, outputSettings: outputSettings)
+        input.expectsMediaDataInRealTime = false
+
+        let pixelBufferAttributes: [String: Any] = [
+            kCVPixelBufferPixelFormatTypeKey as String: Int(kCVPixelFormatType_32ARGB),
+            kCVPixelBufferWidthKey as String: outputSize.width,
+            kCVPixelBufferHeightKey as String: outputSize.height,
+            kCVPixelBufferCGImageCompatibilityKey as String: true,
+            kCVPixelBufferCGBitmapContextCompatibilityKey as String: true
+        ]
+
+        let adaptor = AVAssetWriterInputPixelBufferAdaptor(
+            assetWriterInput: input,
+            sourcePixelBufferAttributes: pixelBufferAttributes
+        )
+
+        guard writer.canAdd(input) else {
+            throw MediaUploadPreparationError.videoCompressionFailed
+        }
+
+        writer.add(input)
+
+        guard writer.startWriting() else {
+            throw writer.error ?? MediaUploadPreparationError.videoCompressionFailed
+        }
+
+        writer.startSession(atSourceTime: .zero)
+
+        let renderSize = CGSize(width: outputSize.width, height: outputSize.height)
+        let timescale: Int32 = 600
+        var presentationTime = CMTime.zero
+
+        for index in 0..<frameCount {
+            while !input.isReadyForMoreMediaData {
+                try await Task.sleep(nanoseconds: 2_000_000)
+            }
+
+            guard let frameImage = CGImageSourceCreateImageAtIndex(source, index, nil),
+                  let pixelBufferPool = adaptor.pixelBufferPool,
+                  let pixelBuffer = makePixelBuffer(
+                    from: frameImage,
+                    size: renderSize,
+                    pixelBufferPool: pixelBufferPool
+                  ) else {
+                continue
+            }
+
+            guard adaptor.append(pixelBuffer, withPresentationTime: presentationTime) else {
+                throw writer.error ?? MediaUploadPreparationError.videoCompressionFailed
+            }
+
+            let frameDuration = max(gifFrameDuration(forFrameAt: index, source: source), 1.0 / 15.0)
+            presentationTime = presentationTime + CMTime(
+                seconds: frameDuration,
+                preferredTimescale: timescale
+            )
+        }
+
+        input.markAsFinished()
+
+        try await withCheckedThrowingContinuation { continuation in
+            writer.finishWriting {
+                switch writer.status {
+                case .completed:
+                    continuation.resume()
+                case .failed:
+                    continuation.resume(throwing: writer.error ?? MediaUploadPreparationError.videoCompressionFailed)
+                case .cancelled:
+                    continuation.resume(throwing: CancellationError())
+                default:
+                    continuation.resume(throwing: MediaUploadPreparationError.videoCompressionFailed)
+                }
+            }
+        }
+    }
+
+    private static func profileVideoOutputSize(
+        originalWidth: Double,
+        originalHeight: Double
+    ) -> CGSize {
+        let safeWidth = max(originalWidth, 1)
+        let safeHeight = max(originalHeight, 1)
+        let scale = min(1, Double(maxProfileImageDimension) / max(safeWidth, safeHeight))
+        let scaledWidth = evenPixelDimension(Int((safeWidth * scale).rounded()))
+        let scaledHeight = evenPixelDimension(Int((safeHeight * scale).rounded()))
+        return CGSize(width: scaledWidth, height: scaledHeight)
+    }
+
+    private static func evenPixelDimension(_ value: Int) -> Int {
+        let clamped = max(value, 2)
+        return clamped.isMultiple(of: 2) ? clamped : clamped + 1
+    }
+
+    private static func makePixelBuffer(
+        from cgImage: CGImage,
+        size: CGSize,
+        pixelBufferPool: CVPixelBufferPool
+    ) -> CVPixelBuffer? {
+        var pixelBufferOut: CVPixelBuffer?
+        let createStatus = CVPixelBufferPoolCreatePixelBuffer(nil, pixelBufferPool, &pixelBufferOut)
+        guard createStatus == kCVReturnSuccess, let pixelBuffer = pixelBufferOut else {
+            return nil
+        }
+
+        CVPixelBufferLockBaseAddress(pixelBuffer, [])
+        defer { CVPixelBufferUnlockBaseAddress(pixelBuffer, []) }
+
+        guard let baseAddress = CVPixelBufferGetBaseAddress(pixelBuffer) else {
+            return nil
+        }
+
+        let bytesPerRow = CVPixelBufferGetBytesPerRow(pixelBuffer)
+        let colorSpace = CGColorSpaceCreateDeviceRGB()
+        guard let context = CGContext(
+            data: baseAddress,
+            width: Int(size.width),
+            height: Int(size.height),
+            bitsPerComponent: 8,
+            bytesPerRow: bytesPerRow,
+            space: colorSpace,
+            bitmapInfo: CGImageAlphaInfo.noneSkipFirst.rawValue
+        ) else {
+            return nil
+        }
+
+        context.clear(CGRect(origin: .zero, size: size))
+        context.interpolationQuality = .high
+        context.draw(cgImage, in: CGRect(origin: .zero, size: size))
+        return pixelBuffer
+    }
+
+    private static func profileGIFPreviewImage(
+        from source: CGImageSource,
+        targetMaxDimension: CGFloat
+    ) -> UIImage? {
+        let thumbnailOptions: [CFString: Any] = [
+            kCGImageSourceCreateThumbnailFromImageAlways: true,
+            kCGImageSourceCreateThumbnailWithTransform: true,
+            kCGImageSourceThumbnailMaxPixelSize: targetMaxDimension,
+            kCGImageSourceShouldCacheImmediately: false
+        ]
+
+        guard let cgImage = CGImageSourceCreateThumbnailAtIndex(
+            source,
+            0,
+            thumbnailOptions as CFDictionary
+        ) ?? CGImageSourceCreateImageAtIndex(source, 0, nil) else {
+            return nil
+        }
+
+        let image = UIImage(cgImage: cgImage)
+        return image.preparingForDisplay() ?? image
+    }
+
+    private static func gifFrameDuration(
+        forFrameAt index: Int,
+        source: CGImageSource
+    ) -> TimeInterval {
+        guard let properties = CGImageSourceCopyPropertiesAtIndex(source, index, nil) as? [CFString: Any],
+              let gifProperties = properties[kCGImagePropertyGIFDictionary] as? [CFString: Any] else {
+            return 0.1
+        }
+
+        let unclampedDelay = (gifProperties[kCGImagePropertyGIFUnclampedDelayTime] as? NSNumber)?.doubleValue
+        let delay = (gifProperties[kCGImagePropertyGIFDelayTime] as? NSNumber)?.doubleValue
+        let duration = unclampedDelay ?? delay ?? 0.1
+
+        if duration < 0.011 {
+            return 0.1
+        }
+
+        return max(duration, 0.02)
+    }
+
     private static func renderedStillImage(
         from cgImage: CGImage,
         hasAlphaChannel: Bool
@@ -425,6 +955,41 @@ enum MediaUploadPreparation {
 
         return renderer.image { _ in
             UIImage(cgImage: cgImage).draw(in: CGRect(origin: .zero, size: imageSize))
+        }
+    }
+
+    private static func renderedBannerImage(
+        from cgImage: CGImage,
+        targetSize: CGSize,
+        opaque: Bool
+    ) -> UIImage {
+        let format = UIGraphicsImageRendererFormat.default()
+        format.scale = 1
+        format.opaque = opaque
+
+        let sourceSize = CGSize(width: cgImage.width, height: cgImage.height)
+        let renderer = UIGraphicsImageRenderer(size: targetSize, format: format)
+
+        return renderer.image { context in
+            if opaque {
+                UIColor.white.setFill()
+                context.fill(CGRect(origin: .zero, size: targetSize))
+            }
+
+            let scale = max(
+                targetSize.width / max(sourceSize.width, 1),
+                targetSize.height / max(sourceSize.height, 1)
+            )
+            let drawSize = CGSize(
+                width: sourceSize.width * scale,
+                height: sourceSize.height * scale
+            )
+            let drawOrigin = CGPoint(
+                x: (targetSize.width - drawSize.width) / 2,
+                y: (targetSize.height - drawSize.height) / 2
+            )
+
+            UIImage(cgImage: cgImage).draw(in: CGRect(origin: drawOrigin, size: drawSize))
         }
     }
 

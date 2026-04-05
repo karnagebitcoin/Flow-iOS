@@ -224,7 +224,7 @@ struct SignupOnboardingView: View {
                 VStack(alignment: .leading, spacing: 14) {
                     VStack(alignment: .leading, spacing: 4) {
                         fieldLabel("Primary Color")
-                        Text("Choose a color for Halo. You can change it later in Core.")
+                        Text("Choose a color for Halo. You can change it later in Settings.")
                             .font(.footnote)
                             .foregroundStyle(.secondary)
                             .fixedSize(horizontal: false, vertical: true)
@@ -333,7 +333,7 @@ struct SignupOnboardingView: View {
         VStack(alignment: .leading, spacing: 18) {
             stepIntro(
                 title: "Notifications",
-                subtitle: "Your Interests feed is ready. Turn on notifications now, or skip and change this later in Core."
+                subtitle: "Your Interests feed is ready. Turn on notifications now, or skip and change this later in Settings."
             )
 
             onboardingFieldCard {
@@ -782,17 +782,11 @@ struct SignupOnboardingView: View {
         }
 
         do {
-            guard let data = try await item.loadTransferable(type: Data.self), !data.isEmpty else {
-                errorMessage = "Couldn’t read the selected image."
-                return
-            }
-
-            selectedAvatarData = data
-            selectedAvatarPreviewImage = UIImage(data: data)
-
-            let mediaType = item.supportedContentTypes.first ?? .jpeg
-            selectedAvatarMIMEType = mediaType.preferredMIMEType ?? "image/jpeg"
-            selectedAvatarFileExtension = mediaType.preferredFilenameExtension ?? "jpg"
+            let preparedMedia = try await MediaUploadPreparation.prepareProfileImageUpload(from: item)
+            selectedAvatarData = preparedMedia.data
+            selectedAvatarPreviewImage = preparedMedia.previewImage ?? UIImage(data: preparedMedia.data)
+            selectedAvatarMIMEType = preparedMedia.mimeType
+            selectedAvatarFileExtension = preparedMedia.fileExtension
         } catch {
             errorMessage = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
         }

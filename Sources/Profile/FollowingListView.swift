@@ -111,7 +111,7 @@ struct FollowingListView: View {
                 Text(errorMessage)
                     .font(.body)
                     .multilineTextAlignment(.center)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(appSettings.themePalette.secondaryForeground)
 
                 Button("Try Again") {
                     Task {
@@ -123,7 +123,7 @@ struct FollowingListView: View {
                 Text("No following accounts yet.")
                     .font(.body)
                     .multilineTextAlignment(.center)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(appSettings.themePalette.secondaryForeground)
             }
         }
         .frame(maxWidth: .infinity)
@@ -136,7 +136,7 @@ struct FollowingListView: View {
                 .controlSize(.small)
             Text("Loading following list…")
                 .font(.subheadline)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(appSettings.themePalette.secondaryForeground)
             Spacer(minLength: 0)
         }
         .padding(.top, 8)
@@ -154,12 +154,12 @@ struct FollowingListView: View {
                         Text(row.displayName)
                             .font(.subheadline.weight(.semibold))
                             .lineLimit(1)
-                            .foregroundStyle(.primary)
+                            .foregroundStyle(appSettings.themePalette.foreground)
                             .layoutPriority(2)
 
                         Text(row.handle)
                             .font(.footnote)
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(appSettings.themePalette.secondaryForeground)
                             .lineLimit(1)
                             .layoutPriority(1)
                     }
@@ -170,7 +170,7 @@ struct FollowingListView: View {
                                 .environmentObject(appSettings)
                             Text(nip05Domain)
                                 .font(.caption)
-                                .foregroundStyle(.secondary)
+                                .foregroundStyle(appSettings.themePalette.secondaryForeground)
                                 .lineLimit(1)
                         }
                         .fixedSize(horizontal: false, vertical: true)
@@ -206,21 +206,21 @@ struct FollowingListView: View {
                 .padding(.horizontal, 12)
                 .foregroundStyle(
                     isFollowing
-                        ? Color.primary
+                        ? appSettings.themePalette.foreground
                         : Color.white
                 )
                 .background(
                     Capsule()
                         .fill(
                             isFollowing
-                                ? Color(.secondarySystemBackground)
-                                : Color.accentColor
+                                ? appSettings.themePalette.secondaryBackground
+                                : appSettings.primaryColor
                         )
                 )
                 .overlay {
                     if isFollowing {
                         Capsule()
-                            .stroke(Color(.separator).opacity(0.35), lineWidth: 0.8)
+                            .stroke(appSettings.themePalette.separator.opacity(0.35), lineWidth: 0.8)
                     }
                 }
         }
@@ -233,20 +233,20 @@ struct FollowingListView: View {
     private var loadingRow: some View {
         HStack(alignment: .top, spacing: 12) {
             Circle()
-                .fill(Color(.secondarySystemFill))
+                .fill(appSettings.themePalette.secondaryFill)
                 .frame(width: 34, height: 34)
 
             VStack(alignment: .leading, spacing: 6) {
                 RoundedRectangle(cornerRadius: 4)
-                    .fill(Color(.secondarySystemFill))
+                    .fill(appSettings.themePalette.secondaryFill)
                     .frame(width: 150, height: 12)
 
                 RoundedRectangle(cornerRadius: 4)
-                    .fill(Color(.secondarySystemFill))
+                    .fill(appSettings.themePalette.secondaryFill)
                     .frame(width: 110, height: 10)
 
                 RoundedRectangle(cornerRadius: 4)
-                    .fill(Color(.secondarySystemFill))
+                    .fill(appSettings.themePalette.secondaryFill)
                     .frame(width: 130, height: 10)
             }
 
@@ -301,18 +301,18 @@ private struct CompactProfileAvatar: View {
         .frame(width: 34, height: 34)
         .clipShape(Circle())
         .overlay {
-            Circle().stroke(Color(.separator).opacity(0.35), lineWidth: 0.6)
+            Circle().stroke(appSettings.themePalette.separator.opacity(0.35), lineWidth: 0.6)
         }
     }
 
     private var fallbackAvatar: some View {
         ZStack {
             Circle()
-                .fill(Color(.secondarySystemFill))
+                .fill(appSettings.themePalette.secondaryFill)
 
             Text(String(fallback.prefix(1)).uppercased())
                 .font(.caption.weight(.semibold))
-                .foregroundStyle(.secondary)
+                .foregroundStyle(appSettings.themePalette.secondaryForeground)
         }
     }
 }
@@ -347,7 +347,7 @@ private struct DomainFavicon: View {
     private var fallbackIcon: some View {
         Image(systemName: "globe")
             .font(.caption2)
-            .foregroundStyle(.secondary)
+            .foregroundStyle(appSettings.themePalette.secondaryForeground)
     }
 
     private var faviconURL: URL? {

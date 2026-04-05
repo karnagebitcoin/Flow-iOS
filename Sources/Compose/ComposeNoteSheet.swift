@@ -506,6 +506,15 @@ private enum SharedComposeImportError: LocalizedError {
     }
 }
 
+private struct ComposeContextPreviewSnapshot: Equatable {
+    let authorPubkey: String
+    let createdAtDate: Date
+    let previewText: String
+    let imageURLs: [URL]
+    let hasVideo: Bool
+    let hasAudio: Bool
+}
+
 struct ComposeFloatingActionButton: View {
     @EnvironmentObject private var appSettings: AppSettingsStore
     let action: () -> Void
@@ -611,6 +620,8 @@ struct ComposeNoteSheet: View {
     @State private var quotedDisplayName: String?
     @State private var quotedHandle: String?
     @State private var quotedAvatarURL: URL?
+    @State private var replyTargetPreviewSnapshot: ComposeContextPreviewSnapshot?
+    @State private var quotedPreviewSnapshot: ComposeContextPreviewSnapshot?
     @State private var hasAppliedInitialDraft = false
     @State private var hasAppliedInitialAttachments = false
     @State private var hasAppliedInitialSharedAttachments = false
@@ -669,12 +680,22 @@ struct ComposeNoteSheet: View {
         .task {
             applyInitialDraftIfNeeded()
             applyInitialAttachmentsIfNeeded()
-            await applyInitialSharedAttachmentsIfNeeded()
             editorSelectedRange = NSRange(location: (viewModel.text as NSString).length, length: 0)
             isEditorFocused = true
+            await applyInitialSharedAttachmentsIfNeeded()
+        }
+        .task(id: currentAccountPubkey) {
             await refreshComposeAccountSummary()
-            await refreshReplyTargetAuthorSummaryIfNeeded()
-            await refreshQuotedAuthorSummaryIfNeeded()
+        }
+        .task(id: replyTargetEvent?.id) {
+            async let summaryRefresh: Void = refreshReplyTargetAuthorSummaryIfNeeded()
+            async let previewRefresh: Void = refreshReplyTargetPreviewIfNeeded()
+            _ = await (summaryRefresh, previewRefresh)
+        }
+        .task(id: quotedEvent?.id) {
+            async let summaryRefresh: Void = refreshQuotedAuthorSummaryIfNeeded()
+            async let previewRefresh: Void = refreshQuotedPreviewIfNeeded()
+            _ = await (summaryRefresh, previewRefresh)
         }
         .onDisappear {
             mentionLookupTask?.cancel()
@@ -686,11 +707,6 @@ struct ComposeNoteSheet: View {
             selectedMediaItems = []
             Task {
                 await handleMediaSelection(items)
-            }
-        }
-        .onChange(of: currentAccountPubkey) { _, _ in
-            Task {
-                await refreshComposeAccountSummary()
             }
         }
         .sheet(isPresented: $isShowingCapturePermissionSheet) {
@@ -1086,6 +1102,7 @@ struct ComposeNoteSheet: View {
     }
 
     private func handleMentionQueryChange(_ query: ComposeMentionQuery?) {
+        guard query != activeMentionQuery else { return }
         activeMentionQuery = query
         mentionLookupTask?.cancel()
 
@@ -1106,7 +1123,7 @@ struct ComposeNoteSheet: View {
 
     private func refreshMentionSuggestions(for query: ComposeMentionQuery) async {
         let normalizedQuery = query.query.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !normalizedQuery.isEmpty else {
+        guard normalizedQuery.count >= 2 else {
             await MainActor.run {
                 guard activeMentionQuery == query else { return }
                 mentionSuggestions = []
@@ -1231,11 +1248,6 @@ struct ComposeNoteSheet: View {
         }
     }
 
-    private var renderedReplyTargetEvent: NostrEvent? {
-        guard let replyTargetEvent else { return nil }
-        return Self.renderEventForQuotePreview(replyTargetEvent)
-    }
-
     private var replyTargetDisplayNameResolved: String {
         if let replyTargetDisplayName {
             let trimmed = replyTargetDisplayName.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -1243,8 +1255,8 @@ struct ComposeNoteSheet: View {
                 return trimmed
             }
         }
-        if let event = renderedReplyTargetEvent {
-            return String(event.pubkey.prefix(8))
+        if let previewSnapshot = replyTargetPreviewSnapshot {
+            return String(previewSnapshot.authorPubkey.prefix(8))
         }
         return "Reply target"
     }
@@ -1256,8 +1268,8 @@ struct ComposeNoteSheet: View {
                 return trimmed.hasPrefix("@") ? trimmed : "@\(trimmed)"
             }
         }
-        if let event = renderedReplyTargetEvent {
-            return "@\(String(event.pubkey.prefix(8)).lowercased())"
+        if let previewSnapshot = replyTargetPreviewSnapshot {
+            return "@\(String(previewSnapshot.authorPubkey.prefix(8)).lowercased())"
         }
         return "@unknown"
     }
@@ -1269,8 +1281,8 @@ struct ComposeNoteSheet: View {
                 return trimmed
             }
         }
-        if let event = renderedQuotedEvent {
-            return String(event.pubkey.prefix(8))
+        if let previewSnapshot = quotedPreviewSnapshot {
+            return String(previewSnapshot.authorPubkey.prefix(8))
         }
         return "Quoted note"
     }
@@ -1282,70 +1294,21 @@ struct ComposeNoteSheet: View {
                 return trimmed.hasPrefix("@") ? trimmed : "@\(trimmed)"
             }
         }
-        if let event = renderedQuotedEvent {
-            return "@\(String(event.pubkey.prefix(8)).lowercased())"
+        if let previewSnapshot = quotedPreviewSnapshot {
+            return "@\(String(previewSnapshot.authorPubkey.prefix(8)).lowercased())"
         }
         return "@unknown"
     }
 
-    private var renderedQuotedEvent: NostrEvent? {
-        guard let quotedEvent else { return nil }
-        return Self.renderEventForQuotePreview(quotedEvent)
-    }
-
-    private var replyTargetPreviewText: String {
-        guard let event = renderedReplyTargetEvent else { return "" }
-        return Self.previewText(for: event)
-    }
-
-    private var quotedPreviewText: String {
-        guard let event = renderedQuotedEvent else { return "" }
-        return Self.previewText(for: event, maximumLength: 220)
-    }
-
-    private var replyTargetPreviewImageURLs: [URL] {
-        guard let event = renderedReplyTargetEvent else { return [] }
-        return Self.previewImageURLs(for: event)
-    }
-
-    private var quotedPreviewImageURLs: [URL] {
-        guard let event = renderedQuotedEvent else { return [] }
-        return Self.previewImageURLs(for: event)
-    }
-
-    private var replyTargetHasVideo: Bool {
-        guard let event = renderedReplyTargetEvent else { return false }
-        return Self.previewHasVideo(for: event)
-    }
-
-    private var replyTargetHasAudio: Bool {
-        guard let event = renderedReplyTargetEvent else { return false }
-        return Self.previewHasAudio(for: event)
-    }
-
-    private var hasQuotedVideo: Bool {
-        guard let event = renderedQuotedEvent else { return false }
-        return Self.previewHasVideo(for: event)
-    }
-
-    private var hasQuotedAudio: Bool {
-        guard let event = renderedQuotedEvent else { return false }
-        return Self.previewHasAudio(for: event)
-    }
-
     private var replyTargetPreviewCard: some View {
         Group {
-            if let event = renderedReplyTargetEvent {
+            if let previewSnapshot = replyTargetPreviewSnapshot {
                 composerContextPreviewCard(
                     title: "Replying to",
-                    event: event,
+                    previewSnapshot: previewSnapshot,
                     displayName: replyTargetDisplayNameResolved,
                     handle: replyTargetHandleResolved,
                     avatarURL: replyTargetAvatarURL,
-                    previewText: replyTargetPreviewText,
-                    imageURLs: replyTargetPreviewImageURLs,
-                    hasVideo: replyTargetHasVideo,
-                    hasAudio: replyTargetHasAudio,
                     videoSummary: "Note includes video",
                     audioSummary: "Note includes audio"
                 ) {
@@ -1357,17 +1320,13 @@ struct ComposeNoteSheet: View {
 
     private var quotePreviewCard: some View {
         Group {
-            if let event = renderedQuotedEvent {
+            if let previewSnapshot = quotedPreviewSnapshot {
                 composerContextPreviewCard(
                     title: "Quoting",
-                    event: event,
+                    previewSnapshot: previewSnapshot,
                     displayName: quotedDisplayNameResolved,
                     handle: quotedHandleResolved,
                     avatarURL: quotedAvatarURL,
-                    previewText: quotedPreviewText,
-                    imageURLs: quotedPreviewImageURLs,
-                    hasVideo: hasQuotedVideo,
-                    hasAudio: hasQuotedAudio,
                     videoSummary: "Quoted note includes video",
                     audioSummary: "Quoted note includes audio"
                 ) {
@@ -1380,14 +1339,10 @@ struct ComposeNoteSheet: View {
     @ViewBuilder
     private func composerContextPreviewCard<Fallback: View>(
         title: String,
-        event: NostrEvent,
+        previewSnapshot: ComposeContextPreviewSnapshot,
         displayName: String,
         handle: String,
         avatarURL: URL?,
-        previewText: String,
-        imageURLs: [URL],
-        hasVideo: Bool,
-        hasAudio: Bool,
         videoSummary: String,
         audioSummary: String,
         @ViewBuilder fallback: @escaping () -> Fallback
@@ -1413,22 +1368,22 @@ struct ComposeNoteSheet: View {
 
                         Spacer(minLength: 0)
 
-                        Text(RelativeTimestampFormatter.shortString(from: event.createdAtDate))
+                        Text(RelativeTimestampFormatter.shortString(from: previewSnapshot.createdAtDate))
                             .font(.caption)
                             .foregroundStyle(appSettings.themePalette.secondaryForeground)
                             .lineLimit(1)
                     }
 
-                    Text(previewText)
+                    Text(previewSnapshot.previewText)
                         .font(.body)
                         .foregroundStyle(appSettings.themePalette.foreground)
                         .multilineTextAlignment(.leading)
                         .frame(maxWidth: .infinity, alignment: .leading)
 
                     composerContextPreviewMedia(
-                        imageURLs: imageURLs,
-                        hasVideo: hasVideo,
-                        hasAudio: hasAudio,
+                        imageURLs: previewSnapshot.imageURLs,
+                        hasVideo: previewSnapshot.hasVideo,
+                        hasAudio: previewSnapshot.hasAudio,
                         videoSummary: videoSummary,
                         audioSummary: audioSummary
                     )
@@ -1481,7 +1436,13 @@ struct ComposeNoteSheet: View {
         audioSummary: String
     ) -> some View {
         if !imageURLs.isEmpty {
-            HStack(spacing: 8) {
+            let columns = Array(
+                repeating: GridItem(.flexible(minimum: 0), spacing: 8),
+                count: min(max(imageURLs.count, 1), 2)
+            )
+            let thumbnailHeight: CGFloat = imageURLs.count == 1 ? 170 : 104
+
+            LazyVGrid(columns: columns, alignment: .leading, spacing: 8) {
                 ForEach(Array(imageURLs.enumerated()), id: \.offset) { _, url in
                     AsyncImage(url: url) { phase in
                         switch phase {
@@ -1503,11 +1464,12 @@ struct ComposeNoteSheet: View {
                             appSettings.themePalette.tertiaryFill
                         }
                     }
-                    .frame(height: 170)
                     .frame(maxWidth: .infinity)
+                    .frame(height: thumbnailHeight)
                     .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
                 }
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
         } else if hasVideo || hasAudio {
             HStack(spacing: 8) {
                 Image(systemName: hasVideo ? "video" : "waveform")
@@ -1710,6 +1672,17 @@ struct ComposeNoteSheet: View {
         }
     }
 
+    private func refreshReplyTargetPreviewIfNeeded() async {
+        guard let replyTargetEvent else {
+            replyTargetPreviewSnapshot = nil
+            return
+        }
+
+        let previewSnapshot = await Self.makeContextPreviewSnapshot(for: replyTargetEvent)
+        guard !Task.isCancelled else { return }
+        replyTargetPreviewSnapshot = previewSnapshot
+    }
+
     private func refreshQuotedAuthorSummaryIfNeeded() async {
         guard let quotedEvent else { return }
 
@@ -1780,6 +1753,20 @@ struct ComposeNoteSheet: View {
            url.scheme != nil {
             quotedAvatarURL = url
         }
+    }
+
+    private func refreshQuotedPreviewIfNeeded() async {
+        guard let quotedEvent else {
+            quotedPreviewSnapshot = nil
+            return
+        }
+
+        let previewSnapshot = await Self.makeContextPreviewSnapshot(
+            for: quotedEvent,
+            maximumLength: 220
+        )
+        guard !Task.isCancelled else { return }
+        quotedPreviewSnapshot = previewSnapshot
     }
 
     private func handleCameraButtonTap() {
@@ -2367,15 +2354,40 @@ struct ComposeNoteSheet: View {
         )
     }
 
-    private static func renderEventForQuotePreview(_ event: NostrEvent) -> NostrEvent {
+    nonisolated private static func renderEventForQuotePreview(_ event: NostrEvent) -> NostrEvent {
         guard event.kind == 6 || event.kind == 16 else { return event }
         guard let embedded = decodeEmbeddedEvent(from: event.content) else { return event }
         guard embedded.kind != 6 && embedded.kind != 16 else { return event }
         return embedded
     }
 
-    private static func previewText(for event: NostrEvent, maximumLength: Int? = nil) -> String {
-        let tokens = NoteContentParser.tokenize(event: event)
+    nonisolated private static func makeContextPreviewSnapshot(
+        for event: NostrEvent,
+        maximumLength: Int? = nil
+    ) async -> ComposeContextPreviewSnapshot {
+        await Task.detached(priority: .userInitiated) {
+            let renderedEvent = renderEventForQuotePreview(event)
+            let tokens = NoteContentParser.tokenize(event: renderedEvent)
+            return ComposeContextPreviewSnapshot(
+                authorPubkey: renderedEvent.pubkey,
+                createdAtDate: renderedEvent.createdAtDate,
+                previewText: previewText(
+                    from: tokens,
+                    fallbackContent: renderedEvent.content,
+                    maximumLength: maximumLength
+                ),
+                imageURLs: previewImageURLs(from: tokens),
+                hasVideo: previewHasVideo(in: tokens),
+                hasAudio: previewHasAudio(in: tokens)
+            )
+        }.value
+    }
+
+    nonisolated private static func previewText(
+        from tokens: [NoteContentToken],
+        fallbackContent: String,
+        maximumLength: Int? = nil
+    ) -> String {
         var fragments: [String] = []
         for token in tokens {
             switch token.type {
@@ -2393,7 +2405,7 @@ struct ComposeNoteSheet: View {
             .replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
             .trimmingCharacters(in: .whitespacesAndNewlines)
         let previewSource = combined.isEmpty
-            ? event.content.trimmingCharacters(in: .whitespacesAndNewlines)
+            ? fallbackContent.trimmingCharacters(in: .whitespacesAndNewlines)
             : combined
         guard !previewSource.isEmpty else {
             return "Note"
@@ -2404,8 +2416,10 @@ struct ComposeNoteSheet: View {
         return String(previewSource.prefix(maximumLength))
     }
 
-    private static func previewImageURLs(for event: NostrEvent, limit: Int = 2) -> [URL] {
-        let tokens = NoteContentParser.tokenize(event: event)
+    nonisolated private static func previewImageURLs(
+        from tokens: [NoteContentToken],
+        limit: Int = 2
+    ) -> [URL] {
         var urls: [URL] = []
         var seen = Set<String>()
         for token in tokens where token.type == .image {
@@ -2420,19 +2434,15 @@ struct ComposeNoteSheet: View {
         return urls
     }
 
-    private static func previewHasVideo(for event: NostrEvent) -> Bool {
-        NoteContentParser
-            .tokenize(event: event)
-            .contains(where: { $0.type == .video })
+    nonisolated private static func previewHasVideo(in tokens: [NoteContentToken]) -> Bool {
+        tokens.contains(where: { $0.type == .video })
     }
 
-    private static func previewHasAudio(for event: NostrEvent) -> Bool {
-        NoteContentParser
-            .tokenize(event: event)
-            .contains(where: { $0.type == .audio })
+    nonisolated private static func previewHasAudio(in tokens: [NoteContentToken]) -> Bool {
+        tokens.contains(where: { $0.type == .audio })
     }
 
-    private static func decodeEmbeddedEvent(from content: String) -> NostrEvent? {
+    nonisolated private static func decodeEmbeddedEvent(from content: String) -> NostrEvent? {
         let trimmed = content.trimmingCharacters(in: .whitespacesAndNewlines)
         guard trimmed.hasPrefix("{"), trimmed.hasSuffix("}") else { return nil }
         guard let data = trimmed.data(using: .utf8),
@@ -2910,6 +2920,7 @@ private struct ComposeMultilineTextView: UIViewRepresentable {
         private let onMentionQueryChange: (ComposeMentionQuery?) -> Void
         var isApplyingProgrammaticUpdate = false
         var lastRenderedMentions: [ComposeSelectedMention] = []
+        private var lastReportedMentionQuery: ComposeMentionQuery?
 
         init(
             text: Binding<String>,
@@ -2930,11 +2941,14 @@ private struct ComposeMultilineTextView: UIViewRepresentable {
             shouldChangeTextIn range: NSRange,
             replacementText text: String
         ) -> Bool {
-            mentions = ComposeMentionSupport.updatedMentions(
+            let updatedMentions = ComposeMentionSupport.updatedMentions(
                 mentions,
                 forEditIn: range,
                 replacementText: text
             )
+            if updatedMentions != mentions {
+                mentions = updatedMentions
+            }
             return true
         }
 
@@ -2961,6 +2975,7 @@ private struct ComposeMultilineTextView: UIViewRepresentable {
         func textViewDidEndEditing(_ textView: UITextView) {
             isFocused = false
             selectedRange = textView.selectedRange
+            lastReportedMentionQuery = nil
             onMentionQueryChange(nil)
         }
 
@@ -2970,6 +2985,8 @@ private struct ComposeMultilineTextView: UIViewRepresentable {
                 selection: textView.selectedRange,
                 confirmedMentions: mentions
             )
+            guard query != lastReportedMentionQuery else { return }
+            lastReportedMentionQuery = query
             onMentionQueryChange(query)
         }
     }

@@ -2,6 +2,7 @@ import SwiftUI
 
 struct NoteReportSheetView: View {
     @Environment(\.dismiss) private var dismiss
+    @EnvironmentObject private var appSettings: AppSettingsStore
 
     let noteAuthorName: String
     let onSubmit: @Sendable (NoteReportType, String) async throws -> Void
@@ -22,17 +23,21 @@ struct NoteReportSheetView: View {
                             HStack(spacing: 12) {
                                 Image(systemName: type.systemImage)
                                     .font(.body.weight(.semibold))
-                                    .foregroundStyle(selectedType == type ? Color.accentColor : .secondary)
+                                    .foregroundStyle(
+                                        selectedType == type
+                                            ? appSettings.primaryColor
+                                            : appSettings.themePalette.iconMutedForeground
+                                    )
                                     .frame(width: 26)
 
                                 VStack(alignment: .leading, spacing: 3) {
                                     Text(type.title)
                                         .font(.body.weight(.semibold))
-                                        .foregroundStyle(.primary)
+                                        .foregroundStyle(appSettings.themePalette.foreground)
 
                                     Text(type.subtitle)
                                         .font(.footnote)
-                                        .foregroundStyle(.secondary)
+                                        .foregroundStyle(appSettings.themePalette.secondaryForeground)
                                         .multilineTextAlignment(.leading)
                                 }
 
@@ -42,8 +47,8 @@ struct NoteReportSheetView: View {
                                     .font(.title3)
                                     .foregroundStyle(
                                         selectedType == type
-                                            ? AnyShapeStyle(Color.accentColor)
-                                            : AnyShapeStyle(.tertiary)
+                                            ? AnyShapeStyle(appSettings.primaryColor)
+                                            : AnyShapeStyle(appSettings.themePalette.tertiaryForeground)
                                     )
                             }
                             .padding(.vertical, 4)
@@ -61,7 +66,7 @@ struct NoteReportSheetView: View {
                     ZStack(alignment: .topLeading) {
                         if details.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                             Text("Optional context")
-                                .foregroundStyle(.tertiary)
+                                .foregroundStyle(appSettings.themePalette.tertiaryForeground)
                                 .padding(.top, 8)
                                 .padding(.leading, 5)
                         }
@@ -80,7 +85,7 @@ struct NoteReportSheetView: View {
                 }
             }
             .scrollContentBackground(.hidden)
-            .background(Color(.systemGroupedBackground))
+            .background(appSettings.themePalette.sheetBackground)
             .navigationTitle("Report Note")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -101,7 +106,7 @@ struct NoteReportSheetView: View {
         }
         .presentationDetents([.medium, .large])
         .presentationDragIndicator(.visible)
-        .presentationBackground(.regularMaterial)
+        .presentationBackground(appSettings.themePalette.sheetBackground)
         .accessibilityLabel("Report note from \(noteAuthorName)")
     }
 

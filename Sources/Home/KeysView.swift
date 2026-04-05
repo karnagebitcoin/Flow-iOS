@@ -2,15 +2,17 @@ import SwiftUI
 import UIKit
 
 struct KeysView: View {
+    @Environment(\.colorScheme) private var colorScheme
+    @EnvironmentObject private var appSettings: AppSettingsStore
     @EnvironmentObject private var auth: AuthManager
     @Environment(\.scenePhase) private var scenePhase
-    @State private var isPrivateKeyRevealed = false
+    @State private var revealedPrivateKey: String?
     @State private var backupErrorMessage: String?
     @State private var privateKeyAccessError: String?
     @State private var isAuthenticatingPrivateKey = false
 
     var body: some View {
-        Form {
+        ThemedSettingsForm {
             publicKeySection
             privateKeySection
             iCloudBackupSection
@@ -18,19 +20,23 @@ struct KeysView: View {
         .navigationTitle("Keys")
         .navigationBarTitleDisplayMode(.inline)
         .onChange(of: auth.currentAccount?.id) { _, _ in
-            isPrivateKeyRevealed = false
+            revealedPrivateKey = nil
             backupErrorMessage = nil
             privateKeyAccessError = nil
         }
         .onChange(of: scenePhase) { _, newPhase in
             guard newPhase == .background else { return }
-            isPrivateKeyRevealed = false
+            revealedPrivateKey = nil
             privateKeyAccessError = nil
         }
     }
 
+    private var settingsSurfaceStyle: SettingsFormSurfaceStyle {
+        appSettings.settingsFormSurfaceStyle(for: colorScheme)
+    }
+
     private var publicKeySection: some View {
-        Section("Public Key") {
+        ThemedSettingsSection("Public Key") {
             if let account = auth.currentAccount {
                 keyValueRow(
                     title: nil,
@@ -49,17 +55,17 @@ struct KeysView: View {
     }
 
     private var privateKeySection: some View {
-        Section("Private Key") {
-            if let privateKey = auth.currentNsec {
+        ThemedSettingsSection("Private Key") {
+            if auth.currentNsec != nil {
                 privateKeyRevealControl
 
-                if isPrivateKeyRevealed {
+                if let revealedPrivateKey {
                     keyValueRow(
                         title: "nsec",
-                        value: privateKey,
+                        value: revealedPrivateKey,
                         actionTitle: "Copy Private Key",
                         action: {
-                            UIPasteboard.general.string = privateKey
+                            UIPasteboard.general.string = revealedPrivateKey
                         }
                     )
                 } else {
@@ -101,7 +107,7 @@ struct KeysView: View {
     @ViewBuilder
     private var iCloudBackupSection: some View {
         if let account = auth.currentAccount, account.signerType == .nsec {
-            Section {
+            ThemedSettingsSection {
                 Toggle("Back Up Private Key to iCloud", isOn: privateKeyBackupBinding(for: account))
 
                 privateKeyBackupStatusCard(for: account)
@@ -130,7 +136,10 @@ struct KeysView: View {
                 .foregroundStyle(.secondary)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(12)
-                .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                .background(
+                    settingsSurfaceStyle.subcardBackground,
+                    in: RoundedRectangle(cornerRadius: 12, style: .continuous)
+                )
 
             Text("Turn on reveal only when you need to view or copy it.")
                 .font(.footnote)
@@ -142,8 +151,8 @@ struct KeysView: View {
 
     private var privateKeyRevealControl: some View {
         Button {
-            if isPrivateKeyRevealed {
-                isPrivateKeyRevealed = false
+            if revealedPrivateKey != nil {
+                revealedPrivateKey = nil
                 privateKeyAccessError = nil
             } else {
                 requestPrivateKeyReveal()
@@ -154,11 +163,11 @@ struct KeysView: View {
                     ProgressView()
                         .controlSize(.small)
                 } else {
-                    Image(systemName: isPrivateKeyRevealed ? "eye.slash" : "eye")
+                    Image(systemName: revealedPrivateKey != nil ? "eye.slash" : "eye")
                         .foregroundStyle(.secondary)
                 }
 
-                Text(isPrivateKeyRevealed ? "Hide Private Key" : "Reveal Private Key")
+                Text(revealedPrivateKey != nil ? "Hide Private Key" : "Reveal Private Key")
                     .foregroundStyle(.primary)
 
                 Spacer()
@@ -187,7 +196,10 @@ struct KeysView: View {
                 .fixedSize(horizontal: false, vertical: true)
         }
         .padding(12)
-        .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .background(
+            settingsSurfaceStyle.subcardBackground,
+            in: RoundedRectangle(cornerRadius: 12, style: .continuous)
+        )
     }
 
     private func backupStatusDescription(
@@ -248,7 +260,10 @@ struct KeysView: View {
                 .textSelection(.enabled)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(12)
-                .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                .background(
+                    settingsSurfaceStyle.subcardBackground,
+                    in: RoundedRectangle(cornerRadius: 12, style: .continuous)
+                )
 
             Button {
                 action()
@@ -279,6 +294,11 @@ struct KeysView: View {
 
     private func requestPrivateKeyReveal() {
         guard !isAuthenticatingPrivateKey else { return }
+        guard let privateKeyToReveal = auth.currentNsec else {
+            privateKeyAccessError = "This account’s private key is no longer available on this device."
+            revealedPrivateKey = nil
+            return
+        }
 
         Task { @MainActor in
             isAuthenticatingPrivateKey = true
@@ -289,9 +309,9 @@ struct KeysView: View {
                 try await DeviceOwnerAuthenticationGate.authenticate(
                     reason: "Reveal your private key in Halo."
                 )
-                isPrivateKeyRevealed = true
+                revealedPrivateKey = privateKeyToReveal
             } catch {
-                isPrivateKeyRevealed = false
+                revealedPrivateKey = nil
                 let message = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
                 if message != "Authentication was cancelled." {
                     privateKeyAccessError = message

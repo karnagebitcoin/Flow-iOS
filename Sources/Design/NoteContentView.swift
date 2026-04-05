@@ -342,11 +342,11 @@ struct NoteContentView: View {
         } label: {
             Text("More")
                 .font(.caption.weight(.semibold))
-                .foregroundStyle(.secondary)
+                .foregroundStyle(appSettings.themePalette.secondaryForeground)
                 .padding(.horizontal, 12)
                 .padding(.vertical, 6)
-                .background(Capsule().fill(Color(.tertiarySystemFill)))
-                .overlay(Capsule().stroke(Color(.separator).opacity(0.3), lineWidth: 0.6))
+                .background(Capsule().fill(appSettings.themePalette.tertiaryFill))
+                .overlay(Capsule().stroke(appSettings.themePalette.separator.opacity(0.3), lineWidth: 0.6))
         }
         .buttonStyle(.plain)
         .accessibilityLabel("Show full note")
@@ -592,8 +592,29 @@ struct NoteContentView: View {
     }
 
     private func inlineText(from tokens: [NoteContentToken]) -> Text {
-        tokens.reduce(Text("")) { partial, token in
+        if shouldPreferInteractiveAttributedInlineText(for: tokens) {
+            return Text(attributedInlineString(from: tokens))
+        }
+
+        return tokens.reduce(Text("")) { partial, token in
             partial + textSegment(for: token)
+        }
+    }
+
+    private func shouldPreferInteractiveAttributedInlineText(for tokens: [NoteContentToken]) -> Bool {
+        tokens.contains { token in
+            switch token.type {
+            case .url, .nostrMention, .hashtag:
+                return true
+            case .text, .websocketURL, .emoji, .nostrEvent, .image, .video, .audio:
+                return false
+            }
+        }
+    }
+
+    private func attributedInlineString(from tokens: [NoteContentToken]) -> AttributedString {
+        tokens.reduce(into: AttributedString()) { partial, token in
+            partial += attributedSegment(for: token)
         }
     }
 
@@ -935,6 +956,7 @@ private final class NoteParsedContentCache {
 }
 
 private struct NoteMediaPlaceholderView: View {
+    @EnvironmentObject private var appSettings: AppSettingsStore
     let systemImage: String
     let text: String
     var action: (() -> Void)? = nil
@@ -956,28 +978,28 @@ private struct NoteMediaPlaceholderView: View {
     private func placeholderContent(isActionable: Bool) -> some View {
         HStack(spacing: 10) {
             Image(systemName: systemImage)
-                .foregroundStyle(isActionable ? Color.accentColor : Color.secondary)
+                .foregroundStyle(isActionable ? appSettings.primaryColor : appSettings.themePalette.iconMutedForeground)
             Text(text)
                 .font(.footnote.weight(isActionable ? .semibold : .regular))
-                .foregroundStyle(isActionable ? Color.accentColor : Color.secondary)
+                .foregroundStyle(isActionable ? appSettings.primaryColor : appSettings.themePalette.secondaryForeground)
                 .lineLimit(nil)
             Spacer(minLength: 0)
             if isActionable {
                 Image(systemName: "chevron.right")
                     .font(.caption.weight(.semibold))
-                    .foregroundStyle(Color.accentColor)
+                    .foregroundStyle(appSettings.primaryColor)
             }
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 10)
         .background(
             RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .fill(Color(.secondarySystemBackground))
+                .fill(appSettings.themePalette.secondaryBackground)
         )
         .overlay(
             RoundedRectangle(cornerRadius: 12, style: .continuous)
                 .stroke(
-                    (isActionable ? Color.accentColor.opacity(0.35) : Color(.separator).opacity(0.35)),
+                    (isActionable ? appSettings.primaryColor.opacity(0.35) : appSettings.themePalette.separator.opacity(0.35)),
                     lineWidth: 0.5
                 )
         )
@@ -985,6 +1007,7 @@ private struct NoteMediaPlaceholderView: View {
 }
 
 private struct NoteBlurRevealContainer<Content: View>: View {
+    @EnvironmentObject private var appSettings: AppSettingsStore
     let cornerRadius: CGFloat
     let onReveal: () -> Void
     let content: Content
@@ -1023,7 +1046,7 @@ private struct NoteBlurRevealContainer<Content: View>: View {
             .background(
                 ZStack {
                     Capsule(style: .continuous)
-                        .fill(.ultraThinMaterial)
+                        .fill(appSettings.themePalette.modalBackground)
 
                     Capsule(style: .continuous)
                         .fill(
@@ -1197,6 +1220,7 @@ private struct NoteImageGalleryView: View {
 }
 
 private struct NoteFeedImageTileView: View {
+    @EnvironmentObject private var appSettings: AppSettingsStore
     let url: URL
     let cornerRadius: CGFloat
     let width: CGFloat
@@ -1210,17 +1234,17 @@ private struct NoteFeedImageTileView: View {
                     .frame(width: width, height: height)
             } placeholder: {
                 ZStack {
-                    Color(.secondarySystemBackground)
+                    appSettings.themePalette.secondaryBackground
                         .frame(width: width, height: height)
                     ProgressView()
                 }
             } failure: {
                 ZStack {
-                    Color(.secondarySystemBackground)
+                    appSettings.themePalette.secondaryBackground
                         .frame(width: width, height: height)
                     Image(systemName: "photo")
                         .font(.title3)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(appSettings.themePalette.secondaryForeground)
                 }
             }
             .frame(width: width, height: height)
@@ -1245,10 +1269,10 @@ private struct NoteSingleImageCellView: View {
     }
 
     private var mediaBackgroundColor: Color {
-        if appSettings.activeTheme == .dracula {
+        if appSettings.activeTheme == .dracula || appSettings.activeTheme == .gamer {
             return appSettings.themePalette.background
         }
-        return Color(.secondarySystemBackground)
+        return appSettings.themePalette.secondaryBackground
     }
 
     var body: some View {
@@ -1262,7 +1286,7 @@ private struct NoteSingleImageCellView: View {
             } failure: {
                 Image(systemName: "photo")
                     .font(.title3)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(appSettings.themePalette.secondaryForeground)
                     .frame(maxWidth: .infinity, minHeight: 180, maxHeight: placeholderHeight, alignment: .center)
                     .background(mediaBackgroundColor)
             }
@@ -1440,12 +1464,14 @@ private struct NoteImageFullscreenViewer: View {
 
             ReactionButton(
                 isLiked: isLikedByCurrentUser,
+                isBonusReaction: isBonusReactionByCurrentUser,
                 count: visibleReactionCount,
+                bonusActiveColor: appSettings.primaryColor,
                 inactiveColor: chromeForegroundColor,
                 minWidth: 36
-            ) {
+            ) { bonusCount in
                 Task {
-                    await handleReactionTap()
+                    await handleReactionTap(bonusCount: bonusCount)
                 }
             }
 
@@ -1496,6 +1522,13 @@ private struct NoteImageFullscreenViewer: View {
         )
     }
 
+    private var isBonusReactionByCurrentUser: Bool {
+        reactionStats.currentUserReaction(
+            for: sourceEvent.id,
+            currentPubkey: auth.currentAccount?.pubkey
+        )?.bonusCount ?? 0 > 0
+    }
+
     private var effectiveReadRelayURLs: [URL] {
         appSettings.effectiveReadRelayURLs(from: relaySettings.readRelayURLs)
     }
@@ -1508,30 +1541,24 @@ private struct NoteImageFullscreenViewer: View {
     }
 
     private var viewerBackgroundColor: Color {
-        if appSettings.activeTheme == .dracula {
-            return appSettings.themePalette.background
-        }
-        return colorScheme == .dark ? .black : Color(.systemBackground)
+        appSettings.themePalette.background
     }
 
     private var viewerNavigationBarColor: Color {
-        if appSettings.activeTheme == .dracula {
-            return appSettings.themePalette.background
-        }
-        return colorScheme == .dark ? .black : Color(.systemBackground)
+        appSettings.themePalette.navigationBackground
     }
 
     private var chromeForegroundColor: Color {
-        colorScheme == .dark ? .white : .primary
+        appSettings.themePalette.foreground
     }
 
     private var doneButtonForegroundColor: Color {
-        colorScheme == .dark ? .white : .black
+        appSettings.themePalette.foreground
     }
 
     private var fullscreenReshareOverlay: some View {
         ZStack(alignment: .bottom) {
-            Color.black.opacity(colorScheme == .dark ? 0.42 : 0.18)
+            appSettings.themePalette.overlayBackground
                 .ignoresSafeArea()
                 .contentShape(Rectangle())
                 .onTapGesture {
@@ -1542,14 +1569,14 @@ private struct NoteImageFullscreenViewer: View {
 
             VStack(alignment: .leading, spacing: 16) {
                 Capsule()
-                    .fill(Color.white.opacity(colorScheme == .dark ? 0.28 : 0.5))
+                    .fill(appSettings.themePalette.separator.opacity(0.82))
                     .frame(width: 42, height: 5)
                     .frame(maxWidth: .infinity)
 
                 HStack {
                     Text("Re-share")
                         .font(.headline.weight(.semibold))
-                        .foregroundStyle(.primary)
+                        .foregroundStyle(appSettings.themePalette.foreground)
                     Spacer()
                     Button {
                         withAnimation(.spring(response: 0.3, dampingFraction: 0.9)) {
@@ -1558,9 +1585,9 @@ private struct NoteImageFullscreenViewer: View {
                     } label: {
                         Image(systemName: "xmark")
                             .font(.subheadline.weight(.semibold))
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(appSettings.themePalette.iconMutedForeground)
                             .frame(width: 30, height: 30)
-                            .background(Color(.tertiarySystemFill), in: Circle())
+                            .background(appSettings.themePalette.tertiaryFill, in: Circle())
                     }
                     .buttonStyle(.plain)
                     .accessibilityLabel("Close re-share options")
@@ -1588,7 +1615,11 @@ private struct NoteImageFullscreenViewer: View {
                 }
                 .background(
                     RoundedRectangle(cornerRadius: 18, style: .continuous)
-                        .fill(Color(.secondarySystemBackground).opacity(colorScheme == .dark ? 0.9 : 0.94))
+                        .fill(appSettings.themePalette.modalBackground)
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                                .stroke(appSettings.themePalette.separator.opacity(0.35), lineWidth: 0.8)
+                        )
                 )
 
                 if let repostStatusMessage, !repostStatusMessage.isEmpty {
@@ -1597,7 +1628,7 @@ private struct NoteImageFullscreenViewer: View {
                             .foregroundStyle(repostStatusIsError ? .red : .green)
                         Text(repostStatusMessage)
                             .font(.footnote)
-                            .foregroundStyle(repostStatusIsError ? .red : .secondary)
+                            .foregroundStyle(repostStatusIsError ? .red : appSettings.themePalette.secondaryForeground)
                         Spacer(minLength: 0)
                     }
                     .padding(.horizontal, 12)
@@ -1609,7 +1640,7 @@ private struct NoteImageFullscreenViewer: View {
                 } else {
                     Text("Share this note as a repost, or add your own context with a quote.")
                         .font(.footnote)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(appSettings.themePalette.secondaryForeground)
                 }
             }
             .padding(.horizontal, 16)
@@ -1617,10 +1648,10 @@ private struct NoteImageFullscreenViewer: View {
             .padding(.bottom, 16)
             .background(
                 RoundedRectangle(cornerRadius: 28, style: .continuous)
-                    .fill(.ultraThinMaterial)
+                    .fill(appSettings.themePalette.modalBackground)
                     .overlay(
                         RoundedRectangle(cornerRadius: 28, style: .continuous)
-                            .stroke(Color.white.opacity(colorScheme == .dark ? 0.12 : 0.35), lineWidth: 0.7)
+                            .stroke(appSettings.themePalette.separator.opacity(0.35), lineWidth: 0.7)
                     )
             )
             .padding(.horizontal, 14)
@@ -1629,7 +1660,7 @@ private struct NoteImageFullscreenViewer: View {
     }
 
     @MainActor
-    private func handleReactionTap() async {
+    private func handleReactionTap(bonusCount: Int = 0) async {
         let eventID = sourceEvent.id
         guard reactionStats.beginPublishingReaction(for: eventID) else { return }
         let existingReaction = reactionStats.currentUserReaction(
@@ -1638,7 +1669,8 @@ private struct NoteImageFullscreenViewer: View {
         )
         let optimisticToggle = reactionStats.applyOptimisticToggle(
             for: eventID,
-            currentPubkey: auth.currentAccount?.pubkey
+            currentPubkey: auth.currentAccount?.pubkey,
+            bonusCount: bonusCount
         )
         defer {
             reactionStats.endPublishingReaction(for: eventID)
@@ -1648,6 +1680,7 @@ private struct NoteImageFullscreenViewer: View {
             let result = try await reactionPublishService.toggleReaction(
                 for: sourceEvent,
                 existingReactionID: existingReaction?.id,
+                bonusCount: bonusCount,
                 currentNsec: auth.currentNsec,
                 writeRelayURLs: effectiveWriteRelayURLs,
                 relayHintURL: effectiveReadRelayURLs.first
@@ -1683,7 +1716,7 @@ private struct NoteImageFullscreenViewer: View {
             HStack(spacing: 12) {
                 Text(title)
                     .font(.body.weight(.medium))
-                    .foregroundStyle(.primary)
+                    .foregroundStyle(appSettings.themePalette.foreground)
 
                 Spacer(minLength: 0)
 
@@ -1693,7 +1726,7 @@ private struct NoteImageFullscreenViewer: View {
                 } else {
                     Image(systemName: systemImage)
                         .font(.body.weight(.semibold))
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(appSettings.themePalette.iconMutedForeground)
                 }
             }
             .padding(.horizontal, 18)
@@ -1994,6 +2027,7 @@ private final class NoteVideoThumbnailCache {
 private struct NoteVideoPlayerView: View {
     let url: URL
     let layout: NoteContentMediaLayout
+    @EnvironmentObject private var appSettings: AppSettingsStore
     @Environment(\.colorScheme) private var colorScheme
     @State private var videoAspectRatio: CGFloat = 16.0 / 9.0
     @State private var videoThumbnail: UIImage?
@@ -2051,8 +2085,8 @@ private struct NoteVideoPlayerView: View {
             ZStack {
                 LinearGradient(
                     colors: [
-                        Color(.secondarySystemFill),
-                        Color(.tertiarySystemFill)
+                        appSettings.themePalette.secondaryFill,
+                        appSettings.themePalette.tertiaryFill
                     ],
                     startPoint: .topLeading,
                     endPoint: .bottomTrailing
@@ -2066,12 +2100,12 @@ private struct NoteVideoPlayerView: View {
 
     private var playOverlayButton: some View {
         Circle()
-            .fill(.ultraThinMaterial)
+            .fill(appSettings.themePalette.modalBackground)
             .frame(width: 54, height: 54)
             .overlay {
                 Image(systemName: "play.fill")
                     .font(.system(size: 18, weight: .semibold))
-                    .foregroundStyle(.primary)
+                    .foregroundStyle(appSettings.themePalette.foreground)
                     .offset(x: 1)
             }
             .overlay {
@@ -2145,6 +2179,7 @@ private struct NoteVideoPlayerView: View {
 
 private struct NoteAudioPlayerView: View {
     let url: URL
+    @EnvironmentObject private var appSettings: AppSettingsStore
     @State private var player: AVPlayer
     @State private var isPlaying = false
 
@@ -2169,7 +2204,7 @@ private struct NoteAudioPlayerView: View {
                     .lineLimit(1)
                 Text(url.host ?? "Audio")
                     .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(appSettings.themePalette.secondaryForeground)
                     .lineLimit(1)
             }
 
@@ -2185,11 +2220,11 @@ private struct NoteAudioPlayerView: View {
         .padding(12)
         .background(
             RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .fill(Color(.secondarySystemBackground))
+                .fill(appSettings.themePalette.secondaryBackground)
         )
         .overlay(
             RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .stroke(Color(.separator), lineWidth: 0.5)
+                .stroke(appSettings.themePalette.separator, lineWidth: 0.5)
         )
         .onReceive(
             NotificationCenter.default.publisher(for: .AVPlayerItemDidPlayToEndTime)
@@ -2833,6 +2868,7 @@ private struct NostrEventReferenceCardView: View {
 }
 
 private struct WebsiteLinkCardView: View {
+    @EnvironmentObject private var appSettings: AppSettingsStore
     let url: URL
     let backgroundColor: Color
     let borderColor: Color
@@ -2860,18 +2896,19 @@ private struct WebsiteLinkCardView: View {
                 VStack(alignment: .leading, spacing: 4) {
                     Text(FlowLayoutGuardrails.softWrapped(loader.title ?? fallbackTitle))
                         .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(appSettings.themePalette.foreground)
                         .lineLimit(2)
                         .multilineTextAlignment(.leading)
                     if let summary = loader.summary, !summary.isEmpty {
                         Text(FlowLayoutGuardrails.softWrapped(summary))
                             .font(.caption)
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(appSettings.themePalette.secondaryForeground)
                             .lineLimit(2)
                             .multilineTextAlignment(.leading)
                     }
                     Text(FlowLayoutGuardrails.softWrapped(loader.hostDisplay, maxNonBreakingRunLength: 18))
                         .font(.caption2)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(appSettings.themePalette.secondaryForeground)
                         .lineLimit(1)
                 }
 

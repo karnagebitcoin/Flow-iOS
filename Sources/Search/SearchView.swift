@@ -89,7 +89,7 @@ struct SearchView: View {
                             } header: {
                                 Text(viewModel.isSearching ? "People" : "Suggestions")
                                     .font(.caption.weight(.semibold))
-                                    .foregroundStyle(.secondary)
+                                    .foregroundStyle(appSettings.themePalette.secondaryForeground)
                                     .textCase(nil)
                             }
                         }
@@ -115,7 +115,7 @@ struct SearchView: View {
                                 } header: {
                                     Text(activeContentSearch.sectionTitle)
                                         .font(.caption.weight(.semibold))
-                                        .foregroundStyle(.secondary)
+                                        .foregroundStyle(appSettings.themePalette.secondaryForeground)
                                         .textCase(nil)
                                 }
                             }
@@ -310,6 +310,12 @@ struct SearchView: View {
                 appSettings.themePalette.chromeBackground.opacity(0.78)
                 appSettings.primaryGradient.opacity(0.14)
             }
+        } else if appSettings.activeTheme == .gamer {
+            ZStack {
+                appSettings.themePalette.chromeBackground
+                appSettings.primaryGradient.opacity(0.18)
+                Color(red: 0.329, green: 0.920, blue: 0.996).opacity(0.04)
+            }
         } else if appSettings.activeTheme == .dracula {
             appSettings.themePalette.background
         } else {
@@ -320,6 +326,8 @@ struct SearchView: View {
     private var searchFieldFill: Color {
         if appSettings.activeTheme == .sakura {
             return Color.white.opacity(0.72)
+        } else if appSettings.activeTheme == .gamer {
+            return appSettings.themePalette.chromeBackground.opacity(0.84)
         }
         return appSettings.themePalette.secondaryBackground
     }
@@ -330,7 +338,7 @@ struct SearchView: View {
                 Text(errorMessage)
                     .font(.body)
                     .multilineTextAlignment(.center)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(appSettings.themePalette.secondaryForeground)
 
                 Button("Try Again") {
                     Task {
@@ -342,12 +350,12 @@ struct SearchView: View {
                 Text("No people match \"\(viewModel.searchText.trimmingCharacters(in: .whitespacesAndNewlines))\".")
                     .font(.body)
                     .multilineTextAlignment(.center)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(appSettings.themePalette.secondaryForeground)
             } else {
                 Text("Popular people will appear here.")
                 .font(.body)
                 .multilineTextAlignment(.center)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(appSettings.themePalette.secondaryForeground)
             }
         }
         .frame(maxWidth: .infinity)
@@ -360,12 +368,12 @@ struct SearchView: View {
                 Text(errorMessage)
                     .font(.body)
                     .multilineTextAlignment(.center)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(appSettings.themePalette.secondaryForeground)
             } else {
                 Text("No results for \(activeContentSearch.title.lowercased()).")
                     .font(.body)
                     .multilineTextAlignment(.center)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(appSettings.themePalette.secondaryForeground)
             }
         }
         .frame(maxWidth: .infinity)
@@ -407,12 +415,12 @@ struct SearchView: View {
                 VStack(alignment: .leading, spacing: 2) {
                     Text(profile.displayName)
                         .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(.primary)
+                        .foregroundStyle(appSettings.themePalette.foreground)
                         .lineLimit(1)
 
                     Text(profile.handle)
                         .font(.footnote)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(appSettings.themePalette.secondaryForeground)
                         .lineLimit(1)
                 }
             }
@@ -427,7 +435,7 @@ struct SearchView: View {
                 profileStatusBadge(
                     title: "You",
                     systemImage: "person.crop.circle.fill",
-                    foreground: .primary,
+                    foreground: appSettings.themePalette.foreground,
                     background: appSettings.themePalette.secondaryGroupedBackground
                 )
             } else {
@@ -603,7 +611,7 @@ struct SearchView: View {
                 .fill(appSettings.themePalette.secondaryFill)
             Text(String(displayName.prefix(1)).uppercased())
                 .font(.caption.weight(.semibold))
-                .foregroundStyle(.secondary)
+                .foregroundStyle(appSettings.themePalette.secondaryForeground)
         }
     }
 
