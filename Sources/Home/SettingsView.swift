@@ -3,7 +3,6 @@ import SwiftUI
 import UIKit
 
 struct SettingsView: View {
-    @Environment(\.colorScheme) private var colorScheme
     @Environment(\.dismiss) private var dismiss
     @EnvironmentObject private var appSettings: AppSettingsStore
     @EnvironmentObject private var premiumStore: FlowPremiumStore
@@ -13,12 +12,12 @@ struct SettingsView: View {
 
     var body: some View {
         ZStack {
-            coreSheetBackground
+            appSettings.themePalette.sheetBackground
                 .ignoresSafeArea()
 
             NavigationStack(path: navigationPathBinding) {
-                Form {
-                    Section {
+                ThemedSettingsForm {
+                    ThemedSettingsSection {
                         SettingsValueNavigationRow(
                             title: "General",
                             systemImage: "slider.horizontal.3",
@@ -68,9 +67,8 @@ struct SettingsView: View {
                             value: .connection
                         )
                     }
-                    .listRowBackground(coreSheetCardBackground)
 
-                    Section {
+                    ThemedSettingsSection {
                         SettingsValueNavigationRow(
                             title: "Halo Plus",
                             subtitle: flowPlusSummaryText,
@@ -78,18 +76,15 @@ struct SettingsView: View {
                             value: .flowPlus
                         )
                     }
-                    .listRowBackground(coreSheetCardBackground)
                 }
-                .scrollContentBackground(.hidden)
-                .background(Color.clear)
-                .navigationTitle("Core")
+                .navigationTitle("Settings")
                 .navigationBarTitleDisplayMode(.large)
                 .navigationDestination(for: SettingsDestination.self) { destination in
                     settingsDestinationView(for: destination)
                 }
                 .toolbar {
                     ToolbarItem(placement: .topBarTrailing) {
-                        Button("Done") {
+                        ThemedToolbarDoneButton {
                             dismiss()
                         }
                     }
@@ -115,31 +110,8 @@ struct SettingsView: View {
                 }
             }
         }
-        .presentationBackground(coreSheetBackground)
+        .presentationBackground(appSettings.themePalette.sheetBackground)
         .preferredColorScheme(appSettings.preferredColorScheme)
-    }
-
-    private var usesLightCoreSheetSurfaces: Bool {
-        switch appSettings.activeTheme {
-        case .white, .light, .sakura:
-            return true
-        case .system:
-            return colorScheme == .light
-        case .black, .dark, .dracula:
-            return false
-        }
-    }
-
-    private var coreSheetBackground: Color {
-        usesLightCoreSheetSurfaces
-            ? appSettings.themePalette.secondaryGroupedBackground
-            : appSettings.themePalette.background
-    }
-
-    private var coreSheetCardBackground: Color {
-        usesLightCoreSheetSurfaces
-            ? .white
-            : appSettings.themePalette.secondaryGroupedBackground
     }
 
     private var connectionSummaryText: String {
@@ -349,7 +321,7 @@ struct NotificationPreferencesView: View {
     var titleDisplayMode: NavigationBarItem.TitleDisplayMode = .large
 
     var body: some View {
-        Form {
+        ThemedSettingsForm {
             Section("System Notifications") {
                 NotificationPreferencesToggleRow(
                     title: "Enable Notifications",
@@ -400,6 +372,151 @@ struct NotificationPreferencesView: View {
     }
 }
 
+struct SettingsFormSurfaceStyle {
+    let formBackground: Color
+    let cardBackground: Color
+    let cardBorder: Color
+    let subcardBackground: Color
+    let controlBackground: Color
+    let navigationBackground: Color
+}
+
+extension AppSettingsStore {
+    func settingsFormSurfaceStyle(for colorScheme: ColorScheme) -> SettingsFormSurfaceStyle {
+        let palette = themePalette
+        let subcardBackground = colorScheme == .light
+            ? palette.sheetCardBackground
+            : palette.sheetInsetBackground
+
+        return SettingsFormSurfaceStyle(
+            formBackground: palette.sheetBackground,
+            cardBackground: palette.sheetCardBackground,
+            cardBorder: palette.sheetCardBorder,
+            subcardBackground: subcardBackground,
+            controlBackground: palette.sheetInsetBackground,
+            navigationBackground: palette.sheetBackground
+        )
+    }
+}
+
+struct ThemedSettingsForm<Content: View>: View {
+    @Environment(\.colorScheme) private var colorScheme
+    @EnvironmentObject private var appSettings: AppSettingsStore
+
+    private let content: Content
+
+    init(@ViewBuilder content: () -> Content) {
+        self.content = content()
+    }
+
+    var body: some View {
+        let effectiveColorScheme = appSettings.preferredColorScheme ?? colorScheme
+        let surfaceStyle = appSettings.settingsFormSurfaceStyle(for: effectiveColorScheme)
+
+        return Form {
+            content
+                .listRowBackground(surfaceStyle.cardBackground)
+        }
+        .scrollContentBackground(.hidden)
+        .background(surfaceStyle.formBackground)
+        .tint(appSettings.primaryColor)
+        .listRowSeparatorTint(surfaceStyle.cardBorder)
+        .listSectionSeparatorTint(surfaceStyle.cardBorder)
+        .toolbarBackground(surfaceStyle.navigationBackground, for: .navigationBar)
+        .toolbarBackground(.visible, for: .navigationBar)
+        .toolbarColorScheme(effectiveColorScheme, for: .navigationBar)
+        .presentationBackground(surfaceStyle.formBackground)
+        .preferredColorScheme(appSettings.preferredColorScheme)
+    }
+}
+
+struct ThemedToolbarDoneButton: View {
+    @EnvironmentObject private var appSettings: AppSettingsStore
+
+    var title: String = "Done"
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            Text(title)
+                .font(appSettings.appFont(.subheadline, weight: .semibold))
+                .foregroundStyle(appSettings.themePalette.foreground)
+                .padding(.horizontal, 14)
+                .padding(.vertical, 8)
+                .background(
+                    appSettings.themePalette.navigationControlBackground,
+                    in: Capsule(style: .continuous)
+                )
+        }
+        .buttonStyle(.plain)
+    }
+}
+
+struct ThemedSettingsSection: View {
+    @EnvironmentObject private var appSettings: AppSettingsStore
+
+    private let title: LocalizedStringKey?
+    private let content: AnyView
+    private let header: AnyView?
+    private let footer: AnyView?
+
+    init<Content: View>(
+        _ title: LocalizedStringKey,
+        @ViewBuilder content: () -> Content
+    ) {
+        self.title = title
+        self.content = AnyView(content())
+        self.header = nil
+        self.footer = nil
+    }
+
+    init<Content: View>(
+        @ViewBuilder content: () -> Content
+    ) {
+        self.title = nil
+        self.content = AnyView(content())
+        self.header = nil
+        self.footer = nil
+    }
+
+    init<Content: View, Header: View, Footer: View>(
+        @ViewBuilder content: () -> Content,
+        @ViewBuilder header: () -> Header,
+        @ViewBuilder footer: () -> Footer
+    ) {
+        self.title = nil
+        self.content = AnyView(content())
+        self.header = AnyView(header())
+        self.footer = AnyView(footer())
+    }
+
+    var body: some View {
+        sectionBody
+            .listRowBackground(appSettings.themePalette.sheetCardBackground)
+    }
+
+    @ViewBuilder
+    private var sectionBody: some View {
+        if let header, let footer {
+            Section {
+                content
+            } header: {
+                header
+            } footer: {
+                footer
+            }
+        } else if let title {
+            Section(title) {
+                content
+            }
+        } else {
+            Section {
+                content
+            }
+        }
+    }
+}
+
 private struct NotificationPreferencesToggleRow: View {
     @EnvironmentObject private var appSettings: AppSettingsStore
     let title: String
@@ -428,7 +545,7 @@ private struct SettingsAppearanceView: View {
     }
 
     var body: some View {
-        Form {
+        ThemedSettingsForm {
             Section("Appearance") {
                 Button {
                     guard appSettings.canCustomizePrimaryColor else { return }
@@ -656,6 +773,15 @@ private struct SettingsAppearanceView: View {
                 startPoint: .topLeading,
                 endPoint: .bottomTrailing
             )
+        case .gamer:
+            return AppThemeOption.gamer.fixedPrimaryGradient ?? LinearGradient(
+                colors: [
+                    Color(red: 0.553, green: 0.408, blue: 1.0),
+                    Color(red: 0.329, green: 0.920, blue: 0.996)
+                ],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
         case .dark:
             return LinearGradient(
                 colors: [Color(red: 0.19, green: 0.16, blue: 0.28), Color(red: 0.09, green: 0.08, blue: 0.14)],
@@ -679,6 +805,8 @@ private struct SettingsAppearanceView: View {
             return Color(red: 0.45, green: 0.21, blue: 0.32)
         case .dracula:
             return Color(red: 0.973, green: 0.973, blue: 0.949).opacity(0.92)
+        case .gamer:
+            return Color.white.opacity(0.92)
         case .black, .dark:
             return .white.opacity(0.85)
         }
@@ -748,7 +876,7 @@ private struct SettingsGeneralView: View {
     @StateObject private var liveReactsPreviewCoordinator = LiveReactsCoordinator()
 
     var body: some View {
-        Form {
+        ThemedSettingsForm {
             Section {
                 LabeledContent("Break Reminder") {
                     Picker("Break Reminder", selection: breakReminderIntervalBinding) {
@@ -866,7 +994,7 @@ private struct SettingsMediaView: View {
     @State private var isShowingClearMediaCacheConfirmation = false
 
     var body: some View {
-        Form {
+        ThemedSettingsForm {
             Section {
                 SettingsToggleRow(
                     title: "Blur Media From People I Don't Follow",
@@ -964,7 +1092,7 @@ private struct SettingsMediaDiagnosticsView: View {
     @State private var flowDBDiagnostics = FlowNostrDBDiagnostics()
 
     var body: some View {
-        Form {
+        ThemedSettingsForm {
             Section {
                 diagnosticMetricRow(
                     title: "Cache Hit Rate",
@@ -1174,7 +1302,7 @@ private struct SettingsMediaDiagnosticsView: View {
 
 private struct SettingsFeedsView: View {
     var body: some View {
-        Form {
+        ThemedSettingsForm {
             Section {
                 SettingsNavigationRow(title: "Interests", systemImage: "sparkles") {
                     SettingsInterestsFeedView()
@@ -1205,7 +1333,7 @@ private struct SettingsInterestsFeedView: View {
     @State private var validationMessage: String?
 
     var body: some View {
-        Form {
+        ThemedSettingsForm {
             Section("Add Hashtag") {
                 TextField("#technology", text: $hashtagInput)
                     .textInputAutocapitalization(.never)
@@ -1297,7 +1425,7 @@ private struct SettingsNewsFeedView: View {
     private let service = NostrFeedService()
 
     var body: some View {
-        Form {
+        ThemedSettingsForm {
             Section {
                 ForEach(appSettings.newsRelayURLs, id: \.self) { relay in
                     HStack(spacing: 10) {
@@ -1534,7 +1662,7 @@ private struct SettingsCustomFeedsView: View {
     @State private var draft: SettingsCustomFeedDraft?
 
     var body: some View {
-        Form {
+        ThemedSettingsForm {
             Section {
                 Button {
                     draft = SettingsCustomFeedDraft()
@@ -1626,7 +1754,7 @@ private struct SettingsCustomFeedEditorSheet: View {
 
     var body: some View {
         NavigationStack {
-            Form {
+            ThemedSettingsForm {
                 Section("Name") {
                     TextField("Soccer Season", text: $draft.name)
                 }
@@ -1907,7 +2035,7 @@ private struct SettingsCustomFeedPersonPickerView: View {
     private let vertexSearchService = VertexProfileSearchService.shared
 
     var body: some View {
-        Form {
+        ThemedSettingsForm {
             Section {
                 TextField("Search name or paste npub", text: $searchText)
                     .textInputAutocapitalization(.never)
@@ -2199,7 +2327,7 @@ private struct SettingsNewsPersonPickerView: View {
     ].compactMap { $0 }
 
     var body: some View {
-        Form {
+        ThemedSettingsForm {
             Section {
                 TextField("Search name or paste npub", text: $searchText)
                     .textInputAutocapitalization(.never)
@@ -2540,7 +2668,7 @@ private struct SettingsMutedContentView: View {
     @State private var isLoadingMutedUsers = false
 
     var body: some View {
-        Form {
+        ThemedSettingsForm {
             Section {
                 FlowCapsuleTabBar(
                     selection: $selectedTab,
@@ -2762,7 +2890,7 @@ private struct MutedUserRow: View {
     private var mutedUserAvatar: some View {
         Group {
             if let avatarURL {
-                AsyncImage(url: avatarURL) { phase in
+                CachedAsyncImage(url: avatarURL) { phase in
                     switch phase {
                     case .success(let image):
                         image
@@ -2834,7 +2962,7 @@ private struct SettingsMutedKeywordListDetailView: View {
     let listID: String
 
     var body: some View {
-        Form {
+        ThemedSettingsForm {
             if let list = currentList {
                 if list.allowsToggle {
                     Section {

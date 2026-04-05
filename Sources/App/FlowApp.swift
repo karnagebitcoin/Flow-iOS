@@ -1,3 +1,4 @@
+import CoreMotion
 import SwiftUI
 import UIKit
 
@@ -78,6 +79,9 @@ struct FlowApp: App {
             .onChange(of: appSettings.fontSize) { _, _ in
                 updateGlobalTypographyAppearance()
             }
+            .onChange(of: appSettings.activeTheme.rawValue) { _, _ in
+                updateGlobalTypographyAppearance()
+            }
             .onChange(of: composeSheetCoordinator.draft?.id) { _, newValue in
                 guard newValue == nil else { return }
                 Task {
@@ -123,11 +127,15 @@ struct FlowApp: App {
     @MainActor
     private func updateGlobalTypographyAppearance() {
         let navigationBar = UINavigationBar.appearance()
+        let navigationTitleColor = UIColor(appSettings.themePalette.foreground)
+
         navigationBar.titleTextAttributes = [
-            .font: appSettings.appUIFont(.headline, weight: .semibold)
+            .font: appSettings.appUIFont(.headline, weight: .semibold),
+            .foregroundColor: navigationTitleColor
         ]
         navigationBar.largeTitleTextAttributes = [
-            .font: appSettings.appUIFont(.largeTitle, weight: .bold)
+            .font: appSettings.appUIFont(.largeTitle, weight: .bold),
+            .foregroundColor: navigationTitleColor
         ]
 
         let barButtonFont = appSettings.appUIFont(.body, weight: .semibold)
@@ -258,6 +266,7 @@ private struct GlobalProfileQRCodeBridge: View {
     @EnvironmentObject private var auth: AuthManager
 
     @State private var isMonitoringOrientation = false
+    @StateObject private var flipMonitor = QRCodeFlipMonitor()
 
     private let overlayController = GlobalProfileQRCodeOverlayController.shared
 
@@ -269,15 +278,20 @@ private struct GlobalProfileQRCodeBridge: View {
                 guard !isMonitoringOrientation else { return }
                 isMonitoringOrientation = true
                 UIDevice.current.beginGeneratingDeviceOrientationNotifications()
+                flipMonitor.start()
                 syncPresentation()
             }
             .onDisappear {
                 guard isMonitoringOrientation else { return }
                 isMonitoringOrientation = false
                 UIDevice.current.endGeneratingDeviceOrientationNotifications()
+                flipMonitor.stop()
                 overlayController.dismiss()
             }
             .onReceive(NotificationCenter.default.publisher(for: UIDevice.orientationDidChangeNotification)) { _ in
+                syncPresentation()
+            }
+            .onChange(of: flipMonitor.isQRCodeFlipActive) { _, _ in
                 syncPresentation()
             }
             .onChange(of: auth.currentAccount?.id) { _, _ in
@@ -291,6 +305,7 @@ private struct GlobalProfileQRCodeBridge: View {
     private func syncPresentation(forceRefresh: Bool = false) {
         overlayController.update(
             orientation: UIDevice.current.orientation,
+            isMotionFlipActive: flipMonitor.isQRCodeFlipActive,
             currentAccount: auth.currentAccount,
             scenePhase: scenePhase,
             forceRefresh: forceRefresh
@@ -299,16 +314,59 @@ private struct GlobalProfileQRCodeBridge: View {
 }
 
 @MainActor
+private final class QRCodeFlipMonitor: ObservableObject {
+    @Published private(set) var isQRCodeFlipActive = false
+
+    private let motionManager = CMMotionManager()
+    private let motionQueue = OperationQueue()
+    private var isMonitoring = false
+
+    init() {
+        motionQueue.name = "com.21media.flow.qr-flip-monitor"
+        motionQueue.qualityOfService = .userInteractive
+    }
+
+    func start() {
+        guard !isMonitoring, motionManager.isDeviceMotionAvailable else { return }
+
+        isMonitoring = true
+        motionManager.deviceMotionUpdateInterval = 0.2
+        motionManager.startDeviceMotionUpdates(to: motionQueue) { [weak self] motion, _ in
+            guard let self, let motion else { return }
+
+            let isFlipActive = Self.isLikelyQRCodeFlip(gravity: motion.gravity)
+            Task { @MainActor in
+                self.isQRCodeFlipActive = isFlipActive
+            }
+        }
+    }
+
+    func stop() {
+        guard isMonitoring else { return }
+
+        isMonitoring = false
+        motionManager.stopDeviceMotionUpdates()
+        isQRCodeFlipActive = false
+    }
+
+    // Fallback for devices/OS versions where upside-down orientation notifications are unreliable.
+    private static func isLikelyQRCodeFlip(gravity: CMAcceleration) -> Bool {
+        gravity.y > 0.82 && abs(gravity.x) < 0.45 && abs(gravity.z) < 0.5
+    }
+}
+
+@MainActor
 private final class GlobalProfileQRCodeOverlayController {
     static let shared = GlobalProfileQRCodeOverlayController()
 
     private var overlayWindow: UIWindow?
-    private var overlayHostingController: UIHostingController<PresentedProfileQRCodeView>?
+    private var overlayHostingController: UIHostingController<GlobalPresentedProfileQRCodeContainer>?
     private var pendingPresentationTask: Task<Void, Never>?
     private var presentedPubkey: String?
 
     func update(
         orientation: UIDeviceOrientation,
+        isMotionFlipActive: Bool,
         currentAccount: AuthAccount?,
         scenePhase: ScenePhase,
         forceRefresh: Bool = false
@@ -318,9 +376,12 @@ private final class GlobalProfileQRCodeOverlayController {
             return
         }
 
-        switch orientation {
-        case .portraitUpsideDown:
+        if orientation == .portraitUpsideDown || isMotionFlipActive {
             presentIfNeeded(for: currentAccount, forceRefresh: forceRefresh)
+            return
+        }
+
+        switch orientation {
         case .faceUp, .faceDown, .unknown:
             break
         default:
@@ -370,7 +431,7 @@ private final class GlobalProfileQRCodeOverlayController {
             for: AppSettingsStore.shared.activeTheme
         )
 
-        let content = PresentedProfileQRCodeView(
+        let content = GlobalPresentedProfileQRCodeContainer(
             trigger: .automatic,
             displayName: presentation.displayName,
             handle: presentation.handle,
@@ -455,6 +516,31 @@ private final class GlobalProfileQRCodeOverlayController {
             .replacingOccurrences(of: " ", with: "")
             .lowercased()
         return compact.isEmpty ? "user" : compact
+    }
+}
+
+private struct GlobalPresentedProfileQRCodeContainer: View {
+    @ObservedObject private var appSettings = AppSettingsStore.shared
+
+    let trigger: FullScreenQRCodeTrigger
+    let displayName: String
+    let handle: String?
+    let avatarURL: URL?
+    let qrCodeImage: UIImage?
+    let qrBackgroundResourceName: String
+    let onDismiss: () -> Void
+
+    var body: some View {
+        PresentedProfileQRCodeView(
+            trigger: trigger,
+            displayName: displayName,
+            handle: handle,
+            avatarURL: avatarURL,
+            qrCodeImage: qrCodeImage,
+            qrBackgroundResourceName: qrBackgroundResourceName,
+            onDismiss: onDismiss
+        )
+        .environmentObject(appSettings)
     }
 }
 

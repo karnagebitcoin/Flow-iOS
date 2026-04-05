@@ -207,7 +207,7 @@ struct ComposeKlipyGIFPickerSheet: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button("Done") {
+                    ThemedToolbarDoneButton {
                         dismiss()
                     }
                 }

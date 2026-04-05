@@ -187,11 +187,11 @@ struct MainTabShellView: View {
         }
     }
 
-    @ViewBuilder
+        @ViewBuilder
     private var bottomTabBarBackground: some View {
         if appSettings.activeTheme == .sakura {
             ZStack {
-                appSettings.themePalette.chromeBackground
+                appSettings.themePalette.navigationBackground
 
                 LinearGradient(
                     colors: [
@@ -202,8 +202,21 @@ struct MainTabShellView: View {
                     endPoint: .bottomTrailing
                 )
             }
+        } else if appSettings.activeTheme == .gamer {
+            ZStack {
+                appSettings.themePalette.navigationBackground
+                LinearGradient(
+                    colors: [
+                        appSettings.primaryColor.opacity(0.16),
+                        Color(red: 0.329, green: 0.920, blue: 0.996).opacity(0.08),
+                        Color.clear
+                    ],
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing
+                )
+            }
         } else {
-            appSettings.themePalette.chromeBackground
+            appSettings.themePalette.navigationBackground
         }
     }
 
@@ -219,7 +232,7 @@ struct MainTabShellView: View {
                     .foregroundStyle(
                         isHighlighted
                             ? appSettings.primaryColor
-                            : appSettings.themePalette.mutedForeground
+                            : appSettings.themePalette.iconMutedForeground
                     )
                     .frame(maxWidth: .infinity)
                     .frame(height: 46)

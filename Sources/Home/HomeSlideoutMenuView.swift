@@ -28,7 +28,7 @@ struct HomeSlideoutMenuView: View {
                     Image(systemName: "xmark")
                         .font(.system(size: 16, weight: .semibold))
                         .frame(width: 32, height: 32)
-                        .background(appSettings.themePalette.secondaryBackground)
+                        .background(appSettings.themePalette.sheetCardBackground)
                         .clipShape(Circle())
                 }
                 .buttonStyle(.plain)
@@ -56,7 +56,7 @@ struct HomeSlideoutMenuView: View {
                     )
 
                     menuButton(
-                        title: "Core",
+                        title: "Settings",
                         icon: "gearshape",
                         action: onManageSettings
                     )
@@ -81,7 +81,7 @@ struct HomeSlideoutMenuView: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .background(appSettings.themePalette.background)
+        .background(appSettings.themePalette.sheetBackground)
         .sheet(isPresented: $isShowingProfileQR) {
             if let currentAccount = auth.currentAccount {
                 ProfileQRCodeSheet(
@@ -93,7 +93,7 @@ struct HomeSlideoutMenuView: View {
                         onOpenScannedProfile(pubkey)
                     }
                 )
-                .presentationBackground(appSettings.themePalette.background)
+                .presentationBackground(appSettings.themePalette.sheetBackground)
             }
         }
         .task(id: accountHeaderLookupID) {
@@ -142,7 +142,7 @@ struct HomeSlideoutMenuView: View {
                     .font(.system(size: 17, weight: .semibold))
                     .foregroundStyle(.primary)
                     .frame(width: 36, height: 36)
-                    .background(appSettings.themePalette.secondaryBackground, in: Circle())
+                    .background(appSettings.themePalette.sheetCardBackground, in: Circle())
             }
             .buttonStyle(.plain)
             .accessibilityLabel("Show profile QR")

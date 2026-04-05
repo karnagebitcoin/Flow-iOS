@@ -507,6 +507,7 @@ private enum SharedComposeImportError: LocalizedError {
 }
 
 struct ComposeFloatingActionButton: View {
+    @EnvironmentObject private var appSettings: AppSettingsStore
     let action: () -> Void
 
     var body: some View {
@@ -515,7 +516,7 @@ struct ComposeFloatingActionButton: View {
                 .font(.system(size: 18, weight: .semibold))
                 .foregroundStyle(.white)
                 .frame(width: 56, height: 56)
-                .background(Color.accentColor, in: Circle())
+                .background(appSettings.primaryColor, in: Circle())
                 .shadow(color: .black.opacity(0.18), radius: 10, x: 0, y: 5)
                 .overlay {
                     Circle()
@@ -816,7 +817,7 @@ struct ComposeNoteSheet: View {
             ZStack(alignment: .topLeading) {
                 if viewModel.text.isEmpty {
                     Text(mode.placeholderText)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(appSettings.themePalette.secondaryForeground)
                         .padding(.horizontal, 16)
                         .padding(.vertical, 16)
                 }
@@ -862,7 +863,7 @@ struct ComposeNoteSheet: View {
                     }
                 }
                 .buttonStyle(.plain)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(appSettings.themePalette.iconMutedForeground)
                 .disabled(isUploadingMedia || viewModel.isPublishing)
 
                 cameraAttachmentButton(symbolFont: .system(size: 18, weight: .medium))
@@ -878,7 +879,7 @@ struct ComposeNoteSheet: View {
                         .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
                 }
                 .buttonStyle(.plain)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(appSettings.themePalette.iconMutedForeground)
                 .disabled(isUploadingMedia || viewModel.isPublishing)
 
                 Button {
@@ -898,10 +899,10 @@ struct ComposeNoteSheet: View {
                                 .font(.system(size: 17, weight: .medium))
                         }
                     }
-                    .foregroundStyle(speechTranscriber.isRecording ? Color.white : Color.secondary)
+                    .foregroundStyle(speechTranscriber.isRecording ? Color.white : appSettings.themePalette.iconMutedForeground)
                     .frame(width: 32, height: 32)
                     .background(
-                        speechTranscriber.isRecording ? Color.accentColor : appSettings.themePalette.tertiaryFill,
+                        speechTranscriber.isRecording ? appSettings.primaryColor : appSettings.themePalette.tertiaryFill,
                         in: Circle()
                     )
                 }
@@ -914,7 +915,7 @@ struct ComposeNoteSheet: View {
                     } label: {
                         Image(systemName: pollDraft == nil ? "chart.bar.xaxis" : "chart.bar.fill")
                             .font(.system(size: 17, weight: .medium))
-                            .foregroundStyle(pollDraft == nil ? Color.secondary : Color.white)
+                            .foregroundStyle(pollDraft == nil ? appSettings.themePalette.iconMutedForeground : Color.white)
                             .frame(width: 32, height: 32)
                             .background(
                                 pollDraft == nil ? appSettings.themePalette.tertiaryFill : appSettings.primaryColor,
@@ -929,23 +930,23 @@ struct ComposeNoteSheet: View {
                 if speechTranscriber.isRecording {
                     Text(formatVoiceDuration(milliseconds: speechTranscriber.elapsedMs))
                         .font(.footnote.monospacedDigit())
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(appSettings.themePalette.secondaryForeground)
                 }
 
                 Spacer()
 
                 Text("\(viewModel.characterCount) characters")
                     .font(.footnote)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(appSettings.themePalette.secondaryForeground)
 
                 if currentNsec == nil {
                     Label("nsec required", systemImage: "lock.fill")
                         .font(.footnote.weight(.semibold))
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(appSettings.themePalette.secondaryForeground)
                 } else if writeRelayURLs.isEmpty {
                     Label("No publish sources", systemImage: "wifi.slash")
                         .font(.footnote.weight(.semibold))
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(appSettings.themePalette.secondaryForeground)
                 }
             }
         }
@@ -960,7 +961,7 @@ struct ComposeNoteSheet: View {
                         .controlSize(.small)
                     Text("Posting to \(configuredPublishSourceCount) source\(configuredPublishSourceCount == 1 ? "" : "s")...")
                         .font(.footnote)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(appSettings.themePalette.secondaryForeground)
                     Spacer()
                 }
                 .padding(.horizontal, 2)
@@ -971,7 +972,7 @@ struct ComposeNoteSheet: View {
 
                     Text(feedbackMessage)
                         .font(.footnote)
-                        .foregroundStyle(viewModel.feedbackIsError ? .red : .secondary)
+                        .foregroundStyle(viewModel.feedbackIsError ? .red : appSettings.themePalette.secondaryForeground)
 
                     Spacer()
                 }
@@ -1028,7 +1029,7 @@ struct ComposeNoteSheet: View {
             HStack(spacing: 8) {
                 Text("Mention suggestions")
                     .font(.footnote.weight(.semibold))
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(appSettings.themePalette.secondaryForeground)
 
                 Spacer()
 
@@ -1208,7 +1209,7 @@ struct ComposeNoteSheet: View {
             Circle().fill(appSettings.themePalette.secondaryFill)
             Text(String(profileFallbackSymbol.prefix(1)).uppercased())
                 .font(.subheadline.weight(.semibold))
-                .foregroundStyle(.secondary)
+                .foregroundStyle(appSettings.themePalette.secondaryForeground)
         }
     }
 
@@ -1217,7 +1218,7 @@ struct ComposeNoteSheet: View {
             Circle().fill(appSettings.themePalette.secondaryFill)
             Text(String(quotedDisplayNameResolved.prefix(1)).uppercased())
                 .font(.caption.weight(.semibold))
-                .foregroundStyle(.secondary)
+                .foregroundStyle(appSettings.themePalette.secondaryForeground)
         }
     }
 
@@ -1226,7 +1227,7 @@ struct ComposeNoteSheet: View {
             Circle().fill(appSettings.themePalette.secondaryFill)
             Text(String(replyTargetDisplayNameResolved.prefix(1)).uppercased())
                 .font(.caption.weight(.semibold))
-                .foregroundStyle(.secondary)
+                .foregroundStyle(appSettings.themePalette.secondaryForeground)
         }
     }
 
@@ -1394,7 +1395,7 @@ struct ComposeNoteSheet: View {
         VStack(alignment: .leading, spacing: 10) {
             Text(title)
                 .font(.footnote.weight(.semibold))
-                .foregroundStyle(.secondary)
+                .foregroundStyle(appSettings.themePalette.secondaryForeground)
 
             HStack(alignment: .top, spacing: 10) {
                 composerContextAvatar(avatarURL: avatarURL, fallback: fallback)
@@ -1407,20 +1408,20 @@ struct ComposeNoteSheet: View {
 
                         Text(handle)
                             .font(.subheadline)
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(appSettings.themePalette.secondaryForeground)
                             .lineLimit(1)
 
                         Spacer(minLength: 0)
 
                         Text(RelativeTimestampFormatter.shortString(from: event.createdAtDate))
                             .font(.caption)
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(appSettings.themePalette.secondaryForeground)
                             .lineLimit(1)
                     }
 
                     Text(previewText)
                         .font(.body)
-                        .foregroundStyle(.primary)
+                        .foregroundStyle(appSettings.themePalette.foreground)
                         .multilineTextAlignment(.leading)
                         .frame(maxWidth: .infinity, alignment: .leading)
 
@@ -1453,7 +1454,7 @@ struct ComposeNoteSheet: View {
     ) -> some View {
         Group {
             if let avatarURL {
-                AsyncImage(url: avatarURL) { phase in
+                CachedAsyncImage(url: avatarURL) { phase in
                     switch phase {
                     case .success(let image):
                         image
@@ -1492,7 +1493,7 @@ struct ComposeNoteSheet: View {
                             appSettings.themePalette.tertiaryFill
                                 .overlay {
                                     Image(systemName: "photo")
-                                        .foregroundStyle(.secondary)
+                                        .foregroundStyle(appSettings.themePalette.secondaryForeground)
                                 }
                         case .empty:
                             ProgressView()
@@ -1515,7 +1516,7 @@ struct ComposeNoteSheet: View {
                 Spacer(minLength: 0)
             }
             .font(.footnote)
-            .foregroundStyle(.secondary)
+            .foregroundStyle(appSettings.themePalette.secondaryForeground)
             .padding(.horizontal, 10)
             .padding(.vertical, 8)
             .background(
@@ -1545,7 +1546,7 @@ struct ComposeNoteSheet: View {
                         } label: {
                             Image(systemName: "xmark.circle.fill")
                                 .font(.title3)
-                                .foregroundStyle(.secondary)
+                                .foregroundStyle(appSettings.themePalette.iconMutedForeground)
                                 .padding(6)
                         }
                         .buttonStyle(.plain)
@@ -1566,7 +1567,7 @@ struct ComposeNoteSheet: View {
                 .font(symbolFont)
         }
         .buttonStyle(.plain)
-        .foregroundStyle(.secondary)
+        .foregroundStyle(appSettings.themePalette.iconMutedForeground)
         .disabled(isUploadingMedia || viewModel.isPublishing || isRequestingCaptureAccess)
         .accessibilityLabel("Capture photo or video")
     }
@@ -1574,11 +1575,11 @@ struct ComposeNoteSheet: View {
     private func infoBanner(systemImage: String, text: String) -> some View {
         HStack(alignment: .top, spacing: 10) {
             Image(systemName: systemImage)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(appSettings.themePalette.iconMutedForeground)
 
             Text(text)
                 .font(.footnote)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(appSettings.themePalette.secondaryForeground)
 
             Spacer()
         }
@@ -2511,7 +2512,7 @@ private struct ComposeMediaAttachmentPreviewSheet: View {
                 }
 
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button("Done") {
+                    ThemedToolbarDoneButton {
                         dismiss()
                     }
                 }
@@ -2684,6 +2685,7 @@ private enum ComposeGIFImageDecoder {
 }
 
 private struct CameraCapturePermissionSheet: View {
+    @EnvironmentObject private var appSettings: AppSettingsStore
     let permissions: CameraCapturePermissionSnapshot
     let isRequestingAccess: Bool
     let onContinue: () -> Void
@@ -2695,14 +2697,14 @@ private struct CameraCapturePermissionSheet: View {
             VStack(alignment: .leading, spacing: 10) {
                 Image(systemName: permissions.isCameraBlocked ? "camera.fill.badge.ellipsis" : "camera.badge.ellipsis")
                     .font(.system(size: 28, weight: .semibold))
-                    .foregroundStyle(Color.accentColor)
+                    .foregroundStyle(appSettings.primaryColor)
 
                 Text(title)
                     .font(.title3.weight(.semibold))
 
                 Text(message)
                     .font(.body)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(appSettings.themePalette.secondaryForeground)
                     .fixedSize(horizontal: false, vertical: true)
             }
 
@@ -2744,7 +2746,7 @@ private struct CameraCapturePermissionSheet: View {
                 }
                 .buttonStyle(.plain)
                 .font(.body.weight(.medium))
-                .foregroundStyle(.secondary)
+                .foregroundStyle(appSettings.themePalette.secondaryForeground)
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, 8)
             }
@@ -2793,8 +2795,8 @@ private struct ComposeMultilineTextView: UIViewRepresentable {
         textView.font = appSettings.appUIFont(.body)
         textView.typingAttributes[.font] = appSettings.appUIFont(.body)
         textView.adjustsFontForContentSizeCategory = false
-        textView.textColor = .label
-        textView.tintColor = .label
+        textView.textColor = UIColor(appSettings.themePalette.foreground)
+        textView.tintColor = UIColor(appSettings.themePalette.foreground)
         textView.autocorrectionType = .yes
         textView.spellCheckingType = .yes
         textView.smartQuotesType = .yes
@@ -2824,13 +2826,20 @@ private struct ComposeMultilineTextView: UIViewRepresentable {
                 for: text,
                 mentions: mentions,
                 font: preferredFont,
+                textColor: UIColor(appSettings.themePalette.foreground),
                 mentionColor: mentionColor
             )
-            uiView.typingAttributes = Self.typingAttributes(font: preferredFont)
+            uiView.typingAttributes = Self.typingAttributes(
+                font: preferredFont,
+                textColor: UIColor(appSettings.themePalette.foreground)
+            )
             context.coordinator.lastRenderedMentions = mentions
             context.coordinator.isApplyingProgrammaticUpdate = false
         } else {
-            uiView.typingAttributes = Self.typingAttributes(font: preferredFont)
+            uiView.typingAttributes = Self.typingAttributes(
+                font: preferredFont,
+                textColor: UIColor(appSettings.themePalette.foreground)
+            )
         }
 
         let clampedRange = Self.clampedRange(selectedRange, maxLength: uiView.text.utf16.count)
@@ -2854,13 +2863,14 @@ private struct ComposeMultilineTextView: UIViewRepresentable {
         for text: String,
         mentions: [ComposeSelectedMention],
         font: UIFont,
+        textColor: UIColor,
         mentionColor: UIColor
     ) -> NSAttributedString {
         let attributed = NSMutableAttributedString(
             string: text,
             attributes: [
                 .font: font,
-                .foregroundColor: UIColor.label
+                .foregroundColor: textColor
             ]
         )
 
@@ -2875,10 +2885,13 @@ private struct ComposeMultilineTextView: UIViewRepresentable {
         return attributed
     }
 
-    private static func typingAttributes(font: UIFont) -> [NSAttributedString.Key: Any] {
+    private static func typingAttributes(
+        font: UIFont,
+        textColor: UIColor
+    ) -> [NSAttributedString.Key: Any] {
         [
             .font: font,
-            .foregroundColor: UIColor.label
+            .foregroundColor: textColor
         ]
     }
 
@@ -2963,6 +2976,7 @@ private struct ComposeMultilineTextView: UIViewRepresentable {
 }
 
 private struct ComposeMentionSuggestionRow: View {
+    @EnvironmentObject private var appSettings: AppSettingsStore
     let suggestion: ComposeMentionSuggestion
 
     var body: some View {
@@ -2975,12 +2989,12 @@ private struct ComposeMentionSuggestionRow: View {
             VStack(alignment: .leading, spacing: 2) {
                 Text(suggestion.displayName)
                     .font(.subheadline.weight(.medium))
-                    .foregroundStyle(.primary)
+                    .foregroundStyle(appSettings.themePalette.foreground)
                     .lineLimit(1)
 
                 Text(suggestion.secondaryText)
                     .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(appSettings.themePalette.secondaryForeground)
                     .lineLimit(1)
             }
 
@@ -3023,7 +3037,7 @@ private struct ComposeMentionAvatarView: View {
             Circle().fill(appSettings.themePalette.secondaryFill)
             Text(String(fallbackText.prefix(1)).uppercased())
                 .font(.caption.weight(.semibold))
-                .foregroundStyle(.secondary)
+                .foregroundStyle(appSettings.themePalette.secondaryForeground)
         }
     }
 }

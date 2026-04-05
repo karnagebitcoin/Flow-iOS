@@ -536,6 +536,20 @@ struct HomeFeedView: View {
                     endPoint: .bottomTrailing
                 )
             }
+        } else if appSettings.activeTheme == .gamer {
+            ZStack {
+                appSettings.themePalette.chromeBackground
+
+                LinearGradient(
+                    colors: [
+                        appSettings.primaryColor.opacity(0.18),
+                        Color(red: 0.329, green: 0.920, blue: 0.996).opacity(0.08),
+                        Color.clear
+                    ],
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing
+                )
+            }
         } else if appSettings.activeTheme == .dracula {
             appSettings.themePalette.background
         } else {
@@ -546,6 +560,8 @@ struct HomeFeedView: View {
     private var topNavigationControlFill: Color {
         if appSettings.activeTheme == .sakura {
             return Color.white.opacity(0.88)
+        } else if appSettings.activeTheme == .gamer {
+            return appSettings.themePalette.chromeBackground.opacity(0.88)
         }
         return appSettings.themePalette.secondaryBackground
     }
@@ -631,16 +647,16 @@ struct HomeFeedView: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button("Done") {
+                    ThemedToolbarDoneButton {
                         isShowingFilterSheet = false
                     }
                 }
             }
-            .background(appSettings.themePalette.background)
+            .background(appSettings.themePalette.sheetBackground)
         }
         .presentationDetents([.fraction(0.7), .large])
         .presentationDragIndicator(.visible)
-        .presentationBackground(appSettings.themePalette.background)
+        .presentationBackground(appSettings.themePalette.sheetBackground)
     }
 
     private var kindsFilterSection: some View {
@@ -1110,7 +1126,7 @@ struct HomeFeedView: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button("Done") {
+                    ThemedToolbarDoneButton {
                         isShowingFeedSourcePicker = false
                     }
                 }

@@ -62,6 +62,14 @@ final class AppThemeOptionTests: XCTestCase {
             matches: UIColor(red: 0.204, green: 0.216, blue: 0.275, alpha: 1)
         )
         assertColor(
+            AppThemeOption.dracula.palette.sheetBackground,
+            matches: UIColor(red: 0.157, green: 0.165, blue: 0.212, alpha: 1)
+        )
+        assertColor(
+            AppThemeOption.dracula.palette.sheetCardBackground,
+            matches: UIColor(red: 0.204, green: 0.216, blue: 0.275, alpha: 1)
+        )
+        assertColor(
             AppThemeOption.dracula.palette.chromeBorder,
             matches: UIColor(white: 1, alpha: 0.07)
         )
@@ -83,6 +91,41 @@ final class AppThemeOptionTests: XCTestCase {
         assertColor(
             AppThemeOption.dracula.palette.pollStyle!.optionWinningBorder,
             matches: UIColor(red: 0.773, green: 0.565, blue: 1.0, alpha: 0.60)
+        )
+    }
+
+    @MainActor
+    func testGamerRequiresFlowPlusAndUsesDarkMode() {
+        XCTAssertTrue(AppThemeOption.gamer.requiresFlowPlus)
+        XCTAssertEqual(AppThemeOption.gamer.preferredColorScheme, .dark)
+        XCTAssertNotNil(AppThemeOption.gamer.fixedPrimaryGradient)
+        XCTAssertNil(AppThemeOption.gamer.qrShareBackgroundResourceName)
+        assertColor(
+            try! XCTUnwrap(AppThemeOption.gamer.fixedPrimaryColor),
+            matches: UIColor(red: 0.553, green: 0.408, blue: 1.0, alpha: 1)
+        )
+        assertColor(
+            AppThemeOption.gamer.palette.background,
+            matches: UIColor(red: 0.035, green: 0.063, blue: 0.106, alpha: 1)
+        )
+        assertColor(
+            AppThemeOption.gamer.palette.chromeBackground,
+            matches: UIColor(red: 0.055, green: 0.086, blue: 0.141, alpha: 1)
+        )
+        assertColor(
+            AppThemeOption.gamer.palette.secondaryBackground,
+            matches: UIColor(red: 0.071, green: 0.114, blue: 0.188, alpha: 1)
+        )
+        assertColor(
+            AppThemeOption.gamer.palette.mutedForeground,
+            matches: UIColor(red: 0.558, green: 0.640, blue: 0.776, alpha: 1)
+        )
+        XCTAssertNotNil(AppThemeOption.gamer.palette.capsuleTabStyle)
+        XCTAssertNotNil(AppThemeOption.gamer.palette.profileActionStyle)
+        XCTAssertNotNil(AppThemeOption.gamer.palette.pollStyle)
+        assertColor(
+            AppThemeOption.gamer.palette.pollStyle!.optionWinningBorder,
+            matches: UIColor(red: 0.561, green: 1.0, blue: 0.369, alpha: 0.56)
         )
     }
 
@@ -186,6 +229,11 @@ final class AppThemeOptionTests: XCTestCase {
         XCTAssertTrue(settings.beginThemePreview(.dracula))
         XCTAssertEqual(settings.previewTheme, .dracula)
         XCTAssertEqual(settings.activeTheme, .dracula)
+
+        XCTAssertTrue(settings.canBeginThemePreview(.gamer))
+        XCTAssertTrue(settings.beginThemePreview(.gamer))
+        XCTAssertEqual(settings.previewTheme, .gamer)
+        XCTAssertEqual(settings.activeTheme, .gamer)
     }
 
     @MainActor
@@ -423,6 +471,10 @@ final class AppThemeOptionTests: XCTestCase {
         )
         XCTAssertEqual(
             ProfileQRCodePresentationBackground.resourceName(for: .dracula),
+            ProfileQRCodePresentationBackground.defaultResourceName
+        )
+        XCTAssertEqual(
+            ProfileQRCodePresentationBackground.resourceName(for: .gamer),
             ProfileQRCodePresentationBackground.defaultResourceName
         )
     }

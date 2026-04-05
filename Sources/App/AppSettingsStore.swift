@@ -10,6 +10,7 @@ enum AppThemeOption: String, CaseIterable, Codable, Identifiable, Hashable, Send
     case white
     case sakura
     case dracula
+    case gamer
     case dark
     case light
 
@@ -27,6 +28,8 @@ enum AppThemeOption: String, CaseIterable, Codable, Identifiable, Hashable, Send
             return "Sakura"
         case .dracula:
             return "Dracula"
+        case .gamer:
+            return "Gamer"
         case .dark:
             return "Dark"
         case .light:
@@ -46,6 +49,8 @@ enum AppThemeOption: String, CaseIterable, Codable, Identifiable, Hashable, Send
             return "leaf.fill"
         case .dracula:
             return "moon.stars.fill"
+        case .gamer:
+            return "gamecontroller.fill"
         case .dark:
             return "sparkles"
         case .light:
@@ -65,6 +70,8 @@ enum AppThemeOption: String, CaseIterable, Codable, Identifiable, Hashable, Send
             return "Paper whites with gradient blossom pinks"
         case .dracula:
             return "Moody shadows with classic violet and neon accents"
+        case .gamer:
+            return "Carbon black with neon violet, cyan, and energy-green accents"
         case .dark:
             return "Coming soon"
         case .light:
@@ -74,7 +81,7 @@ enum AppThemeOption: String, CaseIterable, Codable, Identifiable, Hashable, Send
 
     var isEnabled: Bool {
         switch self {
-        case .system, .black, .white, .sakura, .dracula:
+        case .system, .black, .white, .sakura, .dracula, .gamer:
             return true
         case .dark, .light:
             return false
@@ -83,7 +90,7 @@ enum AppThemeOption: String, CaseIterable, Codable, Identifiable, Hashable, Send
 
     var requiresFlowPlus: Bool {
         switch self {
-        case .sakura, .dracula:
+        case .sakura, .dracula, .gamer:
             return true
         case .system, .black, .white, .dark, .light:
             return false
@@ -94,7 +101,7 @@ enum AppThemeOption: String, CaseIterable, Codable, Identifiable, Hashable, Send
         switch self {
         case .system:
             return nil
-        case .black, .dark, .dracula:
+        case .black, .dark, .dracula, .gamer:
             return .dark
         case .white, .light, .sakura:
             return .light
@@ -107,6 +114,8 @@ enum AppThemeOption: String, CaseIterable, Codable, Identifiable, Hashable, Send
             return Color(red: 1.0, green: 0.404, blue: 0.941)
         case .dracula:
             return Color(red: 0.773, green: 0.565, blue: 1.0)
+        case .gamer:
+            return Color(red: 0.553, green: 0.408, blue: 1.0)
         case .system, .black, .white, .dark, .light:
             return nil
         }
@@ -132,6 +141,15 @@ enum AppThemeOption: String, CaseIterable, Codable, Identifiable, Hashable, Send
                 startPoint: .topLeading,
                 endPoint: .bottomTrailing
             )
+        case .gamer:
+            return LinearGradient(
+                colors: [
+                    Color(red: 0.553, green: 0.408, blue: 1.0),
+                    Color(red: 0.329, green: 0.920, blue: 0.996)
+                ],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
         case .system, .black, .white, .dark, .light:
             return nil
         }
@@ -141,7 +159,7 @@ enum AppThemeOption: String, CaseIterable, Codable, Identifiable, Hashable, Send
         switch self {
         case .sakura:
             return "sakura-share-bg.json"
-        case .system, .black, .white, .dracula, .dark, .light:
+        case .system, .black, .white, .dracula, .gamer, .dark, .light:
             return nil
         }
     }
@@ -158,6 +176,8 @@ enum AppThemeOption: String, CaseIterable, Codable, Identifiable, Hashable, Send
             return AppThemePalette.sakura
         case .dracula:
             return AppThemePalette.dracula
+        case .gamer:
+            return AppThemePalette.gamer
         case .dark:
             return AppThemePalette.black
         case .light:

@@ -28,7 +28,7 @@ struct ProfileQRCodeSheet: View {
     var body: some View {
         NavigationStack {
             ZStack {
-                appSettings.themePalette.background
+                appSettings.themePalette.sheetBackground
                     .ignoresSafeArea()
 
                 ScrollView(showsIndicators: false) {
@@ -50,7 +50,7 @@ struct ProfileQRCodeSheet: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button("Done") {
+                    ThemedToolbarDoneButton {
                         dismiss()
                     }
                 }
@@ -58,7 +58,7 @@ struct ProfileQRCodeSheet: View {
         }
         .presentationDetents([.large])
         .presentationDragIndicator(.visible)
-        .presentationBackground(appSettings.themePalette.background)
+        .presentationBackground(appSettings.themePalette.sheetBackground)
         .fullScreenCover(isPresented: $isShowingScanner) {
             ProfileQRScannerFlowView(
                 onOpenProfile: { pubkey in
@@ -88,7 +88,7 @@ struct ProfileQRCodeSheet: View {
                 if let handle = trimmedNonEmpty(handle) {
                     Text(handle)
                         .font(.subheadline)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(appSettings.themePalette.secondaryForeground)
                         .lineLimit(1)
                 }
             }
@@ -118,16 +118,16 @@ struct ProfileQRCodeSheet: View {
         .frame(width: 46, height: 46)
         .clipShape(Circle())
         .overlay {
-            Circle().stroke(Color(.separator).opacity(0.3), lineWidth: 0.7)
+            Circle().stroke(appSettings.themePalette.separator.opacity(0.3), lineWidth: 0.7)
         }
     }
 
     private var avatarFallback: some View {
         ZStack {
-            Circle().fill(Color(.tertiarySystemFill))
+            Circle().fill(appSettings.themePalette.tertiaryFill)
             Text(String(displayName.prefix(1)).uppercased())
                 .font(.headline.weight(.semibold))
-                .foregroundStyle(.secondary)
+                .foregroundStyle(appSettings.themePalette.secondaryForeground)
         }
     }
 
@@ -145,16 +145,16 @@ struct ProfileQRCodeSheet: View {
 
             Text("Scan to open this profile")
                 .font(.footnote)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(appSettings.themePalette.secondaryForeground)
 
             Text(shortNpub)
                 .font(.footnote.monospaced())
-                .foregroundStyle(.secondary)
+                .foregroundStyle(appSettings.themePalette.secondaryForeground)
                 .lineLimit(1)
 
             Text("Flip your phone over from anywhere in the app to present this code full-screen.")
                 .font(.footnote.weight(.medium))
-                .foregroundStyle(.secondary)
+                .foregroundStyle(appSettings.themePalette.secondaryForeground)
                 .multilineTextAlignment(.center)
         }
         .padding(16)
@@ -180,7 +180,7 @@ struct ProfileQRCodeSheet: View {
                         .font(.subheadline.weight(.semibold))
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 10)
-                        .foregroundStyle(.primary)
+                        .foregroundStyle(appSettings.themePalette.foreground)
                         .background(
                             Capsule()
                                 .fill(appSettings.themePalette.secondaryBackground)
@@ -206,11 +206,11 @@ struct ProfileQRCodeSheet: View {
             Button {
                 isShowingScanner = true
             } label: {
-                Label("Scan Code", systemImage: "qrcode.viewfinder")
-                    .font(.subheadline.weight(.semibold))
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 10)
-                    .foregroundStyle(.primary)
+                    Label("Scan Code", systemImage: "qrcode.viewfinder")
+                        .font(.subheadline.weight(.semibold))
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 10)
+                        .foregroundStyle(appSettings.themePalette.foreground)
                     .background(
                         Capsule()
                             .fill(appSettings.themePalette.secondaryBackground)
@@ -245,6 +245,7 @@ enum FullScreenQRCodeTrigger: String, Identifiable {
 }
 
 struct ProfileQRCodeArtwork: View {
+    @EnvironmentObject private var appSettings: AppSettingsStore
     let qrCodeImage: UIImage?
     let avatarURL: URL?
     let displayName: String
@@ -265,7 +266,7 @@ struct ProfileQRCodeArtwork: View {
                 } else {
                     Image(systemName: "qrcode")
                         .font(.system(size: 92, weight: .medium))
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(appSettings.themePalette.secondaryForeground)
                 }
             }
 
@@ -286,6 +287,7 @@ struct ProfileQRCodeArtwork: View {
 }
 
 struct ProfileQRCodeAvatarBadge: View {
+    @EnvironmentObject private var appSettings: AppSettingsStore
     let avatarURL: URL?
     let displayName: String
     let size: CGFloat
@@ -318,10 +320,10 @@ struct ProfileQRCodeAvatarBadge: View {
     private var fallbackAvatar: some View {
         ZStack {
             Circle()
-                .fill(Color(.systemGray5))
+                .fill(appSettings.themePalette.tertiaryFill)
             Text(String(displayName.prefix(1)).uppercased())
                 .font(.system(size: size * 0.42, weight: .semibold))
-                .foregroundStyle(.secondary)
+                .foregroundStyle(appSettings.themePalette.secondaryForeground)
         }
     }
 }

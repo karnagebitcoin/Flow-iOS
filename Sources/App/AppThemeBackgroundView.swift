@@ -84,6 +84,49 @@ struct AppThemeBackgroundView: View {
                     endRadius: 300
                 )
                 .offset(x: 16, y: -26)
+            } else if appSettings.activeTheme == .gamer {
+                LinearGradient(
+                    colors: [
+                        AppThemePalette.gamer.background.opacity(0.99),
+                        AppThemePalette.gamer.chromeBackground.opacity(0.98),
+                        Color(red: 0.024, green: 0.043, blue: 0.075).opacity(0.98)
+                    ],
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing
+                )
+
+                RadialGradient(
+                    colors: [
+                        Color(red: 0.553, green: 0.408, blue: 1.0).opacity(0.26),
+                        Color.clear
+                    ],
+                    center: .topLeading,
+                    startRadius: 16,
+                    endRadius: 320
+                )
+                .offset(x: -22, y: -38)
+
+                RadialGradient(
+                    colors: [
+                        Color(red: 0.329, green: 0.920, blue: 0.996).opacity(0.18),
+                        Color.clear
+                    ],
+                    center: .topTrailing,
+                    startRadius: 18,
+                    endRadius: 300
+                )
+                .offset(x: 20, y: -24)
+
+                RadialGradient(
+                    colors: [
+                        Color(red: 0.561, green: 1.0, blue: 0.369).opacity(0.14),
+                        Color.clear
+                    ],
+                    center: .bottomTrailing,
+                    startRadius: 22,
+                    endRadius: 360
+                )
+                .offset(x: 30, y: 54)
             }
         }
     }

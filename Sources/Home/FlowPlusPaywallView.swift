@@ -22,7 +22,7 @@ struct FlowPlusPaywallView: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button("Done") {
+                    ThemedToolbarDoneButton {
                         dismiss()
                     }
                 }
@@ -69,7 +69,7 @@ struct FlowPlusPaywallView: View {
                         .font(appSettings.appFont(size: 30, weight: .bold))
                         .foregroundStyle(Color(red: 0.33, green: 0.18, blue: 0.25))
 
-                    Text("Halo Plus includes premium themes like Sakura and Dracula, plus curated mono, serif, and sans font choices for the whole app.")
+                    Text("Halo Plus includes premium themes like Sakura, Dracula, and Gamer, plus curated mono, serif, and sans font choices for the whole app.")
                         .font(appSettings.appFont(.body))
                         .foregroundStyle(Color(red: 0.45, green: 0.27, blue: 0.35))
                 }
@@ -158,7 +158,7 @@ struct FlowPlusPaywallView: View {
                 .font(appSettings.appFont(.headline, weight: .semibold))
                 .foregroundStyle(Color(red: 0.45, green: 0.21, blue: 0.32))
 
-            flowPlusFeature("Sakura and Dracula each ship with a dedicated palette, accent treatment, and premium look.")
+            flowPlusFeature("Sakura, Dracula, and Gamer each ship with a dedicated palette, accent treatment, and premium look.")
             flowPlusFeature("A premium font library with mono, serif, and modern sans options that can restyle the feed, composer, and settings.")
             flowPlusFeature("Try it free for 7 days before billing begins.")
             flowPlusFeature("After the free trial ends, Halo Plus renews at \(monthlyPriceText)/month until canceled.")

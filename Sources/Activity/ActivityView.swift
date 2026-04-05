@@ -247,6 +247,12 @@ struct ActivityView: View {
                 appSettings.themePalette.chromeBackground.opacity(0.78)
                 appSettings.primaryGradient.opacity(0.14)
             }
+        } else if appSettings.activeTheme == .gamer {
+            ZStack {
+                appSettings.themePalette.chromeBackground
+                appSettings.primaryGradient.opacity(0.18)
+                Color(red: 0.329, green: 0.920, blue: 0.996).opacity(0.04)
+            }
         } else if appSettings.activeTheme == .dracula {
             appSettings.themePalette.background
         } else {
@@ -257,6 +263,8 @@ struct ActivityView: View {
     private var topNavigationControlFill: Color {
         if appSettings.activeTheme == .sakura {
             return Color.white.opacity(0.72)
+        } else if appSettings.activeTheme == .gamer {
+            return appSettings.themePalette.chromeBackground.opacity(0.84)
         }
         return appSettings.themePalette.secondaryBackground
     }
@@ -340,7 +348,7 @@ struct ActivityView: View {
             NotificationPreferencesView(navigationTitleText: "Pulse Alerts", titleDisplayMode: .inline)
                 .toolbar {
                     ToolbarItem(placement: .topBarTrailing) {
-                        Button("Done") {
+                        ThemedToolbarDoneButton {
                             isShowingNotificationSettings = false
                         }
                     }
@@ -356,15 +364,15 @@ struct ActivityView: View {
             if let errorMessage = viewModel.errorMessage {
                 Text(errorMessage)
                     .font(.subheadline)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(appSettings.themePalette.secondaryForeground)
             } else if viewModel.hasItemsHiddenByNotificationPreferences {
                 Text("No activity matches your current notification settings.")
                     .font(.subheadline)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(appSettings.themePalette.secondaryForeground)
             } else {
                 Text("No activity yet")
                     .font(.subheadline)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(appSettings.themePalette.secondaryForeground)
             }
         }
         .frame(maxWidth: .infinity, alignment: .center)
@@ -545,7 +553,7 @@ struct ActivityRowCell: View {
 
                 Text(RelativeTimestampFormatter.shortString(from: item.createdAtDate))
                     .font(.caption2)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(appSettings.themePalette.secondaryForeground)
                     .monospacedDigit()
                     .lineLimit(1)
             }
@@ -559,15 +567,15 @@ struct ActivityRowCell: View {
         case .mention:
             Image(systemName: "bubble.left.fill")
                 .font(.system(size: 12, weight: .semibold))
-                .foregroundStyle(Color.accentColor)
+                .foregroundStyle(appSettings.primaryColor)
                 .frame(width: 20, height: 20)
-                .background(Color.accentColor.opacity(0.14), in: Circle())
+                .background(appSettings.primaryColor.opacity(0.14), in: Circle())
         case .reply:
             Image(systemName: "arrowshape.turn.up.left.fill")
                 .font(.system(size: 12, weight: .semibold))
-                .foregroundStyle(Color.accentColor)
+                .foregroundStyle(appSettings.primaryColor)
                 .frame(width: 20, height: 20)
-                .background(Color.accentColor.opacity(0.14), in: Circle())
+                .background(appSettings.primaryColor.opacity(0.14), in: Circle())
         case .reaction(let reaction):
             if let customEmojiURL = reaction.customEmojiImageURL {
                 CachedAsyncImage(url: customEmojiURL) { phase in
@@ -606,7 +614,7 @@ struct ActivityRowCell: View {
         } else if showsImagePill {
             Text("Image")
                 .font(.caption.weight(.semibold))
-                .foregroundStyle(.secondary)
+                .foregroundStyle(appSettings.themePalette.secondaryForeground)
                 .padding(.horizontal, 10)
                 .padding(.vertical, 5)
                 .background(appSettings.themePalette.tertiaryFill, in: Capsule())
@@ -707,6 +715,7 @@ struct ActivityRowCell: View {
 }
 
 private struct ActivitySnippetText: View {
+    @EnvironmentObject private var appSettings: AppSettingsStore
     private struct MentionMetadataDecoder: MetadataCoding {}
 
     private let text: String
@@ -724,7 +733,7 @@ private struct ActivitySnippetText: View {
     var body: some View {
         Text(attributedString)
             .font(.subheadline)
-            .foregroundStyle(.primary)
+            .foregroundStyle(appSettings.themePalette.foreground)
             .lineLimit(1)
             .truncationMode(.tail)
             .task(id: text) {
@@ -740,7 +749,7 @@ private struct ActivitySnippetText: View {
             segment.font = .subheadline
 
             if token.type == .websocketURL {
-                segment.foregroundColor = .secondary
+                segment.foregroundColor = appSettings.themePalette.secondaryForeground
             }
 
             output += segment
@@ -907,7 +916,7 @@ private struct ActivityAvatarView: View {
             Circle().fill(appSettings.themePalette.secondaryFill)
             Text(String(fallback.prefix(1)))
                 .font(.caption.weight(.semibold))
-                .foregroundStyle(.secondary)
+                .foregroundStyle(appSettings.themePalette.secondaryForeground)
         }
     }
 }

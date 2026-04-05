@@ -1,6 +1,7 @@
 import SwiftUI
 
 struct SettingsFlowPlusView: View {
+    @Environment(\.colorScheme) private var colorScheme
     @EnvironmentObject private var appSettings: AppSettingsStore
     @EnvironmentObject private var premiumStore: FlowPremiumStore
     @State private var isPurchasingFlowPlus = false
@@ -10,13 +11,13 @@ struct SettingsFlowPlusView: View {
             AppThemeBackgroundView()
                 .ignoresSafeArea()
 
-            Form {
-                Section {
+            ThemedSettingsForm {
+                ThemedSettingsSection {
                     membershipCard
                 }
-                .listRowBackground(appSettings.themePalette.secondaryGroupedBackground)
+                .listRowBackground(settingsSurfaceStyle.cardBackground)
 
-                Section("Customize") {
+                ThemedSettingsSection("Customize") {
                     FlowPlusDestinationRow(
                         title: "Themes",
                         subtitle: currentThemeSummary,
@@ -35,19 +36,17 @@ struct SettingsFlowPlusView: View {
                         SettingsFlowPlusTypographyView()
                     }
                 }
-                .listRowBackground(appSettings.themePalette.secondaryGroupedBackground)
+                .listRowBackground(settingsSurfaceStyle.cardBackground)
 
                 if let error = premiumStore.lastErrorMessage, !error.isEmpty {
-                    Section {
+                    ThemedSettingsSection {
                         Text(error)
                             .font(appSettings.appFont(.footnote))
                             .foregroundStyle(.red)
                     }
-                    .listRowBackground(appSettings.themePalette.secondaryGroupedBackground)
+                    .listRowBackground(settingsSurfaceStyle.cardBackground)
                 }
             }
-            .scrollContentBackground(.hidden)
-            .background(Color.clear)
         }
         .navigationTitle("Halo Plus")
         .navigationBarTitleDisplayMode(.large)
@@ -63,6 +62,10 @@ struct SettingsFlowPlusView: View {
 
     private var hasFlowPlusCustomizationAccess: Bool {
         appSettings.hasFlowPlusCustomizationAccess
+    }
+
+    private var settingsSurfaceStyle: SettingsFormSurfaceStyle {
+        appSettings.settingsFormSurfaceStyle(for: colorScheme)
     }
 
     private var isTemporaryTestingUnlockActive: Bool {
@@ -231,6 +234,7 @@ struct SettingsFlowPlusView: View {
 }
 
 private struct SettingsFlowPlusThemesView: View {
+    @Environment(\.colorScheme) private var colorScheme
     @EnvironmentObject private var appSettings: AppSettingsStore
     @EnvironmentObject private var premiumStore: FlowPremiumStore
 
@@ -244,8 +248,8 @@ private struct SettingsFlowPlusThemesView: View {
     }
 
     var body: some View {
-        Form {
-            Section("Themes") {
+        ThemedSettingsForm {
+            ThemedSettingsSection("Themes") {
                 LazyVGrid(columns: columns, spacing: 10) {
                     ForEach(premiumThemeOptions) { option in
                         themeOptionCard(for: option)
@@ -253,12 +257,14 @@ private struct SettingsFlowPlusThemesView: View {
                 }
                 .padding(.vertical, 2)
             }
-            .listRowBackground(appSettings.themePalette.secondaryGroupedBackground)
+            .listRowBackground(settingsSurfaceStyle.cardBackground)
         }
-        .scrollContentBackground(.hidden)
-        .background(AppThemeBackgroundView().ignoresSafeArea())
         .navigationTitle("Themes")
         .navigationBarTitleDisplayMode(.inline)
+    }
+
+    private var settingsSurfaceStyle: SettingsFormSurfaceStyle {
+        appSettings.settingsFormSurfaceStyle(for: colorScheme)
     }
 
     private func themeOptionCard(for option: AppThemeOption) -> some View {
@@ -334,6 +340,15 @@ private struct SettingsFlowPlusThemesView: View {
                 startPoint: .topLeading,
                 endPoint: .bottomTrailing
             )
+        case .gamer:
+            return AppThemeOption.gamer.fixedPrimaryGradient ?? LinearGradient(
+                colors: [
+                    Color(red: 0.553, green: 0.408, blue: 1.0),
+                    Color(red: 0.329, green: 0.920, blue: 0.996)
+                ],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
         case .black:
             return LinearGradient(
                 colors: [Color(red: 0.08, green: 0.08, blue: 0.10), Color.black],
@@ -375,6 +390,8 @@ private struct SettingsFlowPlusThemesView: View {
             return Color(red: 0.45, green: 0.21, blue: 0.32)
         case .dracula:
             return Color(red: 0.973, green: 0.973, blue: 0.949).opacity(0.92)
+        case .gamer:
+            return Color.white.opacity(0.92)
         case .black, .dark:
             return .white.opacity(0.85)
         }
@@ -382,6 +399,7 @@ private struct SettingsFlowPlusThemesView: View {
 }
 
 private struct SettingsFlowPlusTypographyView: View {
+    @Environment(\.colorScheme) private var colorScheme
     @EnvironmentObject private var appSettings: AppSettingsStore
     @EnvironmentObject private var premiumStore: FlowPremiumStore
 
@@ -395,8 +413,8 @@ private struct SettingsFlowPlusTypographyView: View {
     }
 
     var body: some View {
-        Form {
-            Section("Typography") {
+        ThemedSettingsForm {
+            ThemedSettingsSection("Typography") {
                 LazyVGrid(columns: columns, spacing: 10) {
                     ForEach(typographyOptions) { option in
                         fontOptionCard(for: option)
@@ -404,12 +422,14 @@ private struct SettingsFlowPlusTypographyView: View {
                 }
                 .padding(.vertical, 2)
             }
-            .listRowBackground(appSettings.themePalette.secondaryGroupedBackground)
+            .listRowBackground(settingsSurfaceStyle.cardBackground)
         }
-        .scrollContentBackground(.hidden)
-        .background(AppThemeBackgroundView().ignoresSafeArea())
         .navigationTitle("Typography")
         .navigationBarTitleDisplayMode(.inline)
+    }
+
+    private var settingsSurfaceStyle: SettingsFormSurfaceStyle {
+        appSettings.settingsFormSurfaceStyle(for: colorScheme)
     }
 
     private func fontOptionCard(for option: AppFontOption) -> some View {

@@ -2,6 +2,7 @@ import SwiftUI
 
 struct ReshareActionSheetView: View {
     @Environment(\.dismiss) private var dismiss
+    @EnvironmentObject private var appSettings: AppSettingsStore
 
     let isWorking: Bool
     let statusMessage: String?
@@ -19,7 +20,11 @@ struct ReshareActionSheetView: View {
                 }
                 .background(
                     RoundedRectangle(cornerRadius: 16, style: .continuous)
-                        .fill(Color(.secondarySystemBackground))
+                        .fill(appSettings.themePalette.modalBackground)
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 16, style: .continuous)
+                        .stroke(appSettings.themePalette.separator.opacity(0.35), lineWidth: 0.8)
                 )
 
                 if let statusMessage, !statusMessage.isEmpty {
@@ -28,7 +33,7 @@ struct ReshareActionSheetView: View {
                             .foregroundStyle(statusIsError ? .red : .green)
                         Text(statusMessage)
                             .font(.footnote)
-                            .foregroundStyle(statusIsError ? .red : .secondary)
+                            .foregroundStyle(statusIsError ? .red : appSettings.themePalette.secondaryForeground)
                         Spacer(minLength: 0)
                     }
                     .padding(.horizontal, 10)
@@ -40,7 +45,7 @@ struct ReshareActionSheetView: View {
                 } else {
                     Text("Share this note as a repost, or add your own context with a quote.")
                         .font(.footnote)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(appSettings.themePalette.secondaryForeground)
                         .padding(.horizontal, 2)
                 }
 
@@ -51,7 +56,7 @@ struct ReshareActionSheetView: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("Done") {
+                    ThemedToolbarDoneButton {
                         dismiss()
                     }
                 }
@@ -60,6 +65,7 @@ struct ReshareActionSheetView: View {
         .interactiveDismissDisabled(isWorking)
         .presentationDetents([.height(250), .medium])
         .presentationDragIndicator(.visible)
+        .presentationBackground(appSettings.themePalette.sheetBackground)
     }
 
     @ViewBuilder
@@ -74,7 +80,7 @@ struct ReshareActionSheetView: View {
             HStack(spacing: 12) {
                 Text(title)
                     .font(.body.weight(.medium))
-                    .foregroundStyle(.primary)
+                    .foregroundStyle(appSettings.themePalette.foreground)
                 Spacer(minLength: 0)
                 if isWorking && title == "Repost" {
                     ProgressView()
@@ -82,7 +88,7 @@ struct ReshareActionSheetView: View {
                 } else {
                     Image(systemName: icon)
                         .font(.body.weight(.semibold))
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(appSettings.themePalette.iconMutedForeground)
                 }
             }
             .padding(.horizontal, 16)
