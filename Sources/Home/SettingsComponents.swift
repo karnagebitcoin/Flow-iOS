@@ -258,7 +258,7 @@ struct ThemedSettingsTitleHeader<Trailing: View>: View {
         }
         .padding(.horizontal, 16)
         .padding(.top, 20)
-        .padding(.bottom, 2)
+        .padding(.bottom, 12)
         .background(appSettings.themePalette.sheetBackground)
     }
 }
@@ -276,18 +276,25 @@ struct ThemedToolbarDoneButton: View {
     let action: () -> Void
 
     var body: some View {
-        Button(action: action) {
-            Text(title)
-                .font(appSettings.appFont(.subheadline, weight: .semibold))
-                .foregroundStyle(appSettings.themePalette.foreground)
-                .padding(.horizontal, 14)
-                .padding(.vertical, 8)
-                .background(
-                    appSettings.themePalette.navigationControlBackground,
-                    in: Capsule(style: .continuous)
-                )
-        }
-        .buttonStyle(.plain)
+        Text(title)
+            .font(appSettings.appFont(.subheadline, weight: .semibold))
+            .foregroundStyle(appSettings.themePalette.foreground)
+            .lineLimit(1)
+            .fixedSize(horizontal: true, vertical: true)
+            .padding(.horizontal, 14)
+            .padding(.vertical, 8)
+            .background(
+                appSettings.themePalette.navigationControlBackground,
+                in: Capsule(style: .continuous)
+            )
+            .contentShape(Capsule(style: .continuous))
+            .onTapGesture(perform: action)
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(title)
+            .accessibilityAddTraits(.isButton)
+            .accessibilityAction {
+                action()
+            }
     }
 }
 

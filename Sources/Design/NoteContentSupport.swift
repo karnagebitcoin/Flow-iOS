@@ -1160,13 +1160,21 @@ struct NoteImageFullscreenViewer: View {
                     .tabViewStyle(.page(indexDisplayMode: .automatic))
                     .toolbar {
                         ToolbarItem(placement: .topBarTrailing) {
-                            Button {
-                                dismiss()
-                            } label: {
-                                Text("Done")
-                                    .font(.subheadline.weight(.semibold))
-                                    .foregroundStyle(doneButtonForegroundColor)
-                            }
+                            Text("Done")
+                                .font(.subheadline.weight(.semibold))
+                                .foregroundStyle(doneButtonForegroundColor)
+                                .lineLimit(1)
+                                .fixedSize(horizontal: true, vertical: true)
+                                .contentShape(Rectangle())
+                                .onTapGesture {
+                                    dismiss()
+                                }
+                                .accessibilityElement(children: .ignore)
+                                .accessibilityLabel("Done")
+                                .accessibilityAddTraits(.isButton)
+                                .accessibilityAction {
+                                    dismiss()
+                                }
                         }
                     }
                     .toolbarBackground(.visible, for: .navigationBar)

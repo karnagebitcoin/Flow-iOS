@@ -46,16 +46,16 @@ enum MediaUploadPreparationError: LocalizedError {
 enum MediaUploadPreparation {
     private static let lightCompressionThresholdBytes = 24 * 1_024 * 1_024
     private static let aggressiveCompressionThresholdBytes = 80 * 1_024 * 1_024
-    private static let maxStillImageUploadBytes = 600 * 1_024
-    private static let maxStillImageDimension: CGFloat = 2_400
+    private static let maxStillImageUploadBytes = 1_500 * 1_024
+    private static let maxStillImageDimension: CGFloat = 3_000
     private static let maxProfileImageDimension: CGFloat = 460
     private static let profileBannerTargetSize = CGSize(width: 1_200, height: 580)
     private static let maxProfileBannerBytes = 500 * 1_024
     private static let animatedProfileGIFVideoThresholdBytes = 1 * 1_024 * 1_024
     private static let animatedProfileVideoBitRate = 420_000
-    private static let stillImageDownscaleStep: CGFloat = 0.82
-    private static let minimumStillImageDimension: CGFloat = 320
-    private static let stillImageJPEGQualities: [CGFloat] = [0.88, 0.82, 0.76, 0.70, 0.64, 0.58, 0.52, 0.46]
+    private static let stillImageDownscaleStep: CGFloat = 0.88
+    private static let minimumStillImageDimension: CGFloat = 1_200
+    private static let stillImageJPEGQualities: [CGFloat] = [0.92, 0.88, 0.84, 0.80, 0.76, 0.72]
 
     static func prepareUploadMedia(from item: PhotosPickerItem) async throws -> PreparedUploadMedia {
         let contentType = preferredContentType(for: item)
@@ -591,7 +591,7 @@ enum MediaUploadPreparation {
             } else {
                 let preferredQualities: [CGFloat]
                 if originalByteCount >= 8 * 1_024 * 1_024 || longestEdge > 3_600 {
-                    preferredQualities = [0.82, 0.76, 0.70, 0.64, 0.58, 0.52, 0.46]
+                    preferredQualities = [0.88, 0.84, 0.80, 0.76, 0.72]
                 } else {
                     preferredQualities = stillImageJPEGQualities
                 }

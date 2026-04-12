@@ -2132,6 +2132,7 @@ private struct ComposeDraftLibrarySheet: View {
                                 } : nil
                             )
                             .listRowBackground(appSettings.themePalette.sheetBackground)
+                            .listRowSeparatorTint(appSettings.themePalette.separator.opacity(0.12))
                             .swipeActions(edge: .trailing, allowsFullSwipe: true) {
                                 Button(role: .destructive) {
                                     onDeleteDraft(draft)
