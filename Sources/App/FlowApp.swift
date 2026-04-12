@@ -212,6 +212,12 @@ final class AppComposeSheetCoordinator: ObservableObject {
         )
     }
 
+    func presentMediaAttachment(_ attachment: ComposeMediaAttachment) {
+        draft = AppComposeSheetDraft(
+            initialUploadedAttachments: [attachment]
+        )
+    }
+
     func presentReply(
         to event: NostrEvent,
         displayNameHint: String? = nil,
@@ -527,9 +533,6 @@ private final class GlobalProfileQRCodeOverlayController {
 
     private func show(_ presentation: GlobalProfileQRCodePresentation) {
         guard let windowScene = activeWindowScene() else { return }
-        let qrBackgroundResourceName = ProfileQRCodePresentationBackground.resourceName(
-            for: AppSettingsStore.shared.activeTheme
-        )
 
         let content = GlobalPresentedProfileQRCodeContainer(
             trigger: .automatic,
@@ -537,7 +540,6 @@ private final class GlobalProfileQRCodeOverlayController {
             handle: presentation.handle,
             avatarURL: presentation.avatarURL,
             qrCodeImage: presentation.qrCodeImage,
-            qrBackgroundResourceName: qrBackgroundResourceName,
             onDismiss: { [weak self] in
                 self?.dismiss()
             }
@@ -622,7 +624,6 @@ private struct GlobalPresentedProfileQRCodeContainer: View {
     let handle: String?
     let avatarURL: URL?
     let qrCodeImage: UIImage?
-    let qrBackgroundResourceName: String
     let onDismiss: () -> Void
 
     var body: some View {
@@ -632,7 +633,6 @@ private struct GlobalPresentedProfileQRCodeContainer: View {
             handle: handle,
             avatarURL: avatarURL,
             qrCodeImage: qrCodeImage,
-            qrBackgroundResourceName: qrBackgroundResourceName,
             onDismiss: onDismiss
         )
         .environmentObject(appSettings)

@@ -61,6 +61,28 @@ final class NoteContentLinkResolverTests: XCTestCase {
         XCTAssertTrue(tokens.contains(where: { $0.type == .video && $0.value == "https://example.com/live/channel" }))
     }
 
+    func testNeventIdentifierEncodesEventMetadataForCopying() throws {
+        let event = NostrEvent(
+            id: String(repeating: "1", count: 64),
+            pubkey: String(repeating: "a", count: 64),
+            createdAt: 1_700_000_000,
+            kind: 1,
+            tags: [],
+            content: "hello",
+            sig: String(repeating: "f", count: 128)
+        )
+        let relayURL = try XCTUnwrap(URL(string: "wss://relay.example.com"))
+
+        let identifier = try XCTUnwrap(NoteContentParser.neventIdentifier(for: event, relayHints: [relayURL]))
+        let decoded = try ReferenceMetadataDecoder().decodedMetadata(from: identifier)
+
+        XCTAssertTrue(identifier.hasPrefix("nevent1"))
+        XCTAssertEqual(decoded.eventId?.lowercased(), event.id)
+        XCTAssertEqual(decoded.pubkey?.lowercased(), event.pubkey)
+        XCTAssertEqual(decoded.kind, 1)
+        XCTAssertEqual(decoded.relays, [relayURL.absoluteString])
+    }
+
     func testImageAspectRatioHintsReadImetaDimensions() {
         let hints = NoteImageLayoutGuide.imageAspectRatioHints(from: [[
             "imeta",
@@ -85,3 +107,5 @@ final class NoteContentLinkResolverTests: XCTestCase {
         )
     }
 }
+
+private struct ReferenceMetadataDecoder: MetadataCoding {}

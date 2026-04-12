@@ -59,6 +59,7 @@ struct ComposeNoteSheet: View {
     @State private var mentionSuggestions: [ComposeMentionSuggestion] = []
     @State private var isLoadingMentionSuggestions = false
     @State private var mentionLookupTask: Task<Void, Never>?
+    @State private var mentionSuggestionAnchorY: CGFloat = 44
     @State private var activeSavedDraftID: UUID?
     @State private var hasPublishedSuccessfully = false
 
@@ -89,7 +90,7 @@ struct ComposeNoteSheet: View {
     var body: some View {
         NavigationStack {
             standardComposerLayout
-                .background(appSettings.themePalette.groupedBackground)
+                .background(composeSheetBackground)
             .navigationTitle(composerNavigationTitle)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -108,7 +109,7 @@ struct ComposeNoteSheet: View {
         }
         .presentationDetents([.large])
         .presentationDragIndicator(.visible)
-        .presentationBackground(appSettings.themePalette.groupedBackground)
+        .presentationBackground(composeSheetBackground)
         .task {
             applyInitialContextIfNeeded()
             applyInitialDraftIfNeeded()
@@ -244,6 +245,10 @@ struct ComposeNoteSheet: View {
         return "Open drafts, \(availableSavedDraftCount) saved drafts"
     }
 
+    private var composeSheetBackground: Color {
+        appSettings.activeTheme == .white ? .white : appSettings.themePalette.groupedBackground
+    }
+
     private var draftLibraryToolbarButton: some View {
         Button {
             isShowingDraftLibrary = true
@@ -301,21 +306,7 @@ struct ComposeNoteSheet: View {
 
     private var composeCard: some View {
         VStack(alignment: .leading, spacing: 12) {
-            ZStack(alignment: .topLeading) {
-                if viewModel.text.isEmpty {
-                    Text(mode.placeholderText)
-                        .foregroundStyle(appSettings.themePalette.secondaryForeground)
-                        .padding(.horizontal, 16)
-                        .padding(.vertical, 16)
-                }
-
-                composeTextView(horizontalPadding: 8, verticalPadding: 8)
-                    .frame(minHeight: 180)
-            }
-
-            if shouldShowMentionSuggestions {
-                mentionSuggestionList
-            }
+            composeEditor
 
             if !mediaAttachments.isEmpty {
                 mediaAttachmentPreviewList
@@ -439,6 +430,42 @@ struct ComposeNoteSheet: View {
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
+    private var composeEditor: some View {
+        ZStack(alignment: .topLeading) {
+            if viewModel.text.isEmpty {
+                Text(mode.placeholderText)
+                    .foregroundStyle(appSettings.themePalette.secondaryForeground)
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 16)
+            }
+
+            composeTextView(horizontalPadding: 8, verticalPadding: 8)
+                .frame(minHeight: composeEditorMinHeight)
+        }
+        .overlay(alignment: .topLeading) {
+            if shouldShowMentionSuggestions {
+                mentionSuggestionList
+                    .padding(.top, mentionSuggestionPanelTopPadding)
+                    .padding(.horizontal, 8)
+                    .zIndex(2)
+                    .transition(.opacity.combined(with: .move(edge: .top)))
+            }
+        }
+        .animation(.easeInOut(duration: 0.16), value: shouldShowMentionSuggestions)
+        .animation(.easeInOut(duration: 0.16), value: mentionSuggestionPanelTopPadding)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .zIndex(shouldShowMentionSuggestions ? 1 : 0)
+    }
+
+    private var composeEditorMinHeight: CGFloat {
+        guard shouldShowMentionSuggestions else { return 180 }
+        return max(180, mentionSuggestionPanelTopPadding + ComposeMentionSuggestionPanel.maxHeight + 12)
+    }
+
+    private var mentionSuggestionPanelTopPadding: CGFloat {
+        min(max(mentionSuggestionAnchorY + 12, 42), 118)
+    }
+
     private var statusSection: some View {
         ComposeStatusSectionView(
             isPublishing: viewModel.isPublishing,
@@ -459,6 +486,7 @@ struct ComposeNoteSheet: View {
             isFocused: $isEditorFocused,
             selectedRange: $editorSelectedRange,
             mentions: $selectedMentions,
+            mentionAnchorY: $mentionSuggestionAnchorY,
             mentionColor: UIColor(appSettings.primaryColor),
             onMentionQueryChange: handleMentionQueryChange(_:)
         )
@@ -518,20 +546,22 @@ struct ComposeNoteSheet: View {
 
     private func refreshMentionSuggestions(for query: ComposeMentionQuery) async {
         let normalizedQuery = query.query.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard normalizedQuery.count >= 2 else {
-            await MainActor.run {
-                guard activeMentionQuery == query else { return }
-                mentionSuggestions = []
-                isLoadingMentionSuggestions = false
-            }
-            return
+        let followedPubkeys = await MainActor.run {
+            FollowStore.shared.followedPubkeys
         }
-
         let profileResults: [ProfileSearchResult]
-        profileResults = await profileService.searchProfiles(
-            query: normalizedQuery,
-            limit: 12
-        )
+        if normalizedQuery.isEmpty {
+            profileResults = await localMentionSeedProfileResults(
+                followedPubkeys: followedPubkeys,
+                limit: 24
+            )
+        } else {
+            profileResults = await profileService.searchProfiles(
+                query: normalizedQuery,
+                limit: 24,
+                preferredPubkeys: followedPubkeys
+            )
+        }
 
         let excludedPubkeys = Set(selectedMentions.map(\.pubkey))
         let normalizedCurrentPubkey = currentAccountPubkey?
@@ -553,6 +583,84 @@ struct ComposeNoteSheet: View {
             mentionSuggestions = suggestions
             isLoadingMentionSuggestions = false
         }
+    }
+
+    private func localMentionSeedProfileResults(
+        followedPubkeys: Set<String>,
+        limit: Int
+    ) async -> [ProfileSearchResult] {
+        guard limit > 0 else { return [] }
+
+        let orderedFollowedPubkeys = await orderedFollowedMentionPubkeys(fallback: followedPubkeys)
+        let followedCandidates = Array(orderedFollowedPubkeys.prefix(max(limit * 3, 48)))
+        let followedProfiles = await profileService.cachedProfiles(pubkeys: followedCandidates)
+        let followedResults = followedCandidates.enumerated().compactMap { index, pubkey -> ProfileSearchResult? in
+            guard let profile = followedProfiles[pubkey] else { return nil }
+            return ProfileSearchResult(
+                pubkey: pubkey,
+                profile: profile,
+                createdAt: Int.max - index
+            )
+        }
+        let recentResults = await profileService.recentLocalProfiles(limit: limit)
+
+        return mergedMentionProfileResults(
+            [followedResults, recentResults],
+            limit: limit
+        )
+    }
+
+    private func orderedFollowedMentionPubkeys(fallback followedPubkeys: Set<String>) async -> [String] {
+        if let normalizedCurrentPubkey = currentAccountPubkey?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased(),
+           !normalizedCurrentPubkey.isEmpty,
+           let snapshot = await profileService.cachedFollowListSnapshot(pubkey: normalizedCurrentPubkey) {
+            let ordered = normalizedUniqueMentionPubkeys(snapshot.followedPubkeys)
+            if !ordered.isEmpty {
+                return ordered
+            }
+        }
+
+        return normalizedUniqueMentionPubkeys(Array(followedPubkeys).sorted())
+    }
+
+    private func mergedMentionProfileResults(
+        _ groups: [[ProfileSearchResult]],
+        limit: Int
+    ) -> [ProfileSearchResult] {
+        guard limit > 0 else { return [] }
+
+        var seen = Set<String>()
+        var merged: [ProfileSearchResult] = []
+        merged.reserveCapacity(limit)
+
+        for group in groups {
+            for result in group {
+                let pubkey = result.pubkey.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+                guard !pubkey.isEmpty, seen.insert(pubkey).inserted else { continue }
+                merged.append(result)
+                if merged.count >= limit {
+                    return merged
+                }
+            }
+        }
+
+        return merged
+    }
+
+    private func normalizedUniqueMentionPubkeys(_ pubkeys: [String]) -> [String] {
+        var seen = Set<String>()
+        var ordered: [String] = []
+        ordered.reserveCapacity(pubkeys.count)
+
+        for pubkey in pubkeys {
+            let normalized = pubkey.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+            guard !normalized.isEmpty, seen.insert(normalized).inserted else { continue }
+            ordered.append(normalized)
+        }
+
+        return ordered
     }
 
     private func insertMentionSuggestion(_ suggestion: ComposeMentionSuggestion) {
@@ -658,7 +766,8 @@ struct ComposeNoteSheet: View {
                     avatarURL: replyTargetAvatarURL,
                     fallbackText: replyTargetDisplayNameResolved,
                     videoSummary: "Note includes video",
-                    audioSummary: "Note includes audio"
+                    audioSummary: "Note includes audio",
+                    pollSummary: "Note includes poll"
                 )
             }
         }
@@ -675,7 +784,8 @@ struct ComposeNoteSheet: View {
                     avatarURL: quotedAvatarURL,
                     fallbackText: quotedDisplayNameResolved,
                     videoSummary: "Quoted note includes video",
-                    audioSummary: "Quoted note includes audio"
+                    audioSummary: "Quoted note includes audio",
+                    pollSummary: "Quoted note includes poll"
                 )
             }
         }
@@ -1743,7 +1853,8 @@ struct ComposeNoteSheet: View {
                 ),
                 imageURLs: previewImageURLs(from: tokens),
                 hasVideo: previewHasVideo(in: tokens),
-                hasAudio: previewHasAudio(in: tokens)
+                hasAudio: previewHasAudio(in: tokens),
+                hasPoll: renderedEvent.pollMetadata != nil
             )
         }.value
     }
@@ -2020,7 +2131,7 @@ private struct ComposeDraftLibrarySheet: View {
                                     dismiss()
                                 } : nil
                             )
-                            .listRowBackground(appSettings.themePalette.groupedBackground)
+                            .listRowBackground(appSettings.themePalette.sheetBackground)
                             .swipeActions(edge: .trailing, allowsFullSwipe: true) {
                                 Button(role: .destructive) {
                                     onDeleteDraft(draft)
@@ -2034,27 +2145,36 @@ private struct ComposeDraftLibrarySheet: View {
                     .scrollContentBackground(.hidden)
                 }
             }
-            .background(appSettings.themePalette.groupedBackground)
+            .background(appSettings.themePalette.sheetBackground)
             .navigationTitle("Drafts")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("Done") {
+                    Button {
                         dismiss()
+                    } label: {
+                        Image(systemName: "xmark")
                     }
+                    .accessibilityLabel("Close drafts")
                 }
 
-                ToolbarItem(placement: .topBarLeading) {
-                    Button("New") {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button {
                         onCreateNewDraft()
                         dismiss()
+                    } label: {
+                        Image(systemName: "plus")
                     }
+                    .foregroundStyle(appSettings.primaryColor)
+                    .accessibilityLabel("New draft")
                 }
             }
+            .toolbarBackground(appSettings.themePalette.sheetBackground, for: .navigationBar)
+            .toolbarBackground(.visible, for: .navigationBar)
         }
         .presentationDetents([.medium, .large])
         .presentationDragIndicator(.visible)
-        .presentationBackground(appSettings.themePalette.groupedBackground)
+        .presentationBackground(appSettings.themePalette.sheetBackground)
     }
 
     private var emptyState: some View {
@@ -2131,11 +2251,20 @@ private struct ComposeDraftLibraryRow: View {
             .buttonStyle(.plain)
 
             if let onInsertText {
-                Button("Insert") {
+                Button {
                     onInsertText()
+                } label: {
+                    Text("Insert")
+                        .font(appSettings.appFont(.caption1, weight: .semibold))
+                        .foregroundStyle(appSettings.themePalette.foreground)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 7)
+                        .background(
+                            appSettings.themePalette.navigationControlBackground,
+                            in: Capsule(style: .continuous)
+                        )
                 }
-                .buttonStyle(.bordered)
-                .controlSize(.small)
+                .buttonStyle(.plain)
             }
         }
         .padding(.vertical, 8)
@@ -2144,6 +2273,8 @@ private struct ComposeDraftLibraryRow: View {
 
 private struct ComposeMentionSuggestionPanel: View {
     @EnvironmentObject private var appSettings: AppSettingsStore
+
+    static let maxHeight: CGFloat = 220
 
     let suggestions: [ComposeMentionSuggestion]
     let isLoading: Bool
@@ -2168,24 +2299,29 @@ private struct ComposeMentionSuggestionPanel: View {
             .padding(.bottom, suggestions.isEmpty ? 12 : 8)
 
             if !suggestions.isEmpty {
-                VStack(spacing: 0) {
-                    ForEach(Array(suggestions.enumerated()), id: \.element.id) { index, suggestion in
-                        Button {
-                            onSelect(suggestion)
-                        } label: {
-                            ComposeMentionSuggestionRow(suggestion: suggestion)
-                        }
-                        .buttonStyle(.plain)
+                ScrollView {
+                    VStack(spacing: 0) {
+                        ForEach(Array(suggestions.enumerated()), id: \.element.id) { index, suggestion in
+                            Button {
+                                onSelect(suggestion)
+                            } label: {
+                                ComposeMentionSuggestionRow(suggestion: suggestion)
+                            }
+                            .buttonStyle(.plain)
 
-                        if index < suggestions.count - 1 {
-                            Divider()
-                                .padding(.leading, 60)
+                            if index < suggestions.count - 1 {
+                                Divider()
+                                    .padding(.leading, 60)
+                            }
                         }
                     }
+                    .padding(.bottom, 6)
                 }
-                .padding(.bottom, 6)
+                .frame(maxHeight: Self.maxHeight)
+                .scrollIndicators(.visible)
             }
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
         .background(
             appSettings.themePalette.secondaryGroupedBackground,
             in: RoundedRectangle(cornerRadius: 18, style: .continuous)
@@ -2208,6 +2344,7 @@ private struct ComposeContextPreviewCardView: View {
     let fallbackText: String
     let videoSummary: String
     let audioSummary: String
+    let pollSummary: String
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -2252,8 +2389,10 @@ private struct ComposeContextPreviewCardView: View {
                         imageURLs: previewSnapshot.imageURLs,
                         hasVideo: previewSnapshot.hasVideo,
                         hasAudio: previewSnapshot.hasAudio,
+                        hasPoll: previewSnapshot.hasPoll,
                         videoSummary: videoSummary,
-                        audioSummary: audioSummary
+                        audioSummary: audioSummary,
+                        pollSummary: pollSummary
                     )
                 }
             }
@@ -2277,10 +2416,24 @@ private struct ComposeContextPreviewMediaView: View {
     let imageURLs: [URL]
     let hasVideo: Bool
     let hasAudio: Bool
+    let hasPoll: Bool
     let videoSummary: String
     let audioSummary: String
+    let pollSummary: String
 
     var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            mediaContent
+
+            if hasPoll {
+                pollBadge
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    @ViewBuilder
+    private var mediaContent: some View {
         if !imageURLs.isEmpty {
             let columns = Array(
                 repeating: GridItem(.flexible(minimum: 0), spacing: 8),
@@ -2332,6 +2485,23 @@ private struct ComposeContextPreviewMediaView: View {
                     .fill(appSettings.themePalette.tertiaryFill)
             )
         }
+    }
+
+    private var pollBadge: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "chart.bar.xaxis")
+            Text(pollSummary)
+                .lineLimit(1)
+            Spacer(minLength: 0)
+        }
+        .font(.footnote)
+        .foregroundStyle(appSettings.themePalette.secondaryForeground)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 8)
+        .background(
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .fill(appSettings.themePalette.tertiaryFill)
+        )
     }
 }
 

@@ -92,6 +92,29 @@ final class NostrRelayClientTests: XCTestCase {
         XCTAssertEqual(outcome.successfulSourceCount, 1)
         XCTAssertEqual(outcome.firstFailureMessage, "Source publish timed out.")
     }
+
+    func testPublishEventToSourcesReturnsAfterFirstSuccessWithoutWaitingForSlowSources() async {
+        let fastSource = URL(string: "wss://source-one.example.com")!
+        let slowSource = URL(string: "wss://source-two.example.com")!
+        let publisher = StubRelayPublisher(
+            delays: [
+                slowSource: 1_000_000_000
+            ]
+        )
+
+        let startedAt = Date()
+        let outcome = await publisher.publishEvent(
+            to: [slowSource, fastSource],
+            eventData: Data("{}".utf8),
+            eventID: "event-id",
+            successPolicy: .returnAfterFirstSuccess
+        )
+        let elapsed = Date().timeIntervalSince(startedAt)
+
+        XCTAssertEqual(outcome.successfulSourceCount, 1)
+        XCTAssertNil(outcome.firstFailureMessage)
+        XCTAssertLessThan(elapsed, 0.35)
+    }
 }
 
 private actor StubRelayPublisher: NostrRelayEventPublishing {

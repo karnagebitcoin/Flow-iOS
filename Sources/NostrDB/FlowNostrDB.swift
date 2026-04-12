@@ -23,6 +23,12 @@ struct FlowNostrDBDiagnostics: Equatable, Sendable {
     var diskUsageBytes: Int64 = 0
 }
 
+struct FlowNostrDBProfileSearchResult: Equatable, Sendable {
+    let pubkey: String
+    let profile: NostrProfile
+    let createdAt: Int
+}
+
 final class FlowNostrDB: @unchecked Sendable {
     static let shared = FlowNostrDB()
 
@@ -222,6 +228,38 @@ final class FlowNostrDB: @unchecked Sendable {
             }
 
             return resolved
+        }
+    }
+
+    func searchProfiles(query: String, limit: Int) -> [FlowNostrDBProfileSearchResult] {
+        let normalizedQuery = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !normalizedQuery.isEmpty, limit > 0 else { return [] }
+
+        return queue.sync {
+            guard openIfNeeded() else { return [] }
+            queryCount += 1
+
+            let rows: [ProfileSearchRow] = normalizedQuery.withCString { rawQuery in
+                var length: Int32 = 0
+                guard let jsonPointer = flow_ndb_copy_profile_search_json(handle, rawQuery, Int32(limit), &length),
+                      length > 0 else {
+                    return []
+                }
+                defer { flow_ndb_free_string(jsonPointer) }
+
+                let data = Data(bytes: jsonPointer, count: Int(length))
+                return (try? decoder.decode([ProfileSearchRow].self, from: data)) ?? []
+            }
+
+            return rows.compactMap { row in
+                let pubkey = normalizeHexIdentifier(row.pubkey)
+                guard !pubkey.isEmpty else { return nil }
+                return FlowNostrDBProfileSearchResult(
+                    pubkey: pubkey,
+                    profile: row.profile,
+                    createdAt: row.createdAt
+                )
+            }
         }
     }
 
@@ -432,6 +470,18 @@ final class FlowNostrDB: @unchecked Sendable {
     private func encodedEventJSON(_ event: NostrEvent) -> String? {
         guard let data = try? encoder.encode(event) else { return nil }
         return String(data: data, encoding: .utf8)
+    }
+
+    private struct ProfileSearchRow: Decodable {
+        let pubkey: String
+        let createdAt: Int
+        let profile: NostrProfile
+
+        private enum CodingKeys: String, CodingKey {
+            case pubkey
+            case createdAt = "created_at"
+            case profile
+        }
     }
 
     private func rememberReplaceable(event: NostrEvent, updateSessionCounters: Bool) {

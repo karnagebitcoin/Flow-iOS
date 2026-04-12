@@ -43,6 +43,56 @@ final class NostrFeedServiceTests: XCTestCase {
         XCTAssertEqual(diagnostics.successfulIngestCallCount, 1)
     }
 
+    func testFastRelayModeMergesMultipleRelayResponses() async throws {
+        let rootURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("FlowFastRelayMerge-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: rootURL, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: rootURL) }
+
+        let fileManager = TestFileManager(rootURL: rootURL)
+        let nostrDatabase = FlowNostrDB(fileManager: fileManager)
+        let firstRelayEvent = makeEvent(
+            id: hex("c"),
+            pubkey: hex("d"),
+            kind: 1,
+            tags: [],
+            content: "first relay",
+            createdAt: 1_700_000_100
+        )
+        let secondRelayEvent = makeEvent(
+            id: hex("e"),
+            pubkey: hex("f"),
+            kind: 1,
+            tags: [],
+            content: "second relay",
+            createdAt: 1_700_000_200
+        )
+        let relayClient = ProfileMetadataRelayClient(eventsByRelay: [
+            relayURL: [firstRelayEvent],
+            relayURL2: [secondRelayEvent]
+        ])
+        let service = makeFeedService(
+            relayClient: relayClient,
+            fileManager: fileManager,
+            nostrDatabase: nostrDatabase
+        )
+
+        let items = try await service.fetchFeed(
+            relayURLs: [relayURL, relayURL2],
+            kinds: [1],
+            limit: 10,
+            until: nil,
+            hydrationMode: .cachedProfilesOnly,
+            fetchTimeout: 0.01,
+            relayFetchMode: .firstNonEmptyRelay
+        )
+
+        let fetchCount = await relayClient.fetchCount()
+
+        XCTAssertEqual(items.map(\.id), [secondRelayEvent.id, firstRelayEvent.id])
+        XCTAssertEqual(fetchCount, 2)
+    }
+
     func testProfileEventServicePersistsFetchedMetadataSnapshotsLocally() async throws {
         let rootURL = FileManager.default.temporaryDirectory
             .appendingPathComponent("FlowProfileEventService-\(UUID().uuidString)", isDirectory: true)
@@ -269,6 +319,145 @@ final class NostrFeedServiceTests: XCTestCase {
 
         XCTAssertEqual(results.first?.pubkey, targetPubkey)
         XCTAssertEqual(results.first?.profile?.displayName, "Michael J. Saylor")
+    }
+
+    func testLocalProfileSearchMatchesSingleCharacterNamePrefixes() async throws {
+        let rootURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("FlowSingleCharacterLocalProfileSearch-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: rootURL, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: rootURL) }
+
+        let fileManager = TestFileManager(rootURL: rootURL)
+        let nostrDatabase = FlowNostrDB(fileManager: fileManager)
+        let service = makeFeedService(
+            relayClient: SpyRelayClient(),
+            fileManager: fileManager,
+            nostrDatabase: nostrDatabase
+        )
+
+        let targetPubkey = String(format: "%064x", 5_000)
+        let nonPrefixPubkey = String(format: "%064x", 5_001)
+        let events = [
+            makeEvent(
+                id: String(format: "%064x", 15_000),
+                pubkey: targetPubkey,
+                kind: 0,
+                tags: [],
+                content: #"{"name":"gigi","display_name":"Gigi"}"#,
+                createdAt: 1_700_000_500
+            ),
+            makeEvent(
+                id: String(format: "%064x", 15_001),
+                pubkey: nonPrefixPubkey,
+                kind: 0,
+                tags: [],
+                content: #"{"name":"meg","display_name":"Meg"}"#,
+                createdAt: 1_700_000_900
+            )
+        ]
+
+        XCTAssertTrue(nostrDatabase.ingest(events: events))
+
+        let results = await service.searchProfiles(query: "g", limit: 8)
+
+        XCTAssertEqual(results.first?.pubkey, targetPubkey)
+        XCTAssertFalse(results.contains { $0.pubkey == nonPrefixPubkey })
+    }
+
+    func testLocalProfileSearchBoostsPreferredPubkeys() async throws {
+        let rootURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("FlowPreferredLocalProfileSearch-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: rootURL, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: rootURL) }
+
+        let fileManager = TestFileManager(rootURL: rootURL)
+        let nostrDatabase = FlowNostrDB(fileManager: fileManager)
+        let service = makeFeedService(
+            relayClient: SpyRelayClient(),
+            fileManager: fileManager,
+            nostrDatabase: nostrDatabase
+        )
+
+        let followedPubkey = String(format: "%064x", 6_000)
+        let recentPubkey = String(format: "%064x", 6_001)
+        let events = [
+            makeEvent(
+                id: String(format: "%064x", 16_000),
+                pubkey: followedPubkey,
+                kind: 0,
+                tags: [],
+                content: #"{"name":"gale","display_name":"Gale"}"#,
+                createdAt: 1_700_000_100
+            ),
+            makeEvent(
+                id: String(format: "%064x", 16_001),
+                pubkey: recentPubkey,
+                kind: 0,
+                tags: [],
+                content: #"{"name":"gina","display_name":"Gina"}"#,
+                createdAt: 1_700_000_900
+            )
+        ]
+
+        XCTAssertTrue(nostrDatabase.ingest(events: events))
+
+        let unboostedResults = await service.searchProfiles(query: "g", limit: 8)
+        let boostedResults = await service.searchProfiles(
+            query: "g",
+            limit: 8,
+            preferredPubkeys: [followedPubkey]
+        )
+
+        XCTAssertEqual(unboostedResults.first?.pubkey, recentPubkey)
+        XCTAssertEqual(boostedResults.first?.pubkey, followedPubkey)
+    }
+
+    func testLocalProfileSearchUsesNostrDBProfileIndexBeyondGenericQueryCapacity() async throws {
+        let rootURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("FlowIndexedLocalProfileSearch-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: rootURL, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: rootURL) }
+
+        let fileManager = TestFileManager(rootURL: rootURL)
+        let nostrDatabase = FlowNostrDB(fileManager: fileManager)
+        let service = makeFeedService(
+            relayClient: SpyRelayClient(),
+            fileManager: fileManager,
+            nostrDatabase: nostrDatabase
+        )
+
+        let targetPubkey = String(format: "%064x", 42)
+        var metadataEvents = [
+            makeEvent(
+                id: String(format: "%064x", 42_000),
+                pubkey: targetPubkey,
+                kind: 0,
+                tags: [],
+                content: #"{"name":"needlefriend","display_name":"Needle Friend"}"#,
+                createdAt: 1_600_000_000
+            )
+        ]
+        metadataEvents.reserveCapacity(2_602)
+
+        for index in 0..<2_600 {
+            metadataEvents.append(
+                makeEvent(
+                    id: String(format: "%064x", 50_000 + index),
+                    pubkey: String(format: "%064x", 60_000 + index),
+                    kind: 0,
+                    tags: [],
+                    content: #"{"name":"other\#(index)","display_name":"Other \#(index)"}"#,
+                    createdAt: 1_700_000_000 + index
+                )
+            )
+        }
+
+        XCTAssertTrue(nostrDatabase.ingest(events: metadataEvents))
+
+        let results = await service.searchProfiles(query: "needle", limit: 8)
+
+        XCTAssertEqual(results.first?.pubkey, targetPubkey)
+        XCTAssertEqual(results.first?.profile?.displayName, "Needle Friend")
     }
 
     func testLocalProfileSearchRefreshesAfterNewMetadataIngest() async throws {
@@ -527,11 +716,24 @@ final class NostrFeedServiceTests: XCTestCase {
             content: "Nested reply",
             createdAt: 1_700_000_002
         )
+        let quoteMention = makeEvent(
+            id: hex("6"),
+            pubkey: hex("7"),
+            kind: 1,
+            tags: [
+                ["e", rootEventID, "", "mention", hex("8")],
+                ["q", rootEventID],
+                ["p", hex("8")]
+            ],
+            content: "Quote, not a reply",
+            createdAt: 1_700_000_003
+        )
 
         let relayClient = ThreadReplyRelayClient(
             rootEventID: rootEventID,
             directReply: directReply,
-            nestedReply: nestedReply
+            nestedReply: nestedReply,
+            quoteMention: quoteMention
         )
         let fileManager = TestFileManager(rootURL: rootURL)
         let nostrDatabase = FlowNostrDB(fileManager: fileManager)
@@ -1043,12 +1245,19 @@ private actor ThreadReplyRelayClient: NostrRelayEventFetching {
     private let rootEventID: String
     private let directReply: Flow.NostrEvent
     private let nestedReply: Flow.NostrEvent
+    private let quoteMention: Flow.NostrEvent
     private var fetchCallCount = 0
 
-    init(rootEventID: String, directReply: Flow.NostrEvent, nestedReply: Flow.NostrEvent) {
+    init(
+        rootEventID: String,
+        directReply: Flow.NostrEvent,
+        nestedReply: Flow.NostrEvent,
+        quoteMention: Flow.NostrEvent
+    ) {
         self.rootEventID = rootEventID
         self.directReply = directReply
         self.nestedReply = nestedReply
+        self.quoteMention = quoteMention
     }
 
     func fetchEvents(
@@ -1060,7 +1269,7 @@ private actor ThreadReplyRelayClient: NostrRelayEventFetching {
 
         let referencedEventIDs = Set(filter.tagFilters?["e"] ?? [])
         if referencedEventIDs.contains(rootEventID) {
-            return [directReply]
+            return [directReply, quoteMention]
         }
         if referencedEventIDs.contains(directReply.id) {
             return [nestedReply]

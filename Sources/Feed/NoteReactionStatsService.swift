@@ -70,7 +70,7 @@ final class NoteReactionStatsService: ObservableObject {
     private var persistTask: Task<Void, Never>?
 
     init(
-        relayClient: any NostrRelayEventFetching = NostrRelayClient(),
+        relayClient: any NostrRelayEventFetching = NostrRelayClient(fetchEndpointBackoff: .sharedReaction),
         store: NoteReactionStatsStore = .shared
     ) {
         self.relayClient = relayClient
@@ -322,6 +322,12 @@ final class NoteReactionStatsService: ObservableObject {
             )
         }
 
+        let plannedFetchCountByEventID = plans.reduce(into: [String: Int]()) { counts, plan in
+            for eventID in plan.eventIDs {
+                counts[eventID, default: 0] += 1
+            }
+        }
+
         let fetchResults = await withTaskGroup(of: RelayReactionFetchResult.self, returning: [RelayReactionFetchResult].self) { group in
             for plan in plans {
                 group.addTask { [relayClient] in
@@ -360,21 +366,37 @@ final class NoteReactionStatsService: ObservableObject {
             return results
         }
 
+        var successfulFetchCountByEventID: [String: Int] = [:]
+        var touchedEventIDs = Set<String>()
+        var persistedEventIDs = Set<String>()
+
         for result in fetchResults {
             guard let reactionEvents = result.events else { continue }
 
             let touchedIDs = mergeReactionEvents(reactionEvents, trackedEventIDs: Set(result.eventIDs))
-            let now = Int(Date().timeIntervalSince1970)
-
-            var persistedIDs = touchedIDs
             for eventID in result.eventIDs {
-                var stats = statsByEventID[eventID] ?? NoteReactionStats()
-                stats.updatedAt = now
-                setStats(stats, for: eventID)
-                persistedIDs.insert(eventID)
+                successfulFetchCountByEventID[eventID, default: 0] += 1
             }
 
-            schedulePersist(eventIDs: Array(persistedIDs))
+            touchedEventIDs.formUnion(touchedIDs)
+            persistedEventIDs.formUnion(touchedIDs)
+        }
+
+        let now = Int(Date().timeIntervalSince1970)
+        for (eventID, successfulFetchCount) in successfulFetchCountByEventID {
+            let plannedFetchCount = plannedFetchCountByEventID[eventID] ?? successfulFetchCount
+            let hasFreshReactionEvent = touchedEventIDs.contains(eventID)
+            let hasCorroboratedEmptyResult = successfulFetchCount >= min(plannedFetchCount, 2)
+            guard hasFreshReactionEvent || hasCorroboratedEmptyResult else { continue }
+
+            var stats = statsByEventID[eventID] ?? NoteReactionStats()
+            stats.updatedAt = now
+            setStats(stats, for: eventID)
+            persistedEventIDs.insert(eventID)
+        }
+
+        if !persistedEventIDs.isEmpty {
+            schedulePersist(eventIDs: Array(persistedEventIDs))
         }
 
         if !pendingRequests.isEmpty {

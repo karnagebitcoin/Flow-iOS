@@ -6,7 +6,7 @@ final class ComposeNoteSheetModeTests: XCTestCase {
         let mode = ComposeNoteSheetMode(hasReplyTarget: false, hasQuotedEvent: false)
 
         XCTAssertEqual(mode, .newNote)
-        XCTAssertEqual(mode.navigationTitle, "Compose note")
+        XCTAssertEqual(mode.navigationTitle, "Compose")
         XCTAssertEqual(mode.publishButtonTitle, "Post")
         XCTAssertEqual(mode.placeholderText, "What do you want to share?")
         XCTAssertEqual(mode.accessibilityActionLabel, "Posting")

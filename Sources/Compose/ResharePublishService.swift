@@ -140,7 +140,8 @@ final class ResharePublishService {
         let publishOutcome = await relayClient.publishEvent(
             to: targets,
             eventData: repostData,
-            eventID: repostEvent.id
+            eventID: repostEvent.id,
+            successPolicy: .returnAfterFirstSuccess
         )
 
         if publishOutcome.successfulSourceCount == 0 {

@@ -168,6 +168,10 @@ struct ThreadDetailView: View {
                     UIPasteboard.general.string = rootCopyableNoteText
                     toastCenter.show("Copied text")
                 },
+                onCopyEventID: {
+                    UIPasteboard.general.string = rootCopyableEventIdentifier
+                    toastCenter.show("Copied event ID")
+                },
                 onCopyLink: {
                     UIPasteboard.general.string = rootNoteShareLink
                     toastCenter.show("Copied link")
@@ -183,7 +187,7 @@ struct ThreadDetailView: View {
                     presentRootReportFlow()
                 }
             )
-            .presentationDetents([.height(rootCanTranslateNote ? 490 : 435), .medium])
+            .presentationDetents([.height(rootCanTranslateNote ? 545 : 490), .medium])
             .presentationDragIndicator(.visible)
         }
         .sheet(isPresented: $isShowingRootReportSheet) {
@@ -341,6 +345,13 @@ struct ThreadDetailView: View {
             return externalURL.absoluteString
         }
         return "https://nlink.to/\(viewModel.rootItem.displayEventID)"
+    }
+
+    private var rootCopyableEventIdentifier: String {
+        NoteContentParser.neventIdentifier(
+            for: viewModel.rootItem.displayEvent,
+            relayHints: effectiveReadRelayURLs
+        ) ?? viewModel.rootItem.displayEventID
     }
 
     private var rootReactionCount: Int {

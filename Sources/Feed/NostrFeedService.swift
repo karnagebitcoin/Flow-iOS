@@ -232,17 +232,78 @@ private actor LocalProfileSearchIndex {
     func search(
         query: String,
         limit: Int,
-        nostrDatabase: FlowNostrDB
+        nostrDatabase: FlowNostrDB,
+        preferredPubkeys: Set<String> = []
     ) async -> [ProfileSearchResult] {
         guard limit > 0 else { return [] }
-        let documents = await documents(for: nostrDatabase)
-        guard !documents.isEmpty else { return [] }
+        let normalizedPreferredPubkeys = Set(
+            preferredPubkeys
+                .map(ProfileSearchSupport.normalizedPubkey)
+                .filter { !$0.isEmpty }
+        )
 
         var topMatches: [RankedMatch] = []
         topMatches.reserveCapacity(limit)
+        var seenPubkeys = Set<String>()
+
+        func insertResult(
+            pubkey rawPubkey: String,
+            profile: NostrProfile,
+            createdAt: Int,
+            baseScore: Int
+        ) {
+            let pubkey = ProfileSearchSupport.normalizedPubkey(rawPubkey)
+            guard !pubkey.isEmpty else { return }
+            guard seenPubkeys.insert(pubkey).inserted else { return }
+
+            var score = baseScore
+            if normalizedPreferredPubkeys.contains(pubkey) {
+                score += 35
+            }
+
+            let candidate = RankedMatch(
+                result: ProfileSearchResult(
+                    pubkey: pubkey,
+                    profile: profile,
+                    createdAt: createdAt
+                ),
+                score: score
+            )
+            Self.insert(candidate, into: &topMatches, limit: limit)
+        }
+
+        let indexedSearchLimit = min(max(limit * 8, 80), 500)
+        let indexedResults = nostrDatabase.searchProfiles(
+            query: query,
+            limit: indexedSearchLimit
+        )
+
+        for result in indexedResults {
+            guard let score = ProfileSearchSupport.score(
+                profile: result.profile,
+                pubkey: result.pubkey,
+                query: query
+            ) else {
+                continue
+            }
+
+            insertResult(
+                pubkey: result.pubkey,
+                profile: result.profile,
+                createdAt: result.createdAt,
+                baseScore: score + 120
+            )
+        }
+
+        if topMatches.count >= limit {
+            return topMatches.map(\.result)
+        }
+
+        let documents = await documents(for: nostrDatabase)
+        guard !documents.isEmpty else { return topMatches.map(\.result) }
 
         for document in documents {
-            guard let score = ProfileSearchSupport.score(
+            guard var score = ProfileSearchSupport.score(
                 searchableFields: document.searchableFields,
                 searchTokens: document.searchTokens,
                 pubkey: document.pubkey,
@@ -250,16 +311,16 @@ private actor LocalProfileSearchIndex {
             ) else {
                 continue
             }
+            if normalizedPreferredPubkeys.contains(document.pubkey) {
+                score += 35
+            }
 
-            let candidate = RankedMatch(
-                result: ProfileSearchResult(
-                    pubkey: document.pubkey,
-                    profile: document.profile,
-                    createdAt: document.createdAt
-                ),
-                score: score
+            insertResult(
+                pubkey: document.pubkey,
+                profile: document.profile,
+                createdAt: document.createdAt,
+                baseScore: score
             )
-            Self.insert(candidate, into: &topMatches, limit: limit)
         }
 
         return topMatches.map(\.result)
@@ -631,6 +692,10 @@ enum FeedItemHydrationMode: Sendable {
 
 enum RelayFetchMode: Sendable, Equatable {
     case allRelays
+
+    // Kept for existing call sites that request the fast path. The fetcher now
+    // keeps listening to all relays within the caller's timeout instead of
+    // trusting the first relay that happens to return a non-empty response.
     case firstNonEmptyRelay
 }
 
@@ -675,6 +740,30 @@ struct NostrFeedService: Sendable {
     func ingestLiveEvents(_ events: [NostrEvent]) async {
         guard !events.isEmpty else { return }
         await seenEventStore.store(events: events)
+    }
+
+    func fetchLiveCatchUpEvents(
+        relayURL: URL,
+        filter: NostrFilter,
+        since: Int,
+        limit: Int = 200,
+        timeout: TimeInterval = 4
+    ) async -> [NostrEvent] {
+        var catchUpFilter = filter
+        catchUpFilter.since = max(since, 0)
+        catchUpFilter.until = nil
+        catchUpFilter.limit = max(catchUpFilter.limit ?? 0, limit)
+
+        do {
+            return try await fetchTimelineEvents(
+                relayURL: relayURL,
+                filter: catchUpFilter,
+                timeout: timeout,
+                useCache: false
+            )
+        } catch {
+            return []
+        }
     }
 
     func fetchFeed(relayURL: URL, kinds: [Int], limit: Int, until: Int?) async throws -> [FeedItem] {
@@ -1283,7 +1372,8 @@ struct NostrFeedService: Sendable {
 
     func searchProfiles(
         query: String,
-        limit: Int
+        limit: Int,
+        preferredPubkeys: Set<String> = []
     ) async -> [ProfileSearchResult] {
         guard limit > 0 else { return [] }
         let normalizedQuery = query.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
@@ -1292,7 +1382,8 @@ struct NostrFeedService: Sendable {
         return await LocalProfileSearchIndex.shared.search(
             query: normalizedQuery,
             limit: limit,
-            nostrDatabase: nostrDatabase
+            nostrDatabase: nostrDatabase,
+            preferredPubkeys: preferredPubkeys
         )
     }
 
@@ -1915,6 +2006,7 @@ struct NostrFeedService: Sendable {
             relayFetchMode: relayFetchMode
         )
             .filter { $0.id != rootEventID }
+            .filter(\.isReplyNote)
             .filter { $0.references(eventID: rootEventID) }
         let directReplyIDs = Set(directReplies.map(\.id))
 
@@ -1933,6 +2025,7 @@ struct NostrFeedService: Sendable {
             )) ?? []
             let relevantNested = nestedReplies
                 .filter { $0.id != rootEventID }
+                .filter(\.isReplyNote)
                 .filter { event in
                     event.references(eventID: rootEventID) ||
                     event.eventReferenceIDs.contains(where: { directReplyIDs.contains($0) })
@@ -3079,15 +3172,9 @@ struct NostrFeedService: Sendable {
             for await item in group {
                 if let events = item.events {
                     successfulFetches += 1
-
                     switch relayFetchMode {
-                    case .allRelays:
+                    case .allRelays, .firstNonEmptyRelay:
                         mergedEvents.append(contentsOf: events)
-                    case .firstNonEmptyRelay:
-                        if !events.isEmpty {
-                            group.cancelAll()
-                            return (events, successfulFetches, firstError)
-                        }
                     }
                 } else if firstError == nil, let error = item.error {
                     firstError = error

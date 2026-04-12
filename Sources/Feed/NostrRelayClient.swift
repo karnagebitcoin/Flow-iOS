@@ -1,3 +1,4 @@
+import Combine
 import Foundation
 
 protocol NostrRelayEventFetching: Sendable {
@@ -20,6 +21,17 @@ protocol NostrRelayEventPublishing: Sendable {
 struct SourcePublishOutcome: Sendable {
     let successfulSourceCount: Int
     let firstFailureMessage: String?
+    let attempts: [SourcePublishAttemptReport]
+
+    init(
+        successfulSourceCount: Int,
+        firstFailureMessage: String?,
+        attempts: [SourcePublishAttemptReport] = []
+    ) {
+        self.successfulSourceCount = successfulSourceCount
+        self.firstFailureMessage = firstFailureMessage
+        self.attempts = attempts
+    }
 }
 
 enum SourcePublishSuccessPolicy: Sendable {
@@ -32,6 +44,127 @@ struct SourcePublishTransportError: LocalizedError, Sendable {
 
     var errorDescription: String? {
         message
+    }
+}
+
+struct SourcePublishAttemptReport: Codable, Equatable, Sendable {
+    let sourceURLString: String
+    let accepted: Bool
+    let failureMessage: String?
+    let rateLimited: Bool
+    let recordedAt: Date
+
+    init(
+        sourceURL: URL,
+        accepted: Bool,
+        failureMessage: String? = nil,
+        rateLimited: Bool = false,
+        recordedAt: Date = Date()
+    ) {
+        self.sourceURLString = Self.normalizedSourceURLString(sourceURL.absoluteString)
+        self.accepted = accepted
+        self.failureMessage = failureMessage
+        self.rateLimited = rateLimited
+        self.recordedAt = recordedAt
+    }
+
+    private static func normalizedSourceURLString(_ value: String) -> String {
+        value
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+    }
+}
+
+struct SourcePublishStatsSnapshot: Codable, Equatable, Identifiable, Sendable {
+    let sourceURLString: String
+    var attemptedCount: Int
+    var acceptedCount: Int
+    var failedCount: Int
+    var rateLimitedCount: Int
+    var lastAttemptAt: Date?
+    var lastAcceptedAt: Date?
+    var lastFailedAt: Date?
+    var lastFailureMessage: String?
+
+    var id: String { sourceURLString }
+
+    var acceptanceRate: Double {
+        guard attemptedCount > 0 else { return 0 }
+        return Double(acceptedCount) / Double(attemptedCount)
+    }
+}
+
+@MainActor
+final class SourcePublishStatsStore: ObservableObject {
+    static let shared = SourcePublishStatsStore()
+
+    @Published private(set) var snapshotsBySource: [String: SourcePublishStatsSnapshot]
+
+    private let defaults: UserDefaults
+    private let storageKey = "flow.sourcePublishStats.v1"
+
+    init(defaults: UserDefaults = .standard) {
+        self.defaults = defaults
+        if let data = defaults.data(forKey: storageKey),
+           let decoded = try? JSONDecoder().decode([String: SourcePublishStatsSnapshot].self, from: data) {
+            self.snapshotsBySource = decoded
+        } else {
+            self.snapshotsBySource = [:]
+        }
+    }
+
+    func snapshot(for sourceURLString: String) -> SourcePublishStatsSnapshot? {
+        snapshotsBySource[normalizedSourceKey(sourceURLString)]
+    }
+
+    func orderedSnapshots(for sourceURLStrings: [String]) -> [SourcePublishStatsSnapshot] {
+        sourceURLStrings.compactMap(snapshot(for:))
+    }
+
+    func record(_ report: SourcePublishAttemptReport) {
+        let key = normalizedSourceKey(report.sourceURLString)
+        guard !key.isEmpty else { return }
+
+        var snapshot = snapshotsBySource[key] ?? SourcePublishStatsSnapshot(
+            sourceURLString: key,
+            attemptedCount: 0,
+            acceptedCount: 0,
+            failedCount: 0,
+            rateLimitedCount: 0,
+            lastAttemptAt: nil,
+            lastAcceptedAt: nil,
+            lastFailedAt: nil,
+            lastFailureMessage: nil
+        )
+
+        snapshot.attemptedCount += 1
+        snapshot.lastAttemptAt = report.recordedAt
+
+        if report.accepted {
+            snapshot.acceptedCount += 1
+            snapshot.lastAcceptedAt = report.recordedAt
+        } else {
+            snapshot.failedCount += 1
+            snapshot.lastFailedAt = report.recordedAt
+            snapshot.lastFailureMessage = report.failureMessage
+            if report.rateLimited {
+                snapshot.rateLimitedCount += 1
+            }
+        }
+
+        snapshotsBySource[key] = snapshot
+        persist()
+    }
+
+    private func persist() {
+        guard let data = try? JSONEncoder().encode(snapshotsBySource) else { return }
+        defaults.set(data, forKey: storageKey)
+    }
+
+    private func normalizedSourceKey(_ value: String) -> String {
+        value
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
     }
 }
 
@@ -60,6 +193,9 @@ enum RelayClientError: LocalizedError {
 
 actor RelayEndpointBackoff {
     static let shared = RelayEndpointBackoff()
+    static let sharedRead = RelayEndpointBackoff()
+    static let sharedReaction = RelayEndpointBackoff()
+    static let sharedPublish = RelayEndpointBackoff()
 
     private struct Entry {
         var failureCount: Int
@@ -137,14 +273,26 @@ actor RelayEndpointBackoff {
 
 final class NostrRelayClient: @unchecked Sendable {
     private let session: URLSession
-    private let endpointBackoff: RelayEndpointBackoff
+    private let fetchEndpointBackoff: RelayEndpointBackoff
+    private let publishEndpointBackoff: RelayEndpointBackoff
 
     init(
         session: URLSession = .shared,
-        endpointBackoff: RelayEndpointBackoff = .shared
+        fetchEndpointBackoff: RelayEndpointBackoff = .sharedRead,
+        publishEndpointBackoff: RelayEndpointBackoff = .sharedPublish
     ) {
         self.session = session
-        self.endpointBackoff = endpointBackoff
+        self.fetchEndpointBackoff = fetchEndpointBackoff
+        self.publishEndpointBackoff = publishEndpointBackoff
+    }
+
+    init(
+        session: URLSession = .shared,
+        endpointBackoff: RelayEndpointBackoff
+    ) {
+        self.session = session
+        self.fetchEndpointBackoff = endpointBackoff
+        self.publishEndpointBackoff = endpointBackoff
     }
 
     func fetchEvents(
@@ -153,7 +301,7 @@ final class NostrRelayClient: @unchecked Sendable {
         timeout: TimeInterval = 12
     ) async throws -> [NostrEvent] {
         let validatedRelayURL = try validatedWebSocketRelayURL(relayURL)
-        guard await endpointBackoff.canAttempt(validatedRelayURL) else {
+        guard await fetchEndpointBackoff.canAttempt(validatedRelayURL) else {
             throw RelayClientError.coolingDown(validatedRelayURL.absoluteString)
         }
 
@@ -196,7 +344,7 @@ final class NostrRelayClient: @unchecked Sendable {
                     }
                 case .eose(let id):
                     if id == subscriptionID {
-                        await endpointBackoff.recordSuccess(for: validatedRelayURL)
+                        await fetchEndpointBackoff.recordSuccess(for: validatedRelayURL)
                         return events
                     }
                 case .ok:
@@ -210,11 +358,11 @@ final class NostrRelayClient: @unchecked Sendable {
                 }
             }
 
-            await endpointBackoff.recordSuccess(for: validatedRelayURL)
+            await fetchEndpointBackoff.recordSuccess(for: validatedRelayURL)
             return events
         } catch {
             if shouldRecordBackoff(for: error) {
-                await endpointBackoff.recordFailure(for: validatedRelayURL)
+                await fetchEndpointBackoff.recordFailure(for: validatedRelayURL)
             }
             throw error
         }
@@ -227,7 +375,7 @@ final class NostrRelayClient: @unchecked Sendable {
         timeout: TimeInterval = 10
     ) async throws {
         let validatedRelayURL = try validatedWebSocketRelayURL(relayURL)
-        guard await endpointBackoff.canAttempt(validatedRelayURL) else {
+        guard await publishEndpointBackoff.canAttempt(validatedRelayURL) else {
             throw RelayClientError.coolingDown(validatedRelayURL.absoluteString)
         }
 
@@ -260,7 +408,7 @@ final class NostrRelayClient: @unchecked Sendable {
                 case .ok(let ackedEventID, let accepted, let reason):
                     guard ackedEventID == eventID else { continue }
                     if accepted {
-                        await endpointBackoff.recordSuccess(for: validatedRelayURL)
+                        await publishEndpointBackoff.recordSuccess(for: validatedRelayURL)
                         return
                     }
                     throw RelayClientError.publishRejected(reason ?? "Unknown reason")
@@ -276,7 +424,7 @@ final class NostrRelayClient: @unchecked Sendable {
             throw RelayClientError.publishTimedOut
         } catch {
             if shouldRecordBackoff(for: error) {
-                await endpointBackoff.recordFailure(for: validatedRelayURL)
+                await publishEndpointBackoff.recordFailure(for: validatedRelayURL)
             }
             throw error
         }
@@ -373,9 +521,56 @@ final class NostrRelayClient: @unchecked Sendable {
 extension NostrRelayClient: NostrRelayEventFetching {}
 extension NostrRelayClient: NostrRelayEventPublishing {}
 
-private enum SourcePublishAttempt: Sendable {
-    case success
-    case failure(String)
+private actor SourcePublishFirstSuccessCoordinator {
+    private let continuation: CheckedContinuation<SourcePublishOutcome, Never>
+    private var remainingCount: Int
+    private var successfulSourceCount = 0
+    private var firstFailureMessage: String?
+    private var attempts: [SourcePublishAttemptReport] = []
+    private var didResume = false
+
+    init(
+        totalCount: Int,
+        continuation: CheckedContinuation<SourcePublishOutcome, Never>
+    ) {
+        self.remainingCount = totalCount
+        self.continuation = continuation
+    }
+
+    func record(_ attempt: SourcePublishAttemptReport) {
+        guard !didResume else { return }
+
+        attempts.append(attempt)
+        remainingCount -= 1
+
+        if attempt.accepted {
+            successfulSourceCount += 1
+            didResume = true
+            continuation.resume(
+                returning: SourcePublishOutcome(
+                    successfulSourceCount: successfulSourceCount,
+                    firstFailureMessage: firstFailureMessage,
+                    attempts: attempts
+                )
+            )
+            return
+        }
+
+        if firstFailureMessage == nil {
+            firstFailureMessage = attempt.failureMessage
+        }
+
+        if remainingCount <= 0 {
+            didResume = true
+            continuation.resume(
+                returning: SourcePublishOutcome(
+                    successfulSourceCount: successfulSourceCount,
+                    firstFailureMessage: firstFailureMessage,
+                    attempts: attempts
+                )
+            )
+        }
+    }
 }
 
 extension NostrRelayEventPublishing {
@@ -386,49 +581,157 @@ extension NostrRelayEventPublishing {
         timeout: TimeInterval = 10,
         successPolicy: SourcePublishSuccessPolicy = .waitForAllAcknowledgements
     ) async -> SourcePublishOutcome {
+        guard !sourceURLs.isEmpty else {
+            return SourcePublishOutcome(successfulSourceCount: 0, firstFailureMessage: nil)
+        }
+
+        switch successPolicy {
+        case .waitForAllAcknowledgements:
+            return await publishEventWaitingForAllSources(
+                sourceURLs: sourceURLs,
+                eventData: eventData,
+                eventID: eventID,
+                timeout: timeout
+            )
+        case .returnAfterFirstSuccess:
+            return await publishEventReturningAfterFirstSourceSuccess(
+                sourceURLs: sourceURLs,
+                eventData: eventData,
+                eventID: eventID,
+                timeout: timeout
+            )
+        }
+    }
+
+    private func publishEventWaitingForAllSources(
+        sourceURLs: [URL],
+        eventData: Data,
+        eventID: String,
+        timeout: TimeInterval
+    ) async -> SourcePublishOutcome {
         await withTaskGroup(of: SourcePublishAttempt.self, returning: SourcePublishOutcome.self) { group in
             for sourceURL in sourceURLs {
                 group.addTask {
-                    do {
-                        try await publishEvent(
-                            relayURL: sourceURL,
-                            eventData: eventData,
-                            eventID: eventID,
-                            timeout: timeout
-                        )
-                        return .success
-                    } catch {
-                        let message = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
-                        return .failure(message)
-                    }
+                    await publishAttemptReport(
+                        publisher: self,
+                        sourceURL: sourceURL,
+                        eventData: eventData,
+                        eventID: eventID,
+                        timeout: timeout
+                    )
                 }
             }
 
             var successfulSourceCount = 0
             var firstFailureMessage: String?
+            var attempts: [SourcePublishAttemptReport] = []
 
             for await attempt in group {
-                switch attempt {
-                case .success:
+                attempts.append(attempt)
+                recordSourcePublishAttempt(attempt)
+
+                if attempt.accepted {
                     successfulSourceCount += 1
-                    if successPolicy == .returnAfterFirstSuccess {
-                        group.cancelAll()
-                        return SourcePublishOutcome(
-                            successfulSourceCount: successfulSourceCount,
-                            firstFailureMessage: firstFailureMessage
-                        )
-                    }
-                case .failure(let message):
-                    if firstFailureMessage == nil {
-                        firstFailureMessage = message
-                    }
+                } else if firstFailureMessage == nil {
+                    firstFailureMessage = attempt.failureMessage
                 }
             }
 
             return SourcePublishOutcome(
                 successfulSourceCount: successfulSourceCount,
-                firstFailureMessage: firstFailureMessage
+                firstFailureMessage: firstFailureMessage,
+                attempts: attempts
             )
         }
+    }
+
+    private func publishEventReturningAfterFirstSourceSuccess(
+        sourceURLs: [URL],
+        eventData: Data,
+        eventID: String,
+        timeout: TimeInterval
+    ) async -> SourcePublishOutcome {
+        await withCheckedContinuation { continuation in
+            let coordinator = SourcePublishFirstSuccessCoordinator(
+                totalCount: sourceURLs.count,
+                continuation: continuation
+            )
+
+            for sourceURL in sourceURLs {
+                Task.detached(priority: .userInitiated) {
+                    let attempt = await publishAttemptReport(
+                        publisher: self,
+                        sourceURL: sourceURL,
+                        eventData: eventData,
+                        eventID: eventID,
+                        timeout: timeout
+                    )
+
+                    recordSourcePublishAttempt(attempt)
+                    await coordinator.record(attempt)
+                }
+            }
+        }
+    }
+}
+
+private typealias SourcePublishAttempt = SourcePublishAttemptReport
+
+private func recordSourcePublishAttempt(_ attempt: SourcePublishAttemptReport) {
+    Task { @MainActor in
+        SourcePublishStatsStore.shared.record(attempt)
+    }
+}
+
+private func publishAttemptReport(
+    publisher: any NostrRelayEventPublishing,
+    sourceURL: URL,
+    eventData: Data,
+    eventID: String,
+    timeout: TimeInterval
+) async -> SourcePublishAttemptReport {
+    do {
+        try await publisher.publishEvent(
+            relayURL: sourceURL,
+            eventData: eventData,
+            eventID: eventID,
+            timeout: timeout
+        )
+        return SourcePublishAttemptReport(sourceURL: sourceURL, accepted: true)
+    } catch {
+        let message = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+        return SourcePublishAttemptReport(
+            sourceURL: sourceURL,
+            accepted: false,
+            failureMessage: message,
+            rateLimited: SourcePublishFailureClassifier.isRateLimited(error: error, message: message)
+        )
+    }
+}
+
+private enum SourcePublishFailureClassifier {
+    static func isRateLimited(error: Error, message: String) -> Bool {
+        if let relayError = error as? RelayClientError {
+            switch relayError {
+            case .coolingDown:
+                return true
+            case .publishRejected(let reason):
+                return isRateLimitMessage(reason)
+            case .invalidRelayURL, .closed, .publishTimedOut:
+                break
+            }
+        }
+
+        return isRateLimitMessage(message)
+    }
+
+    private static func isRateLimitMessage(_ message: String) -> Bool {
+        let normalized = message.lowercased()
+        return normalized.contains("rate limit") ||
+            normalized.contains("rate-limit") ||
+            normalized.contains("ratelimit") ||
+            normalized.contains("too many") ||
+            normalized.contains("too-many") ||
+            normalized.contains("limited")
     }
 }

@@ -3,6 +3,7 @@
 #include "nostrdb.h"
 #include "bindings/c/profile_reader.h"
 
+#include <ctype.h>
 #include <stddef.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -11,6 +12,7 @@
 #define FLOW_NDB_JSON_INITIAL_CAPACITY 4096
 #define FLOW_NDB_JSON_MAX_CAPACITY (4 * 1024 * 1024)
 #define FLOW_NDB_QUERY_RESULT_CAPACITY 2048
+#define FLOW_NDB_PROFILE_SEARCH_KEY_SIZE 24
 
 static int flow_ndb_grow_buffer(char **buffer, int *capacity, int required)
 {
@@ -164,6 +166,69 @@ static char *flow_ndb_append_json_string(char *cursor, const char *value)
 	return flow_ndb_append_char(cursor, '"');
 }
 
+static char *flow_ndb_append_uint64(char *cursor, uint64_t value)
+{
+	char buffer[32];
+	int written = snprintf(buffer, sizeof(buffer), "%llu", (unsigned long long)value);
+	if (written <= 0) {
+		return cursor;
+	}
+	return flow_ndb_append_bytes(cursor, buffer, (size_t)written);
+}
+
+static void flow_ndb_hex_encode(const unsigned char *bytes, size_t length, char *out)
+{
+	static const char hex[] = "0123456789abcdef";
+	size_t index;
+
+	for (index = 0; index < length; index++) {
+		out[index * 2] = hex[bytes[index] >> 4];
+		out[index * 2 + 1] = hex[bytes[index] & 0x0F];
+	}
+	out[length * 2] = '\0';
+}
+
+static void flow_ndb_normalized_profile_query(const char *query, char *out, size_t out_size)
+{
+	size_t index = 0;
+
+	if (out_size == 0) {
+		return;
+	}
+
+	if (query == NULL) {
+		out[0] = '\0';
+		return;
+	}
+
+	while (*query != '\0' && isspace((unsigned char)*query)) {
+		query++;
+	}
+
+	while (*query != '\0' && index + 1 < out_size) {
+		out[index++] = (char)tolower((unsigned char)*query);
+		query++;
+	}
+
+	while (index > 0 && isspace((unsigned char)out[index - 1])) {
+		index--;
+	}
+
+	out[index] = '\0';
+}
+
+static int flow_ndb_search_key_matches_query(const struct ndb_search_key *key, const char *query)
+{
+	size_t query_len;
+
+	if (key == NULL || query == NULL || query[0] == '\0') {
+		return 0;
+	}
+
+	query_len = strlen(query);
+	return strncmp(key->search, query, query_len) == 0;
+}
+
 static char *flow_ndb_copy_query_results_json(struct ndb *ndb,
 					      const struct ndb_query_result *results,
 					      int count,
@@ -277,6 +342,91 @@ static int flow_ndb_profile_json_length(const char *name,
 	}
 
 	return length;
+}
+
+static char *flow_ndb_copy_profile_table_json(NdbProfile_table_t profile, int *out_len)
+{
+	const char *name;
+	const char *display_name;
+	const char *picture;
+	const char *banner;
+	const char *about;
+	const char *nip05;
+	const char *website;
+	const char *lud06;
+	const char *lud16;
+	char *json;
+	char *cursor;
+	int length;
+	int added = 0;
+
+	if (profile == NULL) {
+		return NULL;
+	}
+
+	name = NdbProfile_name(profile);
+	display_name = NdbProfile_display_name(profile);
+	picture = NdbProfile_picture(profile);
+	banner = NdbProfile_banner(profile);
+	about = NdbProfile_about(profile);
+	nip05 = NdbProfile_nip05(profile);
+	website = NdbProfile_website(profile);
+	lud06 = NdbProfile_lud06(profile);
+	lud16 = NdbProfile_lud16(profile);
+
+	length = flow_ndb_profile_json_length(
+		name,
+		display_name,
+		picture,
+		banner,
+		about,
+		nip05,
+		website,
+		lud06,
+		lud16
+	);
+
+	json = malloc((size_t)length + 1);
+	if (json == NULL) {
+		return NULL;
+	}
+
+	cursor = json;
+	cursor = flow_ndb_append_char(cursor, '{');
+
+#define FLOW_NDB_APPEND_PROFILE_FIELD(KEY, VALUE) \
+	do { \
+		if ((VALUE) != NULL && (VALUE)[0] != '\0') { \
+			if (added > 0) { \
+				cursor = flow_ndb_append_char(cursor, ','); \
+			} \
+			cursor = flow_ndb_append_json_string(cursor, (KEY)); \
+			cursor = flow_ndb_append_char(cursor, ':'); \
+			cursor = flow_ndb_append_json_string(cursor, (VALUE)); \
+			added += 1; \
+		} \
+	} while (0)
+
+	FLOW_NDB_APPEND_PROFILE_FIELD("name", name);
+	FLOW_NDB_APPEND_PROFILE_FIELD("display_name", display_name);
+	FLOW_NDB_APPEND_PROFILE_FIELD("picture", picture);
+	FLOW_NDB_APPEND_PROFILE_FIELD("banner", banner);
+	FLOW_NDB_APPEND_PROFILE_FIELD("about", about);
+	FLOW_NDB_APPEND_PROFILE_FIELD("nip05", nip05);
+	FLOW_NDB_APPEND_PROFILE_FIELD("website", website);
+	FLOW_NDB_APPEND_PROFILE_FIELD("lud06", lud06);
+	FLOW_NDB_APPEND_PROFILE_FIELD("lud16", lud16);
+
+#undef FLOW_NDB_APPEND_PROFILE_FIELD
+
+	cursor = flow_ndb_append_char(cursor, '}');
+	*cursor = '\0';
+
+	if (out_len != NULL) {
+		*out_len = (int)(cursor - json);
+	}
+
+	return json;
 }
 
 void *flow_ndb_open(const char *dbdir, int ingest_threads, size_t mapsize, int writer_scratch_buffer_size, int flags)
@@ -586,19 +736,7 @@ char *flow_ndb_copy_profile_json(void *handle, const unsigned char *pubkey, int 
 	size_t profile_size = 0;
 	NdbProfileRecord_table_t record;
 	NdbProfile_table_t profile;
-	const char *name;
-	const char *display_name;
-	const char *picture;
-	const char *banner;
-	const char *about;
-	const char *nip05;
-	const char *website;
-	const char *lud06;
-	const char *lud16;
 	char *json;
-	char *cursor;
-	int length;
-	int added = 0;
 
 	if (ndb == NULL || pubkey == NULL) {
 		return NULL;
@@ -621,71 +759,142 @@ char *flow_ndb_copy_profile_json(void *handle, const unsigned char *pubkey, int 
 		return NULL;
 	}
 
-	name = NdbProfile_name(profile);
-	display_name = NdbProfile_display_name(profile);
-	picture = NdbProfile_picture(profile);
-	banner = NdbProfile_banner(profile);
-	about = NdbProfile_about(profile);
-	nip05 = NdbProfile_nip05(profile);
-	website = NdbProfile_website(profile);
-	lud06 = NdbProfile_lud06(profile);
-	lud16 = NdbProfile_lud16(profile);
+	json = flow_ndb_copy_profile_table_json(profile, out_len);
+	ndb_end_query(&txn);
+	return json;
+}
 
-	length = flow_ndb_profile_json_length(
-		name,
-		display_name,
-		picture,
-		banner,
-		about,
-		nip05,
-		website,
-		lud06,
-		lud16
-	);
+char *flow_ndb_copy_profile_search_json(void *handle, const char *query, int limit, int *out_len)
+{
+	struct ndb *ndb = (struct ndb *)handle;
+	struct ndb_txn txn;
+	struct ndb_search search;
+	char normalized_query[FLOW_NDB_PROFILE_SEARCH_KEY_SIZE];
+	int search_started = 0;
+	int appended = 0;
+	int capacity = FLOW_NDB_JSON_INITIAL_CAPACITY;
+	char *buffer;
+	char *cursor;
 
-	json = malloc((size_t)length + 1);
-	if (json == NULL) {
+	if (out_len != NULL) {
+		*out_len = 0;
+	}
+
+	if (ndb == NULL || query == NULL || limit <= 0) {
+		return NULL;
+	}
+
+	flow_ndb_normalized_profile_query(query, normalized_query, sizeof(normalized_query));
+	if (normalized_query[0] == '\0') {
+		return NULL;
+	}
+
+	if (!ndb_begin_query(ndb, &txn)) {
+		return NULL;
+	}
+
+	buffer = malloc((size_t)capacity + 1);
+	if (buffer == NULL) {
 		ndb_end_query(&txn);
 		return NULL;
 	}
 
-	cursor = json;
-	cursor = flow_ndb_append_char(cursor, '{');
+	cursor = buffer;
+	cursor = flow_ndb_append_char(cursor, '[');
 
-#define FLOW_NDB_APPEND_PROFILE_FIELD(KEY, VALUE) \
-	do { \
-		if ((VALUE) != NULL && (VALUE)[0] != '\0') { \
-			if (added > 0) { \
-				cursor = flow_ndb_append_char(cursor, ','); \
-			} \
-			cursor = flow_ndb_append_json_string(cursor, (KEY)); \
-			cursor = flow_ndb_append_char(cursor, ':'); \
-			cursor = flow_ndb_append_json_string(cursor, (VALUE)); \
-			added += 1; \
-		} \
-	} while (0)
+	if (ndb_search_profile(&txn, &search, normalized_query)) {
+		search_started = 1;
 
-	FLOW_NDB_APPEND_PROFILE_FIELD("name", name);
-	FLOW_NDB_APPEND_PROFILE_FIELD("display_name", display_name);
-	FLOW_NDB_APPEND_PROFILE_FIELD("picture", picture);
-	FLOW_NDB_APPEND_PROFILE_FIELD("banner", banner);
-	FLOW_NDB_APPEND_PROFILE_FIELD("about", about);
-	FLOW_NDB_APPEND_PROFILE_FIELD("nip05", nip05);
-	FLOW_NDB_APPEND_PROFILE_FIELD("website", website);
-	FLOW_NDB_APPEND_PROFILE_FIELD("lud06", lud06);
-	FLOW_NDB_APPEND_PROFILE_FIELD("lud16", lud16);
+		do {
+			void *profile_data;
+			size_t profile_size = 0;
+			NdbProfileRecord_table_t record;
+			NdbProfile_table_t profile;
+			char *profile_json;
+			char pubkey_hex[65];
+			int profile_json_len = 0;
+			int needed;
+			ptrdiff_t cursor_offset;
 
-#undef FLOW_NDB_APPEND_PROFILE_FIELD
+			if (!flow_ndb_search_key_matches_query(search.key, normalized_query)) {
+				break;
+			}
 
-	cursor = flow_ndb_append_char(cursor, '}');
+			profile_data = ndb_get_profile_by_key(&txn, search.profile_key, &profile_size);
+			if (profile_data == NULL) {
+				continue;
+			}
+
+			record = NdbProfileRecord_as_root(profile_data);
+			profile = NdbProfileRecord_profile(record);
+			if (profile == NULL) {
+				continue;
+			}
+
+			profile_json = flow_ndb_copy_profile_table_json(profile, &profile_json_len);
+			if (profile_json == NULL || profile_json_len <= 0) {
+				free(profile_json);
+				continue;
+			}
+
+			flow_ndb_hex_encode(search.key->id, 32, pubkey_hex);
+			needed = (int)(cursor - buffer) + profile_json_len + 128;
+			cursor_offset = cursor - buffer;
+			if (!flow_ndb_grow_buffer(&buffer, &capacity, needed)) {
+				free(profile_json);
+				free(buffer);
+				if (search_started) {
+					ndb_search_profile_end(&search);
+				}
+				ndb_end_query(&txn);
+				return NULL;
+			}
+			cursor = buffer + cursor_offset;
+
+			if (appended > 0) {
+				cursor = flow_ndb_append_char(cursor, ',');
+			}
+
+			cursor = flow_ndb_append_char(cursor, '{');
+			cursor = flow_ndb_append_json_string(cursor, "pubkey");
+			cursor = flow_ndb_append_char(cursor, ':');
+			cursor = flow_ndb_append_json_string(cursor, pubkey_hex);
+			cursor = flow_ndb_append_char(cursor, ',');
+			cursor = flow_ndb_append_json_string(cursor, "created_at");
+			cursor = flow_ndb_append_char(cursor, ':');
+			cursor = flow_ndb_append_uint64(cursor, search.key->timestamp);
+			cursor = flow_ndb_append_char(cursor, ',');
+			cursor = flow_ndb_append_json_string(cursor, "profile");
+			cursor = flow_ndb_append_char(cursor, ':');
+			cursor = flow_ndb_append_bytes(cursor, profile_json, (size_t)profile_json_len);
+			cursor = flow_ndb_append_char(cursor, '}');
+
+			appended += 1;
+			free(profile_json);
+		} while (appended < limit && ndb_search_profile_next(&search));
+	}
+
+	if (!flow_ndb_grow_buffer(&buffer, &capacity, (int)(cursor - buffer) + 2)) {
+		free(buffer);
+		if (search_started) {
+			ndb_search_profile_end(&search);
+		}
+		ndb_end_query(&txn);
+		return NULL;
+	}
+
+	cursor = flow_ndb_append_char(cursor, ']');
 	*cursor = '\0';
 
 	if (out_len != NULL) {
-		*out_len = (int)(cursor - json);
+		*out_len = (int)(cursor - buffer);
 	}
 
+	if (search_started) {
+		ndb_search_profile_end(&search);
+	}
 	ndb_end_query(&txn);
-	return json;
+	return buffer;
 }
 
 void flow_ndb_free_string(char *value)

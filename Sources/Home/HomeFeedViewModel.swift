@@ -72,6 +72,10 @@ final class HomeFeedViewModel: ObservableObject {
     private static let fastHomeRelayFetchMode: RelayFetchMode = .firstNonEmptyRelay
     private static let followingHomeFetchTimeout: TimeInterval = 8
     private static let followingPaginationFetchTimeout: TimeInterval = 12
+    private static let liveCatchUpFetchTimeout: TimeInterval = 4
+    private static let liveCatchUpMinimumInterval: TimeInterval = 15
+    private static let liveCatchUpOverlapSeconds = 90
+    private static let liveCatchUpLimit = 200
     private static let trendingWindowDuration: Int = 24 * 60 * 60
     private static let trendingBackfillWindowLimitPerPage = 7
     private static let trendingRelayURL = URL(string: "wss://trending.relays.land")!
@@ -106,6 +110,9 @@ final class HomeFeedViewModel: ObservableObject {
     private var liveSubscriptionSource: HomePrimaryFeedSource?
     private var liveSubscriptionConfigurationSignature: String?
     private var liveUpdatesTask: Task<Void, Never>?
+    private var liveCatchUpTask: Task<Void, Never>?
+    private var liveCatchUpToken = 0
+    private var lastLiveCatchUpBySignature: [String: Date] = [:]
     private var resetFeedTask: Task<Void, Never>?
     private var itemHydrationTask: Task<Void, Never>?
     private var warmStartRefreshTask: Task<Void, Never>?
@@ -145,6 +152,7 @@ final class HomeFeedViewModel: ObservableObject {
 
     deinit {
         liveUpdatesTask?.cancel()
+        liveCatchUpTask?.cancel()
         resetFeedTask?.cancel()
         itemHydrationTask?.cancel()
         warmStartRefreshTask?.cancel()
@@ -1031,6 +1039,9 @@ final class HomeFeedViewModel: ObservableObject {
             self.bufferedNewItems.removeAll()
             self.liveUpdatesTask?.cancel()
             self.liveUpdatesTask = nil
+            self.liveCatchUpTask?.cancel()
+            self.liveCatchUpTask = nil
+            self.lastLiveCatchUpBySignature.removeAll()
             self.liveSubscriptionKinds = []
             self.liveSubscriptionSource = nil
             self.liveSubscriptionConfigurationSignature = nil
@@ -1060,6 +1071,9 @@ final class HomeFeedViewModel: ObservableObject {
 
         liveUpdatesTask?.cancel()
         liveUpdatesTask = nil
+        liveCatchUpTask?.cancel()
+        liveCatchUpTask = nil
+        lastLiveCatchUpBySignature.removeAll()
         itemHydrationTask?.cancel()
         itemHydrationTask = nil
         liveSubscriptionKinds = []
@@ -1102,6 +1116,9 @@ final class HomeFeedViewModel: ObservableObject {
         guard !targets.isEmpty else {
             liveUpdatesTask?.cancel()
             liveUpdatesTask = nil
+            liveCatchUpTask?.cancel()
+            liveCatchUpTask = nil
+            lastLiveCatchUpBySignature.removeAll()
             liveSubscriptionKinds = []
             liveSubscriptionSource = source
             liveSubscriptionConfigurationSignature = nil
@@ -1123,6 +1140,8 @@ final class HomeFeedViewModel: ObservableObject {
 
         liveUpdatesTask?.cancel()
         liveUpdatesTask = nil
+        liveCatchUpTask?.cancel()
+        liveCatchUpTask = nil
         liveSubscriptionKinds = liveKinds
         liveSubscriptionSource = source
         liveSubscriptionConfigurationSignature = configurationSignature
@@ -1142,7 +1161,7 @@ final class HomeFeedViewModel: ObservableObject {
                             },
                             onStatus: { [weak self] _ in
                                 guard let self else { return }
-                                await self.handleLiveStatus()
+                                await self.handleLiveStatus(target: target)
                             }
                         )
                     }
@@ -1150,10 +1169,68 @@ final class HomeFeedViewModel: ObservableObject {
                 await group.waitForAll()
             }
         }
+
+        scheduleLiveCatchUp(for: targets, force: true)
     }
 
-    private func handleLiveStatus() async {
-        // Keep status lightweight per HIG feedback guidance.
+    private func handleLiveStatus(target: HomeFeedLiveSubscriptionTarget) async {
+        scheduleLiveCatchUp(for: [target])
+    }
+
+    private func scheduleLiveCatchUp(
+        for targets: [HomeFeedLiveSubscriptionTarget],
+        force: Bool = false
+    ) {
+        guard liveCatchUpTask == nil else { return }
+        guard !targets.isEmpty else { return }
+
+        let now = Date()
+        let dueTargets = targets.filter { target in
+            guard !force else { return true }
+            guard let lastFetch = lastLiveCatchUpBySignature[target.signature] else { return true }
+            return now.timeIntervalSince(lastFetch) >= Self.liveCatchUpMinimumInterval
+        }
+        guard !dueTargets.isEmpty else { return }
+
+        dueTargets.forEach { lastLiveCatchUpBySignature[$0.signature] = now }
+        liveCatchUpToken &+= 1
+        let token = liveCatchUpToken
+        liveCatchUpTask = Task(priority: .utility) { [weak self, dueTargets] in
+            guard let self else { return }
+            await self.performLiveCatchUp(for: dueTargets)
+            await MainActor.run { [weak self] in
+                guard let self, self.liveCatchUpToken == token else { return }
+                self.liveCatchUpTask = nil
+            }
+        }
+    }
+
+    private func performLiveCatchUp(for targets: [HomeFeedLiveSubscriptionTarget]) async {
+        let catchUpSince = max(Int(Date().timeIntervalSince1970) - Self.liveCatchUpOverlapSeconds, 0)
+        let catchUpLimit = Self.liveCatchUpLimit
+        let catchUpTimeout = Self.liveCatchUpFetchTimeout
+        let service = service
+
+        await withTaskGroup(of: [NostrEvent].self) { group in
+            for target in targets {
+                group.addTask {
+                    await service.fetchLiveCatchUpEvents(
+                        relayURL: target.relayURL,
+                        filter: target.filter,
+                        since: catchUpSince,
+                        limit: catchUpLimit,
+                        timeout: catchUpTimeout
+                    )
+                }
+            }
+
+            for await events in group {
+                guard !Task.isCancelled else { return }
+                for event in events {
+                    await handleLiveEvent(event)
+                }
+            }
+        }
     }
 
     private func handleLiveEvent(_ event: NostrEvent) async {

@@ -7,6 +7,7 @@ struct HomeFeedView: View {
     private static let bottomScrollClearance: CGFloat = 110
     private static let autoMergeTopThreshold: CGFloat = 56
 
+    @Environment(\.colorScheme) private var colorScheme
     @EnvironmentObject private var auth: AuthManager
     @EnvironmentObject private var appSettings: AppSettingsStore
     @EnvironmentObject private var relaySettings: RelaySettingsStore
@@ -53,6 +54,7 @@ struct HomeFeedView: View {
                                     FlowCapsuleTabBar(
                                         selection: $viewModel.mode,
                                         items: FeedMode.allCases,
+                                        selectedBackground: topNavigationControlFill,
                                         title: { $0.title }
                                     )
 
@@ -570,6 +572,15 @@ struct HomeFeedView: View {
         return appSettings.themePalette.secondaryBackground
     }
 
+    private var feedSourcePickerBackground: Color {
+        appSettings.themePalette.sheetBackground
+    }
+
+    private var feedSourcePickerSurfaceStyle: SettingsFormSurfaceStyle {
+        let effectiveColorScheme = appSettings.preferredColorScheme ?? colorScheme
+        return appSettings.settingsFormSurfaceStyle(for: effectiveColorScheme)
+    }
+
     private var sideMenuOverlay: some View {
         GeometryReader { geometry in
             ZStack(alignment: .leading) {
@@ -665,6 +676,8 @@ struct HomeFeedView: View {
                 }
             }
             .background(appSettings.themePalette.sheetBackground)
+            .toolbarBackground(appSettings.themePalette.sheetBackground, for: .navigationBar)
+            .toolbarBackground(.visible, for: .navigationBar)
         }
         .presentationDetents([.fraction(0.7), .large])
         .presentationDragIndicator(.visible)
@@ -690,9 +703,16 @@ struct HomeFeedView: View {
                 viewModel.selectAllKinds()
             } label: {
                 Label("Select All", systemImage: "line.3.horizontal.decrease.circle")
-                    .font(.footnote.weight(.medium))
+                    .font(appSettings.appFont(.footnote, weight: .semibold))
+                    .foregroundStyle(appSettings.themePalette.foreground)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 8)
+                    .background(
+                        appSettings.themePalette.navigationControlBackground,
+                        in: Capsule(style: .continuous)
+                    )
             }
-            .buttonStyle(.bordered)
+            .buttonStyle(.plain)
         }
     }
 
@@ -764,7 +784,15 @@ struct HomeFeedView: View {
                 Button("Show posts without media") {
                     viewModel.disableMediaOnlyFilter()
                 }
-                .buttonStyle(.bordered)
+                .font(appSettings.appFont(.footnote, weight: .semibold))
+                .foregroundStyle(appSettings.themePalette.foreground)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 8)
+                .background(
+                    appSettings.themePalette.navigationControlBackground,
+                    in: Capsule(style: .continuous)
+                )
+                .buttonStyle(.plain)
             }
         }
         .frame(maxWidth: .infinity)
@@ -1089,34 +1117,32 @@ struct HomeFeedView: View {
 
     private var feedSourcePickerSheet: some View {
         NavigationStack {
-            List {
-                ForEach(viewModel.feedSourceOptions, id: \.id) { source in
-                    Button {
-                        viewModel.selectFeedSource(source)
-                        isShowingFeedSourcePicker = false
-                    } label: {
-                        HStack(alignment: .center, spacing: 10) {
-                            Image(systemName: feedSourceIconName(for: source))
-                                .font(.subheadline.weight(.semibold))
-                                .foregroundStyle(.primary)
-                                .frame(width: 18, alignment: .center)
+            ScrollView {
+                VStack(spacing: 0) {
+                    ForEach(Array(viewModel.feedSourceOptions.enumerated()), id: \.element.id) { index, source in
+                        feedSourceOptionButton(source)
 
-                            Text(feedSourceLabel(for: source))
-                                .foregroundStyle(.primary)
-
-                            Spacer()
-
-                            if viewModel.feedSource == source {
-                                Image(systemName: "checkmark")
-                                    .font(.body.weight(.semibold))
-                                    .foregroundStyle(appSettings.primaryColor)
-                            }
+                        if index < viewModel.feedSourceOptions.count - 1 {
+                            Divider()
+                                .overlay(appSettings.themePalette.separator.opacity(0.18))
+                                .padding(.leading, 44)
                         }
-                        .contentShape(Rectangle())
                     }
-                    .buttonStyle(.plain)
                 }
+                .padding(.vertical, 6)
+                .background(
+                    RoundedRectangle(cornerRadius: 22, style: .continuous)
+                        .fill(feedSourcePickerSurfaceStyle.cardBackground)
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 22, style: .continuous)
+                        .stroke(appSettings.themePalette.separator.opacity(0.18), lineWidth: 0.8)
+                )
+                .padding(.horizontal, 16)
+                .padding(.top, 14)
+                .padding(.bottom, 44)
             }
+            .background(feedSourcePickerBackground)
             .navigationTitle("Feed Source")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -1126,9 +1152,42 @@ struct HomeFeedView: View {
                     }
                 }
             }
+            .toolbarBackground(feedSourcePickerBackground, for: .navigationBar)
+            .toolbarBackground(.visible, for: .navigationBar)
         }
         .presentationDetents([.medium, .large])
         .presentationDragIndicator(.visible)
+        .presentationBackground(feedSourcePickerBackground)
+    }
+
+    private func feedSourceOptionButton(_ source: HomePrimaryFeedSource) -> some View {
+        Button {
+            viewModel.selectFeedSource(source)
+            isShowingFeedSourcePicker = false
+        } label: {
+            HStack(alignment: .center, spacing: 12) {
+                Image(systemName: feedSourceIconName(for: source))
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(appSettings.primaryColor)
+                    .frame(width: 22, alignment: .center)
+
+                Text(feedSourceLabel(for: source))
+                    .font(appSettings.appFont(.body, weight: .medium))
+                    .foregroundStyle(appSettings.themePalette.foreground)
+
+                Spacer()
+
+                if viewModel.feedSource == source {
+                    Image(systemName: "checkmark")
+                        .font(.body.weight(.semibold))
+                        .foregroundStyle(appSettings.primaryColor)
+                }
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 14)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
     }
 }
 

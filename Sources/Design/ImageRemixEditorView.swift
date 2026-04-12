@@ -82,28 +82,23 @@ struct ImageRemixEditorView: View {
                 GeometryReader { geometry in
                     let canvasSize = fittedCanvasSize(in: geometry.size)
 
-                    VStack {
-                        Spacer(minLength: 0)
-
+                    VStack(spacing: 0) {
                         editorCanvas(canvasSize: canvasSize)
                             .frame(width: canvasSize.width, height: canvasSize.height)
-                            .background(
-                                editorBackgroundColor,
-                                in: RoundedRectangle(cornerRadius: 34, style: .continuous)
-                            )
-                            .clipShape(RoundedRectangle(cornerRadius: 34, style: .continuous))
+                            .background(editorBackgroundColor)
+                            .clipped()
                             .overlay(
-                                RoundedRectangle(cornerRadius: 34, style: .continuous)
+                                Rectangle()
                                     .stroke(canvasBorderColor, lineWidth: 1)
                             )
-                            .offset(y: canvasVerticalOffset)
-                            .animation(.spring(response: 0.34, dampingFraction: 0.86), value: isToolPanelExpanded)
 
                         Spacer(minLength: 0)
                     }
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
                     .padding(.horizontal, 22)
-                    .padding(.vertical, 16)
+                    .padding(.top, canvasTopPadding)
+                    .padding(.bottom, 16)
+                    .animation(.spring(response: 0.34, dampingFraction: 0.86), value: isToolPanelExpanded)
                 }
             }
 
@@ -864,8 +859,8 @@ struct ImageRemixEditorView: View {
         isPreparingFilter || isSavingImage || isUploadingImage
     }
 
-    private var canvasVerticalOffset: CGFloat {
-        isToolPanelExpanded ? -24 : 0
+    private var canvasTopPadding: CGFloat {
+        isToolPanelExpanded ? 2 : 10
     }
 
     private var editorBackgroundColor: Color {

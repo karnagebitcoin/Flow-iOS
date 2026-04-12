@@ -75,6 +75,7 @@ struct ActivityView: View {
                                     }
                                 )
                                 .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16))
+                                .listRowSeparatorTint(appSettings.themePalette.chromeBorder)
                                 .listRowBackground(Color.clear)
                             }
                         }
@@ -357,10 +358,12 @@ struct ActivityView: View {
                         }
                     }
                 }
+                .toolbarBackground(appSettings.themePalette.sheetBackground, for: .navigationBar)
+                .toolbarBackground(.visible, for: .navigationBar)
         }
         .presentationDetents([.medium, .large])
         .presentationDragIndicator(.visible)
-        .presentationBackground(appSettings.themePalette.background)
+        .presentationBackground(appSettings.themePalette.sheetBackground)
     }
 
     private var emptyStateRow: some View {

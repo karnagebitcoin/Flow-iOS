@@ -7,15 +7,18 @@ struct FlowCapsuleTabBar<Selection: Hashable>: View {
 
     private let items: [Selection]
     private let title: (Selection) -> String
+    private let selectedBackgroundOverride: Color?
     @Namespace private var selectionNamespace
 
     init(
         selection: Binding<Selection>,
         items: [Selection],
+        selectedBackground: Color? = nil,
         title: @escaping (Selection) -> String
     ) {
         _selection = selection
         self.items = items
+        self.selectedBackgroundOverride = selectedBackground
         self.title = title
     }
 
@@ -81,7 +84,10 @@ struct FlowCapsuleTabBar<Selection: Hashable>: View {
     }
 
     private var selectedFill: Color {
-        appSettings.themePalette.capsuleTabStyle?.selectedBackground
+        if let selectedBackgroundOverride {
+            return selectedBackgroundOverride
+        }
+        return appSettings.themePalette.capsuleTabStyle?.selectedBackground
             ?? (colorScheme == .dark
                 ? Color.white.opacity(0.12)
                 : Color.black.opacity(0.06))

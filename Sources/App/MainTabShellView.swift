@@ -31,8 +31,7 @@ struct MainTabShellView: View {
     @EnvironmentObject private var appSettings: AppSettingsStore
     @EnvironmentObject private var relaySettings: RelaySettingsStore
     @EnvironmentObject private var composeSheetCoordinator: AppComposeSheetCoordinator
-    @EnvironmentObject private var composeDraftStore: AppComposeDraftStore
-    
+
     @State private var selectedTab: Tab = .home
     @State private var homeRootResetID = UUID()
     @State private var activityRootResetID = UUID()
@@ -293,32 +292,12 @@ struct MainTabShellView: View {
                 .frame(width: 54, height: 54)
                 .background(appSettings.primaryGradient, in: Circle())
                 .shadow(color: .black.opacity(0.14), radius: 10, x: 0, y: 4)
-                .overlay(alignment: .topTrailing) {
-                    if composeDraftCount > 0 {
-                        Text(composeDraftBadgeText)
-                            .font(.caption2.weight(.bold))
-                            .foregroundStyle(.white)
-                            .padding(.horizontal, 6)
-                            .padding(.vertical, 3)
-                            .background(Color.red, in: Capsule())
-                            .offset(x: 8, y: -8)
-                            .accessibilityHidden(true)
-                    }
-                }
         }
         .buttonStyle(.plain)
         .frame(maxWidth: .infinity)
         .offset(y: -10)
         .padding(.bottom, -10)
         .accessibilityLabel("Compose note")
-    }
-
-    private var composeDraftCount: Int {
-        composeDraftStore.draftCount(for: auth.currentAccount?.pubkey)
-    }
-
-    private var composeDraftBadgeText: String {
-        composeDraftCount > 99 ? "99+" : "\(composeDraftCount)"
     }
 
     private var effectiveWriteRelayURLs: [URL] {

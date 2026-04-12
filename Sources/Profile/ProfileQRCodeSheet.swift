@@ -55,6 +55,8 @@ struct ProfileQRCodeSheet: View {
                     }
                 }
             }
+            .toolbarBackground(appSettings.themePalette.sheetBackground, for: .navigationBar)
+            .toolbarBackground(.visible, for: .navigationBar)
         }
         .presentationDetents([.large])
         .presentationDragIndicator(.visible)
@@ -334,7 +336,6 @@ struct PresentedProfileQRCodeView: View {
     let handle: String?
     let avatarURL: URL?
     let qrCodeImage: UIImage?
-    let qrBackgroundResourceName: String
     let onDismiss: () -> Void
 
     @State private var automaticEntrancePhase: AutomaticEntrancePhase = .offscreen
@@ -347,7 +348,7 @@ struct PresentedProfileQRCodeView: View {
             let entranceState = automaticEntranceState(for: proxy.size.height)
 
             ZStack {
-                ProfileQRCodePresentationBackground(resourceName: qrBackgroundResourceName)
+                ProfileQRCodeBlurredAvatarBackground(avatarURL: avatarURL)
                     .frame(width: contentSize.width, height: contentSize.height)
                     .rotationEffect(.degrees(rotationDegrees))
                     .position(x: proxy.size.width / 2, y: proxy.size.height / 2)
@@ -604,6 +605,35 @@ struct ProfileQRCodePresentationBackground: View {
             )
             .ignoresSafeArea()
         }
+    }
+}
+
+private struct ProfileQRCodeBlurredAvatarBackground: View {
+    let avatarURL: URL?
+
+    var body: some View {
+        ZStack {
+            Color.black
+
+            if let avatarURL {
+                CachedAsyncImage(url: avatarURL) { phase in
+                    switch phase {
+                    case .success(let image):
+                        image
+                            .resizable()
+                            .scaledToFill()
+                            .scaleEffect(1.18)
+                            .blur(radius: 34, opaque: true)
+                    default:
+                        Color.black
+                    }
+                }
+            }
+
+            Color.black.opacity(0.20)
+        }
+        .clipped()
+        .ignoresSafeArea()
     }
 }
 

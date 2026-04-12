@@ -556,6 +556,7 @@ struct ComposeContextPreviewSnapshot: Equatable {
     let imageURLs: [URL]
     let hasVideo: Bool
     let hasAudio: Bool
+    let hasPoll: Bool
 }
 
 struct SavedComposeDraftSnapshot: Codable, Hashable, Sendable {
@@ -839,6 +840,7 @@ struct ComposeMultilineTextView: UIViewRepresentable {
     @Binding var isFocused: Bool
     @Binding var selectedRange: NSRange
     @Binding var mentions: [ComposeSelectedMention]
+    @Binding var mentionAnchorY: CGFloat
     let mentionColor: UIColor
     let onMentionQueryChange: (ComposeMentionQuery?) -> Void
 
@@ -848,6 +850,7 @@ struct ComposeMultilineTextView: UIViewRepresentable {
             isFocused: $isFocused,
             selectedRange: $selectedRange,
             mentions: $mentions,
+            mentionAnchorY: $mentionAnchorY,
             onMentionQueryChange: onMentionQueryChange
         )
     }
@@ -971,6 +974,7 @@ struct ComposeMultilineTextView: UIViewRepresentable {
         @Binding private var isFocused: Bool
         @Binding private var selectedRange: NSRange
         @Binding private var mentions: [ComposeSelectedMention]
+        @Binding private var mentionAnchorY: CGFloat
         private let onMentionQueryChange: (ComposeMentionQuery?) -> Void
         var isApplyingProgrammaticUpdate = false
         var lastRenderedMentions: [ComposeSelectedMention] = []
@@ -981,12 +985,14 @@ struct ComposeMultilineTextView: UIViewRepresentable {
             isFocused: Binding<Bool>,
             selectedRange: Binding<NSRange>,
             mentions: Binding<[ComposeSelectedMention]>,
+            mentionAnchorY: Binding<CGFloat>,
             onMentionQueryChange: @escaping (ComposeMentionQuery?) -> Void
         ) {
             _text = text
             _isFocused = isFocused
             _selectedRange = selectedRange
             _mentions = mentions
+            _mentionAnchorY = mentionAnchorY
             self.onMentionQueryChange = onMentionQueryChange
         }
 
@@ -1039,9 +1045,22 @@ struct ComposeMultilineTextView: UIViewRepresentable {
                 selection: textView.selectedRange,
                 confirmedMentions: mentions
             )
+            updateMentionAnchor(for: textView, hasActiveQuery: query != nil)
             guard query != lastReportedMentionQuery else { return }
             lastReportedMentionQuery = query
             onMentionQueryChange(query)
+        }
+
+        private func updateMentionAnchor(for textView: UITextView, hasActiveQuery: Bool) {
+            guard hasActiveQuery, let caretPosition = textView.selectedTextRange?.end else {
+                mentionAnchorY = 44
+                return
+            }
+
+            let caretRect = textView.caretRect(for: caretPosition)
+            let visibleCaretBottom = caretRect.maxY - textView.contentOffset.y
+            let clampedAnchorY = min(max(visibleCaretBottom, 32), max(textView.bounds.height - 44, 44))
+            mentionAnchorY = clampedAnchorY
         }
     }
 }

@@ -25,6 +25,16 @@ struct ThreadDetailRootNoteCard: View {
 
         var body: some View {
             VStack(alignment: .leading, spacing: 12) {
+                if !isHiddenByNSFW, let replyContextPresentation = ReplyContextPreviewPresentation.make(for: item) {
+                    ReplyContextPreviewRow(
+                        presentation: replyContextPresentation,
+                        foregroundStyle: appSettings.themePalette.mutedForeground,
+                        onTap: {
+                            onOpenReferencedEvent(replyContextPresentation.parentItem.threadNavigationItem)
+                        }
+                    )
+                }
+
                 HStack(alignment: .center, spacing: 10) {
                     Menu {
                         Button {
@@ -106,28 +116,16 @@ struct ThreadDetailRootNoteCard: View {
                 if isHiddenByNSFW {
                     ThreadDetailNSFWHiddenCard()
                 } else {
-                    VStack(alignment: .leading, spacing: 8) {
-                        if let replyContextPresentation = ReplyContextPreviewPresentation.make(for: item) {
-                            ReplyContextPreviewRow(
-                                presentation: replyContextPresentation,
-                                foregroundStyle: appSettings.themePalette.mutedForeground,
-                                onTap: {
-                                    onOpenReferencedEvent(replyContextPresentation.parentItem.threadNavigationItem)
-                                }
-                            )
-                        }
-
-                        NoteContentView(
-                            event: item.displayEvent,
-                            mediaLayout: .feed,
-                            reactionCount: showReactions ? reactionCount : 0,
-                            commentCount: showReactions ? commentCount : 0,
-                            onHashtagTap: onOpenHashtag,
-                            onProfileTap: onOpenProfile,
-                            onReferencedEventTap: onOpenReferencedEvent
-                        )
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                    }
+                    NoteContentView(
+                        event: item.displayEvent,
+                        mediaLayout: .feed,
+                        reactionCount: showReactions ? reactionCount : 0,
+                        commentCount: showReactions ? commentCount : 0,
+                        onHashtagTap: onOpenHashtag,
+                        onProfileTap: onOpenProfile,
+                        onReferencedEventTap: onOpenReferencedEvent
+                    )
+                    .frame(maxWidth: .infinity, alignment: .leading)
                 }
 
                 if showReactions {

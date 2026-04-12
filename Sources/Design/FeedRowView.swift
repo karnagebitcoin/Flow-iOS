@@ -194,6 +194,10 @@ struct FeedRowView: View {
                     UIPasteboard.general.string = copyableNoteText
                     toastCenter.show("Copied text")
                 },
+                onCopyEventID: {
+                    UIPasteboard.general.string = copyableEventIdentifier
+                    toastCenter.show("Copied event ID")
+                },
                 onCopyLink: {
                     UIPasteboard.general.string = copyableNoteLink
                     toastCenter.show("Copied link")
@@ -209,7 +213,7 @@ struct FeedRowView: View {
                     presentReportFlow()
                 }
             )
-            .presentationDetents([.height(canTranslateNote ? 490 : 435), .medium])
+            .presentationDetents([.height(canTranslateNote ? 545 : 490), .medium])
             .presentationDragIndicator(.visible)
         }
         .sheet(isPresented: $isShowingReportSheet) {
@@ -685,6 +689,13 @@ struct FeedRowView: View {
         return "https://nlink.to/\(item.displayEventID)"
     }
 
+    private var copyableEventIdentifier: String {
+        NoteContentParser.neventIdentifier(
+            for: item.displayEvent,
+            relayHints: effectiveReadRelayURLs
+        ) ?? item.displayEventID
+    }
+
     private var noteTranslationText: String {
         item.displayEvent.content.trimmingCharacters(in: .whitespacesAndNewlines)
     }
@@ -767,6 +778,7 @@ struct NoteOptionsBottomSheetView: View {
 
     let canCopyText: Bool
     let onCopyText: () -> Void
+    let onCopyEventID: () -> Void
     let onCopyLink: () -> Void
     let showsTranslateAction: Bool
     let onTranslate: (() -> Void)?
@@ -783,6 +795,17 @@ struct NoteOptionsBottomSheetView: View {
                     tint: .primary
                 ) {
                     onCopyText()
+                }
+
+                sheetDivider
+
+                optionRow(
+                    title: "Copy Event ID",
+                    icon: "number",
+                    isEnabled: true,
+                    tint: .primary
+                ) {
+                    onCopyEventID()
                 }
 
                 sheetDivider
@@ -811,7 +834,11 @@ struct NoteOptionsBottomSheetView: View {
             }
             .background(
                 RoundedRectangle(cornerRadius: 18, style: .continuous)
-                    .fill(appSettings.themePalette.secondaryGroupedBackground)
+                    .fill(appSettings.themePalette.sheetCardBackground)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    .stroke(appSettings.themePalette.separator.opacity(0.18), lineWidth: 0.8)
             )
 
             VStack(spacing: 0) {
@@ -846,7 +873,11 @@ struct NoteOptionsBottomSheetView: View {
             }
             .background(
                 RoundedRectangle(cornerRadius: 18, style: .continuous)
-                    .fill(appSettings.themePalette.secondaryGroupedBackground)
+                    .fill(appSettings.themePalette.sheetCardBackground)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    .stroke(appSettings.themePalette.separator.opacity(0.18), lineWidth: 0.8)
             )
 
             Spacer(minLength: 0)
@@ -854,12 +885,13 @@ struct NoteOptionsBottomSheetView: View {
         .padding(.horizontal, 16)
         .padding(.top, 8)
         .padding(.bottom, 16)
-        .background(appSettings.themePalette.groupedBackground)
+        .background(appSettings.themePalette.sheetBackground)
+        .presentationBackground(appSettings.themePalette.sheetBackground)
     }
 
     private var sheetDivider: some View {
         Rectangle()
-            .fill(appSettings.themePalette.separator)
+            .fill(appSettings.themePalette.separator.opacity(0.18))
             .frame(height: 0.75)
             .padding(.leading, 16)
     }

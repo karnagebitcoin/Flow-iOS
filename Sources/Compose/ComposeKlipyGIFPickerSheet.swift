@@ -202,7 +202,7 @@ struct ComposeKlipyGIFPickerSheet: View {
             .padding(.top, 16)
             .padding(.bottom, 8)
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-            .background(appSettings.themePalette.groupedBackground)
+            .background(appSettings.themePalette.sheetBackground)
             .navigationTitle("GIFs")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -212,10 +212,12 @@ struct ComposeKlipyGIFPickerSheet: View {
                     }
                 }
             }
+            .toolbarBackground(appSettings.themePalette.sheetBackground, for: .navigationBar)
+            .toolbarBackground(.visible, for: .navigationBar)
         }
         .presentationDetents([.large])
         .presentationDragIndicator(.visible)
-        .presentationBackground(appSettings.themePalette.groupedBackground)
+        .presentationBackground(appSettings.themePalette.sheetBackground)
         .task {
             await viewModel.loadInitialIfNeeded()
         }
@@ -254,11 +256,11 @@ struct ComposeKlipyGIFPickerSheet: View {
         .padding(.vertical, 12)
         .background(
             RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .fill(appSettings.themePalette.secondaryGroupedBackground)
+                .fill(appSettings.themePalette.sheetCardBackground)
         )
         .overlay(
             RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .stroke(appSettings.themePalette.separator.opacity(0.28), lineWidth: 0.8)
+                .stroke(appSettings.themePalette.separator.opacity(0.18), lineWidth: 0.8)
         )
     }
 
@@ -349,11 +351,11 @@ struct ComposeKlipyGIFPickerSheet: View {
         .padding(12)
         .background(
             RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .fill(appSettings.themePalette.secondaryGroupedBackground)
+                .fill(appSettings.themePalette.sheetCardBackground)
         )
         .overlay(
             RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .stroke(appSettings.themePalette.separator.opacity(0.28), lineWidth: 0.8)
+                .stroke(appSettings.themePalette.separator.opacity(0.18), lineWidth: 0.8)
         )
     }
 }

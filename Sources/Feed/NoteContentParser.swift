@@ -220,6 +220,15 @@ enum NoteContentParser {
         }
         return URL(string: "https://nlink.to/\(shareableIdentifier)")
     }
+
+    static func neventIdentifier(for event: NostrEvent, relayHints: [URL] = []) -> String? {
+        encodedNeventIdentifier(
+            forEventID: event.id.lowercased(),
+            authorPubkey: event.pubkey.lowercased(),
+            kind: event.kind,
+            relayHints: relayHints
+        )
+    }
     
     static func hashtagActionURL(for tokenValue: String) -> URL? {
         guard let normalized = normalizedHashtag(from: tokenValue), !normalized.isEmpty else { return nil }
@@ -580,16 +589,72 @@ enum NoteContentParser {
         return decoded.map { String(format: "%02x", $0) }.joined()
     }
 
-    private static func encodedNeventIdentifier(forEventID eventID: String) -> String? {
-        guard isHex64(eventID), let eventData = dataFromHex(eventID) else { return nil }
+    private static func encodedNeventIdentifier(
+        forEventID eventID: String,
+        authorPubkey: String? = nil,
+        kind: Int? = nil,
+        relayHints: [URL] = []
+    ) -> String? {
+        let normalizedEventID = eventID.lowercased()
+        guard isHex64(normalizedEventID), let eventData = dataFromHex(normalizedEventID) else { return nil }
 
         var tlv = Data()
-        tlv.append(0x00)
-        tlv.append(UInt8(eventData.count))
-        tlv.append(eventData)
+        appendTLV(type: 0, value: eventData, to: &tlv)
+
+        for relayHint in normalizedRelayHints(relayHints).prefix(3) {
+            let relayData = Data(relayHint.utf8)
+            appendTLV(type: 1, value: relayData, to: &tlv)
+        }
+
+        if let authorPubkey {
+            let normalizedAuthorPubkey = authorPubkey.lowercased()
+            if isHex64(normalizedAuthorPubkey), let authorData = dataFromHex(normalizedAuthorPubkey) {
+                appendTLV(type: 2, value: authorData, to: &tlv)
+            }
+        }
+
+        if let kind, kind >= 0, let encodedKind = encodedUInt32(kind) {
+            appendTLV(type: 3, value: encodedKind, to: &tlv)
+        }
 
         let payload = base32FromBase8Data(tlv)
         return bech32Encode(hrp: "nevent", payload: payload)
+    }
+
+    private static func appendTLV(type: UInt8, value: Data, to data: inout Data) {
+        guard !value.isEmpty, value.count <= Int(UInt8.max) else { return }
+        data.append(type)
+        data.append(UInt8(value.count))
+        data.append(value)
+    }
+
+    private static func normalizedRelayHints(_ relayHints: [URL]) -> [String] {
+        var seen: Set<String> = []
+        var normalized: [String] = []
+
+        for relayHint in relayHints {
+            guard let scheme = relayHint.scheme?.lowercased(), scheme == "ws" || scheme == "wss" else { continue }
+
+            let value = relayHint.absoluteString.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !value.isEmpty else { continue }
+
+            let key = value.lowercased()
+            guard seen.insert(key).inserted else { continue }
+            normalized.append(value)
+        }
+
+        return normalized
+    }
+
+    private static func encodedUInt32(_ value: Int) -> Data? {
+        guard value <= Int(UInt32.max) else { return nil }
+        let unsignedValue = UInt32(value)
+        return Data([
+            UInt8((unsignedValue >> 24) & 0xff),
+            UInt8((unsignedValue >> 16) & 0xff),
+            UInt8((unsignedValue >> 8) & 0xff),
+            UInt8(unsignedValue & 0xff)
+        ])
     }
 
     private static func dataFromBase32(_ values: [UInt8]) -> Data? {

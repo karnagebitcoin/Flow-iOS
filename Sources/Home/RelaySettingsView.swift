@@ -21,14 +21,21 @@ private enum RelayAddScope: String, CaseIterable, Identifiable {
 
 struct RelaySettingsView: View {
     @Environment(\.colorScheme) private var colorScheme
+    @EnvironmentObject private var auth: AuthManager
     @EnvironmentObject private var appSettings: AppSettingsStore
     @EnvironmentObject private var relaySettings: RelaySettingsStore
+    @ObservedObject private var followStore = FollowStore.shared
+    @ObservedObject private var publishStatsStore = SourcePublishStatsStore.shared
 
     @State private var relayInput = ""
     @State private var relayScope: RelayAddScope = .both
     @State private var validationMessage: String?
     @State private var isShowingAdvancedSources = false
     @State private var isShowingSourcesInfo = false
+    @State private var recommendedSources: [RecommendedDataSourceItem] = []
+    @State private var isLoadingRecommendedSources = false
+
+    private let recommendationService = NostrFeedService()
 
     var body: some View {
         ThemedSettingsForm {
@@ -87,6 +94,7 @@ struct RelaySettingsView: View {
                     DisclosureGroup(isExpanded: $isShowingAdvancedSources) {
                         VStack(alignment: .leading, spacing: 18) {
                             sourceList
+                            recommendedSourcesSection
                             addSourceControls
 
                             if let validationMessage {
@@ -134,6 +142,9 @@ struct RelaySettingsView: View {
         .navigationBarTitleDisplayMode(.inline)
         .sheet(isPresented: $isShowingSourcesInfo) {
             sourcesInfoSheet
+        }
+        .task(id: recommendationTaskKey) {
+            await loadRecommendedSources()
         }
     }
 
@@ -197,6 +208,10 @@ struct RelaySettingsView: View {
                                 sourceCapabilityPill("Publish", systemImage: "arrow.up.circle")
                             }
                         }
+
+                        if source.publishes {
+                            sourcePublishHealth(for: source)
+                        }
                     }
                     .padding(12)
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -220,6 +235,104 @@ struct RelaySettingsView: View {
             .padding(.horizontal, 10)
             .padding(.vertical, 6)
             .background(settingsSurfaceStyle.controlBackground, in: Capsule(style: .continuous))
+    }
+
+    @ViewBuilder
+    private func sourcePublishHealth(for source: DataSourceItem) -> some View {
+        if let stats = publishStatsStore.snapshot(for: source.url) {
+            VStack(alignment: .leading, spacing: 4) {
+                HStack(spacing: 8) {
+                    Label("Publish acceptance \(acceptanceRateLabel(for: stats))", systemImage: "paperplane.circle")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(appSettings.themePalette.secondaryForeground)
+
+                    Spacer(minLength: 0)
+                }
+
+                Text(publishStatsDetailText(for: stats))
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(2)
+
+                if let lastFailureMessage = stats.lastFailureMessage, !lastFailureMessage.isEmpty {
+                    Text(lastFailureMessage)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                }
+            }
+            .padding(10)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(settingsSurfaceStyle.controlBackground, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        } else {
+            Text("No publish attempts recorded yet.")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    private var recommendedSourcesSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Text("Recommended Sources")
+                    .font(.headline)
+
+                Spacer(minLength: 0)
+
+                if isLoadingRecommendedSources {
+                    ProgressView()
+                        .controlSize(.small)
+                }
+            }
+
+            Text("Based on source hints from people you follow. Adding one here only enables receiving from it.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            if recommendedSources.isEmpty && !isLoadingRecommendedSources {
+                Text("No recommendations yet. They’ll appear after Halo has a cached follow list with source hints.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            } else {
+                ForEach(recommendedSources) { source in
+                    HStack(alignment: .center, spacing: 12) {
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text(source.label)
+                                .font(.subheadline.weight(.semibold))
+                                .foregroundStyle(.primary)
+                                .lineLimit(1)
+
+                            Text(source.detail)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                                .lineLimit(1)
+                        }
+
+                        Spacer(minLength: 8)
+
+                        Button("Add Receive") {
+                            addRecommendedSource(source)
+                        }
+                        .font(.caption.weight(.semibold))
+                        .buttonStyle(.bordered)
+                    }
+                    .padding(10)
+                    .background(settingsSurfaceStyle.controlBackground, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                }
+            }
+        }
+        .padding(14)
+        .background(
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .fill(settingsSurfaceStyle.subcardBackground)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .stroke(appSettings.themePalette.separator.opacity(0.12), lineWidth: 1)
+        )
     }
 
     private var addSourceControls: some View {
@@ -276,6 +389,15 @@ struct RelaySettingsView: View {
         return "Halo is currently using your configured data sources."
     }
 
+    private var recommendationTaskKey: String {
+        [
+            auth.currentAccount?.pubkey.lowercased() ?? "signed-out",
+            relaySettings.readRelays.joined(separator: "|"),
+            relaySettings.writeRelays.joined(separator: "|"),
+            String(followStore.followedPubkeys.count)
+        ].joined(separator: "::")
+    }
+
     private var dataSources: [DataSourceItem] {
         let readSet = Set(relaySettings.readRelays)
         let writeSet = Set(relaySettings.writeRelays)
@@ -318,6 +440,44 @@ struct RelaySettingsView: View {
         }
     }
 
+    private func addRecommendedSource(_ source: RecommendedDataSourceItem) {
+        validationMessage = nil
+
+        do {
+            try relaySettings.addRelay(source.url, scope: .read)
+            recommendedSources.removeAll { $0.id == source.id }
+        } catch {
+            validationMessage = userFacingMessage(for: error)
+        }
+    }
+
+    @MainActor
+    private func loadRecommendedSources() async {
+        guard let accountPubkey = auth.currentAccount?.pubkey
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased(),
+              !accountPubkey.isEmpty else {
+            recommendedSources = []
+            isLoadingRecommendedSources = false
+            return
+        }
+
+        isLoadingRecommendedSources = true
+        let snapshot = await recommendationService.cachedFollowListSnapshot(pubkey: accountPubkey)
+        guard !Task.isCancelled else { return }
+
+        let configuredSources = Set(
+            (relaySettings.readRelays + relaySettings.writeRelays)
+                .map(normalizedSourceKey)
+        )
+        recommendedSources = recommendedDataSources(
+            from: snapshot,
+            excluding: configuredSources,
+            limit: 5
+        )
+        isLoadingRecommendedSources = false
+    }
+
     private func removeReceiveSource(_ source: String) {
         validationMessage = nil
         do {
@@ -351,6 +511,69 @@ struct RelaySettingsView: View {
             .replacingOccurrences(of: "write relays", with: "publish sources")
             .replacingOccurrences(of: "relays", with: "sources")
             .replacingOccurrences(of: "relay", with: "source")
+    }
+
+    private func recommendedDataSources(
+        from snapshot: FollowListSnapshot?,
+        excluding configuredSources: Set<String>,
+        limit: Int
+    ) -> [RecommendedDataSourceItem] {
+        guard let snapshot, limit > 0 else { return [] }
+
+        var countsBySource: [String: Int] = [:]
+        var displayURLBySource: [String: String] = [:]
+
+        for relayURLs in snapshot.relayHintsByPubkey.values {
+            var countedForFollow = Set<String>()
+            for relayURL in relayURLs {
+                let normalized = normalizedSourceKey(relayURL.absoluteString)
+                guard !normalized.isEmpty else { continue }
+                guard !configuredSources.contains(normalized) else { continue }
+                guard countedForFollow.insert(normalized).inserted else { continue }
+
+                countsBySource[normalized, default: 0] += 1
+                displayURLBySource[normalized] = relayURL.absoluteString
+            }
+        }
+
+        return countsBySource
+            .sorted { lhs, rhs in
+                if lhs.value == rhs.value {
+                    return lhs.key < rhs.key
+                }
+                return lhs.value > rhs.value
+            }
+            .prefix(limit)
+            .compactMap { source, count in
+                let displayURL = displayURLBySource[source] ?? source
+                return RecommendedDataSourceItem(
+                    url: displayURL,
+                    label: sourceLabel(for: displayURL),
+                    followedHintCount: count
+                )
+            }
+    }
+
+    private func acceptanceRateLabel(for stats: SourcePublishStatsSnapshot) -> String {
+        guard stats.attemptedCount > 0 else { return "0%" }
+        return stats.acceptanceRate.formatted(.percent.precision(.fractionLength(0)))
+    }
+
+    private func publishStatsDetailText(for stats: SourcePublishStatsSnapshot) -> String {
+        var parts = [
+            "\(stats.acceptedCount)/\(stats.attemptedCount) accepted",
+            "\(stats.failedCount) failed"
+        ]
+        if stats.rateLimitedCount > 0 {
+            parts.append("\(stats.rateLimitedCount) rate limited")
+        }
+        return parts.joined(separator: " • ")
+    }
+
+    private func normalizedSourceKey(_ value: String) -> String {
+        value
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
     }
 
     private func messageBanner(_ text: String, systemImage: String, tint: Color) -> some View {
@@ -409,5 +632,19 @@ private extension RelaySettingsView {
         let label: String
         let receives: Bool
         let publishes: Bool
+    }
+
+    struct RecommendedDataSourceItem: Identifiable, Equatable {
+        let url: String
+        let label: String
+        let followedHintCount: Int
+
+        var id: String {
+            url.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        }
+
+        var detail: String {
+            "Hinted by \(followedHintCount) followed \(followedHintCount == 1 ? "person" : "people")"
+        }
     }
 }

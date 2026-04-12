@@ -18,16 +18,17 @@ struct ReshareActionSheetView: View {
                 }
                 .background(
                     RoundedRectangle(cornerRadius: 16, style: .continuous)
-                        .fill(appSettings.themePalette.modalBackground)
+                        .fill(appSettings.themePalette.sheetCardBackground)
                 )
                 .overlay(
                     RoundedRectangle(cornerRadius: 16, style: .continuous)
-                        .stroke(appSettings.themePalette.separator.opacity(0.35), lineWidth: 0.8)
+                        .stroke(appSettings.themePalette.separator.opacity(0.18), lineWidth: 0.8)
                 )
 
                 Spacer(minLength: 0)
             }
             .padding(16)
+            .background(appSettings.themePalette.sheetBackground)
             .navigationTitle("Re-share")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -37,6 +38,8 @@ struct ReshareActionSheetView: View {
                     }
                 }
             }
+            .toolbarBackground(appSettings.themePalette.sheetBackground, for: .navigationBar)
+            .toolbarBackground(.visible, for: .navigationBar)
         }
         .interactiveDismissDisabled(isWorking)
         .presentationDetents([.height(200), .medium])

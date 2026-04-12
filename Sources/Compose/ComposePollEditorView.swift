@@ -18,10 +18,6 @@ struct ComposePollEditorView: View {
                     .buttonStyle(.plain)
             }
 
-            Text("Polls are compatible with x21's Nostr format, but some clients still won't render them.")
-                .font(.footnote)
-                .foregroundStyle(.secondary)
-
             VStack(spacing: 10) {
                 ForEach(Array(draft.options.indices), id: \.self) { index in
                     optionRow(index: index)

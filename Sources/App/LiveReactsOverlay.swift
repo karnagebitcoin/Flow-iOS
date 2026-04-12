@@ -53,7 +53,10 @@ final class LiveReactsCoordinator: ObservableObject {
 @MainActor
 final class LiveReactsSubscriptionController: ObservableObject {
     private let liveSubscriber: NostrLiveFeedSubscriber
+    private let relayClient: any NostrRelayEventFetching
     private var liveUpdatesTask: Task<Void, Never>?
+    private var catchUpTask: Task<Void, Never>?
+    private var catchUpToken = 0
     private var subscriptionSignature: String?
     private var currentUserPubkey: String?
     private var readRelayURLs: [URL] = []
@@ -64,13 +67,23 @@ final class LiveReactsSubscriptionController: ObservableObject {
     private var seenEventOrder: [String] = []
 
     private let maxTrackedEventIDs = 512
+    private let catchUpMinimumInterval: TimeInterval = 15
+    private let catchUpOverlapSeconds = 30
+    private let catchUpLimit = 120
+    private let catchUpTimeout: TimeInterval = 4
+    private var lastCatchUpByRelaySignature: [String: Date] = [:]
 
-    init(liveSubscriber: NostrLiveFeedSubscriber = NostrLiveFeedSubscriber()) {
+    init(
+        liveSubscriber: NostrLiveFeedSubscriber = NostrLiveFeedSubscriber(),
+        relayClient: any NostrRelayEventFetching = NostrRelayClient(fetchEndpointBackoff: .sharedReaction)
+    ) {
         self.liveSubscriber = liveSubscriber
+        self.relayClient = relayClient
     }
 
     deinit {
         liveUpdatesTask?.cancel()
+        catchUpTask?.cancel()
     }
 
     func update(
@@ -145,6 +158,13 @@ final class LiveReactsSubscriptionController: ObservableObject {
                             onNewEvent: { [weak self] event in
                                 guard let self else { return }
                                 await self.handleIncomingReactionEvent(event)
+                            },
+                            onStatus: { [weak self] _ in
+                                guard let self else { return }
+                                await self.scheduleCatchUp(
+                                    relays: [relayURL],
+                                    filter: filter
+                                )
                             }
                         )
                     }
@@ -152,15 +172,87 @@ final class LiveReactsSubscriptionController: ObservableObject {
                 await group.waitForAll()
             }
         }
+
+        scheduleCatchUp(relays: relays, filter: filter, force: true)
     }
 
     private func stopSubscription(resetSeenEvents: Bool) {
         liveUpdatesTask?.cancel()
         liveUpdatesTask = nil
+        catchUpTask?.cancel()
+        catchUpTask = nil
         subscriptionSignature = nil
 
         if resetSeenEvents {
             resetSeenEventTracking()
+            lastCatchUpByRelaySignature = [:]
+        }
+    }
+
+    private func scheduleCatchUp(
+        relays: [URL],
+        filter: NostrFilter,
+        force: Bool = false
+    ) {
+        guard catchUpTask == nil else { return }
+        let now = Date()
+        let dueRelays = relays.filter { relayURL in
+            let signature = relayURL.absoluteString.lowercased()
+            guard !force else { return true }
+            guard let lastFetch = lastCatchUpByRelaySignature[signature] else { return true }
+            return now.timeIntervalSince(lastFetch) >= catchUpMinimumInterval
+        }
+        guard !dueRelays.isEmpty else { return }
+
+        dueRelays.forEach { relayURL in
+            lastCatchUpByRelaySignature[relayURL.absoluteString.lowercased()] = now
+        }
+
+        catchUpToken &+= 1
+        let token = catchUpToken
+        catchUpTask = Task(priority: .utility) { [weak self, dueRelays, filter] in
+            guard let self else { return }
+            await self.performCatchUp(relays: dueRelays, filter: filter)
+            await MainActor.run { [weak self] in
+                guard let self, self.catchUpToken == token else { return }
+                self.catchUpTask = nil
+            }
+        }
+    }
+
+    private func performCatchUp(relays: [URL], filter: NostrFilter) async {
+        guard !relays.isEmpty else { return }
+
+        let catchUpSince = max(Int(Date().timeIntervalSince1970) - catchUpOverlapSeconds, 0)
+        let relayClient = relayClient
+        let timeout = catchUpTimeout
+        var catchUpFilter = filter
+        catchUpFilter.since = catchUpSince
+        catchUpFilter.until = nil
+        catchUpFilter.limit = max(catchUpFilter.limit ?? 0, catchUpLimit)
+        let fetchFilter = catchUpFilter
+
+        await withTaskGroup(of: [NostrEvent].self) { group in
+            for relayURL in relays {
+                group.addTask {
+                    do {
+                        return try await relayClient.fetchEvents(
+                            relayURL: relayURL,
+                            filter: fetchFilter,
+                            timeout: timeout
+                        )
+                    } catch {
+                        return []
+                    }
+                }
+            }
+
+            for await events in group {
+                guard !Task.isCancelled else { return }
+                for event in events {
+                    await handleIncomingReactionEvent(event)
+                }
+            }
         }
     }
 

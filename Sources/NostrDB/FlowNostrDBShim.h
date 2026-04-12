@@ -17,6 +17,7 @@ char *flow_ndb_copy_note_json_by_key(void *handle, uint64_t note_key, int *out_l
 char *flow_ndb_copy_note_json_array_for_filter_json(void *handle, const char *filter_json, int filter_json_len, int *out_len);
 char *flow_ndb_copy_latest_note_json_for_pubkey_kind(void *handle, const unsigned char *pubkey, uint32_t kind, int *out_len);
 char *flow_ndb_copy_profile_json(void *handle, const unsigned char *pubkey, int *out_len);
+char *flow_ndb_copy_profile_search_json(void *handle, const char *query, int limit, int *out_len);
 uint64_t flow_ndb_profile_note_key(void *handle, const unsigned char *pubkey);
 uint64_t flow_ndb_note_count(void *handle);
 uint64_t flow_ndb_profile_count(void *handle);
