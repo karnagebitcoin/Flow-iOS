@@ -1,0 +1,1848 @@
+import AVFoundation
+import AVKit
+import Combine
+import ImageIO
+import LinkPresentation
+import NostrSDK
+import SwiftUI
+import UIKit
+
+final class NoteParsedContentCache {
+    static let shared = NoteParsedContentCache()
+
+    private let maxEntries = 2_000
+    private var entries: [String: NoteContentView.ParsedContent] = [:]
+    private var recency: [String] = []
+    private let lock = NSLock()
+
+    func parsedContent(
+        for event: NostrEvent,
+        builder: () -> NoteContentView.ParsedContent
+    ) -> NoteContentView.ParsedContent {
+        let cacheKey = event.id.lowercased()
+
+        lock.lock()
+        if let cached = entries[cacheKey] {
+            touch(cacheKey)
+            lock.unlock()
+            return cached
+        }
+        lock.unlock()
+
+        let parsed = builder()
+
+        lock.lock()
+        entries[cacheKey] = parsed
+        touch(cacheKey)
+        if recency.count > maxEntries, let oldest = recency.first {
+            recency.removeFirst()
+            entries[oldest] = nil
+        }
+        lock.unlock()
+
+        return parsed
+    }
+
+    private func touch(_ key: String) {
+        recency.removeAll(where: { $0 == key })
+        recency.append(key)
+    }
+}
+
+final class NoteBlurRevealStateCache {
+    static let shared = NoteBlurRevealStateCache()
+
+    private let maxEntries = 2_000
+    private var revealedKeys = Set<String>()
+    private var recency: [String] = []
+    private let lock = NSLock()
+
+    func isRevealed(for key: String) -> Bool {
+        guard !key.isEmpty else { return false }
+
+        lock.lock()
+        defer { lock.unlock() }
+        return revealedKeys.contains(key)
+    }
+
+    func markRevealed(for key: String) {
+        guard !key.isEmpty else { return }
+
+        lock.lock()
+        defer { lock.unlock() }
+
+        revealedKeys.insert(key)
+        touch(key)
+
+        let overflow = recency.count - maxEntries
+        guard overflow > 0 else { return }
+
+        for _ in 0..<overflow {
+            let removedKey = recency.removeFirst()
+            revealedKeys.remove(removedKey)
+        }
+    }
+
+    private func touch(_ key: String) {
+        recency.removeAll(where: { $0 == key })
+        recency.append(key)
+    }
+}
+
+struct NoteMediaPlaceholderView: View {
+    @EnvironmentObject private var appSettings: AppSettingsStore
+    let systemImage: String
+    let text: String
+    var action: (() -> Void)? = nil
+
+    var body: some View {
+        Group {
+            if let action {
+                Button(action: action) {
+                    placeholderContent(isActionable: true)
+                }
+                .buttonStyle(.plain)
+                .accessibilityHint("Loads media for this note")
+            } else {
+                placeholderContent(isActionable: false)
+            }
+        }
+    }
+
+    private func placeholderContent(isActionable: Bool) -> some View {
+        HStack(spacing: 10) {
+            Image(systemName: systemImage)
+                .foregroundStyle(isActionable ? appSettings.primaryColor : appSettings.themePalette.iconMutedForeground)
+            Text(text)
+                .font(.footnote.weight(isActionable ? .semibold : .regular))
+                .foregroundStyle(isActionable ? appSettings.primaryColor : appSettings.themePalette.secondaryForeground)
+                .lineLimit(nil)
+            Spacer(minLength: 0)
+            if isActionable {
+                Image(systemName: "chevron.right")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(appSettings.primaryColor)
+            }
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 10)
+        .background(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .fill(appSettings.themePalette.secondaryBackground)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .stroke(
+                    (isActionable ? appSettings.primaryColor.opacity(0.35) : appSettings.themePalette.separator.opacity(0.35)),
+                    lineWidth: 0.5
+                )
+        )
+    }
+}
+
+struct NoteBlurRevealContainer<Content: View>: View {
+    @EnvironmentObject private var appSettings: AppSettingsStore
+    let cornerRadius: CGFloat
+    let onReveal: () -> Void
+    let content: Content
+
+    init(
+        cornerRadius: CGFloat,
+        onReveal: @escaping () -> Void,
+        @ViewBuilder content: () -> Content
+    ) {
+        self.cornerRadius = cornerRadius
+        self.onReveal = onReveal
+        self.content = content()
+    }
+
+    var body: some View {
+        ZStack {
+            content
+                .compositingGroup()
+                .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
+                .blur(radius: 22)
+                .overlay {
+                    RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                        .fill(Color.black.opacity(0.22))
+                }
+                .allowsHitTesting(false)
+
+            VStack(spacing: 8) {
+                Image(systemName: "eye.slash.fill")
+                    .font(.headline.weight(.semibold))
+                Text("Tap to reveal")
+                    .font(.footnote.weight(.semibold))
+            }
+            .foregroundStyle(.white)
+            .padding(.horizontal, 16)
+            .padding(.vertical, 12)
+            .background(
+                ZStack {
+                    Capsule(style: .continuous)
+                        .fill(appSettings.themePalette.modalBackground)
+
+                    Capsule(style: .continuous)
+                        .fill(
+                            LinearGradient(
+                                colors: [
+                                    Color.white.opacity(0.28),
+                                    Color.white.opacity(0.08),
+                                    Color.clear
+                                ],
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
+                            )
+                        )
+
+                    Capsule(style: .continuous)
+                        .fill(
+                            LinearGradient(
+                                colors: [
+                                    Color.black.opacity(0.18),
+                                    Color.clear
+                                ],
+                                startPoint: .bottom,
+                                endPoint: .top
+                            )
+                        )
+                }
+            )
+            .shadow(color: Color.black.opacity(0.18), radius: 14, x: 0, y: 8)
+        }
+        .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
+        .contentShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
+        .onTapGesture(perform: onReveal)
+        .accessibilityLabel("Reveal media")
+    }
+}
+
+struct NoteImageGalleryView: View {
+    private struct SelectedImage: Identifiable {
+        let id: Int
+    }
+
+    let imageURLs: [URL]
+    let layout: NoteContentMediaLayout
+    let sourceEvent: NostrEvent
+    let reactionCount: Int
+    let commentCount: Int
+    @State private var selectedImage: SelectedImage?
+    @State private var visibleImageIndex = 0
+
+    private var imageAspectRatioHints: [String: CGFloat] {
+        NoteImageLayoutGuide.imageAspectRatioHints(from: sourceEvent.tags)
+    }
+
+    var body: some View {
+        Group {
+            if imageURLs.count == 1 {
+                singleImageCell(url: imageURLs[0], index: 0)
+            } else if layout == .feed {
+                feedGallery
+            } else {
+                pagedGallery
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .fullScreenCover(item: $selectedImage) { selected in
+            NoteImageFullscreenViewer(
+                urls: imageURLs,
+                sourceEvent: sourceEvent,
+                initialIndex: selected.id,
+                reactionCount: reactionCount,
+                commentCount: commentCount
+            )
+        }
+    }
+
+    private var multiImageHeight: CGFloat {
+        layout == .detailCarousel ? 460 : 340
+    }
+
+    private var mediaCornerRadius: CGFloat {
+        layout == .feed ? 18 : 12
+    }
+
+    private var feedGalleryHeight: CGFloat {
+        imageURLs.count == 1 ? 360 : 340
+    }
+
+    private var feedGallerySpacing: CGFloat {
+        6
+    }
+
+    private var feedGallery: some View {
+        GeometryReader { geometry in
+            let width = max(geometry.size.width, 1)
+            let tileWidth = feedTileWidth(availableWidth: width)
+
+            if imageURLs.count == 1, let url = imageURLs.first {
+                feedTile(
+                    url: url,
+                    index: 0,
+                    width: width,
+                    height: feedGalleryHeight
+                )
+            } else {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    LazyHStack(spacing: feedGallerySpacing) {
+                        ForEach(Array(imageURLs.enumerated()), id: \.offset) { index, url in
+                            feedTile(
+                                url: url,
+                                index: index,
+                                width: tileWidth,
+                                height: feedGalleryHeight
+                            )
+                        }
+                    }
+                    .frame(height: feedGalleryHeight, alignment: .leading)
+                }
+            }
+        }
+        .frame(height: feedGalleryHeight)
+    }
+
+    private func feedTileWidth(availableWidth: CGFloat) -> CGFloat {
+        let proposedWidth = availableWidth * 0.74
+        return max(min(proposedWidth, 360), 220)
+    }
+
+    private func feedTile(url: URL, index: Int, width: CGFloat, height: CGFloat) -> some View {
+        NoteFeedImageTileView(
+            url: url,
+            cornerRadius: mediaCornerRadius,
+            width: width,
+            height: height,
+            onTap: {
+                selectedImage = SelectedImage(id: index)
+            }
+        )
+    }
+
+    private var pagedGallery: some View {
+        GeometryReader { geometry in
+            let width = max(geometry.size.width, 1)
+
+            TabView(selection: $visibleImageIndex) {
+                ForEach(Array(imageURLs.enumerated()), id: \.offset) { index, url in
+                    NoteSingleImageCellView(
+                        url: url,
+                        cornerRadius: mediaCornerRadius,
+                        aspectRatioHint: aspectRatioHint(for: url),
+                        maxHeight: multiImageHeight,
+                        onTap: {
+                            selectedImage = SelectedImage(id: index)
+                        }
+                    )
+                    .frame(width: width, height: multiImageHeight)
+                    .tag(index)
+                }
+            }
+            .tabViewStyle(.page(indexDisplayMode: .automatic))
+            .indexViewStyle(.page(backgroundDisplayMode: .always))
+            .frame(width: width, height: multiImageHeight, alignment: .top)
+        }
+        .frame(height: multiImageHeight)
+    }
+
+    private func singleImageCell(url: URL, index: Int) -> some View {
+        NoteSingleImageCellView(
+            url: url,
+            cornerRadius: mediaCornerRadius,
+            aspectRatioHint: aspectRatioHint(for: url),
+            onTap: {
+                selectedImage = SelectedImage(id: index)
+            }
+        )
+    }
+
+    private func aspectRatioHint(for url: URL) -> CGFloat? {
+        imageAspectRatioHints[url.absoluteString]
+    }
+
+}
+
+struct NoteFeedImageTileView: View {
+    @EnvironmentObject private var appSettings: AppSettingsStore
+    let url: URL
+    let cornerRadius: CGFloat
+    let width: CGFloat
+    let height: CGFloat
+    let onTap: () -> Void
+
+    var body: some View {
+        Button(action: onTap) {
+            NoteRemoteMediaView(url: url) { asset in
+                NoteMediaAssetContentView(asset: asset, scaling: .fill)
+                    .frame(width: width, height: height)
+            } placeholder: {
+                ZStack {
+                    appSettings.themePalette.secondaryBackground
+                        .frame(width: width, height: height)
+                    ProgressView()
+                }
+            } failure: {
+                ZStack {
+                    appSettings.themePalette.secondaryBackground
+                        .frame(width: width, height: height)
+                    Image(systemName: "photo")
+                        .font(.title3)
+                        .foregroundStyle(appSettings.themePalette.secondaryForeground)
+                }
+            }
+            .frame(width: width, height: height)
+            .clipped()
+            .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
+            .contentShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
+        }
+        .buttonStyle(.plain)
+        .frame(width: width, height: height)
+    }
+}
+
+struct NoteSingleImageCellView: View {
+    let url: URL
+    let cornerRadius: CGFloat
+    let aspectRatioHint: CGFloat?
+    var maxHeight: CGFloat? = nil
+    let onTap: () -> Void
+    @EnvironmentObject private var appSettings: AppSettingsStore
+    @State private var reservedAspectRatio: CGFloat
+
+    init(
+        url: URL,
+        cornerRadius: CGFloat,
+        aspectRatioHint: CGFloat? = nil,
+        maxHeight: CGFloat? = nil,
+        onTap: @escaping () -> Void
+    ) {
+        self.url = url
+        self.cornerRadius = cornerRadius
+        self.aspectRatioHint = NoteImageLayoutGuide.normalizedAspectRatio(aspectRatioHint)
+        self.maxHeight = maxHeight
+        self.onTap = onTap
+        _reservedAspectRatio = State(
+            initialValue: NoteImageLayoutGuide.reservedSingleImageAspectRatio(
+                exactHint: NoteImageLayoutGuide.normalizedAspectRatio(aspectRatioHint),
+                cachedExactRatio: FlowMediaAspectRatioCache.shared.ratio(for: url)
+            )
+        )
+    }
+
+    private var placeholderHeight: CGFloat {
+        maxHeight ?? 180
+    }
+
+    private var mediaBackgroundColor: Color {
+        if appSettings.activeTheme == .dracula || appSettings.activeTheme == .gamer {
+            return appSettings.themePalette.background
+        }
+        return appSettings.themePalette.secondaryBackground
+    }
+
+    var body: some View {
+        Button(action: onTap) {
+            imageBody
+                .clipped()
+                .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
+                .contentShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
+        }
+        .buttonStyle(.plain)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .task(id: url) {
+            let cachedExactRatio = FlowMediaAspectRatioCache.shared.ratio(for: url)
+            reservedAspectRatio = NoteImageLayoutGuide.reservedSingleImageAspectRatio(
+                exactHint: aspectRatioHint,
+                cachedExactRatio: cachedExactRatio
+            )
+
+            guard maxHeight == nil else { return }
+            guard let resolvedExactRatio = await FlowImageCache.shared.aspectRatio(for: url) else { return }
+            let bucketedRatio = NoteImageLayoutGuide.bucketedSingleImageAspectRatio(for: resolvedExactRatio)
+
+            if aspectRatioHint == nil,
+               cachedExactRatio == nil,
+               abs(bucketedRatio - reservedAspectRatio) <= 0.35,
+               abs(bucketedRatio - reservedAspectRatio) > 0.01 {
+                reservedAspectRatio = bucketedRatio
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func mediaContent(asset: NoteMediaAsset) -> some View {
+        let base = NoteMediaAssetContentView(asset: asset, scaling: .fit)
+
+        if let maxHeight {
+            base
+                .frame(maxWidth: .infinity, maxHeight: maxHeight, alignment: .center)
+                .background(mediaBackgroundColor)
+                .frame(maxWidth: .infinity, maxHeight: maxHeight, alignment: .center)
+        } else {
+            base
+                .background(mediaBackgroundColor)
+        }
+    }
+
+    @ViewBuilder
+    private var imageBody: some View {
+        if maxHeight == nil {
+            stableSingleImageBody
+        } else {
+            fixedHeightImageBody
+        }
+    }
+
+    private var stableSingleImageBody: some View {
+        ZStack {
+            NoteRemoteMediaView(url: url) { asset in
+                mediaContent(asset: asset)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+            } placeholder: {
+                loadingPlaceholder
+            } failure: {
+                failurePlaceholder
+            }
+        }
+        .aspectRatio(reservedAspectRatio, contentMode: .fit)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(mediaBackgroundColor)
+    }
+
+    private var fixedHeightImageBody: some View {
+        NoteRemoteMediaView(url: url) { asset in
+            mediaContent(asset: asset)
+        } placeholder: {
+            loadingPlaceholder
+        } failure: {
+            failurePlaceholder
+        }
+    }
+
+    private var loadingPlaceholder: some View {
+        ZStack {
+            LinearGradient(
+                colors: [
+                    mediaBackgroundColor.opacity(0.92),
+                    mediaBackgroundColor.opacity(0.74)
+                ],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
+
+            ProgressView()
+        }
+        .frame(maxWidth: .infinity, maxHeight: maxHeight == nil ? .infinity : placeholderHeight, alignment: .center)
+        .frame(minHeight: maxHeight == nil ? 0 : 180, maxHeight: maxHeight == nil ? .infinity : placeholderHeight, alignment: .center)
+        .background(mediaBackgroundColor)
+    }
+
+    private var failurePlaceholder: some View {
+        ZStack {
+            mediaBackgroundColor
+
+            Image(systemName: "photo")
+                .font(.title3)
+                .foregroundStyle(appSettings.themePalette.secondaryForeground)
+        }
+        .frame(maxWidth: .infinity, maxHeight: maxHeight == nil ? .infinity : placeholderHeight, alignment: .center)
+        .frame(minHeight: maxHeight == nil ? 0 : 180, maxHeight: maxHeight == nil ? .infinity : placeholderHeight, alignment: .center)
+    }
+}
+
+struct NoteImageFullscreenViewer: View {
+    let urls: [URL]
+    let sourceEvent: NostrEvent
+    let reactionCount: Int
+    let commentCount: Int
+    @EnvironmentObject private var auth: AuthManager
+    @EnvironmentObject private var appSettings: AppSettingsStore
+    @EnvironmentObject private var composeSheetCoordinator: AppComposeSheetCoordinator
+    @EnvironmentObject private var relaySettings: RelaySettingsStore
+    @EnvironmentObject private var toastCenter: AppToastCenter
+    @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.dismiss) private var dismiss
+    @ObservedObject private var reactionStats = NoteReactionStatsService.shared
+    @State private var selectedIndex: Int
+    @State private var isShowingInlineResharePanel = false
+    @State private var isPublishingRepost = false
+    @State private var repostStatusMessage: String?
+    @State private var repostStatusIsError = false
+    @State private var remixSourceImage: UIImage?
+    @State private var pendingRemixComposeDraft: NoteImageRemixComposeDraft?
+    @State private var isShowingRemixEditor = false
+    @State private var isPreparingRemixEditor = false
+    @State private var zoomedImageIndices = Set<Int>()
+    @State private var swipeDismissOffset: CGSize = .zero
+    @State private var isCompletingSwipeDismiss = false
+    private let reshareService = ResharePublishService()
+    private let reactionPublishService = NoteReactionPublishService()
+
+    init(urls: [URL], sourceEvent: NostrEvent, initialIndex: Int, reactionCount: Int, commentCount: Int) {
+        self.urls = urls
+        self.sourceEvent = sourceEvent
+        self.reactionCount = reactionCount
+        self.commentCount = commentCount
+        _selectedIndex = State(initialValue: max(0, min(initialIndex, max(urls.count - 1, 0))))
+    }
+
+    var body: some View {
+        GeometryReader { geometry in
+            ZStack(alignment: .bottom) {
+                viewerBackgroundColor
+                    .opacity(viewerBackgroundOpacity(for: geometry.size))
+                    .ignoresSafeArea()
+
+                NavigationStack {
+                    TabView(selection: $selectedIndex) {
+                        ForEach(Array(urls.enumerated()), id: \.offset) { index, url in
+                            ZStack {
+                                viewerBackgroundColor.ignoresSafeArea()
+                                NoteZoomableFullscreenImageView(
+                                    url: url,
+                                    chromeForegroundColor: chromeForegroundColor,
+                                    onZoomStateChange: { isZoomed in
+                                        updateZoomState(isZoomed, for: index)
+                                    }
+                                )
+                            }
+                            .tag(index)
+                            .flowRemoteImageSaveContextMenu(url: url)
+                        }
+                    }
+                    .tabViewStyle(.page(indexDisplayMode: .automatic))
+                    .toolbar {
+                        ToolbarItem(placement: .topBarTrailing) {
+                            Button {
+                                dismiss()
+                            } label: {
+                                Text("Done")
+                                    .font(.subheadline.weight(.semibold))
+                                    .foregroundStyle(doneButtonForegroundColor)
+                            }
+                        }
+                    }
+                    .toolbarBackground(.visible, for: .navigationBar)
+                    .toolbarBackground(viewerNavigationBarColor, for: .navigationBar)
+                    .toolbarColorScheme(colorScheme == .dark ? .dark : .light, for: .navigationBar)
+                    .safeAreaInset(edge: .bottom) {
+                        mediaActionBar
+                    }
+                }
+                .offset(swipeDismissOffset)
+                .scaleEffect(viewerScale(for: geometry.size))
+                .rotationEffect(.degrees(viewerRotationDegrees(for: geometry.size)))
+                .simultaneousGesture(swipeToDismissGesture(containerSize: geometry.size))
+                .allowsHitTesting(!isShowingInlineResharePanel)
+
+                if isShowingInlineResharePanel {
+                    fullscreenReshareOverlay
+                        .transition(.opacity.combined(with: .move(edge: .bottom)))
+                }
+            }
+        }
+        .fullScreenCover(
+            isPresented: $isShowingRemixEditor,
+            onDismiss: handleRemixEditorDismissed
+        ) {
+            if let remixSourceImage {
+                ImageRemixEditorView(
+                    sourceImage: remixSourceImage,
+                    sourceEvent: sourceEvent,
+                    currentAccountPubkey: auth.currentAccount?.pubkey,
+                    currentNsec: auth.currentNsec,
+                    writeRelayURLs: effectiveWriteRelayURLs,
+                    onComposeRequested: { attachment, replyTargetEvent in
+                        pendingRemixComposeDraft = NoteImageRemixComposeDraft(
+                            attachment: attachment,
+                            replyTargetEvent: replyTargetEvent
+                        )
+                        isShowingRemixEditor = false
+                    }
+                )
+            }
+        }
+        .task {
+            reactionStats.prefetch(events: [sourceEvent], relayURLs: effectiveReadRelayURLs)
+        }
+    }
+
+    private var mediaActionBar: some View {
+        HStack(spacing: 16) {
+            Button {
+                presentReplyComposer()
+            } label: {
+                HStack(spacing: 4) {
+                    Image(systemName: "bubble.right")
+                    if commentCount > 0 {
+                        Text("\(commentCount)")
+                            .font(.footnote)
+                    }
+                }
+                .foregroundStyle(chromeForegroundColor)
+                .frame(minWidth: 36, minHeight: 28, alignment: .leading)
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Reply")
+
+            Button {
+                repostStatusMessage = nil
+                repostStatusIsError = false
+                withAnimation(.spring(response: 0.32, dampingFraction: 0.88)) {
+                    isShowingInlineResharePanel = true
+                }
+            } label: {
+                Image(systemName: "arrow.2.squarepath")
+                    .foregroundStyle(chromeForegroundColor)
+                    .frame(minWidth: 36, minHeight: 28, alignment: .leading)
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Re-share")
+
+            ReactionButton(
+                isLiked: isLikedByCurrentUser,
+                isBonusReaction: isBonusReactionByCurrentUser,
+                count: visibleReactionCount,
+                bonusActiveColor: appSettings.primaryColor,
+                inactiveColor: chromeForegroundColor,
+                minWidth: 36
+            ) { bonusCount in
+                Task {
+                    await handleReactionTap(bonusCount: bonusCount)
+                }
+            }
+
+            ShareLink(item: urls[selectedIndex]) {
+                Image(systemName: "paperplane")
+                    .foregroundStyle(chromeForegroundColor)
+                    .frame(minWidth: 36, minHeight: 28, alignment: .leading)
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Share")
+
+            Button {
+                Task {
+                    await openRemixEditor()
+                }
+            } label: {
+                Group {
+                    if isPreparingRemixEditor {
+                        ProgressView()
+                            .controlSize(.small)
+                            .tint(appSettings.primaryColor)
+                            .frame(minWidth: 36, minHeight: 28, alignment: .leading)
+                    } else {
+                        Image(systemName: "paintbrush.pointed.fill")
+                            .foregroundStyle(appSettings.primaryColor)
+                            .frame(minWidth: 36, minHeight: 28, alignment: .leading)
+                    }
+                }
+            }
+            .buttonStyle(.plain)
+            .disabled(isPreparingRemixEditor)
+            .accessibilityLabel("Edit image")
+        }
+        .font(.headline)
+        .padding(.horizontal, 16)
+        .padding(.vertical, 12)
+        .frame(maxWidth: .infinity, alignment: .center)
+    }
+
+    private var visibleReactionCount: Int {
+        reactionStats.reactionCount(for: sourceEvent.id)
+    }
+
+    private var isLikedByCurrentUser: Bool {
+        reactionStats.isReactedByCurrentUser(
+            for: sourceEvent.id,
+            currentPubkey: auth.currentAccount?.pubkey
+        )
+    }
+
+    private var isBonusReactionByCurrentUser: Bool {
+        reactionStats.currentUserReaction(
+            for: sourceEvent.id,
+            currentPubkey: auth.currentAccount?.pubkey
+        )?.bonusCount ?? 0 > 0
+    }
+
+    private var effectiveReadRelayURLs: [URL] {
+        appSettings.effectiveReadRelayURLs(from: relaySettings.readRelayURLs)
+    }
+
+    private var effectiveWriteRelayURLs: [URL] {
+        appSettings.effectiveWriteRelayURLs(
+            from: relaySettings.writeRelayURLs,
+            fallbackReadRelayURLs: effectiveReadRelayURLs
+        )
+    }
+
+    private var viewerBackgroundColor: Color {
+        appSettings.themePalette.background
+    }
+
+    private var viewerNavigationBarColor: Color {
+        appSettings.themePalette.navigationBackground
+    }
+
+    private var chromeForegroundColor: Color {
+        appSettings.themePalette.foreground
+    }
+
+    private var doneButtonForegroundColor: Color {
+        appSettings.themePalette.foreground
+    }
+
+    private var fullscreenReshareOverlay: some View {
+        ZStack(alignment: .bottom) {
+            appSettings.themePalette.overlayBackground
+                .ignoresSafeArea()
+                .contentShape(Rectangle())
+                .onTapGesture {
+                    withAnimation(.spring(response: 0.3, dampingFraction: 0.9)) {
+                        isShowingInlineResharePanel = false
+                    }
+                }
+
+            VStack(alignment: .leading, spacing: 16) {
+                Capsule()
+                    .fill(appSettings.themePalette.separator.opacity(0.82))
+                    .frame(width: 42, height: 5)
+                    .frame(maxWidth: .infinity)
+
+                HStack {
+                    Text("Re-share")
+                        .font(.headline.weight(.semibold))
+                        .foregroundStyle(appSettings.themePalette.foreground)
+                    Spacer()
+                    Button {
+                        withAnimation(.spring(response: 0.3, dampingFraction: 0.9)) {
+                            isShowingInlineResharePanel = false
+                        }
+                    } label: {
+                        Image(systemName: "xmark")
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(appSettings.themePalette.iconMutedForeground)
+                            .frame(width: 30, height: 30)
+                            .background(appSettings.themePalette.tertiaryFill, in: Circle())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Close re-share options")
+                }
+
+                VStack(spacing: 0) {
+                    inlineReshareActionRow(
+                        title: "Repost",
+                        systemImage: "arrow.2.squarepath"
+                    ) {
+                        Task {
+                            await publishRepost()
+                        }
+                    }
+
+                    Divider()
+                        .padding(.leading, 18)
+
+                    inlineReshareActionRow(
+                        title: "Quote",
+                        systemImage: "quote.bubble"
+                    ) {
+                        presentQuoteComposer()
+                    }
+                }
+                .background(
+                    RoundedRectangle(cornerRadius: 18, style: .continuous)
+                        .fill(appSettings.themePalette.modalBackground)
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                                .stroke(appSettings.themePalette.separator.opacity(0.35), lineWidth: 0.8)
+                        )
+                )
+
+                if let repostStatusMessage, !repostStatusMessage.isEmpty {
+                    HStack(spacing: 8) {
+                        Image(systemName: repostStatusIsError ? "exclamationmark.triangle.fill" : "checkmark.circle.fill")
+                            .foregroundStyle(repostStatusIsError ? .red : .green)
+                        Text(repostStatusMessage)
+                            .font(.footnote)
+                            .foregroundStyle(repostStatusIsError ? .red : appSettings.themePalette.secondaryForeground)
+                        Spacer(minLength: 0)
+                    }
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 10)
+                    .background(
+                        RoundedRectangle(cornerRadius: 14, style: .continuous)
+                            .fill((repostStatusIsError ? Color.red : Color.green).opacity(0.1))
+                    )
+                }
+            }
+            .padding(.horizontal, 16)
+            .padding(.top, 16)
+            .padding(.bottom, 16)
+            .background(
+                RoundedRectangle(cornerRadius: 28, style: .continuous)
+                    .fill(appSettings.themePalette.modalBackground)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 28, style: .continuous)
+                            .stroke(appSettings.themePalette.separator.opacity(0.35), lineWidth: 0.7)
+                    )
+            )
+            .padding(.horizontal, 14)
+            .padding(.bottom, 14)
+        }
+    }
+
+    @MainActor
+    private func handleReactionTap(bonusCount: Int = 0) async {
+        let eventID = sourceEvent.id
+        guard reactionStats.beginPublishingReaction(for: eventID) else { return }
+        let existingReaction = reactionStats.currentUserReaction(
+            for: eventID,
+            currentPubkey: auth.currentAccount?.pubkey
+        )
+        let optimisticToggle = reactionStats.applyOptimisticToggle(
+            for: eventID,
+            currentPubkey: auth.currentAccount?.pubkey,
+            bonusCount: bonusCount
+        )
+        defer {
+            reactionStats.endPublishingReaction(for: eventID)
+        }
+
+        do {
+            let result = try await reactionPublishService.toggleReaction(
+                for: sourceEvent,
+                existingReactionID: existingReaction?.id,
+                bonusCount: bonusCount,
+                currentNsec: auth.currentNsec,
+                writeRelayURLs: effectiveWriteRelayURLs,
+                relayHintURL: effectiveReadRelayURLs.first
+            )
+
+            switch result {
+            case .liked(let reactionEvent):
+                reactionStats.registerPublishedReaction(
+                    reactionEvent,
+                    targetEventID: eventID
+                )
+            case .unliked(let reactionID):
+                reactionStats.registerDeletedReaction(
+                    reactionID: reactionID,
+                    targetEventID: eventID
+                )
+            }
+        } catch {
+            reactionStats.rollbackOptimisticToggle(for: eventID, snapshot: optimisticToggle)
+            return
+        }
+    }
+
+    @ViewBuilder
+    private func inlineReshareActionRow(
+        title: String,
+        systemImage: String,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button {
+            action()
+        } label: {
+            HStack(spacing: 12) {
+                Text(title)
+                    .font(.body.weight(.medium))
+                    .foregroundStyle(appSettings.themePalette.foreground)
+
+                Spacer(minLength: 0)
+
+                if isPublishingRepost && title == "Repost" {
+                    ProgressView()
+                        .controlSize(.small)
+                } else {
+                    Image(systemName: systemImage)
+                        .font(.body.weight(.semibold))
+                        .foregroundStyle(appSettings.themePalette.iconMutedForeground)
+                }
+            }
+            .padding(.horizontal, 18)
+            .padding(.vertical, 16)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .disabled(isPublishingRepost)
+    }
+
+    @MainActor
+    private func publishRepost() async {
+        guard !isPublishingRepost else { return }
+        isPublishingRepost = true
+        repostStatusMessage = nil
+        repostStatusIsError = false
+        defer { isPublishingRepost = false }
+
+        do {
+            let relayCount = try await reshareService.publishRepost(
+                of: sourceEvent,
+                currentNsec: auth.currentNsec,
+                writeRelayURLs: effectiveWriteRelayURLs,
+                relayHintURL: effectiveReadRelayURLs.first
+            )
+            repostStatusMessage = "Reposted to \(relayCount) source\(relayCount == 1 ? "" : "s")."
+            repostStatusIsError = false
+
+            try? await Task.sleep(nanoseconds: 450_000_000)
+            withAnimation(.spring(response: 0.3, dampingFraction: 0.9)) {
+                isShowingInlineResharePanel = false
+            }
+        } catch {
+            repostStatusMessage = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+            repostStatusIsError = true
+        }
+    }
+
+    @MainActor
+    private func openRemixEditor() async {
+        guard !isPreparingRemixEditor else { return }
+        isPreparingRemixEditor = true
+        defer {
+            isPreparingRemixEditor = false
+        }
+
+        let currentURL = urls[selectedIndex]
+        guard let image = await FlowImageCache.shared.image(for: currentURL) else {
+            toastCenter.show("Couldn't load that image for editing.", style: .error, duration: 2.8)
+            return
+        }
+
+        composeSheetCoordinator.dismiss()
+        pendingRemixComposeDraft = nil
+        remixSourceImage = image
+        isShowingRemixEditor = true
+    }
+
+    @MainActor
+    private func handleRemixEditorDismissed() {
+        remixSourceImage = nil
+
+        guard let draft = pendingRemixComposeDraft else { return }
+        pendingRemixComposeDraft = nil
+
+        Task { @MainActor in
+            // Dismiss the fullscreen image viewer before asking the app shell to present compose.
+            dismiss()
+            try? await Task.sleep(nanoseconds: 320_000_000)
+            composeSheetCoordinator.presentRemix(
+                attachment: draft.attachment,
+                replyTargetEvent: draft.replyTargetEvent
+            )
+        }
+    }
+
+    @MainActor
+    private func presentReplyComposer() {
+        Task { @MainActor in
+            dismiss()
+            try? await Task.sleep(nanoseconds: 320_000_000)
+            composeSheetCoordinator.presentReply(to: sourceEvent)
+        }
+    }
+
+    @MainActor
+    private func presentQuoteComposer() {
+        let draft = reshareService.buildQuoteDraft(
+            for: sourceEvent,
+            relayHintURL: effectiveReadRelayURLs.first
+        )
+
+        withAnimation(.spring(response: 0.3, dampingFraction: 0.9)) {
+            isShowingInlineResharePanel = false
+        }
+
+        Task { @MainActor in
+            dismiss()
+            try? await Task.sleep(nanoseconds: 320_000_000)
+            composeSheetCoordinator.presentQuote(draft)
+        }
+    }
+
+    private func swipeToDismissGesture(containerSize: CGSize) -> some Gesture {
+        DragGesture(minimumDistance: 8, coordinateSpace: .local)
+            .onChanged { value in
+                guard !isShowingInlineResharePanel, !isShowingRemixEditor, !isPreparingRemixEditor else { return }
+                guard !isCurrentImageZoomed else { return }
+                guard shouldTrackSwipeDismiss(for: value.translation) else { return }
+                swipeDismissOffset = value.translation
+            }
+            .onEnded { value in
+                guard !isShowingInlineResharePanel, !isShowingRemixEditor else { return }
+                guard !isCurrentImageZoomed else {
+                    swipeDismissOffset = .zero
+                    return
+                }
+                guard shouldTrackSwipeDismiss(for: value.translation) else {
+                    withAnimation(.spring(response: 0.34, dampingFraction: 0.82)) {
+                        swipeDismissOffset = .zero
+                    }
+                    return
+                }
+
+                let finalTranslation = projectedSwipeDismissOffset(for: value)
+                if shouldCompleteSwipeDismiss(with: finalTranslation, in: containerSize) {
+                    completeSwipeDismiss(using: finalTranslation, in: containerSize)
+                } else {
+                    withAnimation(.spring(response: 0.34, dampingFraction: 0.82)) {
+                        swipeDismissOffset = .zero
+                    }
+                }
+            }
+    }
+
+    private func shouldTrackSwipeDismiss(for translation: CGSize) -> Bool {
+        guard !isCompletingSwipeDismiss else { return false }
+        if urls.count <= 1 {
+            return true
+        }
+
+        let horizontal = abs(translation.width)
+        let vertical = abs(translation.height)
+        if vertical >= max(horizontal * 0.7, 20) {
+            return true
+        }
+
+        let isSwipingOutFromLeadingEdge = translation.width > 0 && selectedIndex == 0
+        let isSwipingOutFromTrailingEdge = translation.width < 0 && selectedIndex == urls.count - 1
+        return horizontal >= max(vertical * 1.25, 44) &&
+            (isSwipingOutFromLeadingEdge || isSwipingOutFromTrailingEdge)
+    }
+
+    private func projectedSwipeDismissOffset(for value: DragGesture.Value) -> CGSize {
+        CGSize(
+            width: value.predictedEndTranslation.width,
+            height: value.predictedEndTranslation.height
+        )
+    }
+
+    private func shouldCompleteSwipeDismiss(with translation: CGSize, in size: CGSize) -> Bool {
+        let distance = hypot(translation.width, translation.height)
+        let threshold = max(150, min(size.width, size.height) * 0.18)
+        return distance >= threshold
+    }
+
+    private func completeSwipeDismiss(using translation: CGSize, in size: CGSize) {
+        guard !isCompletingSwipeDismiss else { return }
+        isCompletingSwipeDismiss = true
+
+        let targetOffset = swipeDismissCompletionOffset(for: translation, in: size)
+        withAnimation(.easeOut(duration: 0.2)) {
+            swipeDismissOffset = targetOffset
+        }
+
+        Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 170_000_000)
+            dismiss()
+        }
+    }
+
+    private func swipeDismissCompletionOffset(for translation: CGSize, in size: CGSize) -> CGSize {
+        let distance = max(hypot(translation.width, translation.height), 1)
+        let direction = CGVector(dx: translation.width / distance, dy: translation.height / distance)
+        let exitDistance = max(size.width, size.height) * 1.18
+        return CGSize(
+            width: direction.dx * exitDistance,
+            height: direction.dy * exitDistance
+        )
+    }
+
+    private func viewerBackgroundOpacity(for size: CGSize) -> Double {
+        let distance = hypot(swipeDismissOffset.width, swipeDismissOffset.height)
+        let maxDistance = max(min(size.width, size.height) * 0.75, 1)
+        return max(0.35, 1 - (distance / maxDistance) * 0.75)
+    }
+
+    private func viewerScale(for size: CGSize) -> CGFloat {
+        let distance = hypot(swipeDismissOffset.width, swipeDismissOffset.height)
+        let maxDistance = max(max(size.width, size.height), 1)
+        return max(0.9, 1 - (distance / maxDistance) * 0.09)
+    }
+
+    private func viewerRotationDegrees(for size: CGSize) -> Double {
+        guard size.width > 0 else { return 0 }
+        return Double(swipeDismissOffset.width / size.width) * 8
+    }
+
+    private var isCurrentImageZoomed: Bool {
+        zoomedImageIndices.contains(selectedIndex)
+    }
+
+    private func updateZoomState(_ isZoomed: Bool, for index: Int) {
+        if isZoomed {
+            zoomedImageIndices.insert(index)
+        } else {
+            zoomedImageIndices.remove(index)
+        }
+    }
+}
+
+struct NoteImageRemixComposeDraft: Identifiable {
+    let id = UUID()
+    let attachment: ComposeMediaAttachment
+    let replyTargetEvent: NostrEvent?
+}
+
+private actor NoteVideoAspectRatioCache {
+    static let shared = NoteVideoAspectRatioCache()
+
+    private var cachedRatios: [URL: CGFloat] = [:]
+    private var inFlight: [URL: Task<CGFloat?, Never>] = [:]
+
+    func ratio(for url: URL) async -> CGFloat? {
+        if let cached = cachedRatios[url] {
+            return cached
+        }
+
+        if let existingTask = inFlight[url] {
+            return await existingTask.value
+        }
+
+        let task = Task(priority: .utility) {
+            await Self.loadRatio(for: url)
+        }
+        inFlight[url] = task
+
+        let ratio = await task.value
+        inFlight[url] = nil
+
+        if let ratio {
+            cachedRatios[url] = ratio
+        }
+
+        return ratio
+    }
+
+    private static func loadRatio(for url: URL) async -> CGFloat? {
+        let asset = AVURLAsset(url: url)
+
+        do {
+            let tracks = try await asset.loadTracks(withMediaType: .video)
+            guard let track = tracks.first else { return nil }
+
+            let naturalSize = try await track.load(.naturalSize)
+            let preferredTransform = try await track.load(.preferredTransform)
+            let transformedSize = naturalSize.applying(preferredTransform)
+
+            let width = abs(transformedSize.width)
+            let height = abs(transformedSize.height)
+            guard width > 0, height > 0 else { return nil }
+
+            return max(0.4, min(width / height, 3.0))
+        } catch {
+            return nil
+        }
+    }
+}
+
+final class NoteVideoThumbnailCache {
+    static let shared = NoteVideoThumbnailCache()
+
+    private let cache = NSCache<NSURL, UIImage>()
+
+    private init() {
+        cache.countLimit = 96
+    }
+
+    func image(for url: URL) -> UIImage? {
+        cache.object(forKey: url as NSURL)
+    }
+
+    func insert(_ image: UIImage, for url: URL) {
+        cache.setObject(image, forKey: url as NSURL)
+    }
+}
+
+private func generateNoteVideoThumbnail(for url: URL, maximumPixelSize: CGSize) async -> UIImage? {
+    let asset = AVURLAsset(url: url)
+    let generator = AVAssetImageGenerator(asset: asset)
+    generator.appliesPreferredTrackTransform = true
+    generator.maximumSize = maximumPixelSize
+
+    do {
+        let duration = try await asset.load(.duration)
+        let durationSeconds = CMTimeGetSeconds(duration)
+        let candidateSeconds = [
+            0.15,
+            0.8,
+            durationSeconds.isFinite && durationSeconds > 0
+                ? min(max(durationSeconds * 0.18, 0.25), min(durationSeconds, 2.0))
+                : 1.0
+        ]
+
+        for seconds in candidateSeconds {
+            let time = CMTime(seconds: max(seconds, 0), preferredTimescale: 600)
+            if let cgImage = try? generator.copyCGImage(at: time, actualTime: nil) {
+                return UIImage(cgImage: cgImage)
+            }
+        }
+    } catch {
+        for seconds in [0.15, 0.8, 1.0] {
+            let time = CMTime(seconds: seconds, preferredTimescale: 600)
+            if let cgImage = try? generator.copyCGImage(at: time, actualTime: nil) {
+                return UIImage(cgImage: cgImage)
+            }
+        }
+    }
+
+    return nil
+}
+
+struct NoteVideoPlayerView: View {
+    let url: URL
+    let layout: NoteContentMediaLayout
+    @EnvironmentObject private var appSettings: AppSettingsStore
+    @Environment(\.colorScheme) private var colorScheme
+    @State private var videoAspectRatio: CGFloat = 16.0 / 9.0
+    @State private var videoThumbnail: UIImage?
+    @State private var didAttemptThumbnailLoad = false
+    @State private var isPlaying = false
+
+    init(
+        url: URL,
+        layout: NoteContentMediaLayout
+    ) {
+        self.url = url
+        self.layout = layout
+    }
+
+    var body: some View {
+        ZStack {
+            thumbnailLayer
+
+            NoteNativeVideoPlayerController(
+                url: url,
+                autoplay: false,
+                onPlaybackStateChange: { nextIsPlaying in
+                    isPlaying = nextIsPlaying
+                }
+            )
+            .clipShape(
+                RoundedRectangle(cornerRadius: mediaCornerRadius, style: .continuous)
+            )
+
+            if !isPlaying {
+                previewPlayAffordance
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: maxVideoHeight, alignment: .leading)
+        .aspectRatio(videoAspectRatio, contentMode: .fit)
+        .clipShape(
+            RoundedRectangle(cornerRadius: mediaCornerRadius, style: .continuous)
+        )
+        .contentShape(
+            RoundedRectangle(cornerRadius: mediaCornerRadius, style: .continuous)
+        )
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .task(id: url, priority: .utility) {
+            await MainActor.run {
+                videoThumbnail = NoteVideoThumbnailCache.shared.image(for: url)
+                didAttemptThumbnailLoad = videoThumbnail != nil
+            }
+            await loadVideoAspectRatio()
+            await loadVideoThumbnailIfNeeded()
+        }
+    }
+
+    @ViewBuilder
+    private var thumbnailLayer: some View {
+        if let videoThumbnail {
+            Image(uiImage: videoThumbnail)
+                .resizable()
+                .scaledToFill()
+        } else if isLiveStream {
+            Color.black
+        } else if !didAttemptThumbnailLoad {
+            ZStack {
+                LinearGradient(
+                    colors: [
+                        appSettings.themePalette.secondaryFill,
+                        appSettings.themePalette.tertiaryFill
+                    ],
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing
+                )
+
+                ProgressView()
+                    .controlSize(.small)
+            }
+        } else {
+            ZStack {
+                LinearGradient(
+                    colors: [
+                        Color.black.opacity(colorScheme == .dark ? 0.92 : 0.82),
+                        Color.black.opacity(colorScheme == .dark ? 0.72 : 0.58)
+                    ],
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing
+                )
+
+                VStack(alignment: .leading, spacing: 10) {
+                    Image(systemName: videoFallbackIconName)
+                        .font(.system(size: 22, weight: .semibold))
+                        .foregroundStyle(.white.opacity(0.92))
+
+                    Spacer(minLength: 0)
+
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(videoFallbackTitle)
+                            .font(appSettings.appFont(.subheadline, weight: .semibold))
+                            .foregroundStyle(.white)
+                            .lineLimit(2)
+
+                        Text(videoFallbackSubtitle)
+                            .font(appSettings.appFont(.caption1))
+                            .foregroundStyle(.white.opacity(0.76))
+                            .lineLimit(1)
+                    }
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
+                .padding(16)
+            }
+        }
+    }
+
+    private var maxVideoHeight: CGFloat {
+        min(UIScreen.main.bounds.height * 0.72, 620)
+    }
+
+    private var mediaCornerRadius: CGFloat {
+        layout == .feed ? 18 : 12
+    }
+
+    private var previewPlayAffordance: some View {
+        ZStack {
+            Circle()
+                .fill(.ultraThinMaterial)
+                .frame(width: 66, height: 66)
+
+            Image(systemName: "play.fill")
+                .font(.system(size: 24, weight: .semibold))
+                .foregroundStyle(.white)
+                .offset(x: 2)
+        }
+        .shadow(color: .black.opacity(0.24), radius: 14, y: 6)
+        .allowsHitTesting(false)
+        .accessibilityHidden(true)
+        .transition(.opacity)
+    }
+
+    private var isLiveStream: Bool {
+        url.pathExtension.lowercased() == "m3u8"
+    }
+
+    private var videoFallbackIconName: String {
+        "video.fill"
+    }
+
+    private var videoFallbackTitle: String {
+        let fileName = url.deletingPathExtension().lastPathComponent.trimmingCharacters(in: .whitespacesAndNewlines)
+        return fileName.isEmpty ? "Video" : fileName
+    }
+
+    private var videoFallbackSubtitle: String {
+        let host = (url.host ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        return host.isEmpty ? "Tap to play with controls" : "\(host) • Tap to play"
+    }
+
+    private func loadVideoAspectRatio() async {
+        if layout == .feed {
+            try? await Task.sleep(for: .milliseconds(180))
+            guard !Task.isCancelled else { return }
+        }
+
+        guard let ratio = await NoteVideoAspectRatioCache.shared.ratio(for: url) else { return }
+        guard !Task.isCancelled else { return }
+
+        await MainActor.run {
+            guard abs(videoAspectRatio - ratio) > 0.02 else { return }
+            videoAspectRatio = ratio
+        }
+    }
+
+    private func loadVideoThumbnailIfNeeded() async {
+        if let cached = NoteVideoThumbnailCache.shared.image(for: url) {
+            await MainActor.run {
+                videoThumbnail = cached
+                didAttemptThumbnailLoad = true
+            }
+            return
+        }
+
+        let thumbnailPixelSize = await MainActor.run {
+            CGSize(
+                width: max(UIScreen.main.bounds.width - 28, 1) * UIScreen.main.scale,
+                height: max(maxVideoHeight, 1) * UIScreen.main.scale
+            )
+        }
+
+        let generatedThumbnail: UIImage? = await Task.detached(priority: .utility) {
+            await generateNoteVideoThumbnail(for: url, maximumPixelSize: thumbnailPixelSize)
+        }.value
+
+        guard !Task.isCancelled else { return }
+
+        await MainActor.run {
+            videoThumbnail = generatedThumbnail
+            didAttemptThumbnailLoad = true
+        }
+
+        guard let generatedThumbnail else { return }
+        NoteVideoThumbnailCache.shared.insert(generatedThumbnail, for: url)
+    }
+}
+
+private enum NoteVideoPlaybackAudioSession {
+    static func activateIfNeeded() {
+        let audioSession = AVAudioSession.sharedInstance()
+        try? audioSession.setCategory(.playback, mode: .moviePlayback, options: [])
+        try? audioSession.setActive(true, options: [])
+    }
+}
+
+struct NoteInlineFeedVideoPlayer: UIViewRepresentable {
+    let url: URL
+    let isPlaying: Bool
+    let onPlaybackEnded: () -> Void
+
+    final class Coordinator {
+        let player = AVPlayer()
+        private var currentURL: URL?
+        private var playbackEndedObserver: NSObjectProtocol?
+        private var onPlaybackEnded: (() -> Void)?
+
+        deinit {
+            removePlaybackEndedObserver()
+        }
+
+        func configure(
+            url: URL,
+            in view: NoteInlineFeedVideoPlayerContainerView,
+            isPlaying: Bool,
+            onPlaybackEnded: @escaping () -> Void
+        ) {
+            self.onPlaybackEnded = onPlaybackEnded
+            view.playerLayer.player = player
+
+            if currentURL != url {
+                currentURL = url
+
+                let item = AVPlayerItem(url: url)
+                player.actionAtItemEnd = .pause
+                player.replaceCurrentItem(with: item)
+                observePlaybackEnded(for: item)
+            }
+
+            if isPlaying {
+                NoteVideoPlaybackAudioSession.activateIfNeeded()
+                if player.timeControlStatus != .playing {
+                    player.play()
+                }
+            } else {
+                player.pause()
+            }
+        }
+
+        func stop() {
+            removePlaybackEndedObserver()
+            player.pause()
+            player.replaceCurrentItem(with: nil)
+            currentURL = nil
+            onPlaybackEnded = nil
+        }
+
+        private func observePlaybackEnded(for item: AVPlayerItem) {
+            removePlaybackEndedObserver()
+            playbackEndedObserver = NotificationCenter.default.addObserver(
+                forName: .AVPlayerItemDidPlayToEndTime,
+                object: item,
+                queue: .main
+            ) { [weak self] _ in
+                guard let self else { return }
+                self.player.pause()
+                self.player.seek(to: .zero)
+                self.onPlaybackEnded?()
+            }
+        }
+
+        private func removePlaybackEndedObserver() {
+            guard let playbackEndedObserver else { return }
+            NotificationCenter.default.removeObserver(playbackEndedObserver)
+            self.playbackEndedObserver = nil
+        }
+    }
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator()
+    }
+
+    func makeUIView(context: Context) -> NoteInlineFeedVideoPlayerContainerView {
+        let view = NoteInlineFeedVideoPlayerContainerView()
+        view.backgroundColor = .black
+        view.playerLayer.videoGravity = .resizeAspect
+        view.playerLayer.player = context.coordinator.player
+        context.coordinator.configure(
+            url: url,
+            in: view,
+            isPlaying: isPlaying,
+            onPlaybackEnded: onPlaybackEnded
+        )
+        return view
+    }
+
+    func updateUIView(_ uiView: NoteInlineFeedVideoPlayerContainerView, context: Context) {
+        uiView.playerLayer.videoGravity = .resizeAspect
+        uiView.playerLayer.player = context.coordinator.player
+        context.coordinator.configure(
+            url: url,
+            in: uiView,
+            isPlaying: isPlaying,
+            onPlaybackEnded: onPlaybackEnded
+        )
+    }
+
+    static func dismantleUIView(
+        _ uiView: NoteInlineFeedVideoPlayerContainerView,
+        coordinator: Coordinator
+    ) {
+        uiView.playerLayer.player = nil
+        coordinator.stop()
+    }
+}
+
+final class NoteInlineFeedVideoPlayerContainerView: UIView {
+    override class var layerClass: AnyClass {
+        AVPlayerLayer.self
+    }
+
+    var playerLayer: AVPlayerLayer {
+        layer as! AVPlayerLayer
+    }
+}
+
+struct NoteAudioPlayerView: View {
+    let url: URL
+    @EnvironmentObject private var appSettings: AppSettingsStore
+    @State private var player: AVPlayer
+    @State private var isPlaying = false
+
+    init(url: URL) {
+        self.url = url
+        _player = State(initialValue: AVPlayer(url: url))
+    }
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Button {
+                togglePlayback()
+            } label: {
+                Image(systemName: isPlaying ? "pause.circle.fill" : "play.circle.fill")
+                    .font(.title2)
+            }
+            .buttonStyle(.plain)
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(displayFileName)
+                    .font(.subheadline.weight(.semibold))
+                    .lineLimit(1)
+                Text(url.host ?? "Audio")
+                    .font(.caption)
+                    .foregroundStyle(appSettings.themePalette.secondaryForeground)
+                    .lineLimit(1)
+            }
+
+            Spacer()
+
+            Link(destination: url) {
+                Image(systemName: "arrow.up.right.square")
+                    .font(.body)
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Open audio in browser")
+        }
+        .padding(12)
+        .background(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .fill(appSettings.themePalette.secondaryBackground)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .stroke(appSettings.themePalette.separator, lineWidth: 0.5)
+        )
+        .onReceive(
+            NotificationCenter.default.publisher(for: .AVPlayerItemDidPlayToEndTime)
+        ) { notification in
+            guard let endedItem = notification.object as? AVPlayerItem,
+                  endedItem == player.currentItem else { return }
+            isPlaying = false
+            player.seek(to: .zero)
+        }
+        .onDisappear {
+            player.pause()
+            isPlaying = false
+        }
+    }
+
+    private var displayFileName: String {
+        let candidate = url.lastPathComponent
+        if candidate.isEmpty {
+            return "Audio"
+        }
+        return candidate
+    }
+
+    private func togglePlayback() {
+        if isPlaying {
+            player.pause()
+            isPlaying = false
+        } else {
+            player.play()
+            isPlaying = true
+        }
+    }
+}
+
+private final class NoteInlineAVPlayerViewController: AVPlayerViewController {
+    override var childForStatusBarHidden: UIViewController? {
+        nil
+    }
+
+    override var prefersStatusBarHidden: Bool {
+        false
+    }
+}
+
+struct NoteNativeVideoPlayerController: UIViewControllerRepresentable {
+    let url: URL
+    var autoplay: Bool = true
+    var onPlaybackStateChange: ((Bool) -> Void)? = nil
+
+    final class Coordinator {
+        let player = AVPlayer()
+        private var currentURL: URL?
+        private var shouldAutoplayForCurrentURL = true
+        private var playbackStatusObserver: NSKeyValueObservation?
+        private var onPlaybackStateChange: ((Bool) -> Void)?
+        private var lastKnownIsPlaying = false
+
+        deinit {
+            playbackStatusObserver?.invalidate()
+        }
+
+        func configure(
+            url: URL,
+            autoplay: Bool,
+            controller: AVPlayerViewController,
+            onPlaybackStateChange: ((Bool) -> Void)?
+        ) {
+            self.onPlaybackStateChange = onPlaybackStateChange
+            observePlaybackStateIfNeeded()
+
+            if currentURL != url || controller.player !== player {
+                currentURL = url
+                shouldAutoplayForCurrentURL = autoplay
+                controller.player = player
+                player.isMuted = false
+                player.volume = 1
+                player.automaticallyWaitsToMinimizeStalling = false
+                let item = AVPlayerItem(url: url)
+                item.preferredForwardBufferDuration = 2
+                player.replaceCurrentItem(with: item)
+                publishPlaybackState(false)
+            } else {
+                shouldAutoplayForCurrentURL = shouldAutoplayForCurrentURL || autoplay
+            }
+
+            guard controller.player === player else { return }
+
+            if shouldAutoplayForCurrentURL {
+                NoteVideoPlaybackAudioSession.activateIfNeeded()
+                player.play()
+                shouldAutoplayForCurrentURL = false
+            }
+        }
+
+        func stop() {
+            playbackStatusObserver?.invalidate()
+            playbackStatusObserver = nil
+            player.pause()
+            player.replaceCurrentItem(with: nil)
+            currentURL = nil
+            onPlaybackStateChange = nil
+            publishPlaybackState(false)
+        }
+
+        private func observePlaybackStateIfNeeded() {
+            guard playbackStatusObserver == nil else { return }
+
+            playbackStatusObserver = player.observe(\.timeControlStatus, options: [.initial, .new]) { [weak self] player, _ in
+                let isPlaying = player.timeControlStatus == .playing
+                DispatchQueue.main.async {
+                    guard let self else { return }
+                    if isPlaying {
+                        NoteVideoPlaybackAudioSession.activateIfNeeded()
+                    }
+                    self.publishPlaybackState(isPlaying)
+                }
+            }
+        }
+
+        private func publishPlaybackState(_ isPlaying: Bool) {
+            guard lastKnownIsPlaying != isPlaying else { return }
+            lastKnownIsPlaying = isPlaying
+            onPlaybackStateChange?(isPlaying)
+        }
+    }
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator()
+    }
+
+    func makeUIViewController(context: Context) -> AVPlayerViewController {
+        let controller = NoteInlineAVPlayerViewController()
+        controller.showsPlaybackControls = true
+        controller.videoGravity = .resizeAspect
+        controller.entersFullScreenWhenPlaybackBegins = false
+        controller.exitsFullScreenWhenPlaybackEnds = false
+        controller.canStartPictureInPictureAutomaticallyFromInline = false
+        controller.modalPresentationCapturesStatusBarAppearance = false
+        controller.view.backgroundColor = .clear
+        controller.view.isOpaque = false
+        controller.contentOverlayView?.backgroundColor = .clear
+        controller.setNeedsStatusBarAppearanceUpdate()
+        context.coordinator.configure(
+            url: url,
+            autoplay: autoplay,
+            controller: controller,
+            onPlaybackStateChange: onPlaybackStateChange
+        )
+        return controller
+    }
+
+    func updateUIViewController(_ uiViewController: AVPlayerViewController, context: Context) {
+        uiViewController.modalPresentationCapturesStatusBarAppearance = false
+        uiViewController.view.backgroundColor = .clear
+        uiViewController.view.isOpaque = false
+        uiViewController.contentOverlayView?.backgroundColor = .clear
+        uiViewController.setNeedsStatusBarAppearanceUpdate()
+        context.coordinator.configure(
+            url: url,
+            autoplay: autoplay,
+            controller: uiViewController,
+            onPlaybackStateChange: onPlaybackStateChange
+        )
+    }
+
+    static func dismantleUIViewController(
+        _ uiViewController: AVPlayerViewController,
+        coordinator: Coordinator
+    ) {
+        uiViewController.player = nil
+        coordinator.stop()
+    }
+}

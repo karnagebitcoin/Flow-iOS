@@ -155,14 +155,18 @@ final class HashtagFeedViewModel: ObservableObject {
             }
             if initialPage.fetchedFullPage {
                 oldestCreatedAt = initialItems.last?.event.createdAt
-                hasReachedEnd = initialPage.items.count < pageSize
+                hasReachedEnd = FeedPaginationHeuristic.shouldStopPaging(
+                    afterFetchedCount: initialPage.items.count
+                )
             } else {
                 do {
                     let expandedItems = pruneMutedItems(try await fetchExpandedHashtagPage())
                     if !expandedItems.isEmpty {
                         mergeKeepingNewest(itemsToMerge: expandedItems)
                         oldestCreatedAt = expandedItems.last?.event.createdAt
-                        hasReachedEnd = expandedItems.count < pageSize
+                        hasReachedEnd = FeedPaginationHeuristic.shouldStopPaging(
+                            afterFetchedCount: expandedItems.count
+                        )
                     } else {
                         oldestCreatedAt = initialItems.last?.event.createdAt
                         hasReachedEnd = false
@@ -216,7 +220,7 @@ final class HashtagFeedViewModel: ObservableObject {
             }
 
             oldestCreatedAt = fetched.last?.event.createdAt
-            hasReachedEnd = fetched.count < pageSize
+            hasReachedEnd = FeedPaginationHeuristic.shouldStopPaging(afterFetchedCount: fetched.count)
             mergeKeepingNewest(itemsToMerge: fetched)
             scheduleItemHydration(for: items)
         } catch {
@@ -348,7 +352,9 @@ final class HashtagFeedViewModel: ObservableObject {
             await MainActor.run {
                 self.mergeKeepingNewest(itemsToMerge: expanded)
                 self.oldestCreatedAt = expanded.last?.event.createdAt
-                self.hasReachedEnd = expanded.count < self.pageSize
+                self.hasReachedEnd = FeedPaginationHeuristic.shouldStopPaging(
+                    afterFetchedCount: expanded.count
+                )
                 self.scheduleItemHydration(for: self.items)
             }
         }

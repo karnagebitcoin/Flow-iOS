@@ -16,6 +16,7 @@ struct FlowApp: App {
     @StateObject private var followStore = FollowStore.shared
     @StateObject private var toastCenter = AppToastCenter()
     @StateObject private var composeSheetCoordinator = AppComposeSheetCoordinator()
+    @StateObject private var composeDraftStore = AppComposeDraftStore()
     @StateObject private var breakReminderCoordinator = BreakReminderCoordinator()
 
     init() {
@@ -44,8 +45,10 @@ struct FlowApp: App {
             .environmentObject(appSettings)
             .environmentObject(premiumStore)
             .environmentObject(relaySettings)
+            .environmentObject(followStore)
             .environmentObject(toastCenter)
             .environmentObject(composeSheetCoordinator)
+            .environmentObject(composeDraftStore)
             .environmentObject(breakReminderCoordinator)
             .font(appSettings.appFont(.body))
             .tint(appSettings.primaryColor)
@@ -251,6 +254,8 @@ struct AppComposeSheetDraft: Identifiable {
     var initialAdditionalTags: [[String]] = []
     var initialUploadedAttachments: [ComposeMediaAttachment] = []
     var initialSharedAttachments: [SharedComposeAttachment] = []
+    var initialSelectedMentions: [ComposeSelectedMention] = []
+    var initialPollDraft: ComposePollDraft? = nil
     var replyTargetEvent: NostrEvent? = nil
     var replyTargetDisplayNameHint: String? = nil
     var replyTargetHandleHint: String? = nil
@@ -259,6 +264,60 @@ struct AppComposeSheetDraft: Identifiable {
     var quotedDisplayNameHint: String? = nil
     var quotedHandleHint: String? = nil
     var quotedAvatarURLHint: URL? = nil
+    var savedDraftID: UUID? = nil
+
+    init(
+        initialText: String = "",
+        initialAdditionalTags: [[String]] = [],
+        initialUploadedAttachments: [ComposeMediaAttachment] = [],
+        initialSharedAttachments: [SharedComposeAttachment] = [],
+        initialSelectedMentions: [ComposeSelectedMention] = [],
+        initialPollDraft: ComposePollDraft? = nil,
+        replyTargetEvent: NostrEvent? = nil,
+        replyTargetDisplayNameHint: String? = nil,
+        replyTargetHandleHint: String? = nil,
+        replyTargetAvatarURLHint: URL? = nil,
+        quotedEvent: NostrEvent? = nil,
+        quotedDisplayNameHint: String? = nil,
+        quotedHandleHint: String? = nil,
+        quotedAvatarURLHint: URL? = nil,
+        savedDraftID: UUID? = nil
+    ) {
+        self.initialText = initialText
+        self.initialAdditionalTags = initialAdditionalTags
+        self.initialUploadedAttachments = initialUploadedAttachments
+        self.initialSharedAttachments = initialSharedAttachments
+        self.initialSelectedMentions = initialSelectedMentions
+        self.initialPollDraft = initialPollDraft
+        self.replyTargetEvent = replyTargetEvent
+        self.replyTargetDisplayNameHint = replyTargetDisplayNameHint
+        self.replyTargetHandleHint = replyTargetHandleHint
+        self.replyTargetAvatarURLHint = replyTargetAvatarURLHint
+        self.quotedEvent = quotedEvent
+        self.quotedDisplayNameHint = quotedDisplayNameHint
+        self.quotedHandleHint = quotedHandleHint
+        self.quotedAvatarURLHint = quotedAvatarURLHint
+        self.savedDraftID = savedDraftID
+    }
+
+    init(savedDraft: SavedComposeDraft) {
+        self.init(
+            initialText: savedDraft.snapshot.text,
+            initialAdditionalTags: savedDraft.snapshot.additionalTags,
+            initialUploadedAttachments: savedDraft.snapshot.uploadedAttachments,
+            initialSelectedMentions: savedDraft.snapshot.selectedMentions,
+            initialPollDraft: savedDraft.snapshot.pollDraft,
+            replyTargetEvent: savedDraft.snapshot.replyTargetEvent,
+            replyTargetDisplayNameHint: savedDraft.snapshot.replyTargetDisplayNameHint,
+            replyTargetHandleHint: savedDraft.snapshot.replyTargetHandleHint,
+            replyTargetAvatarURLHint: savedDraft.snapshot.replyTargetAvatarURLHint,
+            quotedEvent: savedDraft.snapshot.quotedEvent,
+            quotedDisplayNameHint: savedDraft.snapshot.quotedDisplayNameHint,
+            quotedHandleHint: savedDraft.snapshot.quotedHandleHint,
+            quotedAvatarURLHint: savedDraft.snapshot.quotedAvatarURLHint,
+            savedDraftID: savedDraft.id
+        )
+    }
 }
 
 private struct GlobalProfileQRCodeBridge: View {
@@ -317,9 +376,18 @@ private struct GlobalProfileQRCodeBridge: View {
 private final class QRCodeFlipMonitor: ObservableObject {
     @Published private(set) var isQRCodeFlipActive = false
 
+    private static let activationGravityYThreshold = 0.82
+    private static let sustainGravityYThreshold = 0.62
+    private static let activationHorizontalTolerance = 0.45
+    private static let sustainHorizontalTolerance = 0.62
+    private static let activationDepthTolerance = 0.5
+    private static let sustainDepthTolerance = 0.72
+    private static let requiredInactiveSamplesForDismissal = 3
+
     private let motionManager = CMMotionManager()
     private let motionQueue = OperationQueue()
     private var isMonitoring = false
+    private var inactiveSampleCount = 0
 
     init() {
         motionQueue.name = "com.21media.flow.qr-flip-monitor"
@@ -334,9 +402,8 @@ private final class QRCodeFlipMonitor: ObservableObject {
         motionManager.startDeviceMotionUpdates(to: motionQueue) { [weak self] motion, _ in
             guard let self, let motion else { return }
 
-            let isFlipActive = Self.isLikelyQRCodeFlip(gravity: motion.gravity)
             Task { @MainActor in
-                self.isQRCodeFlipActive = isFlipActive
+                self.updateFlipState(using: motion.gravity)
             }
         }
     }
@@ -346,12 +413,45 @@ private final class QRCodeFlipMonitor: ObservableObject {
 
         isMonitoring = false
         motionManager.stopDeviceMotionUpdates()
+        inactiveSampleCount = 0
+        isQRCodeFlipActive = false
+    }
+
+    private func updateFlipState(using gravity: CMAcceleration) {
+        if Self.isStrongQRCodeFlip(gravity: gravity) {
+            inactiveSampleCount = 0
+            isQRCodeFlipActive = true
+            return
+        }
+
+        guard isQRCodeFlipActive else {
+            inactiveSampleCount = 0
+            return
+        }
+
+        if Self.shouldKeepQRCodeFlipActive(gravity: gravity) {
+            inactiveSampleCount = 0
+            return
+        }
+
+        inactiveSampleCount += 1
+        guard inactiveSampleCount >= Self.requiredInactiveSamplesForDismissal else { return }
+
+        inactiveSampleCount = 0
         isQRCodeFlipActive = false
     }
 
     // Fallback for devices/OS versions where upside-down orientation notifications are unreliable.
-    private static func isLikelyQRCodeFlip(gravity: CMAcceleration) -> Bool {
-        gravity.y > 0.82 && abs(gravity.x) < 0.45 && abs(gravity.z) < 0.5
+    private static func isStrongQRCodeFlip(gravity: CMAcceleration) -> Bool {
+        gravity.y > activationGravityYThreshold &&
+            abs(gravity.x) < activationHorizontalTolerance &&
+            abs(gravity.z) < activationDepthTolerance
+    }
+
+    private static func shouldKeepQRCodeFlipActive(gravity: CMAcceleration) -> Bool {
+        gravity.y > sustainGravityYThreshold &&
+            abs(gravity.x) < sustainHorizontalTolerance &&
+            abs(gravity.z) < sustainDepthTolerance
     }
 }
 
@@ -494,12 +594,7 @@ private final class GlobalProfileQRCodeOverlayController {
     }
 
     private func preferredAvatarURL(from profile: NostrProfile?) -> URL? {
-        guard let picture = trimmedNonEmpty(profile?.picture),
-              let url = URL(string: picture),
-              url.scheme != nil else {
-            return nil
-        }
-        return url
+        profile?.resolvedAvatarURL
     }
 
     private func trimmedNonEmpty(_ value: String?) -> String? {

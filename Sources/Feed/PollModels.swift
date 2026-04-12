@@ -36,8 +36,7 @@ struct NostrPollMetadata: Hashable, Sendable {
     let maxZapAmount: Int?
 
     init?(event: NostrEvent) {
-        let isLegacyZapPoll = event.kind == NostrPollKind.legacyZapPoll
-        guard event.kind == NostrPollKind.poll || isLegacyZapPoll else {
+        guard event.kind == NostrPollKind.poll else {
             return nil
         }
 
@@ -46,8 +45,6 @@ struct NostrPollMetadata: Hashable, Sendable {
         var relayURLs: [URL] = []
         var pollType: NostrPollType = .singleChoice
         var endsAt: Int?
-        var minZapAmount: Int?
-        var maxZapAmount: Int?
 
         for tag in event.tags {
             guard let name = tag.first?.lowercased() else { continue }
@@ -92,29 +89,6 @@ struct NostrPollMetadata: Hashable, Sendable {
                     continue
                 }
                 endsAt = timestamp
-            case "closed_at":
-                guard isLegacyZapPoll,
-                      tag.count > 1,
-                      let timestamp = Int(tag[1].trimmingCharacters(in: .whitespacesAndNewlines)) else {
-                    continue
-                }
-                endsAt = timestamp
-            case "value_minimum":
-                guard isLegacyZapPoll,
-                      tag.count > 1,
-                      let amount = Int(tag[1].trimmingCharacters(in: .whitespacesAndNewlines)),
-                      amount > 0 else {
-                    continue
-                }
-                minZapAmount = amount
-            case "value_maximum":
-                guard isLegacyZapPoll,
-                      tag.count > 1,
-                      let amount = Int(tag[1].trimmingCharacters(in: .whitespacesAndNewlines)),
-                      amount > 0 else {
-                    continue
-                }
-                maxZapAmount = amount
             default:
                 continue
             }
@@ -131,13 +105,13 @@ struct NostrPollMetadata: Hashable, Sendable {
             return nil
         }
 
-        self.format = isLegacyZapPoll ? .legacyZap : .nip88
+        self.format = .nip88
         self.options = resolvedOptions
         self.pollType = pollType
         self.relayURLs = relayURLs
         self.endsAt = endsAt
-        self.minZapAmount = minZapAmount
-        self.maxZapAmount = maxZapAmount
+        self.minZapAmount = nil
+        self.maxZapAmount = nil
     }
 
     var validOptionIDs: Set<String> {

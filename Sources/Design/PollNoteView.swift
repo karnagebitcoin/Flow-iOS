@@ -5,8 +5,6 @@ struct PollNoteView: View {
     @EnvironmentObject private var appSettings: AppSettingsStore
     @EnvironmentObject private var relaySettings: RelaySettingsStore
 
-    @ObservedObject private var resultsStore = PollResultsStore.shared
-
     let event: NostrEvent
     let poll: NostrPollMetadata
 
@@ -14,8 +12,12 @@ struct PollNoteView: View {
     @State private var isSubmittingVote = false
     @State private var feedbackMessage: String?
     @State private var feedbackIsError = false
+    @State private var resultsSnapshot = PollResultsSnapshot.empty
 
+    private let resultsStore = PollResultsStore.shared
     private let votePublishService = PollVotePublishService()
+    private static let prioritizedAutoLoadDelayNanos: UInt64 = 180_000_000
+    private static let deferredAutoLoadDelayNanos: UInt64 = 650_000_000
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -74,13 +76,17 @@ struct PollNoteView: View {
             RoundedRectangle(cornerRadius: 18, style: .continuous)
                 .stroke(pollCardBorder, lineWidth: 0.8)
         )
+        .onReceive(resultsStore.publisher(for: event.id)) { snapshot in
+            resultsSnapshot = snapshot
+        }
         .task(id: taskIdentifier) {
-            await loadResultsIfNeeded()
+            resultsSnapshot = resultsStore.snapshot(for: event.id)
+            await scheduleResultsLoadIfNeeded()
         }
     }
 
     private var taskIdentifier: String {
-        "\(event.id.lowercased())|\(poll.endsAt ?? 0)"
+        "\(event.id.lowercased())|\(poll.endsAt ?? 0)|\(currentPubkey ?? "anon")"
     }
 
     private var currentPubkey: String? {
@@ -96,11 +102,11 @@ struct PollNoteView: View {
     }
 
     private var pollResults: NostrPollResults? {
-        resultsStore.results(for: event.id)
+        resultsSnapshot.results
     }
 
     private var isLoadingResults: Bool {
-        resultsStore.isLoadingResults(for: event.id)
+        resultsSnapshot.isLoading
     }
 
     private var votedOptionIDs: Set<String> {
@@ -160,6 +166,21 @@ struct PollNoteView: View {
 
     private var shouldShowRefreshControl: Bool {
         poll.format == .nip88 && (isAuthoredByCurrentUser || hasVoted || isExpired)
+    }
+
+    private var shouldAutoLoadResults: Bool {
+        guard poll.format == .nip88 else { return false }
+        if isExpired || isAuthoredByCurrentUser || hasVoted {
+            return true
+        }
+        return currentPubkey != nil
+    }
+
+    private var autoLoadDelayNanos: UInt64 {
+        if isExpired || isAuthoredByCurrentUser || hasVoted {
+            return Self.prioritizedAutoLoadDelayNanos
+        }
+        return Self.deferredAutoLoadDelayNanos
     }
 
     private var headerRow: some View {
@@ -465,6 +486,19 @@ struct PollNoteView: View {
             poll: poll,
             relayURLs: effectiveReadRelayURLs
         )
+    }
+
+    private func scheduleResultsLoadIfNeeded() async {
+        guard shouldAutoLoadResults else { return }
+
+        do {
+            try await Task.sleep(nanoseconds: autoLoadDelayNanos)
+        } catch {
+            return
+        }
+
+        guard !Task.isCancelled else { return }
+        await loadResultsIfNeeded()
     }
 
     private func refreshResults() async {

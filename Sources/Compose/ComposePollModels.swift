@@ -1,6 +1,6 @@
 import Foundation
 
-struct ComposePollOption: Identifiable, Hashable, Sendable {
+struct ComposePollOption: Identifiable, Hashable, Codable, Sendable {
     var id: String
     var text: String
 
@@ -14,7 +14,7 @@ struct ComposePollOption: Identifiable, Hashable, Sendable {
     }
 }
 
-struct ComposePollDraft: Hashable, Sendable {
+struct ComposePollDraft: Hashable, Codable, Sendable {
     var allowsMultipleChoice: Bool
     var options: [ComposePollOption]
     var endsAt: Date?

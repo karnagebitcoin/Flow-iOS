@@ -50,6 +50,171 @@ final class LiveReactsCoordinator: ObservableObject {
     }
 }
 
+@MainActor
+final class LiveReactsSubscriptionController: ObservableObject {
+    private let liveSubscriber: NostrLiveFeedSubscriber
+    private var liveUpdatesTask: Task<Void, Never>?
+    private var subscriptionSignature: String?
+    private var currentUserPubkey: String?
+    private var readRelayURLs: [URL] = []
+    private var isEnabled = false
+    private var scenePhase: ScenePhase = .inactive
+    private var onReaction: ((ActivityReaction) -> Void)?
+    private var seenEventIDs = Set<String>()
+    private var seenEventOrder: [String] = []
+
+    private let maxTrackedEventIDs = 512
+
+    init(liveSubscriber: NostrLiveFeedSubscriber = NostrLiveFeedSubscriber()) {
+        self.liveSubscriber = liveSubscriber
+    }
+
+    deinit {
+        liveUpdatesTask?.cancel()
+    }
+
+    func update(
+        currentUserPubkey: String?,
+        readRelayURLs: [URL],
+        isEnabled: Bool,
+        scenePhase: ScenePhase,
+        onReaction: ((ActivityReaction) -> Void)? = nil
+    ) {
+        let normalizedUser = normalizePubkey(currentUserPubkey)
+        let normalizedRelays = normalizedRelayURLs(readRelayURLs)
+        let userChanged = normalizedUser != self.currentUserPubkey
+
+        self.currentUserPubkey = normalizedUser
+        self.readRelayURLs = normalizedRelays
+        self.isEnabled = isEnabled
+        self.scenePhase = scenePhase
+
+        if let onReaction {
+            self.onReaction = onReaction
+        }
+
+        if userChanged {
+            resetSeenEventTracking()
+        }
+
+        refreshSubscription(forceRestart: userChanged)
+    }
+
+    private func refreshSubscription(forceRestart: Bool = false) {
+        guard isEnabled,
+              scenePhase == .active,
+              let user = currentUserPubkey,
+              !user.isEmpty,
+              !readRelayURLs.isEmpty else {
+            stopSubscription(resetSeenEvents: !isEnabled || currentUserPubkey == nil)
+            return
+        }
+
+        let liveSince = max(Int(Date().timeIntervalSince1970) - 2, 0)
+        let filter = NostrFilter(
+            kinds: [7],
+            limit: 100,
+            since: liveSince,
+            tagFilters: ["p": [user]]
+        )
+        let signature = readRelayURLs
+            .map { $0.absoluteString.lowercased() }
+            .sorted()
+            .joined(separator: "|") + "|\(user)|\(scenePhase == .active)"
+        let relays = readRelayURLs
+
+        if !forceRestart,
+           liveUpdatesTask != nil,
+           subscriptionSignature == signature {
+            return
+        }
+
+        stopSubscription(resetSeenEvents: false)
+        subscriptionSignature = signature
+
+        liveUpdatesTask = Task { [weak self] in
+            guard let self else { return }
+
+            await withTaskGroup(of: Void.self) { group in
+                for relayURL in relays {
+                    group.addTask { [weak self] in
+                        guard let self else { return }
+                        await self.liveSubscriber.run(
+                            relayURL: relayURL,
+                            filter: filter,
+                            onNewEvent: { [weak self] event in
+                                guard let self else { return }
+                                await self.handleIncomingReactionEvent(event)
+                            }
+                        )
+                    }
+                }
+                await group.waitForAll()
+            }
+        }
+    }
+
+    private func stopSubscription(resetSeenEvents: Bool) {
+        liveUpdatesTask?.cancel()
+        liveUpdatesTask = nil
+        subscriptionSignature = nil
+
+        if resetSeenEvents {
+            resetSeenEventTracking()
+        }
+    }
+
+    private func handleIncomingReactionEvent(_ event: NostrEvent) async {
+        guard event.kind == 7 else { return }
+        guard let user = currentUserPubkey, !user.isEmpty else { return }
+        guard event.mentionedPubkeys.contains(where: { $0.lowercased() == user }) else { return }
+        guard normalizePubkey(event.pubkey) != user else { return }
+
+        let normalizedEventID = event.id.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !normalizedEventID.isEmpty else { return }
+        guard registerSeenEventID(normalizedEventID) else { return }
+
+        guard let reaction = event.activityAction?.reaction else { return }
+        onReaction?(reaction)
+    }
+
+    private func registerSeenEventID(_ eventID: String) -> Bool {
+        guard seenEventIDs.insert(eventID).inserted else { return false }
+
+        seenEventOrder.append(eventID)
+        if seenEventOrder.count > maxTrackedEventIDs,
+           let removedEventID = seenEventOrder.first {
+            seenEventOrder.removeFirst()
+            seenEventIDs.remove(removedEventID)
+        }
+        return true
+    }
+
+    private func resetSeenEventTracking() {
+        seenEventIDs = []
+        seenEventOrder = []
+    }
+
+    private func normalizePubkey(_ value: String?) -> String? {
+        guard let value else { return nil }
+        let normalized = value.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        return normalized.isEmpty ? nil : normalized
+    }
+
+    private func normalizedRelayURLs(_ relayURLs: [URL]) -> [URL] {
+        var seen = Set<String>()
+        var ordered: [URL] = []
+
+        for relayURL in relayURLs {
+            let normalized = relayURL.absoluteString.lowercased()
+            guard seen.insert(normalized).inserted else { continue }
+            ordered.append(relayURL)
+        }
+
+        return ordered
+    }
+}
+
 struct LiveReactionEmission: Identifiable, Equatable {
     let id = UUID()
     let reaction: ActivityReaction

@@ -1,6 +1,27 @@
 import Foundation
 import NostrSDK
 
+struct ProfileKnownFollower: Identifiable, Hashable {
+    let pubkey: String
+    let profile: NostrProfile?
+
+    var id: String { pubkey }
+
+    var displayName: String {
+        if let displayName = profile?.displayName?.trimmed, !displayName.isEmpty {
+            return displayName
+        }
+        if let name = profile?.name?.trimmed, !name.isEmpty {
+            return name
+        }
+        return shortNostrIdentifier(pubkey)
+    }
+
+    var avatarURL: URL? {
+        profile?.resolvedAvatarURL
+    }
+}
+
 @MainActor
 final class ProfileViewModel: ObservableObject {
     private struct VisibleItemsCacheKey: Equatable {
@@ -10,10 +31,17 @@ final class ProfileViewModel: ObservableObject {
         let filterRevision: Int
     }
 
+    private struct KnownFollowersLookupKey: Equatable {
+        let currentAccountPubkey: String
+        let profilePubkey: String
+        let candidatePubkeys: [String]
+    }
+
     @Published private(set) var profile: NostrProfile?
     @Published private(set) var metadataSnapshot: ProfileMetadataSnapshot?
     @Published private(set) var followingCount: Int = 0
     @Published private(set) var followsCurrentUser = false
+    @Published private(set) var knownFollowers: [ProfileKnownFollower] = []
     @Published private(set) var items: [FeedItem] = [] {
         didSet {
             itemsRevision &+= 1
@@ -41,11 +69,14 @@ final class ProfileViewModel: ObservableObject {
     private let relayClient: any NostrRelayEventPublishing
     private let seenEventStore: any SeenEventStoring
     private let mediaUploadService: ProfileMediaUploadService
-    static let requestedFeedKinds = [1, 6, 16, 1068, 6969, 1111, 1244]
+    static let requestedFeedKinds = [1, 6, 16, 1068, 1111, 1244]
 
     private let requestKinds = ProfileViewModel.requestedFeedKinds
     private static let fastProfileFetchTimeout: TimeInterval = 3
     private static let fastProfileRelayFetchMode: RelayFetchMode = .firstNonEmptyRelay
+    private static let knownFollowersFetchTimeout: TimeInterval = 4
+    private static let knownFollowersDisplayLimit = 5
+    private static let knownFollowersCandidateLimit = 240
     private var oldestCreatedAt: Int?
     private var hasReachedEnd = false
     private var hasLoadedInitialState = false
@@ -53,6 +84,7 @@ final class ProfileViewModel: ObservableObject {
     private var itemsRevision = 0
     private var visibleItemsCacheKey: VisibleItemsCacheKey?
     private var visibleItemsCache: [FeedItem] = []
+    private var knownFollowersLookupKey: KnownFollowersLookupKey?
 
     init(
         pubkey: String,
@@ -145,8 +177,7 @@ final class ProfileViewModel: ObservableObject {
     }
 
     var avatarURL: URL? {
-        guard let picture = profile?.picture?.trimmed, let url = URL(string: picture) else { return nil }
-        return url
+        profile?.resolvedAvatarURL
     }
 
     var bannerURL: URL? {
@@ -368,6 +399,90 @@ final class ProfileViewModel: ObservableObject {
         followsCurrentUser = fetchedSnapshot.followedPubkeys.contains(normalizedCurrentPubkey)
     }
 
+    func refreshKnownFollowers(
+        currentAccountPubkey: String?,
+        followedPubkeys: Set<String>
+    ) async {
+        let normalizedCurrentPubkey = normalizePubkey(currentAccountPubkey)
+        let normalizedProfilePubkey = normalizePubkey(pubkey)
+
+        guard !normalizedCurrentPubkey.isEmpty,
+              normalizedCurrentPubkey != normalizedProfilePubkey else {
+            knownFollowersLookupKey = nil
+            knownFollowers = []
+            return
+        }
+
+        let orderedCandidates = Array(
+            normalizedPubkeys(Array(followedPubkeys))
+                .filter { $0 != normalizedCurrentPubkey && $0 != normalizedProfilePubkey }
+                .prefix(Self.knownFollowersCandidateLimit)
+        )
+
+        guard !orderedCandidates.isEmpty else {
+            knownFollowersLookupKey = nil
+            knownFollowers = []
+            return
+        }
+
+        let lookupKey = KnownFollowersLookupKey(
+            currentAccountPubkey: normalizedCurrentPubkey,
+            profilePubkey: normalizedProfilePubkey,
+            candidatePubkeys: orderedCandidates
+        )
+        knownFollowersLookupKey = lookupKey
+
+        let cachedMutualPubkeys = await service.cachedKnownFollowers(
+            profilePubkey: normalizedProfilePubkey,
+            candidatePubkeys: orderedCandidates,
+            limit: Self.knownFollowersDisplayLimit
+        )
+        guard !Task.isCancelled, knownFollowersLookupKey == lookupKey else { return }
+        if !cachedMutualPubkeys.isEmpty {
+            let cachedProfiles = await service.cachedProfiles(pubkeys: cachedMutualPubkeys)
+            guard !Task.isCancelled, knownFollowersLookupKey == lookupKey else { return }
+            knownFollowers = cachedMutualPubkeys.map { pubkey in
+                ProfileKnownFollower(pubkey: pubkey, profile: cachedProfiles[pubkey])
+            }
+        }
+
+        let mutualPubkeys = await service.fetchKnownFollowers(
+            relayURLs: readRelayURLs,
+            profilePubkey: normalizedProfilePubkey,
+            candidatePubkeys: orderedCandidates,
+            limit: Self.knownFollowersDisplayLimit,
+            fetchTimeout: Self.knownFollowersFetchTimeout,
+            relayFetchMode: Self.fastProfileRelayFetchMode
+        )
+
+        guard !Task.isCancelled, knownFollowersLookupKey == lookupKey else { return }
+        guard !mutualPubkeys.isEmpty else {
+            knownFollowers = []
+            return
+        }
+
+        let cachedProfiles = await service.cachedProfiles(pubkeys: mutualPubkeys)
+        guard !Task.isCancelled, knownFollowersLookupKey == lookupKey else { return }
+        knownFollowers = mutualPubkeys.map { pubkey in
+            ProfileKnownFollower(pubkey: pubkey, profile: cachedProfiles[pubkey])
+        }
+
+        let missingProfilePubkeys = mutualPubkeys.filter { cachedProfiles[$0] == nil }
+        guard !missingProfilePubkeys.isEmpty else { return }
+
+        let profiles = await service.fetchProfiles(
+            relayURLs: readRelayURLs,
+            pubkeys: missingProfilePubkeys,
+            fetchTimeout: Self.knownFollowersFetchTimeout,
+            relayFetchMode: Self.fastProfileRelayFetchMode
+        )
+
+        guard !Task.isCancelled, knownFollowersLookupKey == lookupKey else { return }
+        knownFollowers = mutualPubkeys.map { pubkey in
+            ProfileKnownFollower(pubkey: pubkey, profile: profiles[pubkey] ?? cachedProfiles[pubkey])
+        }
+    }
+
     func saveProfile(
         fields: EditableProfileFields,
         currentAccountPubkey: String?,
@@ -584,7 +699,7 @@ final class ProfileViewModel: ObservableObject {
             }
 
             oldestFetchedCreatedAt = fetched.last?.event.createdAt
-            hasReachedEnd = fetched.count < batchSize
+            hasReachedEnd = FeedPaginationHeuristic.shouldStopPaging(afterFetchedCount: fetched.count)
             aggregated = mergedItemsKeepingNewest(existing: aggregated, incoming: fetched)
 
             if filteredItems(aggregated, for: targetMode).count >= minimumVisibleCount {
@@ -660,6 +775,19 @@ final class ProfileViewModel: ObservableObject {
         (value ?? "")
             .trimmingCharacters(in: .whitespacesAndNewlines)
             .lowercased()
+    }
+
+    private func normalizedPubkeys(_ pubkeys: [String]) -> [String] {
+        var seen = Set<String>()
+        var ordered: [String] = []
+
+        for pubkey in pubkeys.sorted() {
+            let normalized = normalizePubkey(pubkey)
+            guard !normalized.isEmpty, seen.insert(normalized).inserted else { continue }
+            ordered.append(normalized)
+        }
+
+        return ordered
     }
 
     private func normalizeNsec(_ value: String?) -> String? {

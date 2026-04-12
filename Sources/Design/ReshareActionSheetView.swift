@@ -5,8 +5,6 @@ struct ReshareActionSheetView: View {
     @EnvironmentObject private var appSettings: AppSettingsStore
 
     let isWorking: Bool
-    let statusMessage: String?
-    let statusIsError: Bool
     let onRepost: () -> Void
     let onQuote: () -> Void
 
@@ -27,28 +25,6 @@ struct ReshareActionSheetView: View {
                         .stroke(appSettings.themePalette.separator.opacity(0.35), lineWidth: 0.8)
                 )
 
-                if let statusMessage, !statusMessage.isEmpty {
-                    HStack(spacing: 8) {
-                        Image(systemName: statusIsError ? "exclamationmark.triangle.fill" : "checkmark.circle.fill")
-                            .foregroundStyle(statusIsError ? .red : .green)
-                        Text(statusMessage)
-                            .font(.footnote)
-                            .foregroundStyle(statusIsError ? .red : appSettings.themePalette.secondaryForeground)
-                        Spacer(minLength: 0)
-                    }
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 8)
-                    .background(
-                        RoundedRectangle(cornerRadius: 12, style: .continuous)
-                            .fill((statusIsError ? Color.red : Color.green).opacity(0.09))
-                    )
-                } else {
-                    Text("Share this note as a repost, or add your own context with a quote.")
-                        .font(.footnote)
-                        .foregroundStyle(appSettings.themePalette.secondaryForeground)
-                        .padding(.horizontal, 2)
-                }
-
                 Spacer(minLength: 0)
             }
             .padding(16)
@@ -63,7 +39,7 @@ struct ReshareActionSheetView: View {
             }
         }
         .interactiveDismissDisabled(isWorking)
-        .presentationDetents([.height(250), .medium])
+        .presentationDetents([.height(200), .medium])
         .presentationDragIndicator(.visible)
         .presentationBackground(appSettings.themePalette.sheetBackground)
     }

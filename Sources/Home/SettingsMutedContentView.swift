@@ -298,11 +298,7 @@ private struct MutedUserRow: View {
     }
 
     private var avatarURL: URL? {
-        guard let rawValue = profile?.picture?.trimmingCharacters(in: .whitespacesAndNewlines),
-              !rawValue.isEmpty else {
-            return nil
-        }
-        return URL(string: rawValue)
+        profile?.resolvedAvatarURL
     }
 }
 
@@ -348,12 +344,6 @@ private struct SettingsMutedKeywordListDetailView: View {
                                     .font(.body)
 
                                 Spacer(minLength: 8)
-
-                                if list.id != "other" {
-                                    Image(systemName: "lock.fill")
-                                        .font(.caption2.weight(.semibold))
-                                        .foregroundStyle(.secondary)
-                                }
 
                                 Button {
                                     muteStore.removeWord(word, from: list.id)

@@ -368,46 +368,42 @@ private struct KlipyGIFGridTile: View {
     let item: KlipyGIFItem
 
     var body: some View {
-        RoundedRectangle(cornerRadius: Self.cornerRadius, style: .continuous)
-            .fill(appSettings.themePalette.secondaryGroupedBackground)
-            .overlay {
-                previewContent
-                    .clipShape(RoundedRectangle(cornerRadius: Self.cornerRadius, style: .continuous))
-            }
-            .overlay(alignment: .bottomLeading) {
-                LinearGradient(
-                    colors: [
-                        .clear,
-                        Color.black.opacity(0.55)
-                    ],
-                    startPoint: .top,
-                    endPoint: .bottom
-                )
-                .clipShape(RoundedRectangle(cornerRadius: Self.cornerRadius, style: .continuous))
-                .allowsHitTesting(false)
-            }
-            .overlay(alignment: .bottomLeading) {
-                if !trimmedTitle.isEmpty {
-                    Text(trimmedTitle)
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(.white)
-                        .lineLimit(1)
-                        .truncationMode(.tail)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(.horizontal, 10)
-                        .padding(.vertical, 9)
-                }
-            }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .contentShape(RoundedRectangle(cornerRadius: Self.cornerRadius, style: .continuous))
-            .clipped()
-            .overlay(
-                RoundedRectangle(cornerRadius: Self.cornerRadius, style: .continuous)
-                    .stroke(appSettings.themePalette.separator.opacity(0.16), lineWidth: 0.8)
+        ZStack(alignment: .bottomLeading) {
+            appSettings.themePalette.secondaryGroupedBackground
+
+            previewContent
+
+            LinearGradient(
+                colors: [
+                    .clear,
+                    Color.black.opacity(0.55)
+                ],
+                startPoint: .top,
+                endPoint: .bottom
             )
-            .onAppear {
-                isVisible = true
+            .allowsHitTesting(false)
+
+            if !trimmedTitle.isEmpty {
+                Text(trimmedTitle)
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.white)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 9)
             }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .clipShape(tileShape)
+        .contentShape(RoundedRectangle(cornerRadius: Self.cornerRadius, style: .continuous))
+        .overlay(
+            tileShape
+                .stroke(appSettings.themePalette.separator.opacity(0.16), lineWidth: 0.8)
+        )
+        .onAppear {
+            isVisible = true
+        }
             .onDisappear {
                 isVisible = false
             }
@@ -427,6 +423,10 @@ private struct KlipyGIFGridTile: View {
 
     private var trimmedTitle: String {
         item.title.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private var tileShape: RoundedRectangle {
+        RoundedRectangle(cornerRadius: Self.cornerRadius, style: .continuous)
     }
 
     private var fallbackTile: some View {

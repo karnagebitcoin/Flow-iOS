@@ -107,4 +107,137 @@ final class ComposeNoteSheetModeTests: XCTestCase {
 
         XCTAssertNil(query)
     }
+
+    @MainActor
+    func testDraftStoreDoesNotPersistEmptyReplyDraftButKeepsQuoteContext() {
+        let defaults = makeDraftStoreDefaults()
+        let store = AppComposeDraftStore(defaults: defaults)
+
+        let replyDraft = store.saveDraft(
+            snapshot: SavedComposeDraftSnapshot(
+                text: "",
+                additionalTags: [],
+                uploadedAttachments: [],
+                selectedMentions: [],
+                pollDraft: nil,
+                replyTargetEvent: makeDraftEvent(idSuffix: "reply"),
+                replyTargetDisplayNameHint: nil,
+                replyTargetHandleHint: nil,
+                replyTargetAvatarURLHint: nil,
+                quotedEvent: nil,
+                quotedDisplayNameHint: nil,
+                quotedHandleHint: nil,
+                quotedAvatarURLHint: nil
+            ),
+            ownerPubkey: "abc123"
+        )
+        let quoteDraft = store.saveDraft(
+            snapshot: SavedComposeDraftSnapshot(
+                text: "",
+                additionalTags: [["q", "quote"]],
+                uploadedAttachments: [],
+                selectedMentions: [],
+                pollDraft: nil,
+                replyTargetEvent: nil,
+                replyTargetDisplayNameHint: nil,
+                replyTargetHandleHint: nil,
+                replyTargetAvatarURLHint: nil,
+                quotedEvent: makeDraftEvent(idSuffix: "quote"),
+                quotedDisplayNameHint: "Quote Target",
+                quotedHandleHint: "@quote",
+                quotedAvatarURLHint: nil
+            ),
+            ownerPubkey: "abc123"
+        )
+
+        XCTAssertNil(replyDraft)
+        XCTAssertNotNil(quoteDraft)
+        XCTAssertEqual(store.draftCount(for: "abc123"), 1)
+    }
+
+    @MainActor
+    func testDraftStoreUpdatesExistingDraftAndFiltersPerOwner() {
+        let defaults = makeDraftStoreDefaults()
+        let store = AppComposeDraftStore(defaults: defaults)
+
+        let originalDraft = store.saveDraft(
+            snapshot: SavedComposeDraftSnapshot(
+                text: "first",
+                additionalTags: [],
+                uploadedAttachments: [],
+                selectedMentions: [],
+                pollDraft: nil,
+                replyTargetEvent: nil,
+                replyTargetDisplayNameHint: nil,
+                replyTargetHandleHint: nil,
+                replyTargetAvatarURLHint: nil,
+                quotedEvent: nil,
+                quotedDisplayNameHint: nil,
+                quotedHandleHint: nil,
+                quotedAvatarURLHint: nil
+            ),
+            ownerPubkey: "ABC123"
+        )
+        let updatedDraft = store.saveDraft(
+            snapshot: SavedComposeDraftSnapshot(
+                text: "second",
+                additionalTags: [],
+                uploadedAttachments: [],
+                selectedMentions: [],
+                pollDraft: nil,
+                replyTargetEvent: nil,
+                replyTargetDisplayNameHint: nil,
+                replyTargetHandleHint: nil,
+                replyTargetAvatarURLHint: nil,
+                quotedEvent: nil,
+                quotedDisplayNameHint: nil,
+                quotedHandleHint: nil,
+                quotedAvatarURLHint: nil
+            ),
+            ownerPubkey: "abc123",
+            existingDraftID: originalDraft?.id
+        )
+        _ = store.saveDraft(
+            snapshot: SavedComposeDraftSnapshot(
+                text: "other-account",
+                additionalTags: [],
+                uploadedAttachments: [],
+                selectedMentions: [],
+                pollDraft: nil,
+                replyTargetEvent: nil,
+                replyTargetDisplayNameHint: nil,
+                replyTargetHandleHint: nil,
+                replyTargetAvatarURLHint: nil,
+                quotedEvent: nil,
+                quotedDisplayNameHint: nil,
+                quotedHandleHint: nil,
+                quotedAvatarURLHint: nil
+            ),
+            ownerPubkey: "def456"
+        )
+
+        XCTAssertEqual(originalDraft?.id, updatedDraft?.id)
+        XCTAssertEqual(store.drafts(for: "abc123").count, 1)
+        XCTAssertEqual(store.drafts(for: "abc123").first?.snapshot.text, "second")
+        XCTAssertEqual(store.drafts(for: "def456").count, 1)
+    }
+}
+
+private func makeDraftStoreDefaults() -> UserDefaults {
+    let suiteName = "ComposeDraftStoreTests-\(UUID().uuidString)"
+    let defaults = UserDefaults(suiteName: suiteName)!
+    defaults.removePersistentDomain(forName: suiteName)
+    return defaults
+}
+
+private func makeDraftEvent(idSuffix: String) -> NostrEvent {
+    NostrEvent(
+        id: String(repeating: idSuffix == "quote" ? "b" : "a", count: 64),
+        pubkey: String(repeating: "c", count: 64),
+        createdAt: 1_700_000_000,
+        kind: 1,
+        tags: [],
+        content: "Draft target",
+        sig: String(repeating: "d", count: 128)
+    )
 }

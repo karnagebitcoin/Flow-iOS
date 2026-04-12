@@ -1,130 +1,5 @@
 import Foundation
 
-private enum HomeFeedPaginationDefaults {
-    static let pageSize = 100
-    static let prefetchTriggerDistance = 15
-    static let spinnerTriggerDistance = 2
-}
-
-enum FeedMode: String, CaseIterable, Identifiable {
-    case posts
-    case postsAndReplies
-
-    var id: String { rawValue }
-
-    var title: String {
-        switch self {
-        case .posts:
-            return "Notes"
-        case .postsAndReplies:
-            return "Replies"
-        }
-    }
-}
-
-enum HomePrimaryFeedSource: Identifiable, Hashable {
-    case network
-    case following
-    case trending
-    case interests
-    case news
-    case custom(String)
-    case hashtag(String)
-
-    var id: String {
-        switch self {
-        case .network:
-            return "network"
-        case .following:
-            return "following"
-        case .trending:
-            return "trending"
-        case .interests:
-            return "interests"
-        case .news:
-            return "news"
-        case .custom(let feedID):
-            return "custom:\(Self.normalizeCustomFeedID(feedID))"
-        case .hashtag(let hashtag):
-            return "hashtag:\(Self.normalizeHashtag(hashtag))"
-        }
-    }
-
-    var storageValue: String {
-        switch self {
-        case .network:
-            return "network"
-        case .following:
-            return "following"
-        case .trending:
-            return "trending"
-        case .interests:
-            return "interests"
-        case .news:
-            return "news"
-        case .custom(let feedID):
-            return "custom:\(Self.normalizeCustomFeedID(feedID))"
-        case .hashtag(let hashtag):
-            return "hashtag:\(Self.normalizeHashtag(hashtag))"
-        }
-    }
-
-    init?(storageValue: String) {
-        let normalized = storageValue
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-            .lowercased()
-
-        if normalized == "network" || normalized == "myrelays" {
-            self = .network
-            return
-        }
-        if normalized == "following" {
-            self = .following
-            return
-        }
-        if normalized == "trending" {
-            self = .trending
-            return
-        }
-        if normalized == "interests" {
-            self = .interests
-            return
-        }
-        if normalized == "news" {
-            self = .news
-            return
-        }
-        if normalized.hasPrefix("custom:") {
-            let value = String(normalized.dropFirst("custom:".count))
-            let feedID = Self.normalizeCustomFeedID(value)
-            guard !feedID.isEmpty else { return nil }
-            self = .custom(feedID)
-            return
-        }
-        if normalized.hasPrefix("hashtag:") {
-            let value = String(normalized.dropFirst("hashtag:".count))
-            let hashtag = Self.normalizeHashtag(value)
-            guard !hashtag.isEmpty else { return nil }
-            self = .hashtag(hashtag)
-            return
-        }
-        return nil
-    }
-
-    static func normalizeHashtag(_ value: String) -> String {
-        value
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-            .trimmingCharacters(in: CharacterSet(charactersIn: "#"))
-            .lowercased()
-    }
-
-    static func normalizeCustomFeedID(_ value: String) -> String {
-        value
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-            .lowercased()
-    }
-}
-
 @MainActor
 final class HomeFeedViewModel: ObservableObject {
     struct FeedRequestStrategy: Equatable {
@@ -132,9 +7,15 @@ final class HomeFeedViewModel: ObservableObject {
         let relayFetchMode: RelayFetchMode
     }
 
-    private struct NewsFeedPageResult {
-        let items: [FeedItem]
-        let hadMoreAvailable: Bool
+    private struct TrendingPaginationState {
+        let windowStart: Int
+        let windowEnd: Int
+        let cursor: Int
+    }
+
+    private struct TrendingPageFetchResult {
+        let page: HomeFeedPageResult
+        let nextState: TrendingPaginationState?
     }
 
     private struct VisibleItemsCacheKey: Equatable {
@@ -146,12 +27,6 @@ final class HomeFeedViewModel: ObservableObject {
         let filterRevision: Int
         let mutedConversationRevision: Int
         let ignoreMediaOnly: Bool
-    }
-
-    private struct LiveSubscriptionTarget: Sendable {
-        let relayURL: URL
-        let filter: NostrFilter
-        let signature: String
     }
 
     @Published private(set) var items: [FeedItem] = [] {
@@ -176,6 +51,7 @@ final class HomeFeedViewModel: ObservableObject {
     @Published var feedSource: HomePrimaryFeedSource = .network
     @Published private(set) var interestHashtags: [String] = []
     @Published private(set) var favoriteHashtags: [String] = []
+    @Published private(set) var pollsFeedVisible = true
     @Published private(set) var customFeeds: [CustomFeedDefinition] = []
     @Published var errorMessage: String?
     @Published private(set) var readRelayURLs: [URL]
@@ -196,6 +72,8 @@ final class HomeFeedViewModel: ObservableObject {
     private static let fastHomeRelayFetchMode: RelayFetchMode = .firstNonEmptyRelay
     private static let followingHomeFetchTimeout: TimeInterval = 8
     private static let followingPaginationFetchTimeout: TimeInterval = 12
+    private static let trendingWindowDuration: Int = 24 * 60 * 60
+    private static let trendingBackfillWindowLimitPerPage = 7
     private static let trendingRelayURL = URL(string: "wss://trending.relays.land")!
     private static let newsFallbackRelayURL = URL(string: "wss://news.utxo.one")!
     private static let customFeedSupplementalRelayURLs: [URL] = [
@@ -233,6 +111,7 @@ final class HomeFeedViewModel: ObservableObject {
     private var warmStartRefreshTask: Task<Void, Never>?
     private var isPrefetchingMore = false
     private var latestRefreshRequestID = 0
+    private var trendingPaginationState: TrendingPaginationState?
 
     nonisolated static var defaultPageSizeForTesting: Int {
         HomeFeedPaginationDefaults.pageSize
@@ -249,7 +128,7 @@ final class HomeFeedViewModel: ObservableObject {
     ) {
         let defaults = filterStore.loadDefaults()
 
-        let normalizedReadRelays = Self.normalizedRelayURLs(readRelayURLs ?? [relayURL])
+        let normalizedReadRelays = HomeFeedSourceResolver.normalizedRelayURLs(readRelayURLs ?? [relayURL])
         let initialReadRelayURLs = normalizedReadRelays.isEmpty ? [relayURL] : normalizedReadRelays
         let initialRelayURL = initialReadRelayURLs.first ?? relayURL
 
@@ -275,7 +154,8 @@ final class HomeFeedViewModel: ObservableObject {
         let hashtagSources = favoriteHashtags.map { HomePrimaryFeedSource.hashtag($0) }
         let interestSources: [HomePrimaryFeedSource] = interestHashtags.isEmpty ? [] : [.interests]
         let customSources = customFeeds.map { HomePrimaryFeedSource.custom($0.id) }
-        return [.network, .following, .trending] + interestSources + [.news] + customSources + hashtagSources
+        let pollsSources: [HomePrimaryFeedSource] = pollsFeedVisible ? [.polls] : []
+        return [.network, .following] + pollsSources + [.trending] + interestSources + [.news] + customSources + hashtagSources
     }
 
     var kindFilterOptions: [FeedKindFilterOption] {
@@ -322,7 +202,7 @@ final class HomeFeedViewModel: ObservableObject {
     }
 
     var followingFeedHasNoFollowings: Bool {
-        feedSource == .following && !isLoading && followingPubkeys.isEmpty && errorMessage == nil
+        (feedSource == .following || feedSource == .polls) && !isLoading && followingPubkeys.isEmpty && errorMessage == nil
     }
 
     var interestsFeedHasNoHashtags: Bool {
@@ -345,7 +225,7 @@ final class HomeFeedViewModel: ObservableObject {
         isPagination: Bool
     ) -> FeedRequestStrategy {
         switch source {
-        case .following:
+        case .following, .polls:
             return FeedRequestStrategy(
                 fetchTimeout: isPagination ? Self.followingPaginationFetchTimeout : Self.followingHomeFetchTimeout,
                 relayFetchMode: .allRelays
@@ -372,6 +252,8 @@ final class HomeFeedViewModel: ObservableObject {
             sourceDescriptor = "network"
         case .following:
             sourceDescriptor = "following:\(currentUserPubkey ?? "anonymous")"
+        case .polls:
+            sourceDescriptor = "polls:\(currentUserPubkey ?? "anonymous")"
         case .trending:
             sourceDescriptor = "trending"
         case .interests:
@@ -412,13 +294,25 @@ final class HomeFeedViewModel: ObservableObject {
     }
 
     func updateFavoriteHashtags(_ hashtags: [String]) {
-        let normalized = Self.normalizedFavoriteHashtags(hashtags)
+        let normalized = HomeFeedSourceResolver.normalizedFavoriteHashtags(hashtags)
         guard favoriteHashtags != normalized else { return }
 
         favoriteHashtags = normalized
 
         if case .hashtag(let selectedHashtag) = feedSource,
            !normalized.contains(HomePrimaryFeedSource.normalizeHashtag(selectedHashtag)) {
+            feedSource = .network
+            storeFeedSourcePreference(feedSource, pubkey: currentUserPubkey)
+            resetFeedStateAndReload()
+        }
+    }
+
+    func updatePollsFeedVisibility(_ isVisible: Bool) {
+        guard pollsFeedVisible != isVisible else { return }
+
+        pollsFeedVisible = isVisible
+
+        if feedSource == .polls && !isVisible {
             feedSource = .network
             storeFeedSourcePreference(feedSource, pubkey: currentUserPubkey)
             resetFeedStateAndReload()
@@ -447,7 +341,7 @@ final class HomeFeedViewModel: ObservableObject {
     }
 
     func updateInterestHashtags(_ hashtags: [String]) {
-        let normalized = Self.normalizedFavoriteHashtags(hashtags)
+        let normalized = HomeFeedSourceResolver.normalizedFavoriteHashtags(hashtags)
         guard interestHashtags != normalized else { return }
 
         interestHashtags = normalized
@@ -497,7 +391,7 @@ final class HomeFeedViewModel: ObservableObject {
     }
 
     func updateReadRelayURLs(_ newReadRelayURLs: [URL]) {
-        let normalized = Self.normalizedRelayURLs(newReadRelayURLs)
+        let normalized = HomeFeedSourceResolver.normalizedRelayURLs(newReadRelayURLs)
         guard !normalized.isEmpty else { return }
 
         let existing = readRelayURLs.map { $0.absoluteString.lowercased() }
@@ -580,6 +474,7 @@ final class HomeFeedViewModel: ObservableObject {
         errorMessage = nil
         hasReachedEnd = false
         oldestCreatedAt = nil
+        trendingPaginationState = nil
         itemHydrationTask?.cancel()
         itemHydrationTask = nil
 
@@ -606,6 +501,7 @@ final class HomeFeedViewModel: ObservableObject {
 
         do {
             var fetched: [FeedItem]
+            var sourcePageResult: HomeFeedPageResult?
             let requestRelayURLs = relayURLs(for: requestSource)
             let requestKinds = feedKinds(for: requestSource)
             let requestHydrationMode: FeedItemHydrationMode = .cachedProfilesOnly
@@ -642,18 +538,21 @@ final class HomeFeedViewModel: ObservableObject {
                     moderationSnapshot: muteFilterSnapshot
                 )
                 fetched = interestPage.items
-                hasReachedEnd = !interestPage.hadMoreAvailable
+                sourcePageResult = interestPage
 
             case .trending:
                 followingPubkeys = []
-                fetched = try await service.fetchTrendingNotes(
+                let trendingPage = try await fetchTrendingFeedPage(
                     limit: pageSize,
+                    paginationState: nil,
                     hydrationMode: requestHydrationMode,
                     fetchTimeout: requestFetchTimeout,
                     relayFetchMode: requestRelayFetchMode,
                     moderationSnapshot: muteFilterSnapshot
                 )
-                hasReachedEnd = true
+                fetched = trendingPage.page.items
+                sourcePageResult = trendingPage.page
+                trendingPaginationState = trendingPage.nextState
 
             case .news:
                 followingPubkeys = []
@@ -666,7 +565,7 @@ final class HomeFeedViewModel: ObservableObject {
                     moderationSnapshot: muteFilterSnapshot
                 )
                 fetched = newsPage.items
-                hasReachedEnd = !newsPage.hadMoreAvailable
+                sourcePageResult = newsPage
 
             case .custom(let feedID):
                 followingPubkeys = []
@@ -686,7 +585,7 @@ final class HomeFeedViewModel: ObservableObject {
                     moderationSnapshot: muteFilterSnapshot
                 )
                 fetched = customPage.items
-                hasReachedEnd = !customPage.hadMoreAvailable
+                sourcePageResult = customPage
 
             case .hashtag(let hashtag):
                 followingPubkeys = []
@@ -742,7 +641,7 @@ final class HomeFeedViewModel: ObservableObject {
 
                 startLiveUpdatesIfNeeded(forceRestart: true)
 
-                fetched = try await service.fetchFollowingFeed(
+                let followingPage = try await fetchFollowingFeedPage(
                     relayURLs: requestRelayURLs,
                     authors: followingFeedAuthors,
                     kinds: requestKinds,
@@ -753,6 +652,60 @@ final class HomeFeedViewModel: ObservableObject {
                     relayFetchMode: requestRelayFetchMode,
                     moderationSnapshot: muteFilterSnapshot
                 )
+                fetched = followingPage.items
+
+            case .polls:
+                guard let requestUserPubkey else {
+                    throw HomeFeedError.pollsRequiresLogin
+                }
+
+                var followings = localFollowings()
+                if followings.isEmpty {
+                    followings = try await service.fetchFollowings(
+                        relayURLs: requestRelayURLs,
+                        pubkey: requestUserPubkey,
+                        relayFetchMode: requestRelayFetchMode
+                    )
+                }
+
+                if requestSource != feedSource || requestUserPubkey != currentUserPubkey {
+                    guard latestRefreshRequestID == refreshRequestID else { return }
+                    needsRefreshAfterCurrentRequest = true
+                    return
+                }
+
+                followingPubkeys = followings
+                let pollAuthors = Self.followingAuthorPubkeys(
+                    followingPubkeys: followings,
+                    currentUserPubkey: requestUserPubkey
+                )
+
+                if pollAuthors.isEmpty {
+                    guard latestRefreshRequestID == refreshRequestID else { return }
+                    items = []
+                    bufferedNewItems = []
+                    knownEventIDs = []
+                    oldestCreatedAt = nil
+                    hasReachedEnd = true
+                    startLiveUpdatesIfNeeded(forceRestart: true)
+                    await persistRecentFeedSnapshot(from: [])
+                    return
+                }
+
+                startLiveUpdatesIfNeeded(forceRestart: true)
+
+                let pollsPage = try await fetchFollowingFeedPage(
+                    relayURLs: requestRelayURLs,
+                    authors: pollAuthors,
+                    kinds: FeedKindFilters.pollKinds,
+                    limit: pageSize,
+                    until: nil,
+                    hydrationMode: requestHydrationMode,
+                    fetchTimeout: requestFetchTimeout,
+                    relayFetchMode: requestRelayFetchMode,
+                    moderationSnapshot: muteFilterSnapshot
+                )
+                fetched = pollsPage.items
             }
 
             if requestSource != feedSource || requestUserPubkey != currentUserPubkey {
@@ -763,6 +716,7 @@ final class HomeFeedViewModel: ObservableObject {
 
             if requestSource != .news,
                requestSource != .trending,
+               requestSource != .polls,
                !FeedKindFilters.isSameSelection(requestKinds, showKinds) {
                 guard latestRefreshRequestID == refreshRequestID else { return }
                 needsRefreshAfterCurrentRequest = true
@@ -785,8 +739,10 @@ final class HomeFeedViewModel: ObservableObject {
             bufferedNewItems = []
             knownEventIDs = Set(mergedItems.map(\.id))
             oldestCreatedAt = mergedItems.last?.event.createdAt ?? fetched.last?.event.createdAt
-            if !usesCompositePagination(requestSource) {
-                hasReachedEnd = fetched.count < pageSize
+            if let sourcePageResult {
+                hasReachedEnd = !sourcePageResult.hadMoreAvailable
+            } else {
+                hasReachedEnd = FeedPaginationHeuristic.shouldStopPaging(afterFetchedCount: fetched.count)
             }
             scheduleAssetPrefetch(for: mergedItems)
             startLiveUpdatesIfNeeded()
@@ -801,6 +757,8 @@ final class HomeFeedViewModel: ObservableObject {
             switch error {
             case HomeFeedError.followingRequiresLogin:
                 errorMessage = "Sign in to view the Following feed."
+            case HomeFeedError.pollsRequiresLogin:
+                errorMessage = "Sign in to view the Polls feed."
             case HomeFeedError.networkRequiresLogin:
                 errorMessage = "Sign in to view the Network feed."
             default:
@@ -862,6 +820,7 @@ final class HomeFeedViewModel: ObservableObject {
 
         do {
             var fetched: [FeedItem]
+            var sourcePageResult: HomeFeedPageResult?
             let requestRelayURLs = relayURLs(for: requestSource)
             let requestKinds = feedKinds(for: requestSource)
 
@@ -888,11 +847,20 @@ final class HomeFeedViewModel: ObservableObject {
                     moderationSnapshot: muteFilterSnapshot
                 )
                 fetched = interestPage.items
-                hasReachedEnd = !interestPage.hadMoreAvailable
+                sourcePageResult = interestPage
 
             case .trending:
-                hasReachedEnd = true
-                return
+                let trendingPage = try await fetchTrendingFeedPage(
+                    limit: pageSize,
+                    paginationState: trendingPaginationState,
+                    hydrationMode: requestHydrationMode,
+                    fetchTimeout: requestFetchTimeout,
+                    relayFetchMode: requestRelayFetchMode,
+                    moderationSnapshot: muteFilterSnapshot
+                )
+                fetched = trendingPage.page.items
+                sourcePageResult = trendingPage.page
+                trendingPaginationState = trendingPage.nextState
 
             case .news:
                 let newsPage = try await fetchNewsFeedPage(
@@ -904,7 +872,7 @@ final class HomeFeedViewModel: ObservableObject {
                     moderationSnapshot: muteFilterSnapshot
                 )
                 fetched = newsPage.items
-                hasReachedEnd = !newsPage.hadMoreAvailable
+                sourcePageResult = newsPage
 
             case .custom(let feedID):
                 guard let feed = customFeedDefinition(id: feedID) else {
@@ -922,7 +890,7 @@ final class HomeFeedViewModel: ObservableObject {
                     moderationSnapshot: muteFilterSnapshot
                 )
                 fetched = customPage.items
-                hasReachedEnd = !customPage.hadMoreAvailable
+                sourcePageResult = customPage
 
             case .hashtag(let hashtag):
                 fetched = try await service.fetchHashtagFeed(
@@ -947,7 +915,7 @@ final class HomeFeedViewModel: ObservableObject {
                     return
                 }
 
-                fetched = try await service.fetchFollowingFeed(
+                let followingPage = try await fetchFollowingFeedPage(
                     relayURLs: requestRelayURLs,
                     authors: followingFeedAuthors,
                     kinds: requestKinds,
@@ -958,6 +926,30 @@ final class HomeFeedViewModel: ObservableObject {
                     relayFetchMode: requestRelayFetchMode,
                     moderationSnapshot: muteFilterSnapshot
                 )
+                fetched = followingPage.items
+
+            case .polls:
+                let pollAuthors = Self.followingAuthorPubkeys(
+                    followingPubkeys: followingPubkeys,
+                    currentUserPubkey: currentUserPubkey
+                )
+                guard !pollAuthors.isEmpty else {
+                    hasReachedEnd = true
+                    return
+                }
+
+                let pollsPage = try await fetchFollowingFeedPage(
+                    relayURLs: requestRelayURLs,
+                    authors: pollAuthors,
+                    kinds: FeedKindFilters.pollKinds,
+                    limit: pageSize,
+                    until: until,
+                    hydrationMode: requestHydrationMode,
+                    fetchTimeout: requestFetchTimeout,
+                    relayFetchMode: requestRelayFetchMode,
+                    moderationSnapshot: muteFilterSnapshot
+                )
+                fetched = pollsPage.items
             }
 
             if requestRefreshID != latestRefreshRequestID || requestSource != feedSource {
@@ -966,18 +958,21 @@ final class HomeFeedViewModel: ObservableObject {
 
             if requestSource != .news,
                requestSource != .trending,
+               requestSource != .polls,
                !FeedKindFilters.isSameSelection(requestKinds, showKinds) {
                 return
             }
 
             if fetched.isEmpty {
-                hasReachedEnd = true
+                hasReachedEnd = !(sourcePageResult?.hadMoreAvailable ?? false)
                 return
             }
 
             oldestCreatedAt = fetched.last?.event.createdAt
-            if !usesCompositePagination(requestSource) {
-                hasReachedEnd = fetched.count < pageSize
+            if let sourcePageResult {
+                hasReachedEnd = !sourcePageResult.hadMoreAvailable
+            } else {
+                hasReachedEnd = FeedPaginationHeuristic.shouldStopPaging(afterFetchedCount: fetched.count)
             }
             mergeKeepingNewest(itemsToMerge: fetched)
             await persistRecentFeedSnapshot(from: items)
@@ -1059,6 +1054,7 @@ final class HomeFeedViewModel: ObservableObject {
         knownEventIDs.removeAll()
         oldestCreatedAt = nil
         hasReachedEnd = false
+        trendingPaginationState = nil
         followingPubkeys = []
         errorMessage = nil
 
@@ -1200,7 +1196,7 @@ final class HomeFeedViewModel: ObservableObject {
     private func liveSubscriptionTargets(
         for source: HomePrimaryFeedSource,
         kinds: [Int]
-    ) -> [LiveSubscriptionTarget] {
+    ) -> [HomeFeedLiveSubscriptionTarget] {
         switch source {
         case .network:
             return subscriptionTargets(
@@ -1222,7 +1218,7 @@ final class HomeFeedViewModel: ObservableObject {
             )
 
         case .news:
-            var targets: [LiveSubscriptionTarget] = []
+            var targets: [HomeFeedLiveSubscriptionTarget] = []
 
             let newsRelayTargets = relayURLs(for: .news)
             targets.append(contentsOf: subscriptionTargets(
@@ -1254,7 +1250,7 @@ final class HomeFeedViewModel: ObservableObject {
         case .custom(let feedID):
             guard let feed = customFeedDefinition(id: feedID) else { return [] }
 
-            var targets: [LiveSubscriptionTarget] = []
+            var targets: [HomeFeedLiveSubscriptionTarget] = []
             let relayTargets = relayURLs(for: source)
 
             let authors = Array(feed.authorPubkeys.prefix(400))
@@ -1301,6 +1297,22 @@ final class HomeFeedViewModel: ObservableObject {
                 filter: NostrFilter(authors: liveAuthors, kinds: kinds, limit: 100),
                 scopeSignature: "following:\(liveAuthors.joined(separator: ","))"
             )
+
+        case .polls:
+            let liveAuthors = Array(
+                Self.followingAuthorPubkeys(
+                    followingPubkeys: followingPubkeys,
+                    currentUserPubkey: currentUserPubkey
+                )
+                .prefix(400)
+            )
+            .sorted()
+            guard !liveAuthors.isEmpty else { return [] }
+            return subscriptionTargets(
+                relayURLs: relayURLs(for: .polls),
+                filter: NostrFilter(authors: liveAuthors, kinds: FeedKindFilters.pollKinds, limit: 100),
+                scopeSignature: "polls:\(liveAuthors.joined(separator: ","))"
+            )
         }
     }
 
@@ -1308,9 +1320,9 @@ final class HomeFeedViewModel: ObservableObject {
         relayURLs: [URL],
         filter: NostrFilter,
         scopeSignature: String
-    ) -> [LiveSubscriptionTarget] {
+    ) -> [HomeFeedLiveSubscriptionTarget] {
         Self.normalizedRelayURLs(relayURLs).map { relayURL in
-            LiveSubscriptionTarget(
+            HomeFeedLiveSubscriptionTarget(
                 relayURL: relayURL,
                 filter: filter,
                 signature: "\(scopeSignature)|\(relayURL.absoluteString.lowercased())"
@@ -1318,9 +1330,9 @@ final class HomeFeedViewModel: ObservableObject {
         }
     }
 
-    private func deduplicatedSubscriptionTargets(_ targets: [LiveSubscriptionTarget]) -> [LiveSubscriptionTarget] {
+    private func deduplicatedSubscriptionTargets(_ targets: [HomeFeedLiveSubscriptionTarget]) -> [HomeFeedLiveSubscriptionTarget] {
         var seen = Set<String>()
-        var ordered: [LiveSubscriptionTarget] = []
+        var ordered: [HomeFeedLiveSubscriptionTarget] = []
 
         for target in targets {
             guard seen.insert(target.signature).inserted else { continue }
@@ -1350,7 +1362,7 @@ final class HomeFeedViewModel: ObservableObject {
     }
 
     private func filterVisibleItems(_ source: [FeedItem], ignoreMediaOnly: Bool = false) -> [FeedItem] {
-        let allowedKinds = Set(showKinds)
+        let allowedKinds = Set(feedSource == .polls ? FeedKindFilters.pollKinds : showKinds)
         let hideNSFW = AppSettingsStore.shared.hideNSFWContent
 
         return source.filter { item in
@@ -1374,14 +1386,16 @@ final class HomeFeedViewModel: ObservableObject {
                 return false
             }
 
-            switch mode {
-            case .posts where item.displayEvent.isReplyNote:
-                return false
-            default:
-                break
+            if feedSource != .polls {
+                switch mode {
+                case .posts where item.displayEvent.isReplyNote:
+                    return false
+                default:
+                    break
+                }
             }
 
-            if !ignoreMediaOnly && mediaOnly && !item.displayEvent.hasMedia {
+            if feedSource != .polls && !ignoreMediaOnly && mediaOnly && !item.displayEvent.hasMedia {
                 return false
             }
 
@@ -1408,11 +1422,16 @@ final class HomeFeedViewModel: ObservableObject {
     ) -> [FeedItem] {
         let resolvedSource = feedSource ?? self.feedSource
         switch resolvedSource {
-        case .following:
+        case .following, .polls:
             let allowedAuthors = allowedFollowingAuthors(followingPubkeys: followingPubkeys)
             guard !allowedAuthors.isEmpty else { return [] }
             return source.filter { item in
-                allowedAuthors.contains(self.normalizePubkey(item.displayAuthorPubkey))
+                let isAllowedAuthor = allowedAuthors.contains(self.normalizePubkey(item.displayAuthorPubkey))
+                guard isAllowedAuthor else { return false }
+                if resolvedSource == .polls {
+                    return item.displayEvent.pollMetadata != nil
+                }
+                return true
             }
         default:
             return source
@@ -1425,6 +1444,11 @@ final class HomeFeedViewModel: ObservableObject {
             let allowedAuthors = allowedFollowingAuthors()
             guard !allowedAuthors.isEmpty else { return false }
             return allowedAuthors.contains(self.normalizePubkey(item.displayAuthorPubkey))
+        case .polls:
+            let allowedAuthors = allowedFollowingAuthors()
+            guard !allowedAuthors.isEmpty else { return false }
+            guard allowedAuthors.contains(self.normalizePubkey(item.displayAuthorPubkey)) else { return false }
+            return item.displayEvent.pollMetadata != nil
         default:
             return true
         }
@@ -1487,6 +1511,7 @@ final class HomeFeedViewModel: ObservableObject {
         knownEventIDs = Set(prunedHydrated.map(\.id))
         oldestCreatedAt = prunedHydrated.last?.event.createdAt
         hasReachedEnd = false
+        trendingPaginationState = nil
         scheduleAssetPrefetch(for: prunedHydrated)
         return true
     }
@@ -1607,6 +1632,8 @@ final class HomeFeedViewModel: ObservableObject {
                 return .network
             }
             return .hashtag(normalizedHashtag)
+        case .polls:
+            return pollsFeedVisible ? .polls : .network
         case .interests:
             return interestHashtags.isEmpty ? .network : .interests
         default:
@@ -1648,6 +1675,8 @@ final class HomeFeedViewModel: ObservableObject {
         switch source {
         case .interests:
             return FeedKindFilters.normalizedKinds(showKinds)
+        case .polls:
+            return FeedKindFilters.pollKinds
         case .trending:
             return [1]
         case .news:
@@ -1690,13 +1719,180 @@ final class HomeFeedViewModel: ObservableObject {
         Self.normalizedFavoriteHashtags(interestHashtags)
     }
 
-    private func usesCompositePagination(_ source: HomePrimaryFeedSource) -> Bool {
-        switch source {
-        case .news, .custom:
-            return true
-        default:
-            return false
+    private static func initialTrendingPaginationState(referenceTime: Int) -> TrendingPaginationState {
+        let safeReferenceTime = max(referenceTime, 1)
+        let windowEnd = safeReferenceTime
+        let windowStart = max(windowEnd - Self.trendingWindowDuration, 0)
+        return TrendingPaginationState(
+            windowStart: windowStart,
+            windowEnd: windowEnd,
+            cursor: windowEnd
+        )
+    }
+
+    private static func previousTrendingPaginationState(
+        before state: TrendingPaginationState
+    ) -> TrendingPaginationState? {
+        guard state.windowStart > 0 else { return nil }
+
+        let nextWindowEnd = max(state.windowStart - 1, 0)
+        let nextWindowStart = max(nextWindowEnd - Self.trendingWindowDuration, 0)
+        return TrendingPaginationState(
+            windowStart: nextWindowStart,
+            windowEnd: nextWindowEnd,
+            cursor: nextWindowEnd
+        )
+    }
+
+    private func fetchTrendingFeedPage(
+        limit: Int,
+        paginationState: TrendingPaginationState?,
+        hydrationMode: FeedItemHydrationMode = .full,
+        fetchTimeout: TimeInterval = 12,
+        relayFetchMode: RelayFetchMode = .allRelays,
+        moderationSnapshot: MuteFilterSnapshot? = nil
+    ) async throws -> TrendingPageFetchResult {
+        guard limit > 0 else {
+            return TrendingPageFetchResult(
+                page: HomeFeedPageResult(items: [], hadMoreAvailable: false),
+                nextState: nil
+            )
         }
+
+        let initialState = paginationState
+            ?? Self.initialTrendingPaginationState(
+                referenceTime: Int(Date().timeIntervalSince1970)
+            )
+        var state: TrendingPaginationState? = initialState
+        var collected: [FeedItem] = []
+        var traversedWindows = 0
+
+        while let currentState = state, collected.count < limit {
+            let remaining = max(limit - collected.count, 1)
+            let fetched = try await service.fetchTrendingNotes(
+                limit: remaining,
+                since: currentState.windowStart,
+                until: currentState.cursor,
+                hydrationMode: hydrationMode,
+                fetchTimeout: fetchTimeout,
+                relayFetchMode: relayFetchMode,
+                moderationSnapshot: moderationSnapshot
+            )
+
+            collected = mergeItemArrays(primary: collected, secondary: fetched)
+
+            if fetched.count >= remaining,
+               let oldestFetchedCreatedAt = fetched.last?.event.createdAt {
+                let nextCursor = max(oldestFetchedCreatedAt - 1, 0)
+                if nextCursor >= currentState.windowStart, nextCursor < currentState.cursor {
+                    state = TrendingPaginationState(
+                        windowStart: currentState.windowStart,
+                        windowEnd: currentState.windowEnd,
+                        cursor: nextCursor
+                    )
+                    continue
+                }
+            }
+
+            guard let previousWindow = Self.previousTrendingPaginationState(before: currentState) else {
+                state = nil
+                break
+            }
+
+            traversedWindows += 1
+            state = previousWindow
+
+            if traversedWindows >= Self.trendingBackfillWindowLimitPerPage, collected.isEmpty {
+                return TrendingPageFetchResult(
+                    page: HomeFeedPageResult(items: [], hadMoreAvailable: true),
+                    nextState: state
+                )
+            }
+        }
+
+        let pageItems = Array(collected.prefix(limit))
+        return TrendingPageFetchResult(
+            page: HomeFeedPageResult(
+                items: pageItems,
+                hadMoreAvailable: state != nil
+            ),
+            nextState: state
+        )
+    }
+
+    private func fetchFollowingFeedPage(
+        relayURLs: [URL],
+        authors: [String],
+        kinds: [Int],
+        limit: Int,
+        until: Int?,
+        hydrationMode: FeedItemHydrationMode = .full,
+        fetchTimeout: TimeInterval = 12,
+        relayFetchMode: RelayFetchMode = .allRelays,
+        moderationSnapshot: MuteFilterSnapshot? = nil
+    ) async throws -> HomeFeedPageResult {
+        guard limit > 0, !authors.isEmpty else {
+            return HomeFeedPageResult(items: [], hadMoreAvailable: false)
+        }
+
+        let probeLimit = min(max(limit * 4, 120), 240)
+        let maxBackfillRounds = 6
+        var collected: [FeedItem] = []
+        var cursor = until
+        var exhausted = false
+        var lastBatchCount = 0
+        var roundsCompleted = 0
+
+        while roundsCompleted < maxBackfillRounds && collected.count < limit {
+            let fetched = try await service.fetchFollowingFeed(
+                relayURLs: relayURLs,
+                authors: authors,
+                kinds: kinds,
+                limit: probeLimit,
+                until: cursor,
+                hydrationMode: hydrationMode,
+                fetchTimeout: fetchTimeout,
+                relayFetchMode: relayFetchMode,
+                moderationSnapshot: moderationSnapshot
+            )
+            lastBatchCount = fetched.count
+
+            guard !fetched.isEmpty else {
+                exhausted = true
+                break
+            }
+
+            collected = mergeItemArrays(primary: collected, secondary: fetched)
+
+            if collected.count > limit || fetched.count >= probeLimit {
+                break
+            }
+
+            guard let oldestFetchedCreatedAt = fetched.last?.event.createdAt else {
+                exhausted = true
+                break
+            }
+
+            let nextCursor = max(oldestFetchedCreatedAt - 1, 0)
+            guard nextCursor > 0, nextCursor != cursor else {
+                exhausted = true
+                break
+            }
+
+            cursor = nextCursor
+            roundsCompleted += 1
+        }
+
+        let pageItems = Array(collected.prefix(limit))
+        let hadMoreAvailable =
+            collected.count > limit ||
+            lastBatchCount >= probeLimit ||
+            (!exhausted && !pageItems.isEmpty)
+
+        return HomeFeedPageResult(
+            items: pageItems,
+            hadMoreAvailable: hadMoreAvailable
+        )
     }
 
     private func fetchInterestsFeedPage(
@@ -1706,10 +1902,10 @@ final class HomeFeedViewModel: ObservableObject {
         fetchTimeout: TimeInterval = 12,
         relayFetchMode: RelayFetchMode = .allRelays,
         moderationSnapshot: MuteFilterSnapshot? = nil
-    ) async throws -> NewsFeedPageResult {
+    ) async throws -> HomeFeedPageResult {
         let hashtags = configuredInterestHashtags()
         guard !hashtags.isEmpty else {
-            return NewsFeedPageResult(items: [], hadMoreAvailable: false)
+            return HomeFeedPageResult(items: [], hadMoreAvailable: false)
         }
 
         let relayTargets = relayURLs(for: .interests)
@@ -1725,7 +1921,7 @@ final class HomeFeedViewModel: ObservableObject {
             relayFetchMode: relayFetchMode,
             moderationSnapshot: moderationSnapshot
         )
-        return NewsFeedPageResult(
+        return HomeFeedPageResult(
             items: fetched,
             hadMoreAvailable: fetched.count >= limit
         )
@@ -1738,7 +1934,7 @@ final class HomeFeedViewModel: ObservableObject {
         fetchTimeout: TimeInterval = 12,
         relayFetchMode: RelayFetchMode = .allRelays,
         moderationSnapshot: MuteFilterSnapshot? = nil
-    ) async throws -> NewsFeedPageResult {
+    ) async throws -> HomeFeedPageResult {
         let newsRelayURLs = relayURLs(for: .news)
         let hydrationRelayURLs = hydrationRelayURLs(for: .news)
         let authors = configuredNewsAuthorPubkeys()
@@ -1830,7 +2026,7 @@ final class HomeFeedViewModel: ObservableObject {
             hashtagItems.contains(where: { $0.count >= perHashtagLimit }) ||
             mergedEvents.count > limit
 
-        return NewsFeedPageResult(
+        return HomeFeedPageResult(
             items: hydrated,
             hadMoreAvailable: hadMoreAvailable
         )
@@ -1845,9 +2041,9 @@ final class HomeFeedViewModel: ObservableObject {
         fetchTimeout: TimeInterval = 12,
         relayFetchMode: RelayFetchMode = .allRelays,
         moderationSnapshot: MuteFilterSnapshot? = nil
-    ) async throws -> NewsFeedPageResult {
+    ) async throws -> HomeFeedPageResult {
         guard limit > 0 else {
-            return NewsFeedPageResult(items: [], hadMoreAvailable: false)
+            return HomeFeedPageResult(items: [], hadMoreAvailable: false)
         }
 
         let relayTargets = relayURLs(for: .custom(feed.id))
@@ -1856,7 +2052,7 @@ final class HomeFeedViewModel: ObservableObject {
         let phrases = feed.phrases
 
         guard !authors.isEmpty || !hashtags.isEmpty || !phrases.isEmpty else {
-            return NewsFeedPageResult(items: [], hadMoreAvailable: false)
+            return HomeFeedPageResult(items: [], hadMoreAvailable: false)
         }
 
         let perHashtagLimit = hashtags.isEmpty ? 0 : max(8, min(18, limit))
@@ -1914,7 +2110,7 @@ final class HomeFeedViewModel: ObservableObject {
             phraseItems.contains(where: { $0.count >= perPhraseLimit }) ||
             mergedItems.count > limit
 
-        return NewsFeedPageResult(
+        return HomeFeedPageResult(
             items: limitedItems,
             hadMoreAvailable: hadMoreAvailable
         )
@@ -2112,250 +2308,5 @@ final class HomeFeedViewModel: ObservableObject {
         Task(priority: .utility) {
             await FlowImageCache.shared.prefetch(urls: urls)
         }
-    }
-}
-
-private enum HomeFeedError: Error {
-    case networkRequiresLogin
-    case followingRequiresLogin
-}
-
-@MainActor
-final class WebOfTrustStore: ObservableObject {
-    static let shared = WebOfTrustStore()
-
-    @Published private(set) var orderedTrustedPubkeys: [String] = []
-    @Published private(set) var isLoading = false
-
-    private struct Session: Equatable {
-        let accountPubkey: String
-        let relayURLs: [URL]
-        let hopCount: Int
-    }
-
-    private let service: NostrFeedService
-    private let cache: WebOfTrustGraphCache
-    private var session: Session?
-    private var rebuildTask: Task<Void, Never>?
-
-    private let maxTrustedPubkeys = 1_200
-    private let expansionBatchSize = 12
-    private static let cacheMaxAge: TimeInterval = 60 * 60 * 6
-
-    init(
-        service: NostrFeedService = NostrFeedService(),
-        cache: WebOfTrustGraphCache = .shared
-    ) {
-        self.service = service
-        self.cache = cache
-    }
-
-    deinit {
-        rebuildTask?.cancel()
-    }
-
-    func configure(accountPubkey: String?, relayURLs: [URL], hopCount: Int) {
-        let normalizedAccount = normalizePubkey(accountPubkey)
-        let normalizedRelays = normalizedRelayURLs(relayURLs)
-        let clampedHops = AppSettingsStore.clampedWebOfTrustHops(hopCount)
-
-        guard !normalizedAccount.isEmpty, !normalizedRelays.isEmpty else {
-            session = nil
-            rebuildTask?.cancel()
-            orderedTrustedPubkeys = []
-            isLoading = false
-            return
-        }
-
-        let nextSession = Session(
-            accountPubkey: normalizedAccount,
-            relayURLs: normalizedRelays,
-            hopCount: clampedHops
-        )
-
-        guard nextSession != session else { return }
-
-        session = nextSession
-        orderedTrustedPubkeys = directFollowings(for: normalizedAccount)
-        isLoading = true
-
-        Task { [weak self] in
-            await self?.applyCachedGraphIfAvailable(for: nextSession)
-        }
-
-        rebuildGraph(for: nextSession)
-    }
-
-    func refresh() {
-        guard let session else { return }
-        orderedTrustedPubkeys = directFollowings(for: session.accountPubkey)
-        isLoading = true
-        rebuildGraph(for: session)
-    }
-
-    private func rebuildGraph(for session: Session) {
-        rebuildTask?.cancel()
-        rebuildTask = Task { [weak self] in
-            guard let self else { return }
-            let graph = await self.buildGraph(for: session)
-            guard !Task.isCancelled else { return }
-
-            await self.cache.storePubkeys(graph, for: self.cacheKey(for: session))
-
-            await MainActor.run {
-                guard self.session == session else { return }
-                self.orderedTrustedPubkeys = graph
-                self.isLoading = false
-            }
-        }
-    }
-
-    private func applyCachedGraphIfAvailable(for session: Session) async {
-        guard let cached = await cache.cachedPubkeys(
-            for: cacheKey(for: session),
-            maxAge: Self.cacheMaxAge
-        ) else {
-            return
-        }
-
-        await MainActor.run {
-            guard self.session == session else { return }
-            if cached.count > self.orderedTrustedPubkeys.count {
-                self.orderedTrustedPubkeys = cached
-            }
-        }
-    }
-
-    private func buildGraph(for session: Session) async -> [String] {
-        var visited: Set<String> = [session.accountPubkey]
-        var trusted: [String] = []
-
-        var frontier = directFollowings(for: session.accountPubkey)
-        if frontier.isEmpty {
-            frontier = await fetchFollowingsForExpansion(
-                pubkey: session.accountPubkey,
-                relayURLs: session.relayURLs
-            )
-        }
-
-        frontier = normalizedOrderedPubkeys(frontier).filter { visited.insert($0).inserted }
-        trusted.append(contentsOf: frontier)
-
-        guard session.hopCount > 1, !frontier.isEmpty else {
-            return Array(trusted.prefix(maxTrustedPubkeys))
-        }
-
-        for _ in 2...session.hopCount {
-            guard !Task.isCancelled, !frontier.isEmpty, trusted.count < maxTrustedPubkeys else { break }
-
-            var nextFrontier: [String] = []
-            let batches = chunked(frontier, into: expansionBatchSize)
-
-            for batch in batches {
-                guard !Task.isCancelled, trusted.count < maxTrustedPubkeys else { break }
-
-                let fetchedFollowings = await withTaskGroup(of: [String].self) { group in
-                    for pubkey in batch {
-                        group.addTask { [service] in
-                            if let cached = await service.cachedFollowListSnapshot(pubkey: pubkey) {
-                                return cached.followedPubkeys
-                            }
-                            return await self.fetchFollowingsForExpansion(pubkey: pubkey, relayURLs: session.relayURLs)
-                        }
-                    }
-
-                    var aggregated: [[String]] = []
-                    for await followings in group {
-                        aggregated.append(followings)
-                    }
-                    return aggregated
-                }
-
-                for followings in fetchedFollowings {
-                    for pubkey in followings {
-                        let normalized = normalizePubkey(pubkey)
-                        guard !normalized.isEmpty, visited.insert(normalized).inserted else { continue }
-                        trusted.append(normalized)
-                        nextFrontier.append(normalized)
-
-                        if trusted.count >= maxTrustedPubkeys {
-                            break
-                        }
-                    }
-
-                    if trusted.count >= maxTrustedPubkeys {
-                        break
-                    }
-                }
-            }
-
-            frontier = nextFrontier
-        }
-
-        return trusted
-    }
-
-    private func fetchFollowingsForExpansion(pubkey: String, relayURLs: [URL]) async -> [String] {
-        (try? await service.fetchFollowings(relayURLs: relayURLs, pubkey: pubkey)) ?? []
-    }
-
-    private func directFollowings(for accountPubkey: String) -> [String] {
-        normalizedOrderedPubkeys(Array(FollowStore.shared.followedPubkeys))
-            .filter { $0 != accountPubkey }
-    }
-
-    private func cacheKey(for session: Session) -> String {
-        let relaySignature = session.relayURLs
-            .map { $0.absoluteString.lowercased() }
-            .joined(separator: ",")
-        return "\(session.accountPubkey)|\(session.hopCount)|\(relaySignature)"
-    }
-
-    private func normalizePubkey(_ value: String?) -> String {
-        (value ?? "")
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-            .lowercased()
-    }
-
-    private func normalizedOrderedPubkeys(_ pubkeys: [String]) -> [String] {
-        var seen = Set<String>()
-        var ordered: [String] = []
-
-        for pubkey in pubkeys {
-            let normalized = normalizePubkey(pubkey)
-            guard !normalized.isEmpty, seen.insert(normalized).inserted else { continue }
-            ordered.append(normalized)
-        }
-
-        return ordered
-    }
-
-    private func normalizedRelayURLs(_ relayURLs: [URL]) -> [URL] {
-        var seen = Set<String>()
-        var ordered: [URL] = []
-
-        for relayURL in relayURLs {
-            let normalized = relayURL.absoluteString.lowercased()
-            guard seen.insert(normalized).inserted else { continue }
-            ordered.append(relayURL)
-        }
-
-        return ordered
-    }
-
-    private func chunked(_ values: [String], into size: Int) -> [[String]] {
-        guard size > 0, !values.isEmpty else { return [] }
-
-        var result: [[String]] = []
-        result.reserveCapacity((values.count + size - 1) / size)
-
-        var index = 0
-        while index < values.count {
-            let nextIndex = min(index + size, values.count)
-            result.append(Array(values[index..<nextIndex]))
-            index = nextIndex
-        }
-
-        return result
     }
 }

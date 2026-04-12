@@ -5,13 +5,22 @@ struct MuteFilterSnapshot: Sendable, Equatable {
     let mutedPubkeys: Set<String>
     let exactMutedWords: Set<String>
     let phraseMutedWords: [String]
+    var hidesEncodedSpam = true
 
     var hasAnyRules: Bool {
+        hidesEncodedSpam || hasUserRules
+    }
+
+    var hasUserRules: Bool {
         !mutedPubkeys.isEmpty || !exactMutedWords.isEmpty || !phraseMutedWords.isEmpty
     }
 
     func shouldHide(_ event: NostrEvent) -> Bool {
         if mutedPubkeys.contains(normalizePubkey(event.pubkey)) {
+            return true
+        }
+
+        if hidesEncodedSpam && EncodedSpamContentHeuristic.shouldHide(event.content) {
             return true
         }
 
@@ -69,7 +78,7 @@ struct MuteFilterSnapshot: Sendable, Equatable {
 
         if !exactMutedWords.isEmpty {
             let tokens = Set(
-                normalizedText.split(whereSeparator: { !$0.isLetter && !$0.isNumber })
+                normalizedText.split(whereSeparator: { !isMutedWordTokenCharacter($0) })
                     .map(String.init)
             )
 
@@ -99,6 +108,121 @@ struct MuteFilterSnapshot: Sendable, Equatable {
             .folding(options: [.caseInsensitive, .diacriticInsensitive], locale: .current)
             .lowercased()
         return trimmed.isEmpty ? nil : trimmed
+    }
+
+    private func isMutedWordTokenCharacter(_ character: Character) -> Bool {
+        character.isLetter || character.isNumber || character == "_"
+    }
+}
+
+private enum EncodedSpamContentHeuristic {
+    private static let minimumContentLength = 320
+    private static let minimumTokenLength = 240
+    private static let minimumCompactLength = 420
+    private static let maximumWhitespaceRatio = 0.035
+    private static let minimumBase64AlphabetRatio = 0.94
+    private static let minimumUniqueCharacterCount = 22
+    private static let minimumUniqueCharacterRatio = 0.035
+    private static let maximumUniqueCharacterRatio = 0.42
+
+    static func shouldHide(_ content: String) -> Bool {
+        let trimmed = content.trimmingCharacters(in: .whitespacesAndNewlines)
+        let scalars = Array(trimmed.unicodeScalars)
+        guard scalars.count >= minimumContentLength else {
+            return false
+        }
+
+        var whitespaceCount = 0
+        var currentRunLength = 0
+        var longestNonWhitespaceRun = 0
+        var compactScalars: [Unicode.Scalar] = []
+        compactScalars.reserveCapacity(scalars.count)
+
+        for scalar in scalars {
+            if isWhitespace(scalar) {
+                whitespaceCount += 1
+                longestNonWhitespaceRun = max(longestNonWhitespaceRun, currentRunLength)
+                currentRunLength = 0
+            } else {
+                compactScalars.append(scalar)
+                currentRunLength += 1
+            }
+        }
+        longestNonWhitespaceRun = max(longestNonWhitespaceRun, currentRunLength)
+
+        for token in trimmed.split(whereSeparator: { character in
+            character.unicodeScalars.allSatisfy(isWhitespace)
+        }) {
+            if looksLikeEncodedRun(Array(token.unicodeScalars), minimumLength: minimumTokenLength) {
+                return true
+            }
+        }
+
+        let whitespaceRatio = Double(whitespaceCount) / Double(max(scalars.count, 1))
+        let lacksNaturalSpacing = whitespaceRatio <= maximumWhitespaceRatio ||
+            longestNonWhitespaceRun >= max(minimumTokenLength, Int(Double(compactScalars.count) * 0.82))
+
+        guard lacksNaturalSpacing else {
+            return false
+        }
+
+        return looksLikeEncodedRun(compactScalars, minimumLength: minimumCompactLength)
+    }
+
+    private static func looksLikeEncodedRun(_ scalars: [Unicode.Scalar], minimumLength: Int) -> Bool {
+        guard scalars.count >= minimumLength else {
+            return false
+        }
+
+        var base64AlphabetCount = 0
+        var uniqueScalars = Set<Unicode.Scalar>()
+        var hasUppercase = false
+        var hasLowercase = false
+        var hasDigit = false
+
+        for scalar in scalars {
+            guard isBase64Alphabet(scalar) else {
+                continue
+            }
+
+            base64AlphabetCount += 1
+            uniqueScalars.insert(scalar)
+
+            if scalar.value >= 65 && scalar.value <= 90 {
+                hasUppercase = true
+            } else if scalar.value >= 97 && scalar.value <= 122 {
+                hasLowercase = true
+            } else if scalar.value >= 48 && scalar.value <= 57 {
+                hasDigit = true
+            }
+        }
+
+        let base64AlphabetRatio = Double(base64AlphabetCount) / Double(scalars.count)
+        let uniqueCharacterRatio = Double(uniqueScalars.count) / Double(max(base64AlphabetCount, 1))
+        let categoryCount = [hasUppercase, hasLowercase, hasDigit].filter(\.self).count
+
+        return base64AlphabetRatio >= minimumBase64AlphabetRatio &&
+            uniqueScalars.count >= minimumUniqueCharacterCount &&
+            uniqueCharacterRatio >= minimumUniqueCharacterRatio &&
+            uniqueCharacterRatio <= maximumUniqueCharacterRatio &&
+            categoryCount >= 2
+    }
+
+    private static func isWhitespace(_ scalar: Unicode.Scalar) -> Bool {
+        CharacterSet.whitespacesAndNewlines.contains(scalar)
+    }
+
+    private static func isBase64Alphabet(_ scalar: Unicode.Scalar) -> Bool {
+        if scalar.value >= 65 && scalar.value <= 90 {
+            return true
+        }
+        if scalar.value >= 97 && scalar.value <= 122 {
+            return true
+        }
+        if scalar.value >= 48 && scalar.value <= 57 {
+            return true
+        }
+        return scalar == "+" || scalar == "/" || scalar == "=" || scalar == "-" || scalar == "_"
     }
 }
 
@@ -162,6 +286,35 @@ final class MuteStore: ObservableObject, NIP44v2Encrypting {
     private static let keywordAdditionTagName = "x21-word-add"
     private static let keywordConfirmationTagName = "x21-word-confirmed"
     private static let otherKeywordListID = "other"
+    private static let retiredKeywordListDefaultWordsByID: [String: Set<String>] = [
+        "bitcoin": [
+            "bitcoin",
+            "btc",
+            "xbt",
+            "bitcoiner",
+            "bitcoiners",
+            "sats",
+            "satoshi",
+            "lightning",
+            "lightning network",
+            "lnurl",
+            "zaps",
+            "nostr zap",
+            "ordinal",
+            "ordinals",
+            "rune",
+            "runes",
+            "brc20",
+            "halving",
+            "mining",
+            "miners",
+            "hashrate",
+            "mempool",
+            "utxo",
+            "stack sats",
+            "stacking sats"
+        ]
+    ]
 
     private static let keywordListPresets: [KeywordListPreset] = [
         KeywordListPreset(
@@ -201,35 +354,12 @@ final class MuteStore: ObservableObject, NIP44v2Encrypting {
             ]
         ),
         KeywordListPreset(
-            id: "bitcoin",
-            title: "Bitcoin",
-            subtitle: "Bitcoin, Lightning, ordinals, mining",
+            id: "ai-bots-spam",
+            title: "AI, Bots & Spam",
+            subtitle: "Bot markers and repeated spam patterns",
             defaultWords: [
-                "bitcoin",
-                "btc",
-                "xbt",
-                "bitcoiner",
-                "bitcoiners",
-                "sats",
-                "satoshi",
-                "lightning",
-                "lightning network",
-                "lnurl",
-                "zaps",
-                "nostr zap",
-                "ordinal",
-                "ordinals",
-                "rune",
-                "runes",
-                "brc20",
-                "halving",
-                "mining",
-                "miners",
-                "hashrate",
-                "mempool",
-                "utxo",
-                "stack sats",
-                "stacking sats"
+                "theboard",
+                "zone_presence"
             ]
         )
     ]
@@ -339,7 +469,7 @@ final class MuteStore: ObservableObject, NIP44v2Encrypting {
             return cached
         }
 
-        let decision = containsMutedWord(in: event)
+        let decision = EncodedSpamContentHeuristic.shouldHide(event.content) || containsMutedWord(in: event)
         if muteDecisionCache.count >= Self.muteDecisionCacheLimit {
             muteDecisionCache.removeAll(keepingCapacity: true)
         }
@@ -961,10 +1091,15 @@ final class MuteStore: ObservableObject, NIP44v2Encrypting {
     }
 
     private func rebuildWordTags(in privateTags: [NostrSDK.Tag]) -> [NostrSDK.Tag] {
-        let nonWordTags = privateTags.filter { $0.name.lowercased() != "word" }
+        let retiredPresetWordsToDrop = retiredPresetDefaultWordsToDrop(from: privateTags)
+        let nonWordTags = privateTags.filter {
+            $0.name.lowercased() != "word" && !isRetiredKeywordListMetadata($0)
+        }
         let visibleLists = keywordLists(from: nonWordTags)
         let allListWords = Set(visibleLists.flatMap(\.words))
-        let orphanWords = activeMutedWords(from: privateTags).filter { !allListWords.contains($0) }
+        let orphanWords = activeMutedWords(from: privateTags).filter {
+            !allListWords.contains($0) && !retiredPresetWordsToDrop.contains($0)
+        }
 
         var rebuilt = nonWordTags
         var appended = Set<String>()
@@ -984,6 +1119,33 @@ final class MuteStore: ObservableObject, NIP44v2Encrypting {
         }
 
         return rebuilt
+    }
+
+    private func retiredPresetDefaultWordsToDrop(from privateTags: [NostrSDK.Tag]) -> Set<String> {
+        var wordsToDrop = Set<String>()
+
+        for (listID, words) in Self.retiredKeywordListDefaultWordsByID {
+            guard privateTags.contains(where: { isRetiredKeywordListMetadata($0, listID: listID) }) else {
+                continue
+            }
+            wordsToDrop.formUnion(words)
+        }
+
+        return wordsToDrop
+    }
+
+    private func isRetiredKeywordListMetadata(_ tag: NostrSDK.Tag) -> Bool {
+        Self.retiredKeywordListDefaultWordsByID.keys.contains { listID in
+            isRetiredKeywordListMetadata(tag, listID: listID)
+        }
+    }
+
+    private func isRetiredKeywordListMetadata(_ tag: NostrSDK.Tag, listID: String) -> Bool {
+        let name = tag.name.lowercased()
+        guard tag.value == listID else { return false }
+        return name == Self.keywordListTagName ||
+            name == Self.keywordRemovalTagName ||
+            name == Self.keywordAdditionTagName
     }
 
     private func needsDefaultKeywordSeeding(in privateTags: [NostrSDK.Tag]) -> Bool {
@@ -1246,7 +1408,7 @@ final class MuteStore: ObservableObject, NIP44v2Encrypting {
 
         if !exactMutedWords.isEmpty {
             let tokens = Set(
-                normalizedText.split(whereSeparator: { !$0.isLetter && !$0.isNumber })
+                normalizedText.split(whereSeparator: { !isMutedWordTokenCharacter($0) })
                     .map(String.init)
             )
 
@@ -1269,7 +1431,7 @@ final class MuteStore: ObservableObject, NIP44v2Encrypting {
         var nextPhraseMutedWords: [String] = []
 
         for word in activeMutedWords {
-            if word.range(of: #"^[a-z0-9]+$"#, options: .regularExpression) != nil {
+            if word.range(of: #"^[a-z0-9_]+$"#, options: .regularExpression) != nil {
                 nextExactMutedWords.insert(word)
             } else {
                 nextPhraseMutedWords.append(word)
@@ -1333,5 +1495,9 @@ final class MuteStore: ObservableObject, NIP44v2Encrypting {
         }
         normalizedEventTextCache[event.id] = normalized
         return normalized.isEmpty ? nil : normalized
+    }
+
+    private func isMutedWordTokenCharacter(_ character: Character) -> Bool {
+        character.isLetter || character.isNumber || character == "_"
     }
 }

@@ -1,5 +1,6 @@
 import CryptoKit
 import Foundation
+import ImageIO
 import NostrSDK
 
 enum MediaUploadProvider: String, CaseIterable, Codable, Identifiable, Hashable, Sendable {
@@ -243,6 +244,8 @@ actor MediaUploadService {
             imeta.append("size \(data.count)")
         }
 
+        appendImageDimensionsIfNeeded(to: &imeta, data: data, mimeType: finalType)
+
         return MediaUploadResult(url: uploadedURL, imetaTag: imeta)
     }
 
@@ -304,9 +307,13 @@ actor MediaUploadService {
 
         let imetaTag: [String]
         if parsed.imetaComponents.isEmpty {
-            imetaTag = ["imeta", "url \(uploadedURL.absoluteString)", "m \(mimeType)", "size \(data.count)"]
+            var components = ["imeta", "url \(uploadedURL.absoluteString)", "m \(mimeType)", "size \(data.count)"]
+            appendImageDimensionsIfNeeded(to: &components, data: data, mimeType: mimeType)
+            imetaTag = components
         } else {
-            imetaTag = ["imeta"] + parsed.imetaComponents
+            var components = ["imeta"] + parsed.imetaComponents
+            appendImageDimensionsIfNeeded(to: &components, data: data, mimeType: mimeType)
+            imetaTag = components
         }
 
         return MediaUploadResult(url: uploadedURL, imetaTag: imetaTag)
@@ -551,6 +558,46 @@ actor MediaUploadService {
     private func sha256(data: Data) -> String {
         let digest = SHA256.hash(data: data)
         return digest.map { String(format: "%02x", $0) }.joined()
+    }
+
+    private func appendImageDimensionsIfNeeded(
+        to imeta: inout [String],
+        data: Data,
+        mimeType: String
+    ) {
+        let normalizedMimeType = mimeType.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard normalizedMimeType.hasPrefix("image/") else { return }
+        guard !imeta.contains(where: { $0.hasPrefix("dim ") }) else { return }
+        guard let dimensions = imageDimensions(from: data) else { return }
+
+        imeta.append("dim \(Int(dimensions.width))x\(Int(dimensions.height))")
+    }
+
+    private func imageDimensions(from data: Data) -> CGSize? {
+        guard let source = CGImageSourceCreateWithData(data as CFData, nil),
+              let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any],
+              var width = (properties[kCGImagePropertyPixelWidth] as? NSNumber).map({ CGFloat(truncating: $0) }),
+              var height = (properties[kCGImagePropertyPixelHeight] as? NSNumber).map({ CGFloat(truncating: $0) }) else {
+            return nil
+        }
+
+        if let orientationValue = properties[kCGImagePropertyOrientation] as? NSNumber,
+           let orientation = CGImagePropertyOrientation(rawValue: UInt32(orientationValue.intValue)),
+           imageOrientationSwapsDimensions(orientation) {
+            swap(&width, &height)
+        }
+
+        guard width > 0, height > 0 else { return nil }
+        return CGSize(width: width, height: height)
+    }
+
+    private func imageOrientationSwapsDimensions(_ orientation: CGImagePropertyOrientation) -> Bool {
+        switch orientation {
+        case .left, .leftMirrored, .right, .rightMirrored:
+            return true
+        default:
+            return false
+        }
     }
 
     private func describeUploadError(_ error: Error) -> String {

@@ -1,0 +1,585 @@
+import SwiftUI
+import UIKit
+
+struct ThreadDetailRootNoteCard: View {
+        @EnvironmentObject private var appSettings: AppSettingsStore
+
+        let item: FeedItem
+        let isHiddenByNSFW: Bool
+        let reactionCount: Int
+        let commentCount: Int
+        let showReactions: Bool
+        let isFollowingAuthor: Bool
+        let rootFollowStatusIconName: String?
+        let isLikedByCurrentUser: Bool
+        let isBonusReactionByCurrentUser: Bool
+        let onFollowToggle: () -> Void
+        let onOpenProfile: (String) -> Void
+        let onOpenHashtag: (String) -> Void
+        let onOpenReferencedEvent: (FeedItem) -> Void
+        let onOptionsTap: () -> Void
+        let onReplyTap: () -> Void
+        let onReactionTap: (Int) -> Void
+        let onRepostTap: () -> Void
+        let shareLink: String
+
+        var body: some View {
+            VStack(alignment: .leading, spacing: 12) {
+                HStack(alignment: .center, spacing: 10) {
+                    Menu {
+                        Button {
+                            onFollowToggle()
+                        } label: {
+                            Label(
+                                isFollowingAuthor ? "Unfollow" : "Follow",
+                                systemImage: isFollowingAuthor
+                                    ? "person.crop.circle.badge.minus"
+                                    : "plus.circle"
+                            )
+                        }
+                        Button {
+                            onOpenProfile(item.displayAuthorPubkey)
+                        } label: {
+                            Label("View Profile", systemImage: "person")
+                        }
+                    } label: {
+                        AvatarView(url: item.avatarURL, fallback: item.displayName)
+                            .overlay(alignment: .bottomTrailing) {
+                                if let rootFollowStatusIconName {
+                                    ZStack {
+                                        Circle()
+                                            .fill(appSettings.themePalette.background)
+                                            .frame(width: 18, height: 18)
+
+                                        Image(systemName: rootFollowStatusIconName)
+                                            .font(.system(size: 16, weight: .bold))
+                                            .foregroundStyle(Color.accentColor)
+                                    }
+                                    .offset(x: 3, y: 3)
+                                    .accessibilityHidden(true)
+                                }
+                            }
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Profile actions for \(item.displayName)")
+
+                    HStack(alignment: .firstTextBaseline, spacing: 6) {
+                        Text(item.displayName)
+                            .font(.headline)
+                            .lineLimit(1)
+                            .layoutPriority(1)
+
+                        Text(item.handle)
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+
+                        Spacer(minLength: 8)
+
+                        if let clientName = item.displayEvent.clientName {
+                            Text("via \(clientName)")
+                                .font(.subheadline)
+                                .foregroundStyle(.secondary)
+                                .lineLimit(1)
+                        }
+
+                        Text(RelativeTimestampFormatter.shortString(from: item.displayEvent.createdAtDate))
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+
+                        Button {
+                            onOptionsTap()
+                        } label: {
+                            Image(systemName: "ellipsis")
+                                .font(.subheadline.weight(.semibold))
+                                .foregroundStyle(appSettings.themePalette.mutedForeground)
+                                .frame(width: 28, height: 28)
+                                .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel("Note options")
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                }
+
+                if isHiddenByNSFW {
+                    ThreadDetailNSFWHiddenCard()
+                } else {
+                    VStack(alignment: .leading, spacing: 8) {
+                        if let replyContextPresentation = ReplyContextPreviewPresentation.make(for: item) {
+                            ReplyContextPreviewRow(
+                                presentation: replyContextPresentation,
+                                foregroundStyle: appSettings.themePalette.mutedForeground,
+                                onTap: {
+                                    onOpenReferencedEvent(replyContextPresentation.parentItem.threadNavigationItem)
+                                }
+                            )
+                        }
+
+                        NoteContentView(
+                            event: item.displayEvent,
+                            mediaLayout: .feed,
+                            reactionCount: showReactions ? reactionCount : 0,
+                            commentCount: showReactions ? commentCount : 0,
+                            onHashtagTap: onOpenHashtag,
+                            onProfileTap: onOpenProfile,
+                            onReferencedEventTap: onOpenReferencedEvent
+                        )
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                }
+
+                if showReactions {
+                    ThreadDetailInteractionRow(
+                        replyCount: commentCount,
+                        reactionCount: reactionCount,
+                        isLikedByCurrentUser: isLikedByCurrentUser,
+                        isBonusReactionByCurrentUser: isBonusReactionByCurrentUser,
+                        primaryColor: appSettings.primaryColor,
+                        onReplyTap: onReplyTap,
+                        onRepostTap: onRepostTap,
+                        onReactionTap: onReactionTap,
+                        shareLink: shareLink
+                    )
+                }
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 12)
+        }
+    }
+
+struct ThreadDetailInteractionRow: View {
+        let replyCount: Int?
+        let reactionCount: Int
+        let isLikedByCurrentUser: Bool
+        let isBonusReactionByCurrentUser: Bool
+        let primaryColor: Color
+        let onReplyTap: () -> Void
+        let onRepostTap: () -> Void
+        let onReactionTap: (Int) -> Void
+        let shareLink: String
+
+        var body: some View {
+            HStack(spacing: 14) {
+                Button(action: onReplyTap) {
+                    HStack(spacing: 4) {
+                        Image(systemName: "bubble.right")
+                        if let replyCount, replyCount > 0 {
+                            Text("\(replyCount)")
+                                .font(.footnote)
+                        }
+                    }
+                    .frame(minWidth: 34, minHeight: 30, alignment: .leading)
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(.secondary)
+                .accessibilityLabel("Reply")
+
+                Button(action: onRepostTap) {
+                    Image(systemName: "arrow.2.squarepath")
+                        .frame(minWidth: 34, minHeight: 30, alignment: .leading)
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(.secondary)
+                .accessibilityLabel("Re-share")
+
+                ReactionButton(
+                    isLiked: isLikedByCurrentUser,
+                    isBonusReaction: isBonusReactionByCurrentUser,
+                    count: reactionCount,
+                    bonusActiveColor: primaryColor,
+                    minHeight: 30,
+                    action: onReactionTap
+                )
+
+                ShareLink(item: shareLink) {
+                    Image(systemName: "paperplane")
+                        .frame(minWidth: 34, minHeight: 30, alignment: .leading)
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(.secondary)
+                .accessibilityLabel("Share")
+            }
+            .font(.headline)
+        }
+    }
+
+struct ThreadDetailContentSection: View {
+        @Binding var selectedContentTab: ThreadDetailContentTab
+        let replies: [FeedItem]
+        let replyCountsByTarget: [String: Int]
+        let noteActivityRows: [ActivityRow]
+        let isLoadingReplies: Bool
+        let isLoadingReactions: Bool
+        let repliesErrorMessage: String?
+        let reactionsErrorMessage: String?
+        let rootEventID: String
+        let showReactions: Bool
+        let effectiveReadRelayURLs: [URL]
+        let currentUserPubkey: String?
+        let isFollowingAuthor: (String) -> Bool
+        let onFollowToggle: (String) -> Void
+        let onOpenHashtag: (String) -> Void
+        let onOpenProfile: (String) -> Void
+        let onOpenThread: (FeedItem) -> Void
+        let onReplyTap: (FeedItem) -> Void
+
+        var body: some View {
+            VStack(alignment: .leading, spacing: 0) {
+                FlowCapsuleTabBar(
+                    selection: $selectedContentTab,
+                    items: ThreadDetailContentTab.allCases,
+                    title: { $0.title }
+                )
+                .padding(.horizontal, 16)
+                .padding(.top, 12)
+                .padding(.bottom, 10)
+
+                switch selectedContentTab {
+                case .replies:
+                    ThreadDetailRepliesSection(
+                        replies: replies,
+                        replyCountsByTarget: replyCountsByTarget,
+                        isLoading: isLoadingReplies,
+                        rootEventID: rootEventID,
+                        showReactions: showReactions,
+                        effectiveReadRelayURLs: effectiveReadRelayURLs,
+                        currentUserPubkey: currentUserPubkey,
+                        isFollowingAuthor: isFollowingAuthor,
+                        onFollowToggle: onFollowToggle,
+                        onOpenHashtag: onOpenHashtag,
+                        onOpenProfile: onOpenProfile,
+                        onOpenThread: onOpenThread,
+                        onReplyTap: onReplyTap
+                    )
+
+                    if let repliesErrorMessage {
+                        Text(repliesErrorMessage)
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                            .frame(maxWidth: .infinity, alignment: .center)
+                            .padding(.horizontal, 16)
+                            .padding(.vertical, 10)
+                    }
+                case .reactions:
+                    ThreadDetailReactionsSection(
+                        noteActivityRows: noteActivityRows,
+                        isLoading: isLoadingReactions,
+                        onOpenProfile: onOpenProfile
+                    )
+
+                    if let reactionsErrorMessage {
+                        Text(reactionsErrorMessage)
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                            .frame(maxWidth: .infinity, alignment: .center)
+                            .padding(.horizontal, 16)
+                            .padding(.vertical, 10)
+                    }
+                }
+            }
+        }
+    }
+
+struct ThreadDetailRepliesSection: View {
+        @ObservedObject private var reactionStats = NoteReactionStatsService.shared
+
+        let replies: [FeedItem]
+        let replyCountsByTarget: [String: Int]
+        let isLoading: Bool
+        let rootEventID: String
+        let showReactions: Bool
+        let effectiveReadRelayURLs: [URL]
+        let currentUserPubkey: String?
+        let isFollowingAuthor: (String) -> Bool
+        let onFollowToggle: (String) -> Void
+        let onOpenHashtag: (String) -> Void
+        let onOpenProfile: (String) -> Void
+        let onOpenThread: (FeedItem) -> Void
+        let onReplyTap: (FeedItem) -> Void
+
+        var body: some View {
+            Group {
+                if isLoading && replies.isEmpty {
+                    HStack {
+                        Spacer()
+                        ProgressView()
+                        Spacer()
+                    }
+                    .padding(.vertical, 16)
+                } else if replies.isEmpty {
+                    VStack(spacing: 6) {
+                        Text("No replies yet")
+                            .font(.headline)
+                        Text("Tap below to post the first reply.")
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                    }
+                    .frame(maxWidth: .infinity)
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 18)
+                } else {
+                    ForEach(replies) { reply in
+                        FeedRowView(
+                            item: reply,
+                            reactionCount: reactionStats.reactionCount(for: reply.displayEventID),
+                            isLikedByCurrentUser: reactionStats.isReactedByCurrentUser(
+                                for: reply.displayEventID,
+                                currentPubkey: currentUserPubkey
+                            ),
+                            commentCount: replyCountsByTarget[reply.displayEventID.lowercased()] ?? 0,
+                            showReactions: showReactions,
+                            avatarMenuActions: .init(
+                                followLabel: isFollowingAuthor(reply.displayAuthorPubkey) ? "Unfollow" : "Follow",
+                                onFollowToggle: {
+                                    onFollowToggle(reply.displayAuthorPubkey)
+                                },
+                                onViewProfile: {
+                                    onOpenProfile(reply.displayAuthorPubkey)
+                                }
+                            ),
+                            onHashtagTap: onOpenHashtag,
+                            onProfileTap: onOpenProfile,
+                            onOpenThread: {
+                                onOpenThread(reply)
+                            },
+                            onRepostActorTap: onOpenProfile,
+                            onReferencedEventTap: { referencedItem in
+                                onOpenThread(referencedItem)
+                            },
+                            onReplyTap: {
+                                onReplyTap(reply)
+                            },
+                            suppressReplyContextForDirectReplyTargetEventID: rootEventID
+                        )
+                        .id("thread-detail-reply-\(reply.id.lowercased())")
+                        .padding(.horizontal, 16)
+                        .onAppear {
+                            if showReactions {
+                                reactionStats.prefetch(events: [reply.displayEvent], relayURLs: effectiveReadRelayURLs)
+                            }
+                        }
+
+                        Divider()
+                            .padding(.leading, 72)
+                    }
+                }
+            }
+        }
+    }
+
+struct ThreadDetailReactionsSection: View {
+        let noteActivityRows: [ActivityRow]
+        let isLoading: Bool
+        let onOpenProfile: (String) -> Void
+
+        var body: some View {
+            Group {
+                if isLoading && noteActivityRows.isEmpty {
+                    HStack {
+                        Spacer()
+                        ProgressView()
+                        Spacer()
+                    }
+                    .padding(.vertical, 16)
+                } else if noteActivityRows.isEmpty {
+                    VStack(spacing: 6) {
+                        Text("No reactions yet")
+                            .font(.headline)
+                        Text("Likes, reposts, and quote shares will appear here.")
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                            .multilineTextAlignment(.center)
+                    }
+                    .frame(maxWidth: .infinity)
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 18)
+                } else {
+                    ForEach(noteActivityRows) { activity in
+                        ActivityRowCell(
+                            item: activity,
+                            onAvatarTap: {
+                                onOpenProfile(activity.actorPubkey)
+                            }
+                        )
+                            .padding(.horizontal, 16)
+                            .padding(.vertical, 10)
+
+                        Divider()
+                            .padding(.leading, 56)
+                    }
+                }
+            }
+        }
+    }
+
+struct ThreadDetailArticleBody: View {
+        @EnvironmentObject private var appSettings: AppSettingsStore
+
+        let item: FeedItem
+        let articleMetadata: NostrLongFormArticleMetadata
+        let isHiddenByNSFW: Bool
+        let isOwnedByCurrentUser: Bool
+        let isFollowingAuthor: Bool
+        let showReactions: Bool
+        let errorMessage: String?
+        let reactionCount: Int
+        let isLikedByCurrentUser: Bool
+        let isBonusReactionByCurrentUser: Bool
+        let shareLink: String
+        let onFollowToggle: () -> Void
+        let onOpenProfile: (String) -> Void
+        let onOpenHashtag: (String) -> Void
+        let onReplyTap: () -> Void
+        let onRepostTap: () -> Void
+        let onReactionTap: (Int) -> Void
+
+        var body: some View {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 28) {
+                    if isHiddenByNSFW {
+                        ThreadDetailNSFWHiddenCard()
+                    } else {
+                        LongFormArticleReaderView(
+                            item: item,
+                            article: articleMetadata,
+                            isOwnedByCurrentUser: isOwnedByCurrentUser,
+                            isFollowingAuthor: isFollowingAuthor,
+                            onFollowToggle: onFollowToggle,
+                            onProfileTap: onOpenProfile,
+                            onHashtagTap: onOpenHashtag
+                        )
+
+                        if showReactions {
+                            VStack(alignment: .leading, spacing: 18) {
+                                Divider()
+                                ThreadDetailInteractionRow(
+                                    replyCount: nil,
+                                    reactionCount: reactionCount,
+                                    isLikedByCurrentUser: isLikedByCurrentUser,
+                                    isBonusReactionByCurrentUser: isBonusReactionByCurrentUser,
+                                    primaryColor: appSettings.primaryColor,
+                                    onReplyTap: onReplyTap,
+                                    onRepostTap: onRepostTap,
+                                    onReactionTap: onReactionTap,
+                                    shareLink: shareLink
+                                )
+                            }
+                        }
+
+                        if let errorMessage {
+                            Text(errorMessage)
+                                .font(.footnote)
+                                .foregroundStyle(.secondary)
+                                .frame(maxWidth: .infinity, alignment: .center)
+                        }
+                    }
+                }
+                .padding(.horizontal, 20)
+                .padding(.top, 18)
+                .padding(.bottom, 24)
+                .frame(maxWidth: 820, alignment: .leading)
+                .frame(maxWidth: .infinity, alignment: .center)
+            }
+        }
+    }
+
+struct ThreadDetailReplyDockBar: View {
+        let primaryColor: Color
+        let colorSchemeOverride: ColorScheme
+        let onTap: () -> Void
+
+        var body: some View {
+            Button(action: onTap) {
+                HStack(spacing: 10) {
+                    ZStack {
+                        Circle()
+                            .fill(primaryColor.opacity(colorSchemeOverride == .dark ? 0.2 : 0.12))
+                            .frame(width: 28, height: 28)
+
+                        Image(systemName: "bubble.right.fill")
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundStyle(primaryColor)
+                    }
+
+                    Text("Post your reply")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+
+                    Spacer(minLength: 0)
+                }
+                .padding(.horizontal, 14)
+                .padding(.vertical, 11)
+                .background(.ultraThinMaterial, in: Capsule())
+                .overlay {
+                    Capsule()
+                        .stroke(Color.white.opacity(colorSchemeOverride == .dark ? 0.14 : 0.4), lineWidth: 0.9)
+                }
+                .shadow(color: Color.black.opacity(colorSchemeOverride == .dark ? 0.2 : 0.08), radius: 14, x: 0, y: 6)
+            }
+            .buttonStyle(.plain)
+            .padding(.horizontal, 16)
+            .padding(.top, 8)
+            .padding(.bottom, 6)
+        }
+    }
+
+struct ThreadDetailNSFWHiddenCard: View {
+        @EnvironmentObject private var appSettings: AppSettingsStore
+
+        var body: some View {
+            HStack(spacing: 10) {
+                Image(systemName: "eye.slash")
+                    .foregroundStyle(.secondary)
+                Text("Content hidden by NSFW filter.")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 10)
+            .background(
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .fill(appSettings.themePalette.secondaryBackground)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .stroke(appSettings.themePalette.separator.opacity(0.35), lineWidth: 0.5)
+            )
+        }
+    }
+
+extension ThreadDetailView {
+    var effectiveReadRelayURLs: [URL] {
+        appSettings.effectiveReadRelayURLs(from: relaySettings.readRelayURLs)
+    }
+
+    var effectiveWriteRelayURLs: [URL] {
+        appSettings.effectiveWriteRelayURLs(
+            from: relaySettings.writeRelayURLs,
+            fallbackReadRelayURLs: effectiveReadRelayURLs
+        )
+    }
+
+    var effectiveRelayURL: URL {
+        if appSettings.slowConnectionMode {
+            return AppSettingsStore.slowModeRelayURL
+        }
+        return viewModel.relayURL
+    }
+}
+
+enum ThreadDetailContentTab: String, CaseIterable, Hashable {
+    case replies
+    case reactions
+
+    var title: String {
+        switch self {
+        case .replies:
+            return "Replies"
+        case .reactions:
+            return "Reactions"
+        }
+    }
+}

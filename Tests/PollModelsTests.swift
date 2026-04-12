@@ -35,6 +35,21 @@ final class PollModelsTests: XCTestCase {
         )
     }
 
+    func testMetadataTemporarilyIgnoresLegacyZapPolls() {
+        let event = makeEvent(
+            id: hex("9"),
+            pubkey: hex("a"),
+            kind: NostrPollKind.legacyZapPoll,
+            tags: [
+                ["poll_option", "tea", "Tea"],
+                ["poll_option", "coffee", "Coffee"]
+            ],
+            content: "Favorite drink?"
+        )
+
+        XCTAssertNil(NostrPollMetadata(event: event))
+    }
+
     func testResultsKeepNewestResponsePerVoter() throws {
         let pollEvent = makeEvent(
             id: hex("2"),

@@ -4,6 +4,106 @@ import UIKit
 import Translation
 #endif
 
+struct ReplyContextPreviewPresentation: Equatable, Sendable {
+    let parentItem: FeedItem
+    let snippet: String?
+    let hasImageBadge: Bool
+
+    static func make(for item: FeedItem) -> ReplyContextPreviewPresentation? {
+        guard item.displayEvent.isReplyNote,
+              let parentItem = item.replyTargetFeedItem else {
+            return nil
+        }
+
+        let imageURLs = NoteContentParser.imageURLs(in: parentItem.displayEvent)
+        let hasImageBadge = !imageURLs.isEmpty
+        let snippet = snippet(for: parentItem.displayEvent, imageURLs: imageURLs)
+
+        guard snippet != nil || hasImageBadge else { return nil }
+        return ReplyContextPreviewPresentation(
+            parentItem: parentItem,
+            snippet: snippet,
+            hasImageBadge: hasImageBadge
+        )
+    }
+
+    private static func snippet(for event: NostrEvent, imageURLs: [URL]) -> String? {
+        var cleanedContent = event.content
+        for imageURL in imageURLs {
+            cleanedContent = cleanedContent.replacingOccurrences(of: imageURL.absoluteString, with: " ")
+        }
+
+        let normalized = cleanedContent
+            .replacingOccurrences(of: "\r\n", with: "\n")
+            .replacingOccurrences(of: "\r", with: "\n")
+            .replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+
+        guard !normalized.isEmpty else { return nil }
+        guard normalized.count > 72 else { return normalized }
+
+        let endIndex = normalized.index(normalized.startIndex, offsetBy: 72)
+        return String(normalized[..<endIndex]).trimmingCharacters(in: .whitespacesAndNewlines) + "..."
+    }
+}
+
+struct ReplyContextPreviewRow: View {
+    @EnvironmentObject private var appSettings: AppSettingsStore
+
+    let presentation: ReplyContextPreviewPresentation
+    let foregroundStyle: Color
+    var onTap: (() -> Void)? = nil
+
+    var body: some View {
+        let content = HStack(spacing: 6) {
+            Image(systemName: "arrow.turn.up.left")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(foregroundStyle)
+
+            Text("Replying to")
+                .font(.caption)
+                .foregroundStyle(foregroundStyle)
+                .lineLimit(1)
+
+            AvatarView(
+                url: presentation.parentItem.avatarURL,
+                fallback: presentation.parentItem.displayName,
+                size: 18
+            )
+
+            if let snippet = presentation.snippet {
+                Text(snippet)
+                    .font(.caption)
+                    .foregroundStyle(foregroundStyle)
+                    .lineLimit(1)
+            }
+
+            if presentation.hasImageBadge {
+                Text("image")
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(foregroundStyle)
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 2)
+                    .background(
+                        Capsule()
+                            .fill(appSettings.themePalette.tertiaryFill)
+                    )
+            }
+
+            Spacer(minLength: 0)
+        }
+
+        if let onTap {
+            Button(action: onTap) {
+                content
+            }
+            .buttonStyle(.plain)
+        } else {
+            content
+        }
+    }
+}
+
 struct FeedRowView: View {
     @EnvironmentObject private var auth: AuthManager
     @EnvironmentObject private var appSettings: AppSettingsStore
@@ -38,150 +138,27 @@ struct FeedRowView: View {
     @State private var quoteDraft: ReshareQuoteDraft?
     @State private var isShowingReplyComposer = false
     @State private var isPublishingRepost = false
-    @State private var repostStatusMessage: String?
-    @State private var repostStatusIsError = false
     @State private var isShowingNoteOptionsSheet = false
     @State private var isShowingReportSheet = false
     @State private var isShowingTranslation = false
+    @State private var reactionSnapshot: NoteReactionEventSnapshot?
     private let reshareService = ResharePublishService()
     private let reactionPublishService = NoteReactionPublishService()
     private let reportPublishService = NoteReportPublishService()
-
-    private struct ReplyContextPresentation {
-        let parentItem: FeedItem
-        let snippet: String?
-        let hasImageBadge: Bool
-    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             if item.isRepost {
                 repostBanner
-                    .padding(.leading, 56)
+                    .padding(.leading, rowContentLeadingInset)
             }
 
             if shouldShowReplyContext, let replyContextPresentation {
                 replyContextRow(replyContextPresentation)
-                    .padding(.leading, 56)
+                    .padding(.leading, rowContentLeadingInset)
             }
 
-            HStack(alignment: .top, spacing: 12) {
-                profileAvatar
-
-                VStack(alignment: .leading, spacing: 6) {
-                    HStack(alignment: .firstTextBaseline, spacing: 6) {
-                        HStack(alignment: .firstTextBaseline, spacing: 6) {
-                            Text(item.displayName)
-                                .font(appSettings.appFont(.headline, weight: .semibold))
-                                .lineLimit(1)
-
-                            Text(item.handle)
-                                .font(appSettings.appFont(.subheadline))
-                                .foregroundStyle(mutedChromeColor)
-                                .lineLimit(1)
-                        }
-                        .contentShape(Rectangle())
-                        .onTapGesture {
-                            handleAuthorTap()
-                        }
-
-                        Spacer(minLength: 8)
-                            .frame(height: 28)
-                            .contentShape(Rectangle())
-                            .onTapGesture {
-                                onOpenThread?()
-                            }
-
-                        clientAttributionLabel
-
-                        Text(RelativeTimestampFormatter.shortString(from: item.displayEvent.createdAtDate))
-                            .font(appSettings.appFont(.caption1))
-                            .foregroundStyle(mutedChromeColor)
-                            .lineLimit(1)
-                            .contentShape(Rectangle())
-                            .onTapGesture {
-                                onOpenThread?()
-                            }
-
-                        noteOptionsButton
-                    }
-
-                    NoteContentView(
-                        event: item.displayEvent,
-                        reactionCount: showReactions ? visibleReactionCount : 0,
-                        commentCount: showReactions ? commentCount : 0,
-                        onHashtagTap: onHashtagTap,
-                        onProfileTap: onProfileTap,
-                        onReferencedEventTap: onReferencedEventTap
-                    )
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .contentShape(Rectangle())
-                        .gesture(
-                            TapGesture().onEnded {
-                                onOpenThread?()
-                            },
-                            including: .gesture
-                        )
-
-                    if showReactions {
-                        HStack(spacing: 14) {
-                            Button {
-                                if let onReplyTap {
-                                    onReplyTap()
-                                } else {
-                                    isShowingReplyComposer = true
-                                }
-                            } label: {
-                                HStack(spacing: 4) {
-                                    Image(systemName: "bubble.right")
-                                    if commentCount > 0 {
-                                        Text("\(commentCount)")
-                                            .font(appSettings.appFont(.footnote))
-                                    }
-                                }
-                                .frame(minWidth: 34, minHeight: 28, alignment: .leading)
-                            }
-                            .buttonStyle(.plain)
-                            .foregroundStyle(mutedChromeColor)
-                            .accessibilityLabel("Reply")
-
-                            Button {
-                                repostStatusMessage = nil
-                                repostStatusIsError = false
-                                isShowingReshareSheet = true
-                            } label: {
-                                Image(systemName: "arrow.2.squarepath")
-                                    .frame(minWidth: 34, minHeight: 28, alignment: .leading)
-                            }
-                            .buttonStyle(.plain)
-                            .foregroundStyle(mutedChromeColor)
-                            .accessibilityLabel("Re-share")
-
-                            ReactionButton(
-                                isLiked: isLikedByCurrentUser,
-                                isBonusReaction: isBonusReactionByCurrentUser,
-                                count: visibleReactionCount,
-                                bonusActiveColor: appSettings.primaryColor,
-                                inactiveColor: mutedChromeColor
-                            ) { bonusCount in
-                                Task {
-                                    await handleReactionTap(bonusCount: bonusCount)
-                                }
-                            }
-
-                            ShareLink(item: copyableNoteLink) {
-                                Image(systemName: "paperplane")
-                                    .frame(minWidth: 34, minHeight: 28, alignment: .leading)
-                            }
-                            .buttonStyle(.plain)
-                            .foregroundStyle(mutedChromeColor)
-                            .accessibilityLabel("Share")
-                        }
-                        .font(appSettings.appFont(.headline))
-                    }
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-            }
+            rowContent
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.top, 8)
@@ -190,11 +167,12 @@ struct FeedRowView: View {
             isPresented: $isShowingTranslation,
             text: noteTranslationText
         )
+        .onReceive(reactionStats.publisher(for: item.displayEventID)) { snapshot in
+            reactionSnapshot = snapshot
+        }
         .sheet(isPresented: $isShowingReshareSheet) {
             ReshareActionSheetView(
                 isWorking: isPublishingRepost,
-                statusMessage: repostStatusMessage,
-                statusIsError: repostStatusIsError,
                 onRepost: {
                     Task {
                         await publishRepost()
@@ -266,14 +244,183 @@ struct FeedRowView: View {
     }
 
     private var visibleReactionCount: Int {
-        reactionCount
+        reactionSnapshot?.reactionCount ?? reactionCount
+    }
+
+    private var resolvedIsLikedByCurrentUser: Bool {
+        reactionSnapshot?.isReactedByCurrentUser(currentPubkey: auth.currentAccount?.pubkey) ?? isLikedByCurrentUser
+    }
+
+    private var usesFullWidthNoteRows: Bool {
+        appSettings.fullWidthNoteRows
+    }
+
+    private var rowContentLeadingInset: CGFloat {
+        usesFullWidthNoteRows ? 0 : 56
+    }
+
+    @ViewBuilder
+    private var rowContent: some View {
+        if usesFullWidthNoteRows {
+            fullWidthRowContent
+        } else {
+            compactRowContent
+        }
+    }
+
+    private var compactRowContent: some View {
+        HStack(alignment: .top, spacing: 12) {
+            profileAvatar
+
+            VStack(alignment: .leading, spacing: 6) {
+                metadataHeader(alignment: .firstTextBaseline)
+                noteBodyContent
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+
+    private var fullWidthRowContent: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .center, spacing: 12) {
+                profileAvatar
+                metadataHeader(alignment: .firstTextBaseline)
+                    .frame(minHeight: 44, alignment: .center)
+            }
+
+            noteBodyContent
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func metadataHeader(alignment: VerticalAlignment) -> some View {
+        HStack(alignment: alignment, spacing: 6) {
+            HStack(alignment: alignment, spacing: 6) {
+                Text(item.displayName)
+                    .font(appSettings.appFont(.headline, weight: .semibold))
+                    .lineLimit(1)
+
+                Text(item.handle)
+                    .font(appSettings.appFont(.subheadline))
+                    .foregroundStyle(mutedChromeColor)
+                    .lineLimit(1)
+            }
+            .contentShape(Rectangle())
+            .onTapGesture {
+                handleAuthorTap()
+            }
+
+            Spacer(minLength: 8)
+                .frame(height: 28)
+                .contentShape(Rectangle())
+                .onTapGesture {
+                    onOpenThread?()
+                }
+
+            clientAttributionLabel
+
+            Text(RelativeTimestampFormatter.shortString(from: item.displayEvent.createdAtDate))
+                .font(appSettings.appFont(.caption1))
+                .foregroundStyle(mutedChromeColor)
+                .lineLimit(1)
+                .contentShape(Rectangle())
+                .onTapGesture {
+                    onOpenThread?()
+                }
+
+            noteOptionsButton
+        }
+    }
+
+    private var noteBodyContent: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            NoteContentView(
+                event: item.displayEvent,
+                reactionCount: showReactions ? visibleReactionCount : 0,
+                commentCount: showReactions ? commentCount : 0,
+                trustedMediaSharerPubkey: item.isRepost ? item.actorPubkey : nil,
+                onHashtagTap: onHashtagTap,
+                onProfileTap: onProfileTap,
+                onReferencedEventTap: onReferencedEventTap
+            )
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .contentShape(Rectangle())
+            .gesture(
+                TapGesture().onEnded {
+                    onOpenThread?()
+                },
+                including: .gesture
+            )
+
+            if showReactions {
+                reactionBar
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private var reactionBar: some View {
+        HStack(spacing: 14) {
+            Button {
+                if let onReplyTap {
+                    onReplyTap()
+                } else {
+                    isShowingReplyComposer = true
+                }
+            } label: {
+                HStack(spacing: 4) {
+                    Image(systemName: "bubble.right")
+                    if commentCount > 0 {
+                        Text("\(commentCount)")
+                            .font(appSettings.appFont(.footnote))
+                    }
+                }
+                .frame(minWidth: 34, minHeight: 28, alignment: .leading)
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(mutedChromeColor)
+            .accessibilityLabel("Reply")
+
+            Button {
+                isShowingReshareSheet = true
+            } label: {
+                Image(systemName: "arrow.2.squarepath")
+                    .frame(minWidth: 34, minHeight: 28, alignment: .leading)
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(mutedChromeColor)
+            .accessibilityLabel("Re-share")
+
+            ReactionButton(
+                isLiked: resolvedIsLikedByCurrentUser,
+                isBonusReaction: isBonusReactionByCurrentUser,
+                count: visibleReactionCount,
+                bonusActiveColor: appSettings.primaryColor,
+                inactiveColor: mutedChromeColor
+            ) { bonusCount in
+                Task {
+                    await handleReactionTap(bonusCount: bonusCount)
+                }
+            }
+
+            ShareLink(item: copyableNoteLink) {
+                Image(systemName: "paperplane")
+                    .frame(minWidth: 34, minHeight: 28, alignment: .leading)
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(mutedChromeColor)
+            .accessibilityLabel("Share")
+        }
+        .font(appSettings.appFont(.headline))
     }
 
     private var isBonusReactionByCurrentUser: Bool {
-        reactionStats.currentUserReaction(
-            for: item.displayEventID,
-            currentPubkey: auth.currentAccount?.pubkey
-        )?.bonusCount ?? 0 > 0
+        let currentReaction = reactionSnapshot?.currentUserReaction(currentPubkey: auth.currentAccount?.pubkey)
+            ?? reactionStats.currentUserReaction(
+                for: item.displayEventID,
+                currentPubkey: auth.currentAccount?.pubkey
+            )
+        return currentReaction?.bonusCount ?? 0 > 0
     }
 
     private var mutedChromeColor: Color {
@@ -397,19 +544,8 @@ struct FeedRowView: View {
         return directReplyTargetID != suppressedTargetID
     }
 
-    private var replyContextPresentation: ReplyContextPresentation? {
-        guard let parentItem = item.replyTargetFeedItem else { return nil }
-
-        let imageURLs = NoteContentParser.imageURLs(in: parentItem.displayEvent)
-        let hasImageBadge = !imageURLs.isEmpty
-        let snippet = replyContextSnippet(for: parentItem.displayEvent, imageURLs: imageURLs)
-
-        guard snippet != nil || hasImageBadge else { return nil }
-        return ReplyContextPresentation(
-            parentItem: parentItem,
-            snippet: snippet,
-            hasImageBadge: hasImageBadge
-        )
+    private var replyContextPresentation: ReplyContextPreviewPresentation? {
+        ReplyContextPreviewPresentation.make(for: item)
     }
 
     private var shouldAllowReplyContextNavigation: Bool {
@@ -422,75 +558,14 @@ struct FeedRowView: View {
     }
 
     @ViewBuilder
-    private func replyContextRow(_ presentation: ReplyContextPresentation) -> some View {
-        let content = HStack(spacing: 6) {
-            Image(systemName: "arrow.turn.up.left")
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(mutedChromeColor)
-
-            Text("Replying to")
-                .font(.caption)
-                .foregroundStyle(mutedChromeColor)
-                .lineLimit(1)
-
-            AvatarView(
-                url: presentation.parentItem.avatarURL,
-                fallback: presentation.parentItem.displayName,
-                size: 18
-            )
-
-            if let snippet = presentation.snippet {
-                Text(snippet)
-                    .font(.caption)
-                    .foregroundStyle(mutedChromeColor)
-                    .lineLimit(1)
-            }
-
-            if presentation.hasImageBadge {
-                Text("image")
-                    .font(.caption2.weight(.semibold))
-                    .foregroundStyle(mutedChromeColor)
-                    .padding(.horizontal, 6)
-                    .padding(.vertical, 2)
-                    .background(
-                        Capsule()
-                            .fill(appSettings.themePalette.tertiaryFill)
-                    )
-            }
-
-            Spacer(minLength: 0)
-        }
-
-        if let onReferencedEventTap,
-           shouldAllowReplyContextNavigation {
-            Button {
-                onReferencedEventTap(presentation.parentItem.threadNavigationItem)
-            } label: {
-                content
-            }
-            .buttonStyle(.plain)
-        } else {
-            content
-        }
-    }
-
-    private func replyContextSnippet(for event: NostrEvent, imageURLs: [URL]) -> String? {
-        var cleanedContent = event.content
-        for imageURL in imageURLs {
-            cleanedContent = cleanedContent.replacingOccurrences(of: imageURL.absoluteString, with: " ")
-        }
-
-        let normalized = cleanedContent
-            .replacingOccurrences(of: "\r\n", with: "\n")
-            .replacingOccurrences(of: "\r", with: "\n")
-            .replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-
-        guard !normalized.isEmpty else { return nil }
-        guard normalized.count > 72 else { return normalized }
-
-        let endIndex = normalized.index(normalized.startIndex, offsetBy: 72)
-        return String(normalized[..<endIndex]).trimmingCharacters(in: .whitespacesAndNewlines) + "..."
+    private func replyContextRow(_ presentation: ReplyContextPreviewPresentation) -> some View {
+        ReplyContextPreviewRow(
+            presentation: presentation,
+            foregroundStyle: mutedChromeColor,
+            onTap: shouldAllowReplyContextNavigation ? {
+                onReferencedEventTap?(presentation.parentItem.threadNavigationItem)
+            } : nil
+        )
     }
 
     private var noteOptionsButton: some View {
@@ -576,25 +651,19 @@ struct FeedRowView: View {
     private func publishRepost() async {
         guard !isPublishingRepost else { return }
         isPublishingRepost = true
-        repostStatusMessage = nil
-        repostStatusIsError = false
         defer { isPublishingRepost = false }
 
         do {
-            let relayCount = try await reshareService.publishRepost(
+            _ = try await reshareService.publishRepost(
                 of: item.displayEvent,
                 currentNsec: auth.currentNsec,
                 writeRelayURLs: effectiveWriteRelayURLs,
                 relayHintURL: effectiveReadRelayURLs.first
             )
-            repostStatusMessage = "Reposted to \(relayCount) source\(relayCount == 1 ? "" : "s")."
-            repostStatusIsError = false
-
-            try? await Task.sleep(nanoseconds: 450_000_000)
             isShowingReshareSheet = false
         } catch {
-            repostStatusMessage = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
-            repostStatusIsError = true
+            let errorMessage = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+            toastCenter.show(errorMessage, style: .error, duration: 2.8)
         }
     }
 

@@ -68,6 +68,24 @@ struct SettingsAppearanceView: View {
                 .padding(.vertical, 2)
             }
 
+            Section("Customize") {
+                premiumCustomizationRow(
+                    title: "Themes",
+                    subtitle: premiumThemeSummary,
+                    systemImage: "sparkles"
+                ) {
+                    SettingsFlowPlusThemesView()
+                }
+
+                premiumCustomizationRow(
+                    title: "Typography",
+                    subtitle: premiumTypographySummary,
+                    systemImage: "textformat"
+                ) {
+                    SettingsFlowPlusTypographyView()
+                }
+            }
+
             Section("Font Size") {
                 VStack(alignment: .leading, spacing: 8) {
                     HStack(spacing: 8) {
@@ -92,12 +110,49 @@ struct SettingsAppearanceView: View {
                 .padding(.vertical, 2)
             }
 
+            Section("Feed Layout") {
+                SettingsToggleRow(
+                    title: "Full Width Notes",
+                    isOn: Binding(
+                        get: { appSettings.fullWidthNoteRows },
+                        set: { appSettings.fullWidthNoteRows = $0 }
+                    ),
+                    footer: "Show note content at full width by moving the profile image into the header row instead of the left gutter."
+                )
+            }
+
             Section("Preview") {
                 notePreviewCard
             }
         }
         .navigationTitle("Appearance")
         .navigationBarTitleDisplayMode(.inline)
+    }
+
+    private var hasFlowPlusCustomizationAccess: Bool {
+        appSettings.hasFlowPlusCustomizationAccess
+    }
+
+    private var premiumThemeSummary: String {
+        guard hasFlowPlusCustomizationAccess else {
+            return "Try it free for 7 days"
+        }
+
+        if appSettings.activeTheme.requiresFlowPlus {
+            return appSettings.activeTheme.title
+        }
+        return "Choose a premium theme"
+    }
+
+    private var premiumTypographySummary: String {
+        guard hasFlowPlusCustomizationAccess else {
+            return "Try it free for 7 days"
+        }
+
+        if appSettings.activeFontOption.requiresFlowPlus {
+            return appSettings.activeFontOption.title
+        }
+        return "Choose a premium font"
     }
 
     private var notePreviewCard: some View {
@@ -107,30 +162,7 @@ struct SettingsAppearanceView: View {
                 .foregroundStyle(.secondary)
 
             VStack(alignment: .leading, spacing: 10) {
-                HStack(spacing: 10) {
-                    Circle()
-                        .fill(appSettings.themePalette.tertiaryFill)
-                        .overlay {
-                            Text("A")
-                                .font(.caption.weight(.semibold))
-                                .foregroundStyle(.secondary)
-                        }
-                        .frame(width: 32, height: 32)
-
-                    VStack(alignment: .leading, spacing: 1) {
-                        Text("alex")
-                            .font(appSettings.appFont(.subheadline, weight: .semibold))
-                        Text("@alex")
-                            .font(appSettings.appFont(.caption1))
-                            .foregroundStyle(.secondary)
-                    }
-
-                    Spacer(minLength: 0)
-
-                    Text("2 hr")
-                        .font(appSettings.appFont(.caption2))
-                        .foregroundStyle(.secondary)
-                }
+                previewHeader
 
                 NoteContentView(event: Self.previewEvent)
             }
@@ -138,9 +170,128 @@ struct SettingsAppearanceView: View {
             .padding(12)
             .background(appSettings.themePalette.secondaryBackground, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
             .environment(\.dynamicTypeSize, appSettings.dynamicTypeSize)
-            .id("\(appSettings.fontSize.rawValue)-\(appSettings.activeFontOption.rawValue)")
+            .id("\(appSettings.fontSize.rawValue)-\(appSettings.activeFontOption.rawValue)-\(appSettings.fullWidthNoteRows)")
         }
         .padding(.vertical, 2)
+    }
+
+    @ViewBuilder
+    private var previewHeader: some View {
+        if appSettings.fullWidthNoteRows {
+            HStack(alignment: .top, spacing: 10) {
+                previewAvatar(size: 32)
+
+                VStack(alignment: .leading, spacing: 6) {
+                    HStack(alignment: .firstTextBaseline, spacing: 6) {
+                        Text("alex")
+                            .font(appSettings.appFont(.subheadline, weight: .semibold))
+                        Text("@alex")
+                            .font(appSettings.appFont(.caption1))
+                            .foregroundStyle(.secondary)
+
+                        Spacer(minLength: 0)
+
+                        Text("2 hr")
+                            .font(appSettings.appFont(.caption2))
+                            .foregroundStyle(.secondary)
+                    }
+                }
+            }
+        } else {
+            HStack(spacing: 10) {
+                previewAvatar(size: 32)
+
+                VStack(alignment: .leading, spacing: 1) {
+                    Text("alex")
+                        .font(appSettings.appFont(.subheadline, weight: .semibold))
+                    Text("@alex")
+                        .font(appSettings.appFont(.caption1))
+                        .foregroundStyle(.secondary)
+                }
+
+                Spacer(minLength: 0)
+
+                Text("2 hr")
+                    .font(appSettings.appFont(.caption2))
+                    .foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    private func previewAvatar(size: CGFloat) -> some View {
+        Circle()
+            .fill(appSettings.themePalette.tertiaryFill)
+            .overlay {
+                Text("A")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+            }
+            .frame(width: size, height: size)
+    }
+
+    @ViewBuilder
+    private func premiumCustomizationRow<Destination: View>(
+        title: String,
+        subtitle: String,
+        systemImage: String,
+        @ViewBuilder destination: () -> Destination
+    ) -> some View {
+        let row = premiumCustomizationRowContent(
+            title: title,
+            subtitle: subtitle,
+            systemImage: systemImage,
+            isUnlocked: hasFlowPlusCustomizationAccess
+        )
+
+        if hasFlowPlusCustomizationAccess {
+            NavigationLink {
+                destination()
+            } label: {
+                row
+            }
+        } else {
+            NavigationLink {
+                SettingsFlowPlusView()
+            } label: {
+                row
+            }
+        }
+    }
+
+    private func premiumCustomizationRowContent(
+        title: String,
+        subtitle: String,
+        systemImage: String,
+        isUnlocked: Bool
+    ) -> some View {
+        HStack(spacing: 12) {
+            Image(systemName: systemImage)
+                .font(.title3.weight(.semibold))
+                .foregroundStyle(appSettings.primaryColor)
+                .frame(width: 28, height: 28)
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title)
+                    .font(appSettings.appFont(.body, weight: .regular))
+                    .foregroundStyle(.primary)
+
+                Text(subtitle)
+                    .font(appSettings.appFont(.footnote))
+                    .foregroundStyle(appSettings.themePalette.mutedForeground)
+            }
+
+            Spacer(minLength: 8)
+
+            if isUnlocked {
+                Image(systemName: "chevron.right")
+                    .font(.footnote.weight(.semibold))
+                    .foregroundStyle(.tertiary)
+            } else {
+                Image(systemName: "lock.fill")
+                    .font(.footnote.weight(.semibold))
+                    .foregroundStyle(appSettings.themePalette.mutedForeground)
+            }
+        }
     }
 
     private func themeOptionCard(for option: AppThemeOption) -> some View {

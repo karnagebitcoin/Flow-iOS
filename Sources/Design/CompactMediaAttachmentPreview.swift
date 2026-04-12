@@ -2,6 +2,14 @@ import AVFoundation
 import SwiftUI
 
 struct CompactMediaAttachmentPreview: View {
+    private static let hlsMimeTypes: Set<String> = [
+        "application/vnd.apple.mpegurl",
+        "application/x-mpegurl",
+        "application/mpegurl",
+        "audio/mpegurl",
+        "audio/x-mpegurl"
+    ]
+
     private enum Kind {
         case image
         case video
@@ -35,8 +43,8 @@ struct CompactMediaAttachmentPreview: View {
         }
     }
 
-    static let thumbnailWidth: CGFloat = 108
-    static let thumbnailHeight: CGFloat = 88
+    static let thumbnailWidth: CGFloat = 116
+    static let thumbnailHeight: CGFloat = 104
 
     let url: URL
     let mimeType: String
@@ -65,7 +73,9 @@ struct CompactMediaAttachmentPreview: View {
         if normalizedMIMEType.hasPrefix("image/") || [".jpg", ".jpeg", ".png", ".webp", ".gif", ".heic", ".bmp", ".svg"].contains(where: path.hasSuffix) {
             return .image
         }
-        if normalizedMIMEType.hasPrefix("video/") || [".mp4", ".mov", ".m4v", ".webm", ".mkv"].contains(where: path.hasSuffix) {
+        if normalizedMIMEType.hasPrefix("video/") ||
+            Self.hlsMimeTypes.contains(normalizedMIMEType) ||
+            [".mp4", ".mov", ".m4v", ".webm", ".mkv", ".m3u8"].contains(where: path.hasSuffix) {
             return .video
         }
         if normalizedMIMEType.hasPrefix("audio/") || [".mp3", ".m4a", ".aac", ".wav", ".ogg"].contains(where: path.hasSuffix) {

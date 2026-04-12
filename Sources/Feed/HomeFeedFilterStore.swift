@@ -15,7 +15,7 @@ final class HomeFeedFilterStore: @unchecked Sendable {
     private let legacyShowKindsKey = "x21.home.showKinds"
     private let legacyShowKindsVersionKey = "x21.home.showKindsVersion"
     private let legacyMediaOnlyKey = "x21.home.mediaOnly"
-    private let showKindsVersion = 2
+    private let showKindsVersion = 3
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
@@ -37,9 +37,6 @@ final class HomeFeedFilterStore: @unchecked Sendable {
 
             if storedVersion < 1 {
                 kinds.append(contentsOf: [FeedKindFilters.video, FeedKindFilters.shortVideo])
-            }
-            if storedVersion < 2 && kinds.contains(FeedKindFilters.poll) {
-                kinds.append(FeedKindFilters.legacyZapPoll)
             }
             migratedKinds = FeedKindFilters.normalizedKinds(kinds)
         } else {

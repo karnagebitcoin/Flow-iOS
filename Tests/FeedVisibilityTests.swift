@@ -15,9 +15,12 @@ final class FeedVisibilityTests: XCTestCase {
         XCTAssertEqual(authors, [currentUserPubkey, hex("b"), hex("c")])
     }
 
-    func testProfileFeedRequestedKindsIncludePollKinds() {
+    func testProfileFeedRequestedKindsIncludeStandardPollsAndHideZapPolls() {
         XCTAssertTrue(ProfileViewModel.requestedFeedKinds.contains(FeedKindFilters.poll))
-        XCTAssertTrue(ProfileViewModel.requestedFeedKinds.contains(FeedKindFilters.legacyZapPoll))
+        XCTAssertFalse(ProfileViewModel.requestedFeedKinds.contains(FeedKindFilters.legacyZapPoll))
+        XCTAssertEqual(FeedKindFilters.pollKinds, [FeedKindFilters.poll])
+        XCTAssertFalse(FeedKindFilters.supportedKinds.contains(FeedKindFilters.legacyZapPoll))
+        XCTAssertFalse(FeedKindFilters.normalizedKinds([FeedKindFilters.poll, FeedKindFilters.legacyZapPoll]).contains(FeedKindFilters.legacyZapPoll))
     }
 }
 

@@ -22,7 +22,8 @@ enum FeedKindFilters {
     static let relayReview = 31987
     static let musicTrack = 36787
 
-    static let pollKinds = [poll, legacyZapPoll]
+    static let hiddenKinds = [legacyZapPoll]
+    static let pollKinds = [poll]
 
     static let options: [FeedKindFilterOption] = [
         FeedKindFilterOption(id: "posts", title: "Posts", kinds: [shortTextNote, comment]),
@@ -44,7 +45,6 @@ enum FeedKindFilters {
         video,
         shortVideo,
         poll,
-        legacyZapPoll,
         comment,
         voice,
         voiceComment,
@@ -54,7 +54,11 @@ enum FeedKindFilters {
     ]
 
     static func normalizedKinds(_ kinds: [Int]) -> [Int] {
-        let uniqueKinds = Array(Set(kinds))
+        if kinds.isEmpty {
+            return supportedKinds
+        }
+
+        let uniqueKinds = Array(Set(kinds).subtracting(hiddenKinds))
         if uniqueKinds.isEmpty {
             return supportedKinds
         }

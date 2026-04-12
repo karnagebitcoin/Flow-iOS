@@ -1,0 +1,241 @@
+import Foundation
+
+@MainActor
+final class WebOfTrustStore: ObservableObject {
+    static let shared = WebOfTrustStore()
+
+    @Published private(set) var orderedTrustedPubkeys: [String] = []
+    @Published private(set) var isLoading = false
+
+    private struct Session: Equatable {
+        let accountPubkey: String
+        let relayURLs: [URL]
+        let hopCount: Int
+    }
+
+    private let service: NostrFeedService
+    private let cache: WebOfTrustGraphCache
+    private var session: Session?
+    private var rebuildTask: Task<Void, Never>?
+
+    private let maxTrustedPubkeys = 1_200
+    private let expansionBatchSize = 12
+    private static let cacheMaxAge: TimeInterval = 60 * 60 * 6
+
+    init(
+        service: NostrFeedService = NostrFeedService(),
+        cache: WebOfTrustGraphCache = .shared
+    ) {
+        self.service = service
+        self.cache = cache
+    }
+
+    deinit {
+        rebuildTask?.cancel()
+    }
+
+    func configure(accountPubkey: String?, relayURLs: [URL], hopCount: Int) {
+        let normalizedAccount = normalizePubkey(accountPubkey)
+        let normalizedRelays = normalizedRelayURLs(relayURLs)
+        let clampedHops = AppSettingsStore.clampedWebOfTrustHops(hopCount)
+
+        guard !normalizedAccount.isEmpty, !normalizedRelays.isEmpty else {
+            session = nil
+            rebuildTask?.cancel()
+            orderedTrustedPubkeys = []
+            isLoading = false
+            return
+        }
+
+        let nextSession = Session(
+            accountPubkey: normalizedAccount,
+            relayURLs: normalizedRelays,
+            hopCount: clampedHops
+        )
+
+        guard nextSession != session else { return }
+
+        session = nextSession
+        orderedTrustedPubkeys = directFollowings(for: normalizedAccount)
+        isLoading = true
+
+        Task { [weak self] in
+            await self?.applyCachedGraphIfAvailable(for: nextSession)
+        }
+
+        rebuildGraph(for: nextSession)
+    }
+
+    func refresh() {
+        guard let session else { return }
+        orderedTrustedPubkeys = directFollowings(for: session.accountPubkey)
+        isLoading = true
+        rebuildGraph(for: session)
+    }
+
+    private func rebuildGraph(for session: Session) {
+        rebuildTask?.cancel()
+        rebuildTask = Task { [weak self] in
+            guard let self else { return }
+            let graph = await self.buildGraph(for: session)
+            guard !Task.isCancelled else { return }
+
+            await self.cache.storePubkeys(graph, for: self.cacheKey(for: session))
+
+            await MainActor.run {
+                guard self.session == session else { return }
+                self.orderedTrustedPubkeys = graph
+                self.isLoading = false
+            }
+        }
+    }
+
+    private func applyCachedGraphIfAvailable(for session: Session) async {
+        guard let cached = await cache.cachedPubkeys(
+            for: cacheKey(for: session),
+            maxAge: Self.cacheMaxAge
+        ) else {
+            return
+        }
+
+        await MainActor.run {
+            guard self.session == session else { return }
+            if cached.count > self.orderedTrustedPubkeys.count {
+                self.orderedTrustedPubkeys = cached
+            }
+        }
+    }
+
+    private func buildGraph(for session: Session) async -> [String] {
+        var visited: Set<String> = [session.accountPubkey]
+        var trusted: [String] = []
+
+        var frontier = directFollowings(for: session.accountPubkey)
+        if frontier.isEmpty {
+            frontier = await fetchFollowingsForExpansion(
+                pubkey: session.accountPubkey,
+                relayURLs: session.relayURLs
+            )
+        }
+
+        frontier = normalizedOrderedPubkeys(frontier).filter { visited.insert($0).inserted }
+        trusted.append(contentsOf: frontier)
+
+        guard session.hopCount > 1, !frontier.isEmpty else {
+            return Array(trusted.prefix(maxTrustedPubkeys))
+        }
+
+        for _ in 2...session.hopCount {
+            guard !Task.isCancelled, !frontier.isEmpty, trusted.count < maxTrustedPubkeys else { break }
+
+            var nextFrontier: [String] = []
+            let batches = chunked(frontier, into: expansionBatchSize)
+
+            for batch in batches {
+                guard !Task.isCancelled, trusted.count < maxTrustedPubkeys else { break }
+
+                let fetchedFollowings = await withTaskGroup(of: [String].self) { group in
+                    for pubkey in batch {
+                        group.addTask { [service] in
+                            if let cached = await service.cachedFollowListSnapshot(pubkey: pubkey) {
+                                return cached.followedPubkeys
+                            }
+                            return await self.fetchFollowingsForExpansion(pubkey: pubkey, relayURLs: session.relayURLs)
+                        }
+                    }
+
+                    var aggregated: [[String]] = []
+                    for await followings in group {
+                        aggregated.append(followings)
+                    }
+                    return aggregated
+                }
+
+                for followings in fetchedFollowings {
+                    for pubkey in followings {
+                        let normalized = normalizePubkey(pubkey)
+                        guard !normalized.isEmpty, visited.insert(normalized).inserted else { continue }
+                        trusted.append(normalized)
+                        nextFrontier.append(normalized)
+
+                        if trusted.count >= maxTrustedPubkeys {
+                            break
+                        }
+                    }
+
+                    if trusted.count >= maxTrustedPubkeys {
+                        break
+                    }
+                }
+            }
+
+            frontier = nextFrontier
+        }
+
+        return trusted
+    }
+
+    private func fetchFollowingsForExpansion(pubkey: String, relayURLs: [URL]) async -> [String] {
+        (try? await service.fetchFollowings(relayURLs: relayURLs, pubkey: pubkey)) ?? []
+    }
+
+    private func directFollowings(for accountPubkey: String) -> [String] {
+        normalizedOrderedPubkeys(Array(FollowStore.shared.followedPubkeys))
+            .filter { $0 != accountPubkey }
+    }
+
+    private func cacheKey(for session: Session) -> String {
+        let relaySignature = session.relayURLs
+            .map { $0.absoluteString.lowercased() }
+            .joined(separator: ",")
+        return "\(session.accountPubkey)|\(session.hopCount)|\(relaySignature)"
+    }
+
+    private func normalizePubkey(_ value: String?) -> String {
+        (value ?? "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+    }
+
+    private func normalizedOrderedPubkeys(_ pubkeys: [String]) -> [String] {
+        var seen = Set<String>()
+        var ordered: [String] = []
+
+        for pubkey in pubkeys {
+            let normalized = normalizePubkey(pubkey)
+            guard !normalized.isEmpty, seen.insert(normalized).inserted else { continue }
+            ordered.append(normalized)
+        }
+
+        return ordered
+    }
+
+    private func normalizedRelayURLs(_ relayURLs: [URL]) -> [URL] {
+        var seen = Set<String>()
+        var ordered: [URL] = []
+
+        for relayURL in relayURLs {
+            let normalized = relayURL.absoluteString.lowercased()
+            guard seen.insert(normalized).inserted else { continue }
+            ordered.append(relayURL)
+        }
+
+        return ordered
+    }
+
+    private func chunked(_ values: [String], into size: Int) -> [[String]] {
+        guard size > 0, !values.isEmpty else { return [] }
+
+        var result: [[String]] = []
+        result.reserveCapacity((values.count + size - 1) / size)
+
+        var index = 0
+        while index < values.count {
+            let nextIndex = min(index + size, values.count)
+            result.append(Array(values[index..<nextIndex]))
+            index = nextIndex
+        }
+
+        return result
+    }
+}

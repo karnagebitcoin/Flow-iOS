@@ -68,7 +68,15 @@ enum NoteContentParser {
     ]
 
     private static let videoExtensions: Set<String> = [
-        "mp4", "webm", "ogg", "mov"
+        "mp4", "webm", "ogg", "mov", "m3u8"
+    ]
+
+    private static let hlsMimeTypes: Set<String> = [
+        "application/vnd.apple.mpegurl",
+        "application/x-mpegurl",
+        "application/mpegurl",
+        "audio/mpegurl",
+        "audio/x-mpegurl"
     ]
 
     private static let audioExtensions: Set<String> = [
@@ -725,9 +733,12 @@ enum NoteContentParser {
 
     private static func classifyMediaType(urlString: String, mimeType: String?) -> ParsedMediaType? {
         if let mimeType {
-            if mimeType.hasPrefix("image/") { return .image }
-            if mimeType.hasPrefix("video/") { return .video }
-            if mimeType.hasPrefix("audio/") { return .audio }
+            let normalizedMIMEType = mimeType.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+            if normalizedMIMEType.hasPrefix("image/") { return .image }
+            if normalizedMIMEType.hasPrefix("video/") || hlsMimeTypes.contains(normalizedMIMEType) {
+                return .video
+            }
+            if normalizedMIMEType.hasPrefix("audio/") { return .audio }
         }
 
         guard let url = URL(string: urlString) else { return nil }

@@ -51,19 +51,23 @@ final class AppThemeOptionTests: XCTestCase {
         )
         assertColor(
             AppThemeOption.dracula.palette.background,
-            matches: UIColor(red: 0.157, green: 0.165, blue: 0.212, alpha: 1)
+            matches: UIColor(red: 44.0 / 255.0, green: 45.0 / 255.0, blue: 60.0 / 255.0, alpha: 1)
         )
         assertColor(
             AppThemeOption.dracula.palette.chromeBackground,
-            matches: UIColor(red: 0.129, green: 0.133, blue: 0.173, alpha: 1)
+            matches: UIColor(red: 43.0 / 255.0, green: 44.0 / 255.0, blue: 58.0 / 255.0, alpha: 1)
         )
         assertColor(
             AppThemeOption.dracula.palette.secondaryBackground,
             matches: UIColor(red: 0.204, green: 0.216, blue: 0.275, alpha: 1)
         )
         assertColor(
+            AppThemeOption.dracula.palette.navigationBackground,
+            matches: UIColor(red: 32.0 / 255.0, green: 32.0 / 255.0, blue: 43.0 / 255.0, alpha: 1)
+        )
+        assertColor(
             AppThemeOption.dracula.palette.sheetBackground,
-            matches: UIColor(red: 0.157, green: 0.165, blue: 0.212, alpha: 1)
+            matches: UIColor(red: 44.0 / 255.0, green: 45.0 / 255.0, blue: 60.0 / 255.0, alpha: 1)
         )
         assertColor(
             AppThemeOption.dracula.palette.sheetCardBackground,
@@ -485,6 +489,23 @@ final class AppThemeOptionTests: XCTestCase {
             Bundle.main.url(forResource: "sakura-share-bg", withExtension: "json"),
             "Missing bundled Sakura QR share background"
         )
+    }
+
+    @MainActor
+    func testFullWidthNoteRowsPersistsAcrossStoreReload() {
+        let defaults = UserDefaults(suiteName: #function)!
+        defaults.removePersistentDomain(forName: #function)
+        let authStore = AuthStore(defaults: defaults)
+        let pubkey = String(repeating: "a", count: 64)
+
+        let settings = AppSettingsStore(defaults: defaults, authStore: authStore)
+        settings.configure(accountPubkey: pubkey)
+        settings.fullWidthNoteRows = true
+
+        let reloaded = AppSettingsStore(defaults: defaults, authStore: authStore)
+        reloaded.configure(accountPubkey: pubkey)
+
+        XCTAssertTrue(reloaded.fullWidthNoteRows)
     }
 
     private func assertColor(

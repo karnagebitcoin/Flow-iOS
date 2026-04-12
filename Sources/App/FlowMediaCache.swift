@@ -72,6 +72,28 @@ struct FlowMediaFetchedResponse: Sendable {
     let contentType: String?
 }
 
+final class FlowMediaAspectRatioCache {
+    static let shared = FlowMediaAspectRatioCache()
+
+    private let cache = NSCache<NSURL, NSNumber>()
+
+    private init() {
+        cache.countLimit = 512
+    }
+
+    func ratio(for url: URL) -> CGFloat? {
+        guard let cached = cache.object(forKey: url as NSURL) else { return nil }
+        let ratio = CGFloat(truncating: cached)
+        guard ratio.isFinite, ratio > 0 else { return nil }
+        return ratio
+    }
+
+    func insert(_ ratio: CGFloat, for url: URL) {
+        guard ratio.isFinite, ratio > 0 else { return }
+        cache.setObject(NSNumber(value: Double(ratio)), forKey: url as NSURL)
+    }
+}
+
 private actor FlowMediaFailureBackoff {
     private struct Entry {
         var failureCount: Int
@@ -254,6 +276,20 @@ actor FlowImageCache {
         await image(for: url, tracking: .tracked)
     }
 
+    func aspectRatio(for url: URL) async -> CGFloat? {
+        if let cachedRatio = FlowMediaAspectRatioCache.shared.ratio(for: url) {
+            return cachedRatio
+        }
+
+        guard let data = await data(for: url, tracking: .untracked, countsAsRequest: false),
+              let ratio = Self.imageAspectRatio(from: data) else {
+            return nil
+        }
+
+        FlowMediaAspectRatioCache.shared.insert(ratio, for: url)
+        return ratio
+    }
+
     func data(for url: URL) async -> Data? {
         await data(for: url, tracking: .tracked, countsAsRequest: true)
     }
@@ -275,6 +311,10 @@ actor FlowImageCache {
         let cacheKey = url as NSURL
         recordRequestIfNeeded(tracking)
         if let cached = memoryCache.object(forKey: cacheKey) {
+            if FlowMediaAspectRatioCache.shared.ratio(for: url) == nil,
+               let ratio = Self.aspectRatio(for: cached) {
+                FlowMediaAspectRatioCache.shared.insert(ratio, for: url)
+            }
             recordCacheHit(
                 .imageMemory,
                 byteCount: encodedByteCount(for: cacheKey),
@@ -294,6 +334,9 @@ actor FlowImageCache {
             return nil
         }
 
+        if let ratio = Self.imageAspectRatio(from: data) ?? Self.aspectRatio(for: image) {
+            FlowMediaAspectRatioCache.shared.insert(ratio, for: url)
+        }
         memoryCache.setObject(image, forKey: cacheKey, cost: memoryCost(for: image))
         return image
     }
@@ -680,7 +723,7 @@ actor FlowImageCache {
 
     private static func isLikelyVideoURL(_ url: URL) -> Bool {
         switch url.pathExtension.lowercased() {
-        case "mp4", "mov", "m4v", "webm", "mkv":
+        case "mp4", "mov", "m4v", "webm", "mkv", "m3u8":
             return true
         default:
             return false
@@ -695,6 +738,32 @@ actor FlowImageCache {
             .trimmingCharacters(in: .whitespacesAndNewlines)
             .lowercased()
         return normalized?.isEmpty == true ? nil : normalized
+    }
+
+    private static func imageAspectRatio(from data: Data) -> CGFloat? {
+        guard let source = CGImageSourceCreateWithData(data as CFData, nil),
+              let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any],
+              var width = (properties[kCGImagePropertyPixelWidth] as? NSNumber).map({ CGFloat(truncating: $0) }),
+              var height = (properties[kCGImagePropertyPixelHeight] as? NSNumber).map({ CGFloat(truncating: $0) }) else {
+            return nil
+        }
+
+        if let orientationValue = properties[kCGImagePropertyOrientation] as? NSNumber,
+           let orientation = CGImagePropertyOrientation(rawValue: UInt32(orientationValue.intValue)),
+           orientation.swapsDimensions {
+            swap(&width, &height)
+        }
+
+        return clampedAspectRatio(width: width, height: height)
+    }
+
+    private static func aspectRatio(for image: UIImage) -> CGFloat? {
+        clampedAspectRatio(width: image.size.width, height: image.size.height)
+    }
+
+    private static func clampedAspectRatio(width: CGFloat, height: CGFloat) -> CGFloat? {
+        guard width.isFinite, height.isFinite, width > 0, height > 0 else { return nil }
+        return min(max(width / height, 0.28), 3.2)
     }
 
     private static func hasSupportedImageSignature(_ data: Data) -> Bool {
@@ -783,6 +852,17 @@ actor FlowImageCache {
             return makeFetchedResponse(data: data, response: response)
         } catch {
             return nil
+        }
+    }
+}
+
+private extension CGImagePropertyOrientation {
+    var swapsDimensions: Bool {
+        switch self {
+        case .left, .leftMirrored, .right, .rightMirrored:
+            return true
+        default:
+            return false
         }
     }
 }

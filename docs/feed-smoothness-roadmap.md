@@ -27,6 +27,29 @@ The current gap is that Halo often has the raw event at paint time, but not all 
 
 Primal likely feels smoother because more of this work is already done before the client paints the row.
 
+## April 2026 Home Feed Review
+
+Latest code review of the home feed points to four concrete causes behind the "jittery" feel:
+
+1. Scroll position currently mutates top-level feed state on every offset change.
+   This causes `HomeFeedView` to re-evaluate while the list is moving.
+2. The top navigation bar currently hides and shows by changing the list's layout height during a drag.
+   This makes the viewport feel like it is shifting under the finger.
+3. Reaction state still fans out broadly across the feed as rows appear and reaction batches land.
+4. Several note subviews still upgrade after first paint, including mentions, custom emoji, link previews, and embedded referenced notes.
+
+### Immediate priority
+
+The first two items should be fixed first.
+
+They are the most likely sources of the "feed fights my scroll" feeling because they affect the entire scroll surface rather than just individual rows.
+
+### Current action
+
+- document the root causes here so future feed work stays grounded
+- reduce scroll tracking to threshold-crossing state only
+- keep the top navigation overlaid on the list so hide/show no longer resizes the scrolling viewport
+
 ## What We Have Today
 
 ### Existing strengths

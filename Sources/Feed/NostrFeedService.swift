@@ -828,6 +828,136 @@ struct NostrFeedService: Sendable {
         return snapshot?.followedPubkeys ?? []
     }
 
+    func fetchKnownFollowers(
+        relayURLs: [URL],
+        profilePubkey: String,
+        candidatePubkeys: [String],
+        limit: Int = 5,
+        fetchTimeout: TimeInterval = 4,
+        relayFetchMode: RelayFetchMode = .allRelays
+    ) async -> [String] {
+        let normalizedProfilePubkey = normalizePubkey(profilePubkey)
+        guard limit > 0, !normalizedProfilePubkey.isEmpty else { return [] }
+
+        let relayTargets = normalizedRelayURLs(relayURLs)
+        guard !relayTargets.isEmpty else { return [] }
+
+        let candidates = normalizedUniquePubkeys(candidatePubkeys)
+            .filter { $0 != normalizedProfilePubkey }
+        guard !candidates.isEmpty else { return [] }
+
+        var results: [String] = []
+        var resultSet = Set<String>()
+
+        func appendResult(_ pubkey: String) {
+            guard results.count < limit else { return }
+            guard resultSet.insert(pubkey).inserted else { return }
+            results.append(pubkey)
+        }
+
+        for candidate in candidates {
+            guard let snapshot = await followListCache.cachedSnapshot(pubkey: candidate) else {
+                continue
+            }
+            if snapshot.followedPubkeys.contains(normalizedProfilePubkey) {
+                appendResult(candidate)
+            }
+            if results.count >= limit {
+                return results
+            }
+        }
+
+        for batch in candidates.filter({ !resultSet.contains($0) }).chunked(into: 80) {
+            let filter = NostrFilter(
+                authors: batch,
+                kinds: [3],
+                limit: min(max(limit * 6, 24), max(batch.count * 2, 1)),
+                tagFilters: ["p": [normalizedProfilePubkey]]
+            )
+
+            guard let events = try? await fetchTimelineEvents(
+                relayURLs: relayTargets,
+                filter: filter,
+                timeout: fetchTimeout,
+                useCache: false,
+                relayFetchMode: relayFetchMode
+            ) else {
+                continue
+            }
+
+            let batchSet = Set(batch)
+            var hitAuthors: [String] = []
+            var seenHitAuthors = Set<String>()
+
+            for event in events where event.kind == 3 {
+                let author = normalizePubkey(event.pubkey)
+                guard batchSet.contains(author), !resultSet.contains(author) else { continue }
+                guard event.tags.contains(where: { tag in
+                    tag.count > 1 &&
+                        tag.first?.lowercased() == "p" &&
+                        normalizePubkey(tag[1]) == normalizedProfilePubkey
+                }) else {
+                    continue
+                }
+                if seenHitAuthors.insert(author).inserted {
+                    hitAuthors.append(author)
+                }
+            }
+
+            for author in hitAuthors {
+                guard let snapshot = try? await fetchFollowListSnapshot(
+                    relayURLs: relayTargets,
+                    pubkey: author,
+                    fetchTimeout: fetchTimeout,
+                    relayFetchMode: relayFetchMode
+                ) else {
+                    continue
+                }
+                if snapshot.followedPubkeys.contains(normalizedProfilePubkey) {
+                    appendResult(author)
+                }
+                if results.count >= limit {
+                    return results
+                }
+            }
+        }
+
+        return results
+    }
+
+    func cachedKnownFollowers(
+        profilePubkey: String,
+        candidatePubkeys: [String],
+        limit: Int = 5
+    ) async -> [String] {
+        let normalizedProfilePubkey = normalizePubkey(profilePubkey)
+        guard limit > 0, !normalizedProfilePubkey.isEmpty else { return [] }
+
+        let candidates = normalizedUniquePubkeys(candidatePubkeys)
+            .filter { $0 != normalizedProfilePubkey }
+        guard !candidates.isEmpty else { return [] }
+
+        var results: [String] = []
+        var seen = Set<String>()
+
+        for candidate in candidates {
+            guard let snapshot = await followListCache.cachedSnapshot(pubkey: candidate) else {
+                continue
+            }
+            guard snapshot.followedPubkeys.contains(normalizedProfilePubkey) else {
+                continue
+            }
+            if seen.insert(candidate).inserted {
+                results.append(candidate)
+            }
+            if results.count >= limit {
+                return results
+            }
+        }
+
+        return results
+    }
+
     func cachedFollowListSnapshot(pubkey: String) async -> FollowListSnapshot? {
         let normalizedPubkey = normalizePubkey(pubkey)
         guard !normalizedPubkey.isEmpty else { return nil }
@@ -1276,6 +1406,8 @@ struct NostrFeedService: Sendable {
 
     func fetchTrendingNotes(
         limit: Int = 100,
+        since: Int? = nil,
+        until: Int? = nil,
         hydrationMode: FeedItemHydrationMode = .full,
         fetchTimeout: TimeInterval = 12,
         relayFetchMode: RelayFetchMode = .allRelays,
@@ -1289,7 +1421,9 @@ struct NostrFeedService: Sendable {
         )
         let filter = NostrFilter(
             kinds: [1],
-            limit: fetchLimit
+            limit: fetchLimit,
+            since: since,
+            until: until
         )
 
         let fetchedEvents = try await fetchTimelineEvents(
@@ -2171,7 +2305,7 @@ struct NostrFeedService: Sendable {
         for limit: Int,
         moderationSnapshot: MuteFilterSnapshot?
     ) -> Int {
-        guard moderationSnapshot?.hasAnyRules == true else { return limit }
+        guard moderationSnapshot?.hasUserRules == true else { return limit }
         return min(max(limit * 4, limit), 240)
     }
 
@@ -3078,6 +3212,20 @@ struct NostrFeedService: Sendable {
         (value ?? "")
             .trimmingCharacters(in: .whitespacesAndNewlines)
             .lowercased()
+    }
+
+    private func normalizedUniquePubkeys(_ pubkeys: [String]) -> [String] {
+        var seen = Set<String>()
+        var ordered: [String] = []
+
+        for pubkey in pubkeys {
+            let normalized = normalizePubkey(pubkey)
+            guard normalized.range(of: "^[0-9a-f]{64}$", options: .regularExpression) != nil else { continue }
+            guard seen.insert(normalized).inserted else { continue }
+            ordered.append(normalized)
+        }
+
+        return ordered
     }
 }
 

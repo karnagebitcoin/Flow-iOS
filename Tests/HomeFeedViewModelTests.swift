@@ -3,6 +3,17 @@ import XCTest
 
 final class HomeFeedViewModelTests: XCTestCase {
     @MainActor
+    func testPaginationDoesNotStopOnShortNonEmptyPage() {
+        XCTAssertFalse(FeedPaginationHeuristic.shouldStopPaging(afterFetchedCount: 1))
+        XCTAssertFalse(FeedPaginationHeuristic.shouldStopPaging(afterFetchedCount: 24))
+    }
+
+    @MainActor
+    func testPaginationStopsOnlyAfterEmptyPage() {
+        XCTAssertTrue(FeedPaginationHeuristic.shouldStopPaging(afterFetchedCount: 0))
+    }
+
+    @MainActor
     func testHomeFeedUsesLargerDefaultPageSize() {
         XCTAssertEqual(HomeFeedViewModel.defaultPageSizeForTesting, 100)
     }

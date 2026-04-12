@@ -416,6 +416,7 @@ final class AppSettingsStore: ObservableObject {
             case autoplayVideos
             case autoplayVideoSoundEnabled
             case blurMediaFromUnfollowedAuthors
+            case fullWidthNoteRows
             case textOnlyMode
             case slowConnectionMode
             case notificationsEnabled
@@ -428,6 +429,7 @@ final class AppSettingsStore: ObservableObject {
             case newsRelayURLs
             case newsAuthorPubkeys
             case newsHashtags
+            case pollsFeedVisible
             case customFeeds
             case webOfTrustHops
         }
@@ -442,6 +444,7 @@ final class AppSettingsStore: ObservableObject {
         var autoplayVideos: Bool = true
         var autoplayVideoSoundEnabled: Bool = false
         var blurMediaFromUnfollowedAuthors: Bool = true
+        var fullWidthNoteRows: Bool = false
         var textOnlyMode: Bool = false
         var slowConnectionMode: Bool = false
         var notificationsEnabled: Bool = false
@@ -454,6 +457,7 @@ final class AppSettingsStore: ObservableObject {
         var newsRelayURLs: [URL] = AppSettingsStore.defaultNewsRelayURLs
         var newsAuthorPubkeys: [String] = []
         var newsHashtags: [String] = []
+        var pollsFeedVisible: Bool = true
         var customFeeds: [CustomFeedDefinition] = []
         var webOfTrustHops: Int = 3
 
@@ -471,6 +475,7 @@ final class AppSettingsStore: ObservableObject {
             autoplayVideos = try container.decodeIfPresent(Bool.self, forKey: .autoplayVideos) ?? true
             autoplayVideoSoundEnabled = try container.decodeIfPresent(Bool.self, forKey: .autoplayVideoSoundEnabled) ?? false
             blurMediaFromUnfollowedAuthors = try container.decodeIfPresent(Bool.self, forKey: .blurMediaFromUnfollowedAuthors) ?? true
+            fullWidthNoteRows = try container.decodeIfPresent(Bool.self, forKey: .fullWidthNoteRows) ?? false
             textOnlyMode = try container.decodeIfPresent(Bool.self, forKey: .textOnlyMode) ?? false
             slowConnectionMode = try container.decodeIfPresent(Bool.self, forKey: .slowConnectionMode) ?? false
             notificationsEnabled = try container.decodeIfPresent(Bool.self, forKey: .notificationsEnabled) ?? false
@@ -490,6 +495,7 @@ final class AppSettingsStore: ObservableObject {
             newsHashtags = AppSettingsStore.normalizedNewsHashtags(
                 try container.decodeIfPresent([String].self, forKey: .newsHashtags) ?? []
             )
+            pollsFeedVisible = try container.decodeIfPresent(Bool.self, forKey: .pollsFeedVisible) ?? true
             customFeeds = AppSettingsStore.normalizedCustomFeeds(
                 try container.decodeIfPresent([CustomFeedDefinition].self, forKey: .customFeeds) ?? []
             )
@@ -510,6 +516,7 @@ final class AppSettingsStore: ObservableObject {
             try container.encode(autoplayVideos, forKey: .autoplayVideos)
             try container.encode(autoplayVideoSoundEnabled, forKey: .autoplayVideoSoundEnabled)
             try container.encode(blurMediaFromUnfollowedAuthors, forKey: .blurMediaFromUnfollowedAuthors)
+            try container.encode(fullWidthNoteRows, forKey: .fullWidthNoteRows)
             try container.encode(textOnlyMode, forKey: .textOnlyMode)
             try container.encode(slowConnectionMode, forKey: .slowConnectionMode)
             try container.encode(notificationsEnabled, forKey: .notificationsEnabled)
@@ -522,6 +529,7 @@ final class AppSettingsStore: ObservableObject {
             try container.encode(newsRelayURLs, forKey: .newsRelayURLs)
             try container.encode(newsAuthorPubkeys, forKey: .newsAuthorPubkeys)
             try container.encode(newsHashtags, forKey: .newsHashtags)
+            try container.encode(pollsFeedVisible, forKey: .pollsFeedVisible)
             try container.encode(customFeeds, forKey: .customFeeds)
             try container.encode(webOfTrustHops, forKey: .webOfTrustHops)
         }
@@ -707,6 +715,14 @@ final class AppSettingsStore: ObservableObject {
         }
     }
 
+    var fullWidthNoteRows: Bool {
+        get { persistedSettings.fullWidthNoteRows }
+        set {
+            persistedSettings.fullWidthNoteRows = newValue
+            persist()
+        }
+    }
+
     var slowConnectionMode: Bool {
         get { persistedSettings.slowConnectionMode }
         set {
@@ -801,6 +817,14 @@ final class AppSettingsStore: ObservableObject {
         get { persistedSettings.newsHashtags }
         set {
             persistedSettings.newsHashtags = Self.normalizedNewsHashtags(newValue)
+            persist()
+        }
+    }
+
+    var pollsFeedVisible: Bool {
+        get { persistedSettings.pollsFeedVisible }
+        set {
+            persistedSettings.pollsFeedVisible = newValue
             persist()
         }
     }

@@ -86,11 +86,7 @@ struct ActivityActor: Hashable, Sendable {
     }
 
     var avatarURL: URL? {
-        guard let picture = profile?.picture,
-              let url = URL(string: picture) else {
-            return nil
-        }
-        return url
+        profile?.resolvedAvatarURL
     }
 }
 

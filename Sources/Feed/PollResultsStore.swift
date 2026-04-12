@@ -1,4 +1,13 @@
+import Combine
 import Foundation
+
+struct PollResultsSnapshot: Equatable, Sendable {
+    static let empty = PollResultsSnapshot(results: nil, isLoading: false, lastFetchedAt: nil)
+
+    let results: NostrPollResults?
+    let isLoading: Bool
+    let lastFetchedAt: Date?
+}
 
 enum PollResultsError: LocalizedError {
     case missingRelaySources
@@ -15,16 +24,17 @@ enum PollResultsError: LocalizedError {
 }
 
 @MainActor
-final class PollResultsStore: ObservableObject {
+final class PollResultsStore {
     static let shared = PollResultsStore()
 
-    @Published private var resultsByPollID: [String: NostrPollResults] = [:]
-    @Published private var loadingPollIDs: Set<String> = []
+    private var resultsByPollID: [String: NostrPollResults] = [:]
+    private var loadingPollIDs: Set<String> = []
 
     private let relayClient: any NostrRelayEventFetching
     private let automaticRefreshInterval: TimeInterval
     private var inFlightTasks: [String: Task<NostrPollResults, Error>] = [:]
     private var lastFetchedAtByPollID: [String: Date] = [:]
+    private var snapshotPublishers: [String: CurrentValueSubject<PollResultsSnapshot, Never>] = [:]
 
     init(
         relayClient: any NostrRelayEventFetching = NostrRelayClient(),
@@ -40,6 +50,22 @@ final class PollResultsStore: ObservableObject {
 
     func isLoadingResults(for pollEventID: String) -> Bool {
         loadingPollIDs.contains(normalizedPollID(pollEventID))
+    }
+
+    func snapshot(for pollEventID: String) -> PollResultsSnapshot {
+        let normalizedPollEventID = normalizedPollID(pollEventID)
+        guard !normalizedPollEventID.isEmpty else { return .empty }
+        return buildSnapshot(for: normalizedPollEventID)
+    }
+
+    func publisher(for pollEventID: String) -> AnyPublisher<PollResultsSnapshot, Never> {
+        let normalizedPollEventID = normalizedPollID(pollEventID)
+        guard !normalizedPollEventID.isEmpty else {
+            return Just(.empty).eraseToAnyPublisher()
+        }
+
+        return snapshotPublisher(for: normalizedPollEventID)
+            .eraseToAnyPublisher()
     }
 
     func loadResultsIfNeeded(
@@ -83,7 +109,7 @@ final class PollResultsStore: ObservableObject {
             throw PollResultsError.missingRelaySources
         }
 
-        loadingPollIDs.insert(pollEventID)
+        setLoading(true, for: pollEventID)
 
         let task = Task { [relayClient] () throws -> NostrPollResults in
             let responseEvents = try await Self.fetchResponseEvents(
@@ -105,13 +131,12 @@ final class PollResultsStore: ObservableObject {
         inFlightTasks[pollEventID] = task
         defer {
             inFlightTasks[pollEventID] = nil
-            loadingPollIDs.remove(pollEventID)
+            setLoading(false, for: pollEventID)
         }
 
         do {
             let results = try await task.value
-            resultsByPollID[pollEventID] = results
-            lastFetchedAtByPollID[pollEventID] = Date()
+            setResults(results, fetchedAt: Date(), for: pollEventID)
             return results
         } catch {
             if let existing = resultsByPollID[pollEventID] {
@@ -153,8 +178,7 @@ final class PollResultsStore: ObservableObject {
             voters: voters,
             optionVoters: optionVoters
         )
-        resultsByPollID[normalizedPollEventID] = nextResults
-        lastFetchedAtByPollID[normalizedPollEventID] = Date()
+        setResults(nextResults, fetchedAt: Date(), for: normalizedPollEventID)
     }
 
     private func preferredRelayURLs(
@@ -176,6 +200,58 @@ final class PollResultsStore: ObservableObject {
 
     private func normalizedPollID(_ value: String) -> String {
         value.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+    }
+
+    private func buildSnapshot(for pollEventID: String) -> PollResultsSnapshot {
+        PollResultsSnapshot(
+            results: resultsByPollID[pollEventID],
+            isLoading: loadingPollIDs.contains(pollEventID),
+            lastFetchedAt: lastFetchedAtByPollID[pollEventID]
+        )
+    }
+
+    private func snapshotPublisher(for pollEventID: String) -> CurrentValueSubject<PollResultsSnapshot, Never> {
+        if let existingPublisher = snapshotPublishers[pollEventID] {
+            return existingPublisher
+        }
+
+        let publisher = CurrentValueSubject<PollResultsSnapshot, Never>(buildSnapshot(for: pollEventID))
+        snapshotPublishers[pollEventID] = publisher
+        return publisher
+    }
+
+    private func publishSnapshot(for pollEventID: String) {
+        let normalizedPollEventID = normalizedPollID(pollEventID)
+        guard !normalizedPollEventID.isEmpty else { return }
+
+        let snapshot = buildSnapshot(for: normalizedPollEventID)
+        let publisher = snapshotPublisher(for: normalizedPollEventID)
+        guard publisher.value != snapshot else { return }
+        publisher.send(snapshot)
+    }
+
+    private func setResults(_ results: NostrPollResults, fetchedAt: Date, for pollEventID: String) {
+        let normalizedPollEventID = normalizedPollID(pollEventID)
+        guard !normalizedPollEventID.isEmpty else { return }
+
+        resultsByPollID[normalizedPollEventID] = results
+        lastFetchedAtByPollID[normalizedPollEventID] = fetchedAt
+        publishSnapshot(for: normalizedPollEventID)
+    }
+
+    private func setLoading(_ isLoading: Bool, for pollEventID: String) {
+        let normalizedPollEventID = normalizedPollID(pollEventID)
+        guard !normalizedPollEventID.isEmpty else { return }
+
+        let didChange: Bool
+        if isLoading {
+            didChange = loadingPollIDs.insert(normalizedPollEventID).inserted
+        } else {
+            didChange = loadingPollIDs.remove(normalizedPollEventID) != nil
+        }
+
+        guard didChange else { return }
+        publishSnapshot(for: normalizedPollEventID)
     }
 
     private static func fetchResponseEvents(

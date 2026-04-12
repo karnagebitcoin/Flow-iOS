@@ -116,10 +116,7 @@ struct ProfileEditorSheet: View {
 
     private var previewSection: some View {
         VStack(alignment: .leading, spacing: 12) {
-            sectionHeader(
-                title: "Live Preview",
-                subtitle: "See how your profile will look before you save."
-            )
+            sectionHeader(title: "Live Preview")
 
             ProfileEditorPreviewCard(
                 fields: fields,
@@ -133,10 +130,7 @@ struct ProfileEditorSheet: View {
 
     private var imagesSection: some View {
         VStack(alignment: .leading, spacing: 12) {
-            sectionHeader(
-                title: "Images",
-                subtitle: "Upload images through Halo so we can resize and compress them properly."
-            )
+            sectionHeader(title: "Images")
 
             editorCard {
                 VStack(alignment: .leading, spacing: 16) {
@@ -151,7 +145,7 @@ struct ProfileEditorSheet: View {
                         errorMessage: bannerUploadError,
                         selection: $selectedBannerItem,
                         accessibilityLabel: "Upload profile banner",
-                        recommendedHint: "Recommended size: 1200×580. Halo uploads banners at this size and keeps them under 500 KB when possible.",
+                        recommendedHint: "Recommended size: 1200×580.",
                         emptyStateText: "No banner uploaded yet.",
                         usesCircularPreview: false
                     )
@@ -169,7 +163,7 @@ struct ProfileEditorSheet: View {
                         errorMessage: avatarUploadError,
                         selection: $selectedAvatarItem,
                         accessibilityLabel: "Upload profile photo",
-                        recommendedHint: "Halo resizes profile photos to a compact square so they load quickly across the app.",
+                        recommendedHint: nil,
                         emptyStateText: "No profile photo uploaded yet.",
                         usesCircularPreview: true
                     )
@@ -180,10 +174,7 @@ struct ProfileEditorSheet: View {
 
     private var profileSection: some View {
         VStack(alignment: .leading, spacing: 12) {
-            sectionHeader(
-                title: "Profile",
-                subtitle: "Your name, handle, and bio update the preview in real time."
-            )
+            sectionHeader(title: "Profile")
 
             editorCard {
                 VStack(alignment: .leading, spacing: 16) {
@@ -299,16 +290,18 @@ struct ProfileEditorSheet: View {
         appSettings.themePalette.separator
     }
 
-    private func sectionHeader(title: String, subtitle: String) -> some View {
+    private func sectionHeader(title: String, subtitle: String? = nil) -> some View {
         VStack(alignment: .leading, spacing: 4) {
             Text(title)
                 .font(appSettings.appFont(.headline, weight: .bold))
                 .foregroundStyle(appSettings.themePalette.foreground)
 
-            Text(subtitle)
-                .font(appSettings.appFont(.footnote))
-                .foregroundStyle(appSettings.themePalette.secondaryForeground)
-                .fixedSize(horizontal: false, vertical: true)
+            if let subtitle, !subtitle.isEmpty {
+                Text(subtitle)
+                    .font(appSettings.appFont(.footnote))
+                    .foregroundStyle(appSettings.themePalette.secondaryForeground)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
         }
     }
 
@@ -361,7 +354,7 @@ struct ProfileEditorSheet: View {
         errorMessage: String?,
         selection: Binding<PhotosPickerItem?>,
         accessibilityLabel: String,
-        recommendedHint: String,
+        recommendedHint: String?,
         emptyStateText: String,
         usesCircularPreview: Bool
     ) -> some View {
@@ -392,10 +385,12 @@ struct ProfileEditorSheet: View {
                     .foregroundStyle(appSettings.themePalette.foreground)
                     .fixedSize(horizontal: false, vertical: true)
 
-                    Text(recommendedHint)
-                        .font(appSettings.appFont(.caption1))
-                        .foregroundStyle(appSettings.themePalette.secondaryForeground)
-                        .fixedSize(horizontal: false, vertical: true)
+                    if let recommendedHint, !recommendedHint.isEmpty {
+                        Text(recommendedHint)
+                            .font(appSettings.appFont(.caption1))
+                            .foregroundStyle(appSettings.themePalette.secondaryForeground)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
 
                     if let byteCount, byteCount > maximumRecommendedProfileAssetBytes {
                         Text("This image is over 500 KB. Re-upload it with Halo so we can resize and compress it properly.")
@@ -818,10 +813,6 @@ private struct ProfileEditorPreviewCard: View {
                 }
 
                 VStack(alignment: .leading, spacing: 10) {
-                    if let nip05 = normalizedValue(fields.nip05) {
-                        previewInfoRow(text: nip05, systemImage: "checkmark.seal")
-                    }
-
                     if let website = normalizedWebsiteDisplayText {
                         previewInfoRow(text: website, systemImage: "link")
                     }

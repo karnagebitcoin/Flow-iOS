@@ -7,599 +7,12 @@ import SwiftUI
 import UIKit
 import UniformTypeIdentifiers
 
-struct ComposeMentionQuery: Equatable {
-    let range: NSRange
-    let query: String
-}
-
-struct ComposeSelectedMention: Identifiable, Equatable {
-    let pubkey: String
-    let handle: String
-    let range: NSRange
-
-    var id: String {
-        "\(pubkey)|\(range.location)|\(range.length)|\(handle)"
-    }
-
-    var replacementText: String {
-        "@\(handle)"
-    }
-
-    func shifted(by delta: Int) -> ComposeSelectedMention {
-        ComposeSelectedMention(
-            pubkey: pubkey,
-            handle: handle,
-            range: NSRange(
-                location: max(0, range.location + delta),
-                length: range.length
-            )
-        )
-    }
-}
-
-struct ComposeMentionSuggestion: Identifiable, Equatable {
-    let pubkey: String
-    let displayName: String
-    let handle: String
-    let secondaryText: String
-    let avatarURL: URL?
-
-    var id: String { pubkey }
-
-    var replacementText: String {
-        "@\(handle)"
-    }
-
-    init?(result: ProfileSearchResult) {
-        let normalizedPubkey = Self.normalizedPubkey(result.pubkey)
-        guard !normalizedPubkey.isEmpty else { return nil }
-        guard let handle = Self.handle(from: result.profile, pubkey: normalizedPubkey) else { return nil }
-
-        self.pubkey = normalizedPubkey
-        displayName = Self.displayName(from: result.profile, pubkey: normalizedPubkey)
-        self.handle = handle
-        secondaryText = "@\(handle)"
-        avatarURL = Self.avatarURL(from: result.profile)
-    }
-
-    private static func displayName(from profile: NostrProfile?, pubkey: String) -> String {
-        if let displayName = normalizedText(profile?.displayName) {
-            return displayName
-        }
-        if let name = normalizedText(profile?.name) {
-            return name
-        }
-        return shortNostrIdentifier(pubkey)
-    }
-
-    private static func avatarURL(from profile: NostrProfile?) -> URL? {
-        guard let picture = normalizedText(profile?.picture),
-              let url = URL(string: picture),
-              url.scheme != nil else {
-            return nil
-        }
-        return url
-    }
-
-    private static func handle(from profile: NostrProfile?, pubkey: String) -> String? {
-        if let handle = normalizedHandle(profile?.name) {
-            return handle
-        }
-        if let handle = normalizedHandle(profile?.displayName) {
-            return handle
-        }
-        let fallback = String(pubkey.prefix(12)).lowercased()
-        return fallback.isEmpty ? nil : fallback
-    }
-
-    private static func normalizedText(_ value: String?) -> String? {
-        let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        return trimmed.isEmpty ? nil : trimmed
-    }
-
-    private static func normalizedHandle(_ value: String?) -> String? {
-        let trimmed = normalizedText(value)?
-            .replacingOccurrences(of: "@", with: "")
-            .lowercased() ?? ""
-        guard !trimmed.isEmpty else { return nil }
-
-        let filtered = trimmed.unicodeScalars.filter { scalar in
-            allowedHandleCharacters.contains(scalar)
-        }
-        let normalized = String(String.UnicodeScalarView(filtered))
-        return normalized.isEmpty ? nil : normalized
-    }
-
-    private static func normalizedPubkey(_ value: String) -> String {
-        value.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-    }
-}
-
-struct ComposeMentionInsertionResult: Equatable {
-    let text: String
-    let mentions: [ComposeSelectedMention]
-    let selectedRange: NSRange
-}
-
-struct ComposePreparedMentions: Equatable {
-    let content: String
-    let additionalTags: [[String]]
-}
-
-enum ComposeMentionSupport {
-    static func activeQuery(
-        in text: String,
-        selection: NSRange,
-        confirmedMentions: [ComposeSelectedMention]
-    ) -> ComposeMentionQuery? {
-        guard selection.length == 0 else { return nil }
-
-        let nsText = text as NSString
-        let caretLocation = min(max(selection.location, 0), nsText.length)
-        guard !confirmedMentions.contains(where: { mention in
-            caretLocation > mention.range.location &&
-            caretLocation <= mention.range.location + mention.range.length
-        }) else {
-            return nil
-        }
-
-        var cursor = caretLocation
-        while cursor > 0 {
-            let previousRange = NSRange(location: cursor - 1, length: 1)
-            let previousCharacter = nsText.substring(with: previousRange)
-
-            if confirmedMentions.contains(where: { mention in
-                cursor - 1 >= mention.range.location &&
-                cursor - 1 < mention.range.location + mention.range.length
-            }) {
-                return nil
-            }
-
-            if previousCharacter == "@" {
-                if cursor - 1 > 0 {
-                    let leadingCharacter = nsText.substring(with: NSRange(location: cursor - 2, length: 1))
-                    if isMentionStartContinuationText(leadingCharacter) {
-                        cursor -= 1
-                        continue
-                    }
-                }
-
-                let queryRange = NSRange(location: cursor - 1, length: caretLocation - (cursor - 1))
-                let token = nsText.substring(with: queryRange)
-                let query = normalizedSearchQuery(String(token.dropFirst()))
-                guard isReasonableSearchQuery(query) else {
-                    return nil
-                }
-                return ComposeMentionQuery(range: queryRange, query: query)
-            }
-
-            guard isAllowedSearchQueryText(previousCharacter) else { return nil }
-            cursor -= 1
-        }
-
-        return nil
-    }
-
-    static func updatedMentions(
-        _ mentions: [ComposeSelectedMention],
-        forEditIn range: NSRange,
-        replacementText: String
-    ) -> [ComposeSelectedMention] {
-        let replacementLength = (replacementText as NSString).length
-        let delta = replacementLength - range.length
-
-        return mentions.compactMap { mention in
-            if NSIntersectionRange(mention.range, range).length > 0 {
-                return nil
-            }
-
-            if range.location < mention.range.location {
-                return mention.shifted(by: delta)
-            }
-
-            return mention
-        }
-    }
-
-    static func insertSuggestion(
-        _ suggestion: ComposeMentionSuggestion,
-        into text: String,
-        replacing query: ComposeMentionQuery,
-        existingMentions: [ComposeSelectedMention]
-    ) -> ComposeMentionInsertionResult {
-        let replacementText = suggestion.replacementText
-        let insertedText = replacementText + " "
-        let updatedText = (text as NSString).replacingCharacters(in: query.range, with: insertedText)
-        var updatedMentions = updatedMentions(
-            existingMentions,
-            forEditIn: query.range,
-            replacementText: insertedText
-        )
-
-        updatedMentions.append(
-            ComposeSelectedMention(
-                pubkey: suggestion.pubkey,
-                handle: suggestion.handle,
-                range: NSRange(
-                    location: query.range.location,
-                    length: (replacementText as NSString).length
-                )
-            )
-        )
-        updatedMentions.sort { lhs, rhs in
-            if lhs.range.location == rhs.range.location {
-                return lhs.pubkey < rhs.pubkey
-            }
-            return lhs.range.location < rhs.range.location
-        }
-
-        return ComposeMentionInsertionResult(
-            text: updatedText,
-            mentions: updatedMentions,
-            selectedRange: NSRange(
-                location: query.range.location + (insertedText as NSString).length,
-                length: 0
-            )
-        )
-    }
-
-    static func preparedMentions(
-        from text: String,
-        selectedMentions: [ComposeSelectedMention]
-    ) -> ComposePreparedMentions {
-        guard !selectedMentions.isEmpty else {
-            return ComposePreparedMentions(content: text, additionalTags: [])
-        }
-
-        let mutableContent = NSMutableString(string: text)
-        var seenPubkeys = Set<String>()
-        var additionalTags: [[String]] = []
-
-        for mention in selectedMentions.sorted(by: { lhs, rhs in
-            lhs.range.location > rhs.range.location
-        }) {
-            let normalizedPubkey = mention.pubkey.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-            guard !normalizedPubkey.isEmpty else { continue }
-            guard let npub = PublicKey(hex: normalizedPubkey)?.npub else { continue }
-            guard mention.range.location >= 0,
-                  mention.range.location + mention.range.length <= mutableContent.length else {
-                continue
-            }
-
-            mutableContent.replaceCharacters(in: mention.range, with: "nostr:\(npub)")
-
-            if seenPubkeys.insert(normalizedPubkey).inserted {
-                additionalTags.append(["p", normalizedPubkey])
-            }
-        }
-
-        return ComposePreparedMentions(
-            content: mutableContent as String,
-            additionalTags: additionalTags
-        )
-    }
-
-    private static func isAllowedSearchQueryText(_ value: String) -> Bool {
-        guard value.unicodeScalars.count == 1,
-              let scalar = value.unicodeScalars.first else {
-            return false
-        }
-        guard !CharacterSet.newlines.contains(scalar) else { return false }
-        return !mentionSearchTerminatorCharacters.contains(scalar)
-    }
-
-    private static func isMentionStartContinuationText(_ value: String) -> Bool {
-        guard value.unicodeScalars.count == 1,
-              let scalar = value.unicodeScalars.first else {
-            return false
-        }
-        return mentionStartContinuationCharacters.contains(scalar)
-    }
-
-    private static func normalizedSearchQuery(_ value: String) -> String {
-        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return "" }
-
-        return trimmed.replacingOccurrences(
-            of: "\\s+",
-            with: " ",
-            options: .regularExpression
-        )
-    }
-
-    private static func isReasonableSearchQuery(_ value: String) -> Bool {
-        guard !value.isEmpty, value.count <= 48 else { return false }
-        return value.split(whereSeparator: { $0.isWhitespace }).count <= 3
-    }
-}
-
-private let allowedHandleCharacters = CharacterSet.alphanumerics.union(
-    CharacterSet(charactersIn: "._-")
-)
-private let mentionStartContinuationCharacters = CharacterSet.alphanumerics.union(
-    CharacterSet(charactersIn: "._-")
-)
-private let mentionSearchTerminatorCharacters = CharacterSet(charactersIn: ",;:!?()[]{}<>/\\|`~\"")
-
-@MainActor
-final class ComposeNoteViewModel: ObservableObject {
-    @Published var text: String = ""
-    @Published private(set) var isPublishing = false
-    @Published var feedbackMessage: String?
-    @Published var feedbackIsError = false
-
-    private let publishingService: ComposeNotePublishService
-    private let replyPublishingService: ThreadReplyPublishService
-
-    init(
-        publishingService: ComposeNotePublishService = ComposeNotePublishService(),
-        replyPublishingService: ThreadReplyPublishService = ThreadReplyPublishService()
-    ) {
-        self.publishingService = publishingService
-        self.replyPublishingService = replyPublishingService
-    }
-
-    var trimmedText: String {
-        text.trimmingCharacters(in: .whitespacesAndNewlines)
-    }
-
-    var characterCount: Int {
-        trimmedText.count
-    }
-
-    func publish(
-        content: String? = nil,
-        currentAccountPubkey: String?,
-        currentNsec: String?,
-        writeRelayURLs: [URL],
-        additionalTags: [[String]] = [],
-        pollDraft: ComposePollDraft? = nil,
-        replyTargetEvent: NostrEvent? = nil
-    ) async -> Bool {
-        guard !isPublishing else { return false }
-
-        isPublishing = true
-        feedbackMessage = nil
-        feedbackIsError = false
-
-        defer {
-            isPublishing = false
-        }
-
-        let publishContent = content ?? text
-
-        do {
-            if let replyTargetEvent {
-                _ = try await replyPublishingService.publishReply(
-                    content: publishContent,
-                    replyingTo: replyTargetEvent,
-                    currentAccountPubkey: currentAccountPubkey,
-                    currentNsec: currentNsec,
-                    writeRelayURLs: writeRelayURLs,
-                    additionalTags: additionalTags
-                )
-                text = ""
-                feedbackMessage = "Reply posted."
-                feedbackIsError = false
-                return true
-            } else if let pollDraft {
-                _ = try await publishingService.publishPoll(
-                    content: publishContent,
-                    poll: pollDraft,
-                    currentNsec: currentNsec,
-                    writeRelayURLs: writeRelayURLs,
-                    additionalTags: additionalTags
-                )
-
-                text = ""
-                feedbackMessage = "Poll posted."
-                feedbackIsError = false
-                return true
-            } else {
-                _ = try await publishingService.publishNote(
-                    content: publishContent,
-                    currentNsec: currentNsec,
-                    writeRelayURLs: writeRelayURLs,
-                    additionalTags: additionalTags
-                )
-
-                text = ""
-                feedbackMessage = "Posted."
-                feedbackIsError = false
-                return true
-            }
-        } catch {
-            feedbackMessage = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
-            feedbackIsError = true
-            return false
-        }
-    }
-}
-
-struct ComposeMediaAttachment: Identifiable, Hashable {
-    let id = UUID()
-    let url: URL
-    let imetaTag: [String]
-    let mimeType: String
-    let fileSizeBytes: Int?
-
-    var isImage: Bool {
-        let normalized = mimeType.lowercased()
-        if normalized.hasPrefix("image/") {
-            return true
-        }
-        return [".jpg", ".jpeg", ".png", ".webp", ".gif", ".heic", ".bmp", ".svg"]
-            .contains { url.path.lowercased().hasSuffix($0) }
-    }
-
-    var isVideo: Bool {
-        let normalized = mimeType.lowercased()
-        if normalized.hasPrefix("video/") {
-            return true
-        }
-        return [".mp4", ".mov", ".m4v", ".webm", ".mkv"]
-            .contains { url.path.lowercased().hasSuffix($0) }
-    }
-
-    var isAudio: Bool {
-        let normalized = mimeType.lowercased()
-        if normalized.hasPrefix("audio/") {
-            return true
-        }
-        return [".mp3", ".m4a", ".aac", ".wav", ".ogg"]
-            .contains { url.path.lowercased().hasSuffix($0) }
-    }
-
-    var isGIF: Bool {
-        let normalized = mimeType.lowercased()
-        if normalized.contains("gif") {
-            return true
-        }
-        return url.pathExtension.lowercased() == "gif"
-    }
-}
-
-private struct CameraCapturePermissionSnapshot: Equatable {
-    let cameraStatus: AVAuthorizationStatus
-    let microphoneStatus: AVAuthorizationStatus
-
-    static func current() -> CameraCapturePermissionSnapshot {
-        CameraCapturePermissionSnapshot(
-            cameraStatus: AVCaptureDevice.authorizationStatus(for: .video),
-            microphoneStatus: AVCaptureDevice.authorizationStatus(for: .audio)
-        )
-    }
-
-    var cameraRequiresPrompt: Bool {
-        cameraStatus == .notDetermined
-    }
-
-    var microphoneRequiresPrompt: Bool {
-        microphoneStatus == .notDetermined
-    }
-
-    var isCameraBlocked: Bool {
-        cameraStatus == .denied || cameraStatus == .restricted
-    }
-
-    var isMicrophoneBlocked: Bool {
-        microphoneStatus == .denied || microphoneStatus == .restricted
-    }
-}
-
-private enum CapturedCameraMedia {
-    case image(data: Data, mimeType: String, fileExtension: String)
-    case video(fileURL: URL, mimeType: String, fileExtension: String)
-}
-
-private enum SharedComposeImportError: LocalizedError {
-    case missingFileURL
-    case unreadableFile
-
-    var errorDescription: String? {
-        switch self {
-        case .missingFileURL:
-            return "Couldn't access the shared media."
-        case .unreadableFile:
-            return "Couldn't read the shared media."
-        }
-    }
-}
-
-private struct ComposeContextPreviewSnapshot: Equatable {
-    let authorPubkey: String
-    let createdAtDate: Date
-    let previewText: String
-    let imageURLs: [URL]
-    let hasVideo: Bool
-    let hasAudio: Bool
-}
-
-struct ComposeFloatingActionButton: View {
-    @EnvironmentObject private var appSettings: AppSettingsStore
-    let action: () -> Void
-
-    var body: some View {
-        Button(action: action) {
-            Image(systemName: "plus")
-                .font(.system(size: 18, weight: .semibold))
-                .foregroundStyle(.white)
-                .frame(width: 56, height: 56)
-                .background(appSettings.primaryColor, in: Circle())
-                .shadow(color: .black.opacity(0.18), radius: 10, x: 0, y: 5)
-                .overlay {
-                    Circle()
-                        .strokeBorder(.white.opacity(0.18), lineWidth: 1)
-                }
-        }
-        .buttonStyle(.plain)
-        .accessibilityLabel("Compose note")
-    }
-}
-
-enum ComposeNoteSheetMode: Equatable {
-    case newNote
-    case reply
-    case quote
-
-    init(hasReplyTarget: Bool, hasQuotedEvent: Bool) {
-        if hasQuotedEvent {
-            self = .quote
-        } else if hasReplyTarget {
-            self = .reply
-        } else {
-            self = .newNote
-        }
-    }
-
-    var navigationTitle: String {
-        switch self {
-        case .newNote:
-            return "Compose note"
-        case .reply:
-            return "Reply"
-        case .quote:
-            return "Quote"
-        }
-    }
-
-    var publishButtonTitle: String {
-        switch self {
-        case .reply:
-            return "Reply"
-        case .newNote, .quote:
-            return "Post"
-        }
-    }
-
-    var placeholderText: String {
-        switch self {
-        case .newNote:
-            return "What do you want to share?"
-        case .reply:
-            return "Post your reply"
-        case .quote:
-            return "Add your thoughts"
-        }
-    }
-
-    var accessibilityActionLabel: String {
-        switch self {
-        case .newNote:
-            return "Posting"
-        case .reply:
-            return "Replying"
-        case .quote:
-            return "Quoting"
-        }
-    }
-}
-
 struct ComposeNoteSheet: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.colorScheme) private var colorScheme
     @EnvironmentObject private var appSettings: AppSettingsStore
     @EnvironmentObject private var toastCenter: AppToastCenter
+    @EnvironmentObject private var composeDraftStore: AppComposeDraftStore
     @State private var isEditorFocused = false
     @StateObject private var viewModel = ComposeNoteViewModel()
     @StateObject private var speechTranscriber = ComposeSpeechTranscriber()
@@ -622,17 +35,32 @@ struct ComposeNoteSheet: View {
     @State private var quotedAvatarURL: URL?
     @State private var replyTargetPreviewSnapshot: ComposeContextPreviewSnapshot?
     @State private var quotedPreviewSnapshot: ComposeContextPreviewSnapshot?
+    @State private var currentAdditionalTags: [[String]] = []
+    @State private var currentReplyTargetEvent: NostrEvent?
+    @State private var currentReplyTargetDisplayNameHint: String?
+    @State private var currentReplyTargetHandleHint: String?
+    @State private var currentReplyTargetAvatarURLHint: URL?
+    @State private var currentQuotedEvent: NostrEvent?
+    @State private var currentQuotedDisplayNameHint: String?
+    @State private var currentQuotedHandleHint: String?
+    @State private var currentQuotedAvatarURLHint: URL?
     @State private var hasAppliedInitialDraft = false
+    @State private var hasAppliedInitialContext = false
     @State private var hasAppliedInitialAttachments = false
+    @State private var hasAppliedInitialPollDraft = false
+    @State private var hasAppliedInitialSelectedMentions = false
     @State private var hasAppliedInitialSharedAttachments = false
     @State private var previewingMediaAttachment: ComposeMediaAttachment?
     @State private var isShowingKlipyGIFPicker = false
+    @State private var isShowingDraftLibrary = false
     @State private var editorSelectedRange = NSRange(location: 0, length: 0)
     @State private var selectedMentions: [ComposeSelectedMention] = []
     @State private var activeMentionQuery: ComposeMentionQuery?
     @State private var mentionSuggestions: [ComposeMentionSuggestion] = []
     @State private var isLoadingMentionSuggestions = false
     @State private var mentionLookupTask: Task<Void, Never>?
+    @State private var activeSavedDraftID: UUID?
+    @State private var hasPublishedSuccessfully = false
 
     private let mediaUploadService = MediaUploadService.shared
     private let klipyGIFService = KlipyGIFService.shared
@@ -645,6 +73,8 @@ struct ComposeNoteSheet: View {
     var initialAdditionalTags: [[String]] = []
     var initialUploadedAttachments: [ComposeMediaAttachment] = []
     var initialSharedAttachments: [SharedComposeAttachment] = []
+    var initialSelectedMentions: [ComposeSelectedMention] = []
+    var initialPollDraft: ComposePollDraft? = nil
     var replyTargetEvent: NostrEvent? = nil
     var replyTargetDisplayNameHint: String? = nil
     var replyTargetHandleHint: String? = nil
@@ -653,6 +83,7 @@ struct ComposeNoteSheet: View {
     var quotedDisplayNameHint: String? = nil
     var quotedHandleHint: String? = nil
     var quotedAvatarURLHint: URL? = nil
+    var savedDraftID: UUID? = nil
     var onPublished: (() -> Void)? = nil
 
     var body: some View {
@@ -662,10 +93,11 @@ struct ComposeNoteSheet: View {
             .navigationTitle(composerNavigationTitle)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
+                ToolbarItemGroup(placement: .topBarLeading) {
                     Button("Cancel") {
                         dismiss()
                     }
+                    draftLibraryToolbarButton
                 }
 
                 ToolbarItemGroup(placement: .topBarTrailing) {
@@ -678,8 +110,11 @@ struct ComposeNoteSheet: View {
         .presentationDragIndicator(.visible)
         .presentationBackground(appSettings.themePalette.groupedBackground)
         .task {
+            applyInitialContextIfNeeded()
             applyInitialDraftIfNeeded()
             applyInitialAttachmentsIfNeeded()
+            applyInitialSelectedMentionsIfNeeded()
+            applyInitialPollDraftIfNeeded()
             editorSelectedRange = NSRange(location: (viewModel.text as NSString).length, length: 0)
             isEditorFocused = true
             await applyInitialSharedAttachmentsIfNeeded()
@@ -687,12 +122,12 @@ struct ComposeNoteSheet: View {
         .task(id: currentAccountPubkey) {
             await refreshComposeAccountSummary()
         }
-        .task(id: replyTargetEvent?.id) {
+        .task(id: currentReplyTargetEvent?.id) {
             async let summaryRefresh: Void = refreshReplyTargetAuthorSummaryIfNeeded()
             async let previewRefresh: Void = refreshReplyTargetPreviewIfNeeded()
             _ = await (summaryRefresh, previewRefresh)
         }
-        .task(id: quotedEvent?.id) {
+        .task(id: currentQuotedEvent?.id) {
             async let summaryRefresh: Void = refreshQuotedAuthorSummaryIfNeeded()
             async let previewRefresh: Void = refreshQuotedPreviewIfNeeded()
             _ = await (summaryRefresh, previewRefresh)
@@ -700,6 +135,7 @@ struct ComposeNoteSheet: View {
         .onDisappear {
             mentionLookupTask?.cancel()
             cleanupInitialSharedAttachments()
+            saveDraftIfNeededOnDismiss()
         }
         .onChange(of: selectedMediaItems) { _, newValue in
             guard !newValue.isEmpty else { return }
@@ -750,12 +186,22 @@ struct ComposeNoteSheet: View {
                 }
             }
         }
+        .sheet(isPresented: $isShowingDraftLibrary) {
+            ComposeDraftLibrarySheet(
+                drafts: availableSavedDrafts,
+                activeDraftID: activeSavedDraftID,
+                onOpenDraft: loadSavedDraft(_:),
+                onInsertText: insertSavedDraftText(_:),
+                onDeleteDraft: deleteSavedDraft(_:),
+                onCreateNewDraft: clearComposerForFreshDraft
+            )
+        }
     }
 
     private var mode: ComposeNoteSheetMode {
         ComposeNoteSheetMode(
-            hasReplyTarget: replyTargetEvent != nil,
-            hasQuotedEvent: quotedEvent != nil
+            hasReplyTarget: currentReplyTargetEvent != nil,
+            hasQuotedEvent: currentQuotedEvent != nil
         )
     }
 
@@ -773,6 +219,46 @@ struct ComposeNoteSheet: View {
 
     private var publishButtonTitle: String {
         mode.publishButtonTitle
+    }
+
+    private var availableSavedDrafts: [SavedComposeDraft] {
+        composeDraftStore.drafts(for: currentAccountPubkey)
+    }
+
+    private var availableSavedDraftCount: Int {
+        availableSavedDrafts.count
+    }
+
+    private var draftLibraryCountText: String? {
+        guard availableSavedDraftCount > 0 else { return nil }
+        if availableSavedDraftCount > 99 {
+            return "99+"
+        }
+        return "\(availableSavedDraftCount)"
+    }
+
+    private var draftLibraryAccessibilityLabel: String {
+        if availableSavedDraftCount == 1 {
+            return "Open drafts, 1 saved draft"
+        }
+        return "Open drafts, \(availableSavedDraftCount) saved drafts"
+    }
+
+    private var draftLibraryToolbarButton: some View {
+        Button {
+            isShowingDraftLibrary = true
+        } label: {
+            HStack(spacing: 5) {
+                Image(systemName: availableSavedDraftCount > 0 ? "tray.full.fill" : "tray")
+
+                if let draftLibraryCountText {
+                    Text(draftLibraryCountText)
+                        .font(.caption.weight(.semibold))
+                        .monospacedDigit()
+                }
+            }
+        }
+        .accessibilityLabel(draftLibraryAccessibilityLabel)
     }
 
     private var standardComposerLayout: some View {
@@ -794,38 +280,23 @@ struct ComposeNoteSheet: View {
     }
 
     private var publishToolbarButton: some View {
-        Button {
+        ComposePublishToolbarButton(
+            title: publishButtonTitle,
+            isPublishing: viewModel.isPublishing,
+            isEnabled: canPublish
+        ) {
             Task {
                 await publish()
             }
-        } label: {
-            Group {
-                if viewModel.isPublishing {
-                    ProgressView()
-                        .controlSize(.small)
-                        .tint(.white)
-                } else {
-                    Text(publishButtonTitle)
-                }
-            }
-            .font(.subheadline.weight(.semibold))
-            .foregroundStyle(.white)
-            .padding(.horizontal, 16)
-            .padding(.vertical, 8)
-            .background(appSettings.primaryGradient, in: Capsule())
         }
-        .buttonStyle(.plain)
-        .disabled(!canPublish)
-        .opacity(canPublish ? 1 : 0.45)
     }
 
     private var composeToolbarAvatar: some View {
-        composeAvatar(size: 34)
-            .overlay {
-                Circle()
-                    .stroke(appSettings.themePalette.separator.opacity(0.22), lineWidth: 0.8)
-            }
-            .accessibilityLabel("\(mode.accessibilityActionLabel) as \(profileDisplayName)")
+        ComposeToolbarAvatarView(
+            avatarURL: profileAvatarURL,
+            fallbackSymbol: profileFallbackSymbol,
+            accessibilityLabel: "\(mode.accessibilityActionLabel) as \(profileDisplayName)"
+        )
     }
 
     private var composeCard: some View {
@@ -841,7 +312,6 @@ struct ComposeNoteSheet: View {
                 composeTextView(horizontalPadding: 8, verticalPadding: 8)
                     .frame(minHeight: 180)
             }
-            .background(appSettings.themePalette.secondaryGroupedBackground, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
 
             if shouldShowMentionSuggestions {
                 mentionSuggestionList
@@ -970,55 +440,16 @@ struct ComposeNoteSheet: View {
     }
 
     private var statusSection: some View {
-        Group {
-            if viewModel.isPublishing {
-                HStack(spacing: 10) {
-                    ProgressView()
-                        .controlSize(.small)
-                    Text("Posting to \(configuredPublishSourceCount) source\(configuredPublishSourceCount == 1 ? "" : "s")...")
-                        .font(.footnote)
-                        .foregroundStyle(appSettings.themePalette.secondaryForeground)
-                    Spacer()
-                }
-                .padding(.horizontal, 2)
-            } else if let feedbackMessage = viewModel.feedbackMessage, !feedbackMessage.isEmpty {
-                HStack(alignment: .top, spacing: 10) {
-                    Image(systemName: viewModel.feedbackIsError ? "exclamationmark.triangle.fill" : "checkmark.circle.fill")
-                        .foregroundStyle(viewModel.feedbackIsError ? .red : .green)
-
-                    Text(feedbackMessage)
-                        .font(.footnote)
-                        .foregroundStyle(viewModel.feedbackIsError ? .red : appSettings.themePalette.secondaryForeground)
-
-                    Spacer()
-                }
-                .padding(12)
-                .background(
-                    (viewModel.feedbackIsError ? Color.red.opacity(0.08) : Color.green.opacity(0.08)),
-                    in: RoundedRectangle(cornerRadius: 16, style: .continuous)
-                )
-            } else if speechTranscriber.isTranscribing {
-                infoBanner(
-                    systemImage: "waveform.badge.magnifyingglass",
-                    text: "Transcribing speech..."
-                )
-            } else if currentNsec == nil {
-                infoBanner(
-                    systemImage: "lock.fill",
-                    text: "This account can read feeds, but it needs an nsec to publish notes."
-                )
-            } else if writeRelayURLs.isEmpty {
-                infoBanner(
-                    systemImage: "wifi.slash",
-                    text: "Add at least one publish source to post notes."
-                )
-            } else if let pollValidationMessage {
-                infoBanner(
-                    systemImage: "chart.bar.xaxis",
-                    text: pollValidationMessage
-                )
-            }
-        }
+        ComposeStatusSectionView(
+            isPublishing: viewModel.isPublishing,
+            publishSourceCount: configuredPublishSourceCount,
+            feedbackMessage: viewModel.feedbackMessage,
+            feedbackIsError: viewModel.feedbackIsError,
+            isTranscribingSpeech: speechTranscriber.isTranscribing,
+            missingNsec: currentNsec == nil,
+            missingPublishSources: writeRelayURLs.isEmpty,
+            pollValidationMessage: pollValidationMessage
+        )
     }
 
     @ViewBuilder
@@ -1041,47 +472,11 @@ struct ComposeNoteSheet: View {
     }
 
     private var mentionSuggestionList: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            HStack(spacing: 8) {
-                Text("Mention suggestions")
-                    .font(.footnote.weight(.semibold))
-                    .foregroundStyle(appSettings.themePalette.secondaryForeground)
-
-                Spacer()
-
-                if isLoadingMentionSuggestions {
-                    ProgressView()
-                        .controlSize(.small)
-                }
-            }
-            .padding(.horizontal, 14)
-            .padding(.top, 12)
-            .padding(.bottom, mentionSuggestions.isEmpty ? 12 : 8)
-
-            if !mentionSuggestions.isEmpty {
-                VStack(spacing: 0) {
-                    ForEach(Array(mentionSuggestions.enumerated()), id: \.element.id) { index, suggestion in
-                        Button {
-                            insertMentionSuggestion(suggestion)
-                        } label: {
-                            ComposeMentionSuggestionRow(suggestion: suggestion)
-                        }
-                        .buttonStyle(.plain)
-
-                        if index < mentionSuggestions.count - 1 {
-                            Divider()
-                                .padding(.leading, 60)
-                        }
-                    }
-                }
-                .padding(.bottom, 6)
-            }
-        }
-        .background(appSettings.themePalette.secondaryGroupedBackground, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
-        .overlay {
-            RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .stroke(appSettings.themePalette.separator.opacity(0.18), lineWidth: 0.8)
-        }
+        ComposeMentionSuggestionPanel(
+            suggestions: mentionSuggestions,
+            isLoading: isLoadingMentionSuggestions,
+            onSelect: insertMentionSuggestion(_:)
+        )
     }
 
     private var canPublish: Bool {
@@ -1098,7 +493,7 @@ struct ComposeNoteSheet: View {
             return !viewModel.trimmedText.isEmpty && pollDraft.hasMinimumOptions
         }
 
-        return !viewModel.trimmedText.isEmpty || !mediaAttachments.isEmpty || quotedEvent != nil
+        return !viewModel.trimmedText.isEmpty || !mediaAttachments.isEmpty || currentQuotedEvent != nil
     }
 
     private func handleMentionQueryChange(_ query: ComposeMentionQuery?) {
@@ -1200,54 +595,6 @@ struct ComposeNoteSheet: View {
         return nil
     }
 
-    private func composeAvatar(size: CGFloat) -> some View {
-        Group {
-            if let profileAvatarURL {
-                AsyncImage(url: profileAvatarURL) { phase in
-                    switch phase {
-                    case .success(let image):
-                        image
-                            .resizable()
-                            .scaledToFill()
-                    default:
-                        composeAvatarFallback
-                    }
-                }
-            } else {
-                composeAvatarFallback
-            }
-        }
-        .frame(width: size, height: size)
-        .clipShape(Circle())
-    }
-
-    private var composeAvatarFallback: some View {
-        ZStack {
-            Circle().fill(appSettings.themePalette.secondaryFill)
-            Text(String(profileFallbackSymbol.prefix(1)).uppercased())
-                .font(.subheadline.weight(.semibold))
-                .foregroundStyle(appSettings.themePalette.secondaryForeground)
-        }
-    }
-
-    private var quotedAvatarFallback: some View {
-        ZStack {
-            Circle().fill(appSettings.themePalette.secondaryFill)
-            Text(String(quotedDisplayNameResolved.prefix(1)).uppercased())
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(appSettings.themePalette.secondaryForeground)
-        }
-    }
-
-    private var replyTargetAvatarFallback: some View {
-        ZStack {
-            Circle().fill(appSettings.themePalette.secondaryFill)
-            Text(String(replyTargetDisplayNameResolved.prefix(1)).uppercased())
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(appSettings.themePalette.secondaryForeground)
-        }
-    }
-
     private var replyTargetDisplayNameResolved: String {
         if let replyTargetDisplayName {
             let trimmed = replyTargetDisplayName.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -1303,17 +650,16 @@ struct ComposeNoteSheet: View {
     private var replyTargetPreviewCard: some View {
         Group {
             if let previewSnapshot = replyTargetPreviewSnapshot {
-                composerContextPreviewCard(
+                ComposeContextPreviewCardView(
                     title: "Replying to",
                     previewSnapshot: previewSnapshot,
                     displayName: replyTargetDisplayNameResolved,
                     handle: replyTargetHandleResolved,
                     avatarURL: replyTargetAvatarURL,
+                    fallbackText: replyTargetDisplayNameResolved,
                     videoSummary: "Note includes video",
                     audioSummary: "Note includes audio"
-                ) {
-                    replyTargetAvatarFallback
-                }
+                )
             }
         }
     }
@@ -1321,204 +667,29 @@ struct ComposeNoteSheet: View {
     private var quotePreviewCard: some View {
         Group {
             if let previewSnapshot = quotedPreviewSnapshot {
-                composerContextPreviewCard(
+                ComposeContextPreviewCardView(
                     title: "Quoting",
                     previewSnapshot: previewSnapshot,
                     displayName: quotedDisplayNameResolved,
                     handle: quotedHandleResolved,
                     avatarURL: quotedAvatarURL,
+                    fallbackText: quotedDisplayNameResolved,
                     videoSummary: "Quoted note includes video",
                     audioSummary: "Quoted note includes audio"
-                ) {
-                    quotedAvatarFallback
-                }
+                )
             }
-        }
-    }
-
-    @ViewBuilder
-    private func composerContextPreviewCard<Fallback: View>(
-        title: String,
-        previewSnapshot: ComposeContextPreviewSnapshot,
-        displayName: String,
-        handle: String,
-        avatarURL: URL?,
-        videoSummary: String,
-        audioSummary: String,
-        @ViewBuilder fallback: @escaping () -> Fallback
-    ) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text(title)
-                .font(.footnote.weight(.semibold))
-                .foregroundStyle(appSettings.themePalette.secondaryForeground)
-
-            HStack(alignment: .top, spacing: 10) {
-                composerContextAvatar(avatarURL: avatarURL, fallback: fallback)
-
-                VStack(alignment: .leading, spacing: 8) {
-                    HStack(alignment: .firstTextBaseline, spacing: 6) {
-                        Text(displayName)
-                            .font(.subheadline.weight(.semibold))
-                            .lineLimit(1)
-
-                        Text(handle)
-                            .font(.subheadline)
-                            .foregroundStyle(appSettings.themePalette.secondaryForeground)
-                            .lineLimit(1)
-
-                        Spacer(minLength: 0)
-
-                        Text(RelativeTimestampFormatter.shortString(from: previewSnapshot.createdAtDate))
-                            .font(.caption)
-                            .foregroundStyle(appSettings.themePalette.secondaryForeground)
-                            .lineLimit(1)
-                    }
-
-                    Text(previewSnapshot.previewText)
-                        .font(.body)
-                        .foregroundStyle(appSettings.themePalette.foreground)
-                        .multilineTextAlignment(.leading)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-
-                    composerContextPreviewMedia(
-                        imageURLs: previewSnapshot.imageURLs,
-                        hasVideo: previewSnapshot.hasVideo,
-                        hasAudio: previewSnapshot.hasAudio,
-                        videoSummary: videoSummary,
-                        audioSummary: audioSummary
-                    )
-                }
-            }
-        }
-        .padding(12)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(
-            RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .fill(appSettings.themePalette.secondaryBackground)
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .stroke(appSettings.themePalette.separator.opacity(0.3), lineWidth: 0.8)
-        )
-    }
-
-    @ViewBuilder
-    private func composerContextAvatar<Fallback: View>(
-        avatarURL: URL?,
-        @ViewBuilder fallback: @escaping () -> Fallback
-    ) -> some View {
-        Group {
-            if let avatarURL {
-                CachedAsyncImage(url: avatarURL) { phase in
-                    switch phase {
-                    case .success(let image):
-                        image
-                            .resizable()
-                            .scaledToFill()
-                    default:
-                        fallback()
-                    }
-                }
-            } else {
-                fallback()
-            }
-        }
-        .frame(width: 30, height: 30)
-        .clipShape(Circle())
-    }
-
-    @ViewBuilder
-    private func composerContextPreviewMedia(
-        imageURLs: [URL],
-        hasVideo: Bool,
-        hasAudio: Bool,
-        videoSummary: String,
-        audioSummary: String
-    ) -> some View {
-        if !imageURLs.isEmpty {
-            let columns = Array(
-                repeating: GridItem(.flexible(minimum: 0), spacing: 8),
-                count: min(max(imageURLs.count, 1), 2)
-            )
-            let thumbnailHeight: CGFloat = imageURLs.count == 1 ? 170 : 104
-
-            LazyVGrid(columns: columns, alignment: .leading, spacing: 8) {
-                ForEach(Array(imageURLs.enumerated()), id: \.offset) { _, url in
-                    AsyncImage(url: url) { phase in
-                        switch phase {
-                        case .success(let image):
-                            image
-                                .resizable()
-                                .scaledToFill()
-                        case .failure:
-                            appSettings.themePalette.tertiaryFill
-                                .overlay {
-                                    Image(systemName: "photo")
-                                        .foregroundStyle(appSettings.themePalette.secondaryForeground)
-                                }
-                        case .empty:
-                            ProgressView()
-                                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                                .background(appSettings.themePalette.tertiaryFill)
-                        @unknown default:
-                            appSettings.themePalette.tertiaryFill
-                        }
-                    }
-                    .frame(maxWidth: .infinity)
-                    .frame(height: thumbnailHeight)
-                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-                }
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-        } else if hasVideo || hasAudio {
-            HStack(spacing: 8) {
-                Image(systemName: hasVideo ? "video" : "waveform")
-                Text(hasVideo ? videoSummary : audioSummary)
-                    .lineLimit(1)
-                Spacer(minLength: 0)
-            }
-            .font(.footnote)
-            .foregroundStyle(appSettings.themePalette.secondaryForeground)
-            .padding(.horizontal, 10)
-            .padding(.vertical, 8)
-            .background(
-                RoundedRectangle(cornerRadius: 10, style: .continuous)
-                    .fill(appSettings.themePalette.tertiaryFill)
-            )
         }
     }
 
     private var mediaAttachmentPreviewList: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 10) {
-                ForEach(mediaAttachments) { attachment in
-                    ZStack(alignment: .topTrailing) {
-                        CompactMediaAttachmentPreview(
-                            url: attachment.url,
-                            mimeType: attachment.mimeType,
-                            fileSizeBytes: attachment.fileSizeBytes,
-                            colorScheme: colorScheme,
-                            onTap: {
-                                previewingMediaAttachment = attachment
-                            }
-                        )
-
-                        Button {
-                            removeMediaAttachment(attachment)
-                        } label: {
-                            Image(systemName: "xmark.circle.fill")
-                                .font(.title3)
-                                .foregroundStyle(appSettings.themePalette.iconMutedForeground)
-                                .padding(6)
-                        }
-                        .buttonStyle(.plain)
-                        .accessibilityLabel("Remove attachment")
-                    }
-                }
-            }
-            .padding(.horizontal, 1)
-            .padding(.vertical, 1)
-        }
+        ComposeMediaAttachmentStrip(
+            attachments: mediaAttachments,
+            colorScheme: colorScheme,
+            onPreview: { attachment in
+                previewingMediaAttachment = attachment
+            },
+            onRemove: removeMediaAttachment(_:)
+        )
     }
 
     private func cameraAttachmentButton(symbolFont: Font) -> some View {
@@ -1534,26 +705,11 @@ struct ComposeNoteSheet: View {
         .accessibilityLabel("Capture photo or video")
     }
 
-    private func infoBanner(systemImage: String, text: String) -> some View {
-        HStack(alignment: .top, spacing: 10) {
-            Image(systemName: systemImage)
-                .foregroundStyle(appSettings.themePalette.iconMutedForeground)
-
-            Text(text)
-                .font(.footnote)
-                .foregroundStyle(appSettings.themePalette.secondaryForeground)
-
-            Spacer()
-        }
-        .padding(12)
-        .background(appSettings.themePalette.secondaryGroupedBackground, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-    }
-
     private func refreshComposeAccountSummary() async {
         guard let currentAccountPubkey else {
             profileDisplayName = "Account"
             profileAvatarURL = nil
-            profileFallbackSymbol = "A"
+            profileFallbackSymbol = ""
             return
         }
 
@@ -1563,7 +719,7 @@ struct ComposeNoteSheet: View {
         let fallbackIdentifier = shortNostrIdentifier(normalizedPubkey)
         profileDisplayName = fallbackIdentifier
         profileAvatarURL = nil
-        profileFallbackSymbol = String(fallbackIdentifier.prefix(1)).uppercased()
+        profileFallbackSymbol = ""
 
         if let cachedProfile = await profileService.cachedProfile(pubkey: normalizedPubkey) {
             applyComposeProfile(cachedProfile, pubkey: normalizedPubkey)
@@ -1580,48 +736,44 @@ struct ComposeNoteSheet: View {
     }
 
     private func applyComposeProfile(_ profile: NostrProfile, pubkey: String) {
+        let preferredName: String?
+
         if let displayName = profile.displayName?.trimmingCharacters(in: .whitespacesAndNewlines),
            !displayName.isEmpty {
-            profileDisplayName = displayName
+            preferredName = displayName
         } else if let name = profile.name?.trimmingCharacters(in: .whitespacesAndNewlines), !name.isEmpty {
-            profileDisplayName = name
+            preferredName = name
         } else {
-            profileDisplayName = String(pubkey.prefix(8))
+            preferredName = nil
         }
 
-        profileFallbackSymbol = String(profileDisplayName.prefix(1)).uppercased()
-
-        if let picture = profile.picture?.trimmingCharacters(in: .whitespacesAndNewlines),
-           let url = URL(string: picture),
-           url.scheme != nil {
-            profileAvatarURL = url
-        } else {
-            profileAvatarURL = nil
-        }
+        profileDisplayName = preferredName ?? shortNostrIdentifier(pubkey)
+        profileFallbackSymbol = preferredName.map { String($0.prefix(1)).uppercased() } ?? ""
+        profileAvatarURL = profile.resolvedAvatarURL
     }
 
     private func refreshReplyTargetAuthorSummaryIfNeeded() async {
-        guard let replyTargetEvent else { return }
+        guard let currentReplyTargetEvent else { return }
 
-        if let replyTargetDisplayNameHint {
-            let trimmed = replyTargetDisplayNameHint.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let currentReplyTargetDisplayNameHint {
+            let trimmed = currentReplyTargetDisplayNameHint.trimmingCharacters(in: .whitespacesAndNewlines)
             if !trimmed.isEmpty {
                 replyTargetDisplayName = trimmed
             }
         }
 
-        if let replyTargetHandleHint {
-            let trimmed = replyTargetHandleHint.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let currentReplyTargetHandleHint {
+            let trimmed = currentReplyTargetHandleHint.trimmingCharacters(in: .whitespacesAndNewlines)
             if !trimmed.isEmpty {
                 replyTargetHandle = trimmed.hasPrefix("@") ? trimmed : "@\(trimmed)"
             }
         }
 
-        if let replyTargetAvatarURLHint {
-            replyTargetAvatarURL = replyTargetAvatarURLHint
+        if let currentReplyTargetAvatarURLHint {
+            replyTargetAvatarURL = currentReplyTargetAvatarURLHint
         }
 
-        let normalizedPubkey = replyTargetEvent.pubkey.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        let normalizedPubkey = currentReplyTargetEvent.pubkey.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         guard !normalizedPubkey.isEmpty else { return }
 
         if let cachedProfile = await profileService.cachedProfile(pubkey: normalizedPubkey) {
@@ -1665,46 +817,42 @@ struct ComposeNoteSheet: View {
             replyTargetHandle = "@\(String(pubkey.prefix(8)).lowercased())"
         }
 
-        if let picture = profile.picture?.trimmingCharacters(in: .whitespacesAndNewlines),
-           let url = URL(string: picture),
-           url.scheme != nil {
-            replyTargetAvatarURL = url
-        }
+        replyTargetAvatarURL = profile.resolvedAvatarURL
     }
 
     private func refreshReplyTargetPreviewIfNeeded() async {
-        guard let replyTargetEvent else {
+        guard let currentReplyTargetEvent else {
             replyTargetPreviewSnapshot = nil
             return
         }
 
-        let previewSnapshot = await Self.makeContextPreviewSnapshot(for: replyTargetEvent)
+        let previewSnapshot = await Self.makeContextPreviewSnapshot(for: currentReplyTargetEvent)
         guard !Task.isCancelled else { return }
         replyTargetPreviewSnapshot = previewSnapshot
     }
 
     private func refreshQuotedAuthorSummaryIfNeeded() async {
-        guard let quotedEvent else { return }
+        guard let currentQuotedEvent else { return }
 
-        if let quotedDisplayNameHint {
-            let trimmed = quotedDisplayNameHint.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let currentQuotedDisplayNameHint {
+            let trimmed = currentQuotedDisplayNameHint.trimmingCharacters(in: .whitespacesAndNewlines)
             if !trimmed.isEmpty {
                 quotedDisplayName = trimmed
             }
         }
 
-        if let quotedHandleHint {
-            let trimmed = quotedHandleHint.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let currentQuotedHandleHint {
+            let trimmed = currentQuotedHandleHint.trimmingCharacters(in: .whitespacesAndNewlines)
             if !trimmed.isEmpty {
                 quotedHandle = trimmed.hasPrefix("@") ? trimmed : "@\(trimmed)"
             }
         }
 
-        if let quotedAvatarURLHint {
-            quotedAvatarURL = quotedAvatarURLHint
+        if let currentQuotedAvatarURLHint {
+            quotedAvatarURL = currentQuotedAvatarURLHint
         }
 
-        let normalizedPubkey = quotedEvent.pubkey.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        let normalizedPubkey = currentQuotedEvent.pubkey.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         guard !normalizedPubkey.isEmpty else { return }
 
         if let cachedProfile = await profileService.cachedProfile(pubkey: normalizedPubkey) {
@@ -1748,21 +896,17 @@ struct ComposeNoteSheet: View {
             quotedHandle = "@\(String(pubkey.prefix(8)).lowercased())"
         }
 
-        if let picture = profile.picture?.trimmingCharacters(in: .whitespacesAndNewlines),
-           let url = URL(string: picture),
-           url.scheme != nil {
-            quotedAvatarURL = url
-        }
+        quotedAvatarURL = profile.resolvedAvatarURL
     }
 
     private func refreshQuotedPreviewIfNeeded() async {
-        guard let quotedEvent else {
+        guard let currentQuotedEvent else {
             quotedPreviewSnapshot = nil
             return
         }
 
         let previewSnapshot = await Self.makeContextPreviewSnapshot(
-            for: quotedEvent,
+            for: currentQuotedEvent,
             maximumLength: 220
         )
         guard !Task.isCancelled else { return }
@@ -2196,7 +1340,7 @@ struct ComposeNoteSheet: View {
             from: viewModel.text,
             selectedMentions: selectedMentions
         )
-        let publishTags = mediaAttachments.map(\.imetaTag) + initialAdditionalTags + preparedMentions.additionalTags
+        let publishTags = mediaAttachments.map(\.imetaTag) + currentAdditionalTags + preparedMentions.additionalTags
         let isPublishingPoll = pollDraft != nil
         let didPublish = await viewModel.publish(
             content: preparedMentions.content,
@@ -2205,24 +1349,46 @@ struct ComposeNoteSheet: View {
             writeRelayURLs: writeRelayURLs,
             additionalTags: publishTags,
             pollDraft: pollDraft,
-            replyTargetEvent: replyTargetEvent
+            replyTargetEvent: currentReplyTargetEvent
         )
 
         guard didPublish else { return }
 
+        hasPublishedSuccessfully = true
+        if let activeSavedDraftID {
+            composeDraftStore.deleteDraft(id: activeSavedDraftID)
+        }
         mediaAttachments.removeAll()
         pollDraft = nil
         selectedMentions.removeAll()
         activeMentionQuery = nil
         mentionSuggestions = []
+        activeSavedDraftID = nil
         editorSelectedRange = NSRange(location: 0, length: 0)
         onPublished?()
         if isPublishingPoll {
             toastCenter.show("Poll posted")
         } else {
-            toastCenter.show(replyTargetEvent == nil ? "Note posted" : "Reply posted")
+            toastCenter.show(currentReplyTargetEvent == nil ? "Note posted" : "Reply posted")
         }
         dismiss()
+    }
+
+    private func applyInitialContextIfNeeded() {
+        guard !hasAppliedInitialContext else { return }
+        hasAppliedInitialContext = true
+        applyComposerContext(
+            additionalTags: initialAdditionalTags,
+            replyTargetEvent: replyTargetEvent,
+            replyTargetDisplayNameHint: replyTargetDisplayNameHint,
+            replyTargetHandleHint: replyTargetHandleHint,
+            replyTargetAvatarURLHint: replyTargetAvatarURLHint,
+            quotedEvent: quotedEvent,
+            quotedDisplayNameHint: quotedDisplayNameHint,
+            quotedHandleHint: quotedHandleHint,
+            quotedAvatarURLHint: quotedAvatarURLHint
+        )
+        activeSavedDraftID = savedDraftID
     }
 
     private func applyInitialDraftIfNeeded() {
@@ -2233,6 +1399,20 @@ struct ComposeNoteSheet: View {
         guard !initialText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
         viewModel.text = initialText
         editorSelectedRange = NSRange(location: (initialText as NSString).length, length: 0)
+    }
+
+    private func applyInitialSelectedMentionsIfNeeded() {
+        guard !hasAppliedInitialSelectedMentions else { return }
+        hasAppliedInitialSelectedMentions = true
+        guard selectedMentions.isEmpty else { return }
+        selectedMentions = initialSelectedMentions
+    }
+
+    private func applyInitialPollDraftIfNeeded() {
+        guard !hasAppliedInitialPollDraft else { return }
+        hasAppliedInitialPollDraft = true
+        guard pollDraft == nil else { return }
+        pollDraft = initialPollDraft
     }
 
     private func applyInitialAttachmentsIfNeeded() {
@@ -2246,6 +1426,191 @@ struct ComposeNoteSheet: View {
             mediaAttachments.append(attachment)
             removeUploadedMediaURLIfPresent(attachment.url)
         }
+    }
+
+    private func applyComposerContext(
+        additionalTags: [[String]],
+        replyTargetEvent: NostrEvent?,
+        replyTargetDisplayNameHint: String?,
+        replyTargetHandleHint: String?,
+        replyTargetAvatarURLHint: URL?,
+        quotedEvent: NostrEvent?,
+        quotedDisplayNameHint: String?,
+        quotedHandleHint: String?,
+        quotedAvatarURLHint: URL?
+    ) {
+        currentAdditionalTags = additionalTags
+        currentReplyTargetEvent = replyTargetEvent
+        currentReplyTargetDisplayNameHint = normalizedDraftHint(replyTargetDisplayNameHint)
+        currentReplyTargetHandleHint = normalizedDraftHandle(replyTargetHandleHint)
+        currentReplyTargetAvatarURLHint = replyTargetAvatarURLHint
+        currentQuotedEvent = quotedEvent
+        currentQuotedDisplayNameHint = normalizedDraftHint(quotedDisplayNameHint)
+        currentQuotedHandleHint = normalizedDraftHandle(quotedHandleHint)
+        currentQuotedAvatarURLHint = quotedAvatarURLHint
+
+        replyTargetDisplayName = currentReplyTargetDisplayNameHint
+        replyTargetHandle = currentReplyTargetHandleHint
+        replyTargetAvatarURL = currentReplyTargetAvatarURLHint
+        quotedDisplayName = currentQuotedDisplayNameHint
+        quotedHandle = currentQuotedHandleHint
+        quotedAvatarURL = currentQuotedAvatarURLHint
+        replyTargetPreviewSnapshot = nil
+        quotedPreviewSnapshot = nil
+    }
+
+    private func saveDraftIfNeededOnDismiss() {
+        guard !hasPublishedSuccessfully else { return }
+        guard !isShowingCapturePermissionSheet,
+              !isShowingCameraCapture,
+              !isShowingKlipyGIFPicker,
+              !isShowingDraftLibrary,
+              previewingMediaAttachment == nil else {
+            return
+        }
+        guard !viewModel.isPublishing else { return }
+
+        let savedDraft = composeDraftStore.saveDraft(
+            snapshot: currentDraftSnapshot,
+            ownerPubkey: currentAccountPubkey,
+            existingDraftID: activeSavedDraftID
+        )
+
+        if let savedDraft {
+            activeSavedDraftID = savedDraft.id
+            toastCenter.show("Draft saved locally", style: .info)
+        } else {
+            activeSavedDraftID = nil
+        }
+    }
+
+    private var currentDraftSnapshot: SavedComposeDraftSnapshot {
+        SavedComposeDraftSnapshot(
+            text: viewModel.text,
+            additionalTags: currentAdditionalTags,
+            uploadedAttachments: mediaAttachments,
+            selectedMentions: selectedMentions,
+            pollDraft: pollDraft,
+            replyTargetEvent: currentReplyTargetEvent,
+            replyTargetDisplayNameHint: replyTargetDisplayName,
+            replyTargetHandleHint: replyTargetHandle,
+            replyTargetAvatarURLHint: replyTargetAvatarURL,
+            quotedEvent: currentQuotedEvent,
+            quotedDisplayNameHint: quotedDisplayName,
+            quotedHandleHint: quotedHandle,
+            quotedAvatarURLHint: quotedAvatarURL
+        )
+    }
+
+    private func loadSavedDraft(_ draft: SavedComposeDraft) {
+        if activeSavedDraftID != draft.id {
+            _ = composeDraftStore.saveDraft(
+                snapshot: currentDraftSnapshot,
+                ownerPubkey: currentAccountPubkey,
+                existingDraftID: activeSavedDraftID
+            )
+        }
+
+        applySavedDraftSnapshot(draft.snapshot)
+        activeSavedDraftID = draft.id
+        toastCenter.show("Draft loaded", style: .info)
+    }
+
+    private func insertSavedDraftText(_ draft: SavedComposeDraft) {
+        guard draft.canInsertText else { return }
+
+        let existingText = viewModel.text
+        let separator: String
+        if existingText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            separator = ""
+        } else if existingText.hasSuffix("\n") {
+            separator = "\n"
+        } else {
+            separator = "\n\n"
+        }
+
+        let offset = (existingText as NSString).length + (separator as NSString).length
+        viewModel.text = existingText + separator + draft.snapshot.text
+        selectedMentions.append(contentsOf: draft.snapshot.selectedMentions.map { $0.shifted(by: offset) })
+        selectedMentions.sort { lhs, rhs in
+            if lhs.range.location == rhs.range.location {
+                return lhs.handle < rhs.handle
+            }
+            return lhs.range.location < rhs.range.location
+        }
+        editorSelectedRange = NSRange(location: (viewModel.text as NSString).length, length: 0)
+        isEditorFocused = true
+        toastCenter.show("Draft text inserted", style: .info)
+    }
+
+    private func deleteSavedDraft(_ draft: SavedComposeDraft) {
+        composeDraftStore.deleteDraft(draft)
+        if activeSavedDraftID == draft.id {
+            activeSavedDraftID = nil
+        }
+    }
+
+    private func clearComposerForFreshDraft() {
+        _ = composeDraftStore.saveDraft(
+            snapshot: currentDraftSnapshot,
+            ownerPubkey: currentAccountPubkey,
+            existingDraftID: activeSavedDraftID
+        )
+
+        applySavedDraftSnapshot(
+            SavedComposeDraftSnapshot(
+                text: "",
+                additionalTags: [],
+                uploadedAttachments: [],
+                selectedMentions: [],
+                pollDraft: nil,
+                replyTargetEvent: nil,
+                replyTargetDisplayNameHint: nil,
+                replyTargetHandleHint: nil,
+                replyTargetAvatarURLHint: nil,
+                quotedEvent: nil,
+                quotedDisplayNameHint: nil,
+                quotedHandleHint: nil,
+                quotedAvatarURLHint: nil
+            )
+        )
+        activeSavedDraftID = nil
+        toastCenter.show("Started a fresh draft", style: .info)
+    }
+
+    private func applySavedDraftSnapshot(_ snapshot: SavedComposeDraftSnapshot) {
+        applyComposerContext(
+            additionalTags: snapshot.additionalTags,
+            replyTargetEvent: snapshot.replyTargetEvent,
+            replyTargetDisplayNameHint: snapshot.replyTargetDisplayNameHint,
+            replyTargetHandleHint: snapshot.replyTargetHandleHint,
+            replyTargetAvatarURLHint: snapshot.replyTargetAvatarURLHint,
+            quotedEvent: snapshot.quotedEvent,
+            quotedDisplayNameHint: snapshot.quotedDisplayNameHint,
+            quotedHandleHint: snapshot.quotedHandleHint,
+            quotedAvatarURLHint: snapshot.quotedAvatarURLHint
+        )
+        viewModel.text = snapshot.text
+        mediaAttachments = snapshot.uploadedAttachments
+        pollDraft = snapshot.pollDraft
+        selectedMentions = snapshot.selectedMentions
+        activeMentionQuery = nil
+        mentionSuggestions = []
+        isLoadingMentionSuggestions = false
+        viewModel.feedbackMessage = nil
+        viewModel.feedbackIsError = false
+        editorSelectedRange = NSRange(location: (viewModel.text as NSString).length, length: 0)
+        isEditorFocused = true
+    }
+
+    private func normalizedDraftHint(_ value: String?) -> String? {
+        let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return trimmed.isEmpty ? nil : trimmed
+    }
+
+    private func normalizedDraftHandle(_ value: String?) -> String? {
+        guard let trimmed = normalizedDraftHint(value) else { return nil }
+        return trimmed.hasPrefix("@") ? trimmed : "@\(trimmed)"
     }
 
     private var configuredPublishSourceCount: Int {
@@ -2478,6 +1843,582 @@ struct ComposeNoteSheet: View {
             content: content,
             sig: sig
         )
+    }
+}
+
+private struct ComposePublishToolbarButton: View {
+    @EnvironmentObject private var appSettings: AppSettingsStore
+
+    let title: String
+    let isPublishing: Bool
+    let isEnabled: Bool
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            Group {
+                if isPublishing {
+                    ProgressView()
+                        .controlSize(.small)
+                        .tint(.white)
+                } else {
+                    Text(title)
+                }
+            }
+            .font(.subheadline.weight(.semibold))
+            .foregroundStyle(.white)
+            .padding(.horizontal, 16)
+            .padding(.vertical, 8)
+            .background(appSettings.primaryGradient, in: Capsule())
+        }
+        .buttonStyle(.plain)
+        .disabled(!isEnabled)
+        .opacity(isEnabled ? 1 : 0.45)
+    }
+}
+
+private struct ComposeToolbarAvatarView: View {
+    @EnvironmentObject private var appSettings: AppSettingsStore
+
+    let avatarURL: URL?
+    let fallbackSymbol: String
+    let accessibilityLabel: String
+
+    var body: some View {
+        ComposeAvatarCircleView(
+            avatarURL: avatarURL,
+            fallbackText: fallbackSymbol,
+            size: 34,
+            fallbackFont: .subheadline.weight(.semibold)
+        )
+        .overlay {
+            Circle()
+                .stroke(appSettings.themePalette.separator.opacity(0.22), lineWidth: 0.8)
+        }
+        .accessibilityLabel(accessibilityLabel)
+    }
+}
+
+private struct ComposeStatusSectionView: View {
+    @EnvironmentObject private var appSettings: AppSettingsStore
+
+    let isPublishing: Bool
+    let publishSourceCount: Int
+    let feedbackMessage: String?
+    let feedbackIsError: Bool
+    let isTranscribingSpeech: Bool
+    let missingNsec: Bool
+    let missingPublishSources: Bool
+    let pollValidationMessage: String?
+
+    var body: some View {
+        Group {
+            if isPublishing {
+                HStack(spacing: 10) {
+                    ProgressView()
+                        .controlSize(.small)
+                    Text("Posting to \(publishSourceCount) source\(publishSourceCount == 1 ? "" : "s")...")
+                        .font(.footnote)
+                        .foregroundStyle(appSettings.themePalette.secondaryForeground)
+                    Spacer()
+                }
+                .padding(.horizontal, 2)
+            } else if let feedbackMessage, !feedbackMessage.isEmpty {
+                HStack(alignment: .top, spacing: 10) {
+                    Image(systemName: feedbackIsError ? "exclamationmark.triangle.fill" : "checkmark.circle.fill")
+                        .foregroundStyle(feedbackIsError ? .red : .green)
+
+                    Text(feedbackMessage)
+                        .font(.footnote)
+                        .foregroundStyle(feedbackIsError ? .red : appSettings.themePalette.secondaryForeground)
+
+                    Spacer()
+                }
+                .padding(12)
+                .background(
+                    (feedbackIsError ? Color.red.opacity(0.08) : Color.green.opacity(0.08)),
+                    in: RoundedRectangle(cornerRadius: 16, style: .continuous)
+                )
+            } else if isTranscribingSpeech {
+                ComposeInfoBannerView(
+                    systemImage: "waveform.badge.magnifyingglass",
+                    text: "Transcribing speech..."
+                )
+            } else if missingNsec {
+                ComposeInfoBannerView(
+                    systemImage: "lock.fill",
+                    text: "This account can read feeds, but it needs an nsec to publish notes."
+                )
+            } else if missingPublishSources {
+                ComposeInfoBannerView(
+                    systemImage: "wifi.slash",
+                    text: "Add at least one publish source to post notes."
+                )
+            } else if let pollValidationMessage {
+                ComposeInfoBannerView(
+                    systemImage: "chart.bar.xaxis",
+                    text: pollValidationMessage
+                )
+            }
+        }
+    }
+}
+
+private struct ComposeInfoBannerView: View {
+    @EnvironmentObject private var appSettings: AppSettingsStore
+
+    let systemImage: String
+    let text: String
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 10) {
+            Image(systemName: systemImage)
+                .foregroundStyle(appSettings.themePalette.iconMutedForeground)
+
+            Text(text)
+                .font(.footnote)
+                .foregroundStyle(appSettings.themePalette.secondaryForeground)
+
+            Spacer()
+        }
+        .padding(12)
+        .background(
+            appSettings.themePalette.secondaryGroupedBackground,
+            in: RoundedRectangle(cornerRadius: 16, style: .continuous)
+        )
+    }
+}
+
+private struct ComposeDraftLibrarySheet: View {
+    @Environment(\.dismiss) private var dismiss
+    @EnvironmentObject private var appSettings: AppSettingsStore
+
+    let drafts: [SavedComposeDraft]
+    let activeDraftID: UUID?
+    let onOpenDraft: (SavedComposeDraft) -> Void
+    let onInsertText: (SavedComposeDraft) -> Void
+    let onDeleteDraft: (SavedComposeDraft) -> Void
+    let onCreateNewDraft: () -> Void
+
+    var body: some View {
+        NavigationStack {
+            Group {
+                if drafts.isEmpty {
+                    emptyState
+                } else {
+                    List {
+                        ForEach(drafts) { draft in
+                            ComposeDraftLibraryRow(
+                                draft: draft,
+                                isActive: activeDraftID == draft.id,
+                                onOpen: {
+                                    onOpenDraft(draft)
+                                    dismiss()
+                                },
+                                onInsertText: draft.canInsertText ? {
+                                    onInsertText(draft)
+                                    dismiss()
+                                } : nil
+                            )
+                            .listRowBackground(appSettings.themePalette.groupedBackground)
+                            .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+                                Button(role: .destructive) {
+                                    onDeleteDraft(draft)
+                                } label: {
+                                    Label("Delete", systemImage: "trash")
+                                }
+                            }
+                        }
+                    }
+                    .listStyle(.plain)
+                    .scrollContentBackground(.hidden)
+                }
+            }
+            .background(appSettings.themePalette.groupedBackground)
+            .navigationTitle("Drafts")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Done") {
+                        dismiss()
+                    }
+                }
+
+                ToolbarItem(placement: .topBarLeading) {
+                    Button("New") {
+                        onCreateNewDraft()
+                        dismiss()
+                    }
+                }
+            }
+        }
+        .presentationDetents([.medium, .large])
+        .presentationDragIndicator(.visible)
+        .presentationBackground(appSettings.themePalette.groupedBackground)
+    }
+
+    private var emptyState: some View {
+        VStack(spacing: 14) {
+            Image(systemName: "tray")
+                .font(.system(size: 28, weight: .semibold))
+                .foregroundStyle(appSettings.primaryColor)
+                .frame(width: 68, height: 68)
+                .background(appSettings.primaryColor.opacity(0.12), in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+
+            Text("No local drafts yet")
+                .font(appSettings.appFont(.headline, weight: .semibold))
+                .foregroundStyle(appSettings.themePalette.foreground)
+
+            Text("Swipe a composer down or tap Cancel after writing something, and Halo will keep that draft on this device.")
+                .font(appSettings.appFont(.subheadline))
+                .foregroundStyle(appSettings.themePalette.secondaryForeground)
+                .multilineTextAlignment(.center)
+                .padding(.horizontal, 28)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+        .padding(.bottom, 40)
+    }
+}
+
+private struct ComposeDraftLibraryRow: View {
+    @EnvironmentObject private var appSettings: AppSettingsStore
+
+    let draft: SavedComposeDraft
+    let isActive: Bool
+    let onOpen: () -> Void
+    let onInsertText: (() -> Void)?
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 12) {
+            Button(action: onOpen) {
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack(spacing: 8) {
+                        Text(draft.mode.navigationTitle)
+                            .font(appSettings.appFont(.caption1, weight: .semibold))
+                            .foregroundStyle(appSettings.primaryColor)
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 4)
+                            .background(appSettings.primaryColor.opacity(0.12), in: Capsule())
+
+                        if isActive {
+                            Text("Open")
+                                .font(appSettings.appFont(.caption1, weight: .semibold))
+                                .foregroundStyle(appSettings.themePalette.secondaryForeground)
+                        }
+
+                        Spacer(minLength: 8)
+
+                        Text(draft.updatedAt.formatted(date: .abbreviated, time: .shortened))
+                            .font(appSettings.appFont(.caption1))
+                            .foregroundStyle(appSettings.themePalette.secondaryForeground)
+                    }
+
+                    Text(draft.textPreview)
+                        .font(appSettings.appFont(.body, weight: .medium))
+                        .foregroundStyle(appSettings.themePalette.foreground)
+                        .multilineTextAlignment(.leading)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+
+                    if !draft.accessorySummary.isEmpty {
+                        Text(draft.accessorySummary)
+                            .font(appSettings.appFont(.footnote))
+                            .foregroundStyle(appSettings.themePalette.secondaryForeground)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+
+            if let onInsertText {
+                Button("Insert") {
+                    onInsertText()
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+            }
+        }
+        .padding(.vertical, 8)
+    }
+}
+
+private struct ComposeMentionSuggestionPanel: View {
+    @EnvironmentObject private var appSettings: AppSettingsStore
+
+    let suggestions: [ComposeMentionSuggestion]
+    let isLoading: Bool
+    let onSelect: (ComposeMentionSuggestion) -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: 8) {
+                Text("Mention suggestions")
+                    .font(.footnote.weight(.semibold))
+                    .foregroundStyle(appSettings.themePalette.secondaryForeground)
+
+                Spacer()
+
+                if isLoading {
+                    ProgressView()
+                        .controlSize(.small)
+                }
+            }
+            .padding(.horizontal, 14)
+            .padding(.top, 12)
+            .padding(.bottom, suggestions.isEmpty ? 12 : 8)
+
+            if !suggestions.isEmpty {
+                VStack(spacing: 0) {
+                    ForEach(Array(suggestions.enumerated()), id: \.element.id) { index, suggestion in
+                        Button {
+                            onSelect(suggestion)
+                        } label: {
+                            ComposeMentionSuggestionRow(suggestion: suggestion)
+                        }
+                        .buttonStyle(.plain)
+
+                        if index < suggestions.count - 1 {
+                            Divider()
+                                .padding(.leading, 60)
+                        }
+                    }
+                }
+                .padding(.bottom, 6)
+            }
+        }
+        .background(
+            appSettings.themePalette.secondaryGroupedBackground,
+            in: RoundedRectangle(cornerRadius: 18, style: .continuous)
+        )
+        .overlay {
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .stroke(appSettings.themePalette.separator.opacity(0.18), lineWidth: 0.8)
+        }
+    }
+}
+
+private struct ComposeContextPreviewCardView: View {
+    @EnvironmentObject private var appSettings: AppSettingsStore
+
+    let title: String
+    let previewSnapshot: ComposeContextPreviewSnapshot
+    let displayName: String
+    let handle: String
+    let avatarURL: URL?
+    let fallbackText: String
+    let videoSummary: String
+    let audioSummary: String
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text(title)
+                .font(.footnote.weight(.semibold))
+                .foregroundStyle(appSettings.themePalette.secondaryForeground)
+
+            HStack(alignment: .top, spacing: 10) {
+                ComposeAvatarCircleView(
+                    avatarURL: avatarURL,
+                    fallbackText: fallbackText,
+                    size: 30,
+                    fallbackFont: .caption.weight(.semibold)
+                )
+
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack(alignment: .firstTextBaseline, spacing: 6) {
+                        Text(displayName)
+                            .font(.subheadline.weight(.semibold))
+                            .lineLimit(1)
+
+                        Text(handle)
+                            .font(.subheadline)
+                            .foregroundStyle(appSettings.themePalette.secondaryForeground)
+                            .lineLimit(1)
+
+                        Spacer(minLength: 0)
+
+                        Text(RelativeTimestampFormatter.shortString(from: previewSnapshot.createdAtDate))
+                            .font(.caption)
+                            .foregroundStyle(appSettings.themePalette.secondaryForeground)
+                            .lineLimit(1)
+                    }
+
+                    Text(previewSnapshot.previewText)
+                        .font(.body)
+                        .foregroundStyle(appSettings.themePalette.foreground)
+                        .multilineTextAlignment(.leading)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+
+                    ComposeContextPreviewMediaView(
+                        imageURLs: previewSnapshot.imageURLs,
+                        hasVideo: previewSnapshot.hasVideo,
+                        hasAudio: previewSnapshot.hasAudio,
+                        videoSummary: videoSummary,
+                        audioSummary: audioSummary
+                    )
+                }
+            }
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .fill(appSettings.themePalette.secondaryBackground)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .stroke(appSettings.themePalette.separator.opacity(0.3), lineWidth: 0.8)
+        )
+    }
+}
+
+private struct ComposeContextPreviewMediaView: View {
+    @EnvironmentObject private var appSettings: AppSettingsStore
+
+    let imageURLs: [URL]
+    let hasVideo: Bool
+    let hasAudio: Bool
+    let videoSummary: String
+    let audioSummary: String
+
+    var body: some View {
+        if !imageURLs.isEmpty {
+            let columns = Array(
+                repeating: GridItem(.flexible(minimum: 0), spacing: 8),
+                count: min(max(imageURLs.count, 1), 2)
+            )
+            let thumbnailHeight: CGFloat = imageURLs.count == 1 ? 170 : 104
+
+            LazyVGrid(columns: columns, alignment: .leading, spacing: 8) {
+                ForEach(Array(imageURLs.enumerated()), id: \.offset) { _, url in
+                    AsyncImage(url: url) { phase in
+                        switch phase {
+                        case .success(let image):
+                            image
+                                .resizable()
+                                .scaledToFill()
+                        case .failure:
+                            appSettings.themePalette.tertiaryFill
+                                .overlay {
+                                    Image(systemName: "photo")
+                                        .foregroundStyle(appSettings.themePalette.secondaryForeground)
+                                }
+                        case .empty:
+                            ProgressView()
+                                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                                .background(appSettings.themePalette.tertiaryFill)
+                        @unknown default:
+                            appSettings.themePalette.tertiaryFill
+                        }
+                    }
+                    .frame(maxWidth: .infinity)
+                    .frame(height: thumbnailHeight)
+                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        } else if hasVideo || hasAudio {
+            HStack(spacing: 8) {
+                Image(systemName: hasVideo ? "video" : "waveform")
+                Text(hasVideo ? videoSummary : audioSummary)
+                    .lineLimit(1)
+                Spacer(minLength: 0)
+            }
+            .font(.footnote)
+            .foregroundStyle(appSettings.themePalette.secondaryForeground)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 8)
+            .background(
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .fill(appSettings.themePalette.tertiaryFill)
+            )
+        }
+    }
+}
+
+private struct ComposeMediaAttachmentStrip: View {
+    @EnvironmentObject private var appSettings: AppSettingsStore
+
+    let attachments: [ComposeMediaAttachment]
+    let colorScheme: ColorScheme
+    let onPreview: (ComposeMediaAttachment) -> Void
+    let onRemove: (ComposeMediaAttachment) -> Void
+
+    var body: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 10) {
+                ForEach(attachments) { attachment in
+                    ZStack(alignment: .topTrailing) {
+                        CompactMediaAttachmentPreview(
+                            url: attachment.url,
+                            mimeType: attachment.mimeType,
+                            fileSizeBytes: attachment.fileSizeBytes,
+                            colorScheme: colorScheme,
+                            onTap: {
+                                onPreview(attachment)
+                            }
+                        )
+
+                        Button {
+                            onRemove(attachment)
+                        } label: {
+                            Image(systemName: "xmark.circle.fill")
+                                .font(.title3)
+                                .foregroundStyle(appSettings.themePalette.iconMutedForeground)
+                                .padding(6)
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel("Remove attachment")
+                    }
+                }
+            }
+            .padding(.horizontal, 1)
+            .padding(.vertical, 1)
+        }
+    }
+}
+
+private struct ComposeAvatarCircleView: View {
+    @EnvironmentObject private var appSettings: AppSettingsStore
+
+    let avatarURL: URL?
+    let fallbackText: String
+    let size: CGFloat
+    let fallbackFont: Font
+
+    var body: some View {
+        Group {
+            if let avatarURL {
+                CachedAsyncImage(url: avatarURL) { phase in
+                    switch phase {
+                    case .success(let image):
+                        image
+                            .resizable()
+                            .scaledToFill()
+                    default:
+                        placeholder
+                    }
+                }
+            } else {
+                placeholder
+            }
+        }
+        .frame(width: size, height: size)
+        .clipShape(Circle())
+    }
+
+    private var placeholder: some View {
+        ZStack {
+            Circle().fill(appSettings.themePalette.secondaryFill)
+            if let firstCharacter = fallbackText.trimmingCharacters(in: .whitespacesAndNewlines).first {
+                Text(String(firstCharacter).uppercased())
+                    .font(fallbackFont)
+                    .foregroundStyle(appSettings.themePalette.secondaryForeground)
+            } else {
+                Image(systemName: "person.fill")
+                    .font(fallbackFont)
+                    .foregroundStyle(appSettings.themePalette.secondaryForeground)
+            }
+        }
     }
 }
 
@@ -2776,351 +2717,5 @@ private struct CameraCapturePermissionSheet: View {
             return "To capture photos or videos for your note, \(AppBrand.displayName) needs camera access. Microphone access is used for video capture with sound. You can change this any time later in app settings."
         }
         return "To capture photos or videos for your note, \(AppBrand.displayName) needs access to your camera and microphone. You can change this any time later in app settings."
-    }
-}
-
-private struct ComposeMultilineTextView: UIViewRepresentable {
-    @EnvironmentObject private var appSettings: AppSettingsStore
-    @Binding var text: String
-    @Binding var isFocused: Bool
-    @Binding var selectedRange: NSRange
-    @Binding var mentions: [ComposeSelectedMention]
-    let mentionColor: UIColor
-    let onMentionQueryChange: (ComposeMentionQuery?) -> Void
-
-    func makeCoordinator() -> Coordinator {
-        Coordinator(
-            text: $text,
-            isFocused: $isFocused,
-            selectedRange: $selectedRange,
-            mentions: $mentions,
-            onMentionQueryChange: onMentionQueryChange
-        )
-    }
-
-    func makeUIView(context: Context) -> UITextView {
-        let textView = UITextView()
-        textView.delegate = context.coordinator
-        textView.backgroundColor = .clear
-        textView.font = appSettings.appUIFont(.body)
-        textView.typingAttributes[.font] = appSettings.appUIFont(.body)
-        textView.adjustsFontForContentSizeCategory = false
-        textView.textColor = UIColor(appSettings.themePalette.foreground)
-        textView.tintColor = UIColor(appSettings.themePalette.foreground)
-        textView.autocorrectionType = .yes
-        textView.spellCheckingType = .yes
-        textView.smartQuotesType = .yes
-        textView.smartDashesType = .yes
-        textView.smartInsertDeleteType = .yes
-        textView.keyboardType = .default
-        textView.returnKeyType = .default
-        textView.textContainerInset = UIEdgeInsets(top: 8, left: 4, bottom: 8, right: 4)
-        textView.textContainer.lineFragmentPadding = 0
-        textView.isScrollEnabled = true
-        textView.alwaysBounceVertical = true
-        textView.keyboardDismissMode = .interactive
-        return textView
-    }
-
-    func updateUIView(_ uiView: UITextView, context: Context) {
-        let preferredFont = appSettings.appUIFont(.body)
-        let fontChanged = uiView.font != preferredFont
-        if fontChanged {
-            uiView.font = preferredFont
-        }
-
-        if (uiView.text != text || context.coordinator.lastRenderedMentions != mentions || fontChanged),
-           uiView.markedTextRange == nil {
-            context.coordinator.isApplyingProgrammaticUpdate = true
-            uiView.attributedText = Self.attributedText(
-                for: text,
-                mentions: mentions,
-                font: preferredFont,
-                textColor: UIColor(appSettings.themePalette.foreground),
-                mentionColor: mentionColor
-            )
-            uiView.typingAttributes = Self.typingAttributes(
-                font: preferredFont,
-                textColor: UIColor(appSettings.themePalette.foreground)
-            )
-            context.coordinator.lastRenderedMentions = mentions
-            context.coordinator.isApplyingProgrammaticUpdate = false
-        } else {
-            uiView.typingAttributes = Self.typingAttributes(
-                font: preferredFont,
-                textColor: UIColor(appSettings.themePalette.foreground)
-            )
-        }
-
-        let clampedRange = Self.clampedRange(selectedRange, maxLength: uiView.text.utf16.count)
-        if uiView.selectedRange != clampedRange {
-            uiView.selectedRange = clampedRange
-        }
-
-        if isFocused {
-            guard uiView.window != nil, !uiView.isFirstResponder else { return }
-            DispatchQueue.main.async {
-                if uiView.window != nil && !uiView.isFirstResponder {
-                    uiView.becomeFirstResponder()
-                }
-            }
-        } else if uiView.isFirstResponder {
-            uiView.resignFirstResponder()
-        }
-    }
-
-    private static func attributedText(
-        for text: String,
-        mentions: [ComposeSelectedMention],
-        font: UIFont,
-        textColor: UIColor,
-        mentionColor: UIColor
-    ) -> NSAttributedString {
-        let attributed = NSMutableAttributedString(
-            string: text,
-            attributes: [
-                .font: font,
-                .foregroundColor: textColor
-            ]
-        )
-
-        for mention in mentions {
-            guard mention.range.location >= 0,
-                  mention.range.location + mention.range.length <= attributed.length else {
-                continue
-            }
-            attributed.addAttribute(.foregroundColor, value: mentionColor, range: mention.range)
-        }
-
-        return attributed
-    }
-
-    private static func typingAttributes(
-        font: UIFont,
-        textColor: UIColor
-    ) -> [NSAttributedString.Key: Any] {
-        [
-            .font: font,
-            .foregroundColor: textColor
-        ]
-    }
-
-    private static func clampedRange(_ range: NSRange, maxLength: Int) -> NSRange {
-        let location = min(max(range.location, 0), maxLength)
-        let remainingLength = max(0, maxLength - location)
-        let length = min(max(range.length, 0), remainingLength)
-        return NSRange(location: location, length: length)
-    }
-
-    final class Coordinator: NSObject, UITextViewDelegate {
-        @Binding private var text: String
-        @Binding private var isFocused: Bool
-        @Binding private var selectedRange: NSRange
-        @Binding private var mentions: [ComposeSelectedMention]
-        private let onMentionQueryChange: (ComposeMentionQuery?) -> Void
-        var isApplyingProgrammaticUpdate = false
-        var lastRenderedMentions: [ComposeSelectedMention] = []
-        private var lastReportedMentionQuery: ComposeMentionQuery?
-
-        init(
-            text: Binding<String>,
-            isFocused: Binding<Bool>,
-            selectedRange: Binding<NSRange>,
-            mentions: Binding<[ComposeSelectedMention]>,
-            onMentionQueryChange: @escaping (ComposeMentionQuery?) -> Void
-        ) {
-            _text = text
-            _isFocused = isFocused
-            _selectedRange = selectedRange
-            _mentions = mentions
-            self.onMentionQueryChange = onMentionQueryChange
-        }
-
-        func textView(
-            _ textView: UITextView,
-            shouldChangeTextIn range: NSRange,
-            replacementText text: String
-        ) -> Bool {
-            let updatedMentions = ComposeMentionSupport.updatedMentions(
-                mentions,
-                forEditIn: range,
-                replacementText: text
-            )
-            if updatedMentions != mentions {
-                mentions = updatedMentions
-            }
-            return true
-        }
-
-        func textViewDidChange(_ textView: UITextView) {
-            guard !isApplyingProgrammaticUpdate else { return }
-            text = textView.text
-            selectedRange = textView.selectedRange
-            lastRenderedMentions = mentions
-            updateMentionQuery(for: textView)
-        }
-
-        func textViewDidChangeSelection(_ textView: UITextView) {
-            guard !isApplyingProgrammaticUpdate else { return }
-            selectedRange = textView.selectedRange
-            updateMentionQuery(for: textView)
-        }
-
-        func textViewDidBeginEditing(_ textView: UITextView) {
-            isFocused = true
-            selectedRange = textView.selectedRange
-            updateMentionQuery(for: textView)
-        }
-
-        func textViewDidEndEditing(_ textView: UITextView) {
-            isFocused = false
-            selectedRange = textView.selectedRange
-            lastReportedMentionQuery = nil
-            onMentionQueryChange(nil)
-        }
-
-        private func updateMentionQuery(for textView: UITextView) {
-            let query = ComposeMentionSupport.activeQuery(
-                in: textView.text,
-                selection: textView.selectedRange,
-                confirmedMentions: mentions
-            )
-            guard query != lastReportedMentionQuery else { return }
-            lastReportedMentionQuery = query
-            onMentionQueryChange(query)
-        }
-    }
-}
-
-private struct ComposeMentionSuggestionRow: View {
-    @EnvironmentObject private var appSettings: AppSettingsStore
-    let suggestion: ComposeMentionSuggestion
-
-    var body: some View {
-        HStack(spacing: 12) {
-            ComposeMentionAvatarView(
-                url: suggestion.avatarURL,
-                fallbackText: suggestion.displayName
-            )
-
-            VStack(alignment: .leading, spacing: 2) {
-                Text(suggestion.displayName)
-                    .font(.subheadline.weight(.medium))
-                    .foregroundStyle(appSettings.themePalette.foreground)
-                    .lineLimit(1)
-
-                Text(suggestion.secondaryText)
-                    .font(.caption)
-                    .foregroundStyle(appSettings.themePalette.secondaryForeground)
-                    .lineLimit(1)
-            }
-
-            Spacer(minLength: 8)
-        }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 10)
-        .contentShape(Rectangle())
-    }
-}
-
-private struct ComposeMentionAvatarView: View {
-    @EnvironmentObject private var appSettings: AppSettingsStore
-    let url: URL?
-    let fallbackText: String
-
-    var body: some View {
-        Group {
-            if let url {
-                AsyncImage(url: url) { phase in
-                    switch phase {
-                    case .success(let image):
-                        image
-                            .resizable()
-                            .scaledToFill()
-                    default:
-                        placeholder
-                    }
-                }
-            } else {
-                placeholder
-            }
-        }
-        .frame(width: 36, height: 36)
-        .clipShape(Circle())
-    }
-
-    private var placeholder: some View {
-        ZStack {
-            Circle().fill(appSettings.themePalette.secondaryFill)
-            Text(String(fallbackText.prefix(1)).uppercased())
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(appSettings.themePalette.secondaryForeground)
-        }
-    }
-}
-
-private struct CameraCaptureView: UIViewControllerRepresentable {
-    let onCapture: (CapturedCameraMedia) -> Void
-    let onCancel: () -> Void
-
-    func makeCoordinator() -> Coordinator {
-        Coordinator(parent: self)
-    }
-
-    func makeUIViewController(context: Context) -> UIImagePickerController {
-        let picker = UIImagePickerController()
-        picker.sourceType = .camera
-        picker.delegate = context.coordinator
-        picker.mediaTypes = supportedMediaTypes
-        picker.videoQuality = .typeMedium
-        picker.allowsEditing = false
-        return picker
-    }
-
-    func updateUIViewController(_ uiViewController: UIImagePickerController, context: Context) {}
-
-    private var supportedMediaTypes: [String] {
-        let available = Set(UIImagePickerController.availableMediaTypes(for: .camera) ?? [])
-        let preferred = [UTType.image.identifier, UTType.movie.identifier]
-        let filtered = preferred.filter { available.contains($0) }
-        return filtered.isEmpty ? [UTType.image.identifier] : filtered
-    }
-
-    final class Coordinator: NSObject, UINavigationControllerDelegate, UIImagePickerControllerDelegate {
-        private let parent: CameraCaptureView
-
-        init(parent: CameraCaptureView) {
-            self.parent = parent
-        }
-
-        func imagePickerControllerDidCancel(_ picker: UIImagePickerController) {
-            parent.onCancel()
-        }
-
-        func imagePickerController(
-            _ picker: UIImagePickerController,
-            didFinishPickingMediaWithInfo info: [UIImagePickerController.InfoKey: Any]
-        ) {
-            guard let mediaType = info[.mediaType] as? String else {
-                parent.onCancel()
-                return
-            }
-
-            if mediaType == UTType.movie.identifier,
-               let mediaURL = info[.mediaURL] as? URL {
-                let fileExtension = mediaURL.pathExtension.isEmpty ? "mov" : mediaURL.pathExtension.lowercased()
-                let mimeType = UTType(filenameExtension: fileExtension)?.preferredMIMEType ?? "video/quicktime"
-                parent.onCapture(.video(fileURL: mediaURL, mimeType: mimeType, fileExtension: fileExtension))
-                return
-            }
-
-            if let image = (info[.editedImage] ?? info[.originalImage]) as? UIImage,
-               let imageData = image.jpegData(compressionQuality: 0.92) {
-                parent.onCapture(.image(data: imageData, mimeType: "image/jpeg", fileExtension: "jpg"))
-                return
-            }
-
-            parent.onCancel()
-        }
     }
 }

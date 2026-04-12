@@ -65,13 +65,17 @@ struct ActivityView: View {
                                 .listRowBackground(Color.clear)
                         } else {
                             ForEach(viewModel.visibleItems) { item in
-                                ActivityRowCell(item: item)
-                                    .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16))
-                                    .listRowBackground(Color.clear)
-                                    .contentShape(Rectangle())
-                                    .onTapGesture {
+                                ActivityRowCell(
+                                    item: item,
+                                    onTap: {
                                         selectedThreadRoute = threadRoute(for: item)
+                                    },
+                                    onAvatarTap: {
+                                        selectedProfileRoute = ProfileRoute(pubkey: item.actorPubkey)
                                     }
+                                )
+                                .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16))
+                                .listRowBackground(Color.clear)
                             }
                         }
                     }
@@ -460,13 +464,7 @@ struct ActivityView: View {
     }
 
     private func preferredAvatarURL(from profile: NostrProfile) -> URL? {
-        guard let picture = profile.picture?.trimmingCharacters(in: .whitespacesAndNewlines),
-              !picture.isEmpty,
-              let url = URL(string: picture),
-              url.scheme != nil else {
-            return nil
-        }
-        return url
+        profile.resolvedAvatarURL
     }
 
     @MainActor
@@ -539,11 +537,54 @@ struct ActivityView: View {
 struct ActivityRowCell: View {
     @EnvironmentObject private var appSettings: AppSettingsStore
     let item: ActivityRow
+    let onTap: (() -> Void)?
+    let onAvatarTap: (() -> Void)?
+
+    init(
+        item: ActivityRow,
+        onTap: (() -> Void)? = nil,
+        onAvatarTap: (() -> Void)? = nil
+    ) {
+        self.item = item
+        self.onTap = onTap
+        self.onAvatarTap = onAvatarTap
+    }
 
     var body: some View {
         HStack(spacing: 10) {
-            ActivityAvatarView(url: item.actor.avatarURL, fallback: avatarFallbackCharacter)
+            avatarView
+            rowBodyView
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
 
+    @ViewBuilder
+    private var avatarView: some View {
+        if let onAvatarTap {
+            Button(action: onAvatarTap) {
+                ActivityAvatarView(url: item.actor.avatarURL, fallback: avatarFallbackCharacter)
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Open \(item.actor.displayName)'s profile")
+        } else {
+            ActivityAvatarView(url: item.actor.avatarURL, fallback: avatarFallbackCharacter)
+        }
+    }
+
+    @ViewBuilder
+    private var rowBodyView: some View {
+        if let onTap {
+            Button(action: onTap) {
+                rowBodyContent
+            }
+            .buttonStyle(.plain)
+        } else {
+            rowBodyContent
+        }
+    }
+
+    private var rowBodyContent: some View {
+        HStack(spacing: 10) {
             activityIndicator
 
             HStack(spacing: 8) {
@@ -559,6 +600,7 @@ struct ActivityRowCell: View {
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+        .contentShape(Rectangle())
     }
 
     @ViewBuilder

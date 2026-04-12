@@ -29,10 +29,7 @@ final class FollowingListViewModel: ObservableObject {
         }
 
         var avatarURL: URL? {
-            guard let picture = profile?.picture?.trimmed, let url = URL(string: picture) else {
-                return nil
-            }
-            return url
+            profile?.resolvedAvatarURL
         }
 
         var nip05Domain: String? {

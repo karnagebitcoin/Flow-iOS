@@ -17,27 +17,6 @@ struct SettingsFlowPlusView: View {
                 }
                 .listRowBackground(settingsSurfaceStyle.cardBackground)
 
-                ThemedSettingsSection("Customize") {
-                    FlowPlusDestinationRow(
-                        title: "Themes",
-                        subtitle: currentThemeSummary,
-                        systemImage: "sparkles",
-                        isEnabled: hasFlowPlusCustomizationAccess
-                    ) {
-                        SettingsFlowPlusThemesView()
-                    }
-
-                    FlowPlusDestinationRow(
-                        title: "Typography",
-                        subtitle: currentTypographySummary,
-                        systemImage: "textformat",
-                        isEnabled: hasFlowPlusCustomizationAccess
-                    ) {
-                        SettingsFlowPlusTypographyView()
-                    }
-                }
-                .listRowBackground(settingsSurfaceStyle.cardBackground)
-
                 if let error = premiumStore.lastErrorMessage, !error.isEmpty {
                     ThemedSettingsSection {
                         Text(error)
@@ -72,28 +51,6 @@ struct SettingsFlowPlusView: View {
         hasFlowPlusCustomizationAccess && !premiumStore.isFlowPlusActive
     }
 
-    private var currentThemeSummary: String {
-        guard hasFlowPlusCustomizationAccess else {
-            return "Try it free for 7 days"
-        }
-
-        if appSettings.activeTheme.requiresFlowPlus {
-            return appSettings.activeTheme.title
-        }
-        return "Choose a premium theme"
-    }
-
-    private var currentTypographySummary: String {
-        guard hasFlowPlusCustomizationAccess else {
-            return "Try it free for 7 days"
-        }
-
-        if appSettings.activeFontOption.requiresFlowPlus {
-            return appSettings.activeFontOption.title
-        }
-        return "Choose a premium font"
-    }
-
     private var monthlyPriceText: String {
         premiumStore.flowPlusMonthlyPriceText
     }
@@ -111,20 +68,8 @@ struct SettingsFlowPlusView: View {
     private var membershipCard: some View {
         VStack(alignment: .leading, spacing: 14) {
             HStack(alignment: .top, spacing: 12) {
-                VStack(alignment: .leading, spacing: 6) {
-                    Text("Halo Plus")
-                        .font(appSettings.appFont(.title3, weight: .semibold))
-
-                    Text("Unlock new themes, fonts and other fun enhancements with Halo Plus.")
-                        .font(appSettings.appFont(.footnote))
-                        .foregroundStyle(appSettings.themePalette.mutedForeground)
-                        .fixedSize(horizontal: false, vertical: true)
-
-                    Text("Try it free for 7 days. Then \(monthlyPriceText)/month.")
-                        .font(appSettings.appFont(.caption1, weight: .semibold))
-                        .foregroundStyle(appSettings.primaryColor)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
+                Text("Halo Plus")
+                    .font(appSettings.appFont(.title3, weight: .semibold))
 
                 Spacer(minLength: 12)
 
@@ -162,6 +107,17 @@ struct SettingsFlowPlusView: View {
 
                     temporaryTestingUnlockButton
                 }
+            }
+
+            VStack(alignment: .leading, spacing: 10) {
+                membershipBenefitRow(
+                    systemImage: "heart.circle.fill",
+                    text: "Help support Halo open source development."
+                )
+                membershipBenefitRow(
+                    systemImage: "sparkles",
+                    text: "Unlock new themes, fonts and other fun bonuses."
+                )
             }
 
             Text(membershipDetailText)
@@ -231,9 +187,23 @@ struct SettingsFlowPlusView: View {
         }
         #endif
     }
+
+    private func membershipBenefitRow(systemImage: String, text: String) -> some View {
+        HStack(alignment: .top, spacing: 10) {
+            Image(systemName: systemImage)
+                .font(.system(size: 16, weight: .semibold))
+                .foregroundStyle(appSettings.primaryColor)
+                .frame(width: 20)
+
+            Text(text)
+                .font(appSettings.appFont(.footnote))
+                .foregroundStyle(appSettings.themePalette.mutedForeground)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
 }
 
-private struct SettingsFlowPlusThemesView: View {
+struct SettingsFlowPlusThemesView: View {
     @Environment(\.colorScheme) private var colorScheme
     @EnvironmentObject private var appSettings: AppSettingsStore
     @EnvironmentObject private var premiumStore: FlowPremiumStore
@@ -398,7 +368,7 @@ private struct SettingsFlowPlusThemesView: View {
     }
 }
 
-private struct SettingsFlowPlusTypographyView: View {
+struct SettingsFlowPlusTypographyView: View {
     @Environment(\.colorScheme) private var colorScheme
     @EnvironmentObject private var appSettings: AppSettingsStore
     @EnvironmentObject private var premiumStore: FlowPremiumStore
@@ -473,71 +443,5 @@ private struct SettingsFlowPlusTypographyView: View {
             .contentShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
         }
         .buttonStyle(.plain)
-    }
-}
-
-private struct FlowPlusDestinationRow<Destination: View>: View {
-    @EnvironmentObject private var appSettings: AppSettingsStore
-
-    let title: String
-    let subtitle: String
-    let systemImage: String
-    let isEnabled: Bool
-    let destination: Destination
-
-    init(
-        title: String,
-        subtitle: String,
-        systemImage: String,
-        isEnabled: Bool,
-        @ViewBuilder destination: () -> Destination
-    ) {
-        self.title = title
-        self.subtitle = subtitle
-        self.systemImage = systemImage
-        self.isEnabled = isEnabled
-        self.destination = destination()
-    }
-
-    var body: some View {
-        Group {
-            if isEnabled {
-                NavigationLink {
-                    destination
-                } label: {
-                    rowContent
-                }
-            } else {
-                rowContent
-            }
-        }
-        .opacity(isEnabled ? 1 : 0.6)
-    }
-
-    private var rowContent: some View {
-        HStack(spacing: 12) {
-            Image(systemName: systemImage)
-                .font(.title3.weight(.semibold))
-                .foregroundStyle(appSettings.primaryColor)
-                .frame(width: 28, height: 28)
-
-            VStack(alignment: .leading, spacing: 2) {
-                Text(title)
-                    .font(appSettings.appFont(.body, weight: .regular))
-                    .foregroundStyle(.primary)
-
-                Text(subtitle)
-                    .font(appSettings.appFont(.footnote))
-                    .foregroundStyle(appSettings.themePalette.mutedForeground)
-            }
-
-            Spacer(minLength: 8)
-
-            if !isEnabled {
-                Image(systemName: "lock.fill")
-                    .font(.footnote.weight(.semibold))
-                    .foregroundStyle(appSettings.themePalette.mutedForeground)
-            }
-        }
     }
 }

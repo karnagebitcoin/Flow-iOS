@@ -1,6 +1,7 @@
 import SwiftUI
 
 struct MainTabShellView: View {
+    @Environment(\.scenePhase) private var scenePhase
     private enum Tab: String, CaseIterable, Hashable {
         case home
         case search
@@ -30,6 +31,7 @@ struct MainTabShellView: View {
     @EnvironmentObject private var appSettings: AppSettingsStore
     @EnvironmentObject private var relaySettings: RelaySettingsStore
     @EnvironmentObject private var composeSheetCoordinator: AppComposeSheetCoordinator
+    @EnvironmentObject private var composeDraftStore: AppComposeDraftStore
     
     @State private var selectedTab: Tab = .home
     @State private var homeRootResetID = UUID()
@@ -37,6 +39,8 @@ struct MainTabShellView: View {
     @State private var isShowingAuthSheet = false
     @State private var authSheetInitialTab: AuthSheetTab = .signIn
     @State private var isActivityRootVisible = true
+    @State private var isDMRootVisible = true
+    @State private var isHomeSideMenuPresented = false
 
     @StateObject private var homeViewModel = HomeFeedViewModel(
         relayURL: URL(string: RelaySettingsStore.defaultReadRelayURLs.first ?? "wss://relay.damus.io/")!
@@ -46,6 +50,7 @@ struct MainTabShellView: View {
     )
     @StateObject private var activityViewModel = ActivityViewModel()
     @StateObject private var liveReactsCoordinator = LiveReactsCoordinator()
+    @StateObject private var liveReactsSubscriptionController = LiveReactsSubscriptionController()
 
     var body: some View {
         ZStack {
@@ -53,7 +58,10 @@ struct MainTabShellView: View {
                 .ignoresSafeArea()
 
             TabView(selection: $selectedTab) {
-                HomeFeedView(viewModel: homeViewModel)
+                HomeFeedView(
+                    viewModel: homeViewModel,
+                    isShowingSideMenu: $isHomeSideMenuPresented
+                )
                     .id(homeRootResetID)
                     .tag(Tab.home)
                     .toolbar(.hidden, for: .tabBar)
@@ -65,7 +73,7 @@ struct MainTabShellView: View {
                     .tag(Tab.search)
                     .toolbar(.hidden, for: .tabBar)
 
-                DMsView()
+                DMsView(isRootVisible: $isDMRootVisible)
                     .tag(Tab.dms)
                     .toolbar(.hidden, for: .tabBar)
 
@@ -80,7 +88,10 @@ struct MainTabShellView: View {
             }
         }
         .safeAreaInset(edge: .bottom, spacing: 0) {
-            bottomTabBar
+            if isBottomTabBarVisible {
+                bottomTabBar
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
+            }
         }
         .overlay(alignment: .bottomTrailing) {
             GeometryReader { proxy in
@@ -106,6 +117,8 @@ struct MainTabShellView: View {
                 initialAdditionalTags: draft.initialAdditionalTags,
                 initialUploadedAttachments: draft.initialUploadedAttachments,
                 initialSharedAttachments: draft.initialSharedAttachments,
+                initialSelectedMentions: draft.initialSelectedMentions,
+                initialPollDraft: draft.initialPollDraft,
                 replyTargetEvent: draft.replyTargetEvent,
                 replyTargetDisplayNameHint: draft.replyTargetDisplayNameHint,
                 replyTargetHandleHint: draft.replyTargetHandleHint,
@@ -114,6 +127,7 @@ struct MainTabShellView: View {
                 quotedDisplayNameHint: draft.quotedDisplayNameHint,
                 quotedHandleHint: draft.quotedHandleHint,
                 quotedAvatarURLHint: draft.quotedAvatarURLHint,
+                savedDraftID: draft.savedDraftID,
                 onPublished: {
                     Task {
                         switch selectedTab {
@@ -140,6 +154,8 @@ struct MainTabShellView: View {
                 nsec: auth.currentNsec
             )
             configureActivityViewModel()
+            await activityViewModel.sceneDidChange(isActive: scenePhase == .active)
+            configureLiveReactsSubscription()
             syncActivityTabActiveState()
         }
         .onChange(of: auth.currentAccount?.pubkey) { _, _ in
@@ -148,12 +164,18 @@ struct MainTabShellView: View {
                 nsec: auth.currentNsec
             )
             configureActivityViewModel()
+            configureLiveReactsSubscription()
         }
         .onChange(of: relaySettings.readRelays) { _, _ in
             configureActivityViewModel()
+            configureLiveReactsSubscription()
         }
         .onChange(of: appSettings.slowConnectionMode) { _, _ in
             configureActivityViewModel()
+            configureLiveReactsSubscription()
+        }
+        .onChange(of: appSettings.liveReactsEnabled) { _, _ in
+            configureLiveReactsSubscription()
         }
         .onChange(of: appSettings.activityNotificationPreferenceSignature) { _, _ in
             activityViewModel.notificationPreferencesChanged()
@@ -161,7 +183,16 @@ struct MainTabShellView: View {
         .onChange(of: isActivityRootVisible) { _, _ in
             syncActivityTabActiveState()
         }
+        .onChange(of: scenePhase) { _, _ in
+            Task {
+                await activityViewModel.sceneDidChange(isActive: scenePhase == .active)
+            }
+            configureLiveReactsSubscription()
+        }
+        .animation(.easeInOut(duration: 0.2), value: isHomeSideMenuPresented)
+        .animation(.easeInOut(duration: 0.2), value: isDMRootVisible)
         .tint(appSettings.primaryColor)
+        .statusBarHidden(false)
     }
 
     private var bottomTabBar: some View {
@@ -262,6 +293,18 @@ struct MainTabShellView: View {
                 .frame(width: 54, height: 54)
                 .background(appSettings.primaryGradient, in: Circle())
                 .shadow(color: .black.opacity(0.14), radius: 10, x: 0, y: 4)
+                .overlay(alignment: .topTrailing) {
+                    if composeDraftCount > 0 {
+                        Text(composeDraftBadgeText)
+                            .font(.caption2.weight(.bold))
+                            .foregroundStyle(.white)
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 3)
+                            .background(Color.red, in: Capsule())
+                            .offset(x: 8, y: -8)
+                            .accessibilityHidden(true)
+                    }
+                }
         }
         .buttonStyle(.plain)
         .frame(maxWidth: .infinity)
@@ -270,12 +313,24 @@ struct MainTabShellView: View {
         .accessibilityLabel("Compose note")
     }
 
+    private var composeDraftCount: Int {
+        composeDraftStore.draftCount(for: auth.currentAccount?.pubkey)
+    }
+
+    private var composeDraftBadgeText: String {
+        composeDraftCount > 99 ? "99+" : "\(composeDraftCount)"
+    }
+
     private var effectiveWriteRelayURLs: [URL] {
         let readRelayURLs = appSettings.effectiveReadRelayURLs(from: relaySettings.readRelayURLs)
         return appSettings.effectiveWriteRelayURLs(
             from: relaySettings.writeRelayURLs,
             fallbackReadRelayURLs: readRelayURLs
         )
+    }
+
+    private var isBottomTabBarVisible: Bool {
+        !isHomeSideMenuPresented && (selectedTab != .dms || isDMRootVisible)
     }
 
     private var composeSheetDraftBinding: Binding<AppComposeSheetDraft?> {
@@ -299,6 +354,10 @@ struct MainTabShellView: View {
         let previousTab = selectedTab
         let wasActivityRootVisible = isActivityRootVisible
 
+        if tab != .home {
+            isHomeSideMenuPresented = false
+        }
+
         if previousTab == .activity, tab != .activity {
             resetActivityTabToRoot()
         } else if tab == .activity, previousTab == .activity, !wasActivityRootVisible {
@@ -316,9 +375,17 @@ struct MainTabShellView: View {
     private func configureActivityViewModel() {
         activityViewModel.configure(
             currentUserPubkey: auth.currentAccount?.pubkey,
+            readRelayURLs: appSettings.effectiveReadRelayURLs(from: relaySettings.readRelayURLs)
+        )
+    }
+
+    private func configureLiveReactsSubscription() {
+        liveReactsSubscriptionController.update(
+            currentUserPubkey: auth.currentAccount?.pubkey,
             readRelayURLs: appSettings.effectiveReadRelayURLs(from: relaySettings.readRelayURLs),
-            onLiveReactionDetected: { reaction in
-                guard appSettings.liveReactsEnabled else { return }
+            isEnabled: appSettings.liveReactsEnabled,
+            scenePhase: scenePhase,
+            onReaction: { reaction in
                 liveReactsCoordinator.emit(reaction)
             }
         )

@@ -341,6 +341,59 @@ final class NostrFeedServiceTests: XCTestCase {
         XCTAssertEqual(cached?.followedPubkeys, [followedPubkey])
     }
 
+    func testFetchKnownFollowersUsesPersistedFollowSnapshotsBeforeRelayFetch() async throws {
+        let rootURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("FlowKnownFollowers-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: rootURL, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: rootURL) }
+
+        let fileManager = TestFileManager(rootURL: rootURL)
+        let nostrDatabase = FlowNostrDB(fileManager: fileManager)
+        let followListCache = FollowListSnapshotCache(fileManager: fileManager, nostrDatabase: nostrDatabase)
+        let relayClient = SpyRelayClient()
+        let service = NostrFeedService(
+            relayClient: relayClient,
+            timelineCache: TimelineEventCache(),
+            profileCache: ProfileCache(
+                snapshotStore: ProfileSnapshotStore(fileManager: fileManager),
+                nostrDatabase: nostrDatabase
+            ),
+            relayHintCache: ProfileRelayHintCache(),
+            followListCache: followListCache,
+            seenEventStore: SeenEventStore(fileManager: fileManager, nostrDatabase: nostrDatabase),
+            nostrDatabase: nostrDatabase
+        )
+
+        let profilePubkey = hex("1")
+        let knownFollowerPubkey = hex("2")
+        let nonFollowerPubkey = hex("3")
+        await followListCache.storeSnapshot(
+            FollowListSnapshot(content: "", tags: [["p", profilePubkey]]),
+            for: knownFollowerPubkey
+        )
+        await followListCache.storeSnapshot(
+            FollowListSnapshot(content: "", tags: [["p", hex("4")]]),
+            for: nonFollowerPubkey
+        )
+
+        let cached = await service.cachedKnownFollowers(
+            profilePubkey: profilePubkey,
+            candidatePubkeys: [nonFollowerPubkey, knownFollowerPubkey],
+            limit: 5
+        )
+        XCTAssertEqual(cached, [knownFollowerPubkey])
+
+        let fetched = await service.fetchKnownFollowers(
+            relayURLs: [relayURL],
+            profilePubkey: profilePubkey,
+            candidatePubkeys: [knownFollowerPubkey],
+            limit: 1
+        )
+        XCTAssertEqual(fetched, [knownFollowerPubkey])
+        let fetchCount = await relayClient.fetchCount()
+        XCTAssertEqual(fetchCount, 0)
+    }
+
     @MainActor
     func testFollowStorePreservesSuccessfulPublishAcrossLogout() async throws {
         let rootURL = FileManager.default.temporaryDirectory
@@ -837,6 +890,72 @@ final class NostrFeedServiceTests: XCTestCase {
 
         XCTAssertEqual(items.map(\.id), [localEvent.id])
         XCTAssertEqual(fetchCount, 1)
+    }
+
+    func testReplyContextPreviewPresentationUsesParentSnippetForReplies() {
+        let rootEvent = makeEvent(
+            id: hex("1"),
+            pubkey: hex("a"),
+            kind: 1,
+            tags: [],
+            content: "Alice started the thread with some extra context."
+        )
+        let replyEvent = makeEvent(
+            id: hex("2"),
+            pubkey: hex("b"),
+            kind: 1,
+            tags: [
+                ["e", rootEvent.id, "", "root"],
+                ["e", rootEvent.id, "", "reply"]
+            ],
+            content: "Bob replied with the important middle comment."
+        )
+        let item = FeedItem(
+            event: replyEvent,
+            profile: makeProfile(name: "bob", displayName: "Bob"),
+            replyTargetEvent: rootEvent,
+            replyTargetProfile: makeProfile(name: "alice", displayName: "Alice")
+        )
+
+        let presentation = ReplyContextPreviewPresentation.make(for: item)
+
+        XCTAssertNotNil(presentation)
+        XCTAssertEqual(presentation?.parentItem.displayName, "Alice")
+        XCTAssertEqual(presentation?.snippet, "Alice started the thread with some extra context.")
+        XCTAssertEqual(presentation?.hasImageBadge, false)
+    }
+
+    func testReplyContextPreviewPresentationKeepsMediaOnlyParentsVisible() {
+        let mediaURL = "https://example.com/alice.jpg"
+        let rootEvent = makeEvent(
+            id: hex("3"),
+            pubkey: hex("c"),
+            kind: 1,
+            tags: [],
+            content: mediaURL
+        )
+        let replyEvent = makeEvent(
+            id: hex("4"),
+            pubkey: hex("d"),
+            kind: 1,
+            tags: [
+                ["e", rootEvent.id, "", "root"],
+                ["e", rootEvent.id, "", "reply"]
+            ],
+            content: "Dan replied to the media post."
+        )
+        let item = FeedItem(
+            event: replyEvent,
+            profile: makeProfile(name: "dan", displayName: "Dan"),
+            replyTargetEvent: rootEvent,
+            replyTargetProfile: makeProfile(name: "alice", displayName: "Alice")
+        )
+
+        let presentation = ReplyContextPreviewPresentation.make(for: item)
+
+        XCTAssertNotNil(presentation)
+        XCTAssertNil(presentation?.snippet)
+        XCTAssertEqual(presentation?.hasImageBadge, true)
     }
 }
 

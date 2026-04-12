@@ -46,13 +46,16 @@ enum MediaUploadPreparationError: LocalizedError {
 enum MediaUploadPreparation {
     private static let lightCompressionThresholdBytes = 24 * 1_024 * 1_024
     private static let aggressiveCompressionThresholdBytes = 80 * 1_024 * 1_024
-    private static let imageCompressionThresholdBytes = 2 * 1_024 * 1_024
+    private static let maxStillImageUploadBytes = 600 * 1_024
     private static let maxStillImageDimension: CGFloat = 2_400
     private static let maxProfileImageDimension: CGFloat = 460
     private static let profileBannerTargetSize = CGSize(width: 1_200, height: 580)
     private static let maxProfileBannerBytes = 500 * 1_024
     private static let animatedProfileGIFVideoThresholdBytes = 1 * 1_024 * 1_024
     private static let animatedProfileVideoBitRate = 420_000
+    private static let stillImageDownscaleStep: CGFloat = 0.82
+    private static let minimumStillImageDimension: CGFloat = 320
+    private static let stillImageJPEGQualities: [CGFloat] = [0.88, 0.82, 0.76, 0.70, 0.64, 0.58, 0.52, 0.46]
 
     static func prepareUploadMedia(from item: PhotosPickerItem) async throws -> PreparedUploadMedia {
         let contentType = preferredContentType(for: item)
@@ -476,25 +479,43 @@ enum MediaUploadPreparation {
         let normalizedMimeType = mimeType.lowercased()
         let normalizedExtension = fileExtension.lowercased()
 
+        guard let source = CGImageSourceCreateWithData(data as CFData, nil) else {
+            return nil
+        }
+
+        guard CGImageSourceGetCount(source) <= 1 else {
+            return nil
+        }
+
+        let sourceProperties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any]
+        let pixelWidth = (sourceProperties?[kCGImagePropertyPixelWidth] as? NSNumber)?.doubleValue ?? 0
+        let pixelHeight = (sourceProperties?[kCGImagePropertyPixelHeight] as? NSNumber)?.doubleValue ?? 0
+        let longestEdge = max(pixelWidth, pixelHeight)
+        let shouldResize = longestEdge > maxStillImageDimension
+
         guard shouldAttemptStillImageOptimization(
             contentType: contentType,
             mimeType: normalizedMimeType,
             fileExtension: normalizedExtension,
-            byteCount: data.count
+            byteCount: data.count,
+            longestEdge: longestEdge
         ) else {
             return nil
         }
 
         guard let optimized = optimizedStillImagePayload(
-            from: data,
-            contentType: contentType,
-            originalMimeType: mimeType,
-            originalFileExtension: normalizedExtension
+            from: source,
+            originalByteCount: data.count,
+            longestEdge: longestEdge
         ) else {
             return nil
         }
 
-        guard optimized.data.count > 0, optimized.data.count < data.count else {
+        guard optimized.data.count > 0 else {
+            return nil
+        }
+
+        guard optimized.data.count < data.count || shouldResize else {
             return nil
         }
 
@@ -505,7 +526,8 @@ enum MediaUploadPreparation {
         contentType: UTType?,
         mimeType: String,
         fileExtension: String,
-        byteCount: Int
+        byteCount: Int,
+        longestEdge: Double
     ) -> Bool {
         if let contentType, contentType.conforms(to: .movie) {
             return false
@@ -524,78 +546,86 @@ enum MediaUploadPreparation {
             return false
         }
 
-        return byteCount >= imageCompressionThresholdBytes || mimeType.contains("heic") || mimeType.contains("png")
+        return byteCount > maxStillImageUploadBytes ||
+            longestEdge > maxStillImageDimension ||
+            mimeType.contains("heic")
     }
 
     private static func optimizedStillImagePayload(
-        from data: Data,
-        contentType: UTType?,
-        originalMimeType: String,
-        originalFileExtension: String
+        from source: CGImageSource,
+        originalByteCount: Int,
+        longestEdge: Double
     ) -> PreparedUploadMedia? {
-        guard let source = CGImageSourceCreateWithData(data as CFData, nil) else {
+        let initialCandidateDimension = min(CGFloat(longestEdge), maxStillImageDimension)
+        guard initialCandidateDimension > 0 else {
             return nil
         }
 
-        guard CGImageSourceGetCount(source) <= 1 else {
-            return nil
-        }
+        var candidateDimension = initialCandidateDimension
+        var smallestCandidate: PreparedUploadMedia?
 
-        let sourceProperties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any]
-        let pixelWidth = (sourceProperties?[kCGImagePropertyPixelWidth] as? NSNumber)?.doubleValue ?? 0
-        let pixelHeight = (sourceProperties?[kCGImagePropertyPixelHeight] as? NSNumber)?.doubleValue ?? 0
-        let longestEdge = max(pixelWidth, pixelHeight)
-        let shouldResize = longestEdge > maxStillImageDimension
-
-        let thumbnailOptions: [CFString: Any] = [
-            kCGImageSourceCreateThumbnailFromImageAlways: true,
-            kCGImageSourceCreateThumbnailWithTransform: true,
-            kCGImageSourceThumbnailMaxPixelSize: maxStillImageDimension,
-            kCGImageSourceShouldCacheImmediately: false
-        ]
-
-        let cgImage: CGImage?
-        if shouldResize {
-            cgImage = CGImageSourceCreateThumbnailAtIndex(source, 0, thumbnailOptions as CFDictionary)
-        } else {
-            cgImage = CGImageSourceCreateImageAtIndex(source, 0, nil)
-        }
-
-        guard let cgImage else {
-            return nil
-        }
-
-        let hasAlphaChannel = cgImage.hasAlphaChannel
-        let renderedImage = renderedStillImage(from: cgImage, hasAlphaChannel: hasAlphaChannel)
-
-        if hasAlphaChannel {
-            guard let pngData = renderedImage.pngData() else {
-                return nil
+        while true {
+            guard let cgImage = cgImageForStillImageOptimization(
+                from: source,
+                originalLongestEdge: CGFloat(longestEdge),
+                targetMaxDimension: candidateDimension
+            ) else {
+                return smallestCandidate
             }
 
-            return PreparedUploadMedia(
-                data: pngData,
-                mimeType: "image/png",
-                fileExtension: "png"
-            )
+            let hasAlphaChannel = cgImage.hasAlphaChannel
+            let renderedImage = renderedStillImage(from: cgImage, hasAlphaChannel: hasAlphaChannel)
+
+            if hasAlphaChannel {
+                if let pngData = renderedImage.pngData() {
+                    let candidate = PreparedUploadMedia(
+                        data: pngData,
+                        mimeType: "image/png",
+                        fileExtension: "png"
+                    )
+                    smallestCandidate = smallerStillImageCandidate(candidate, than: smallestCandidate)
+                    if pngData.count <= maxStillImageUploadBytes {
+                        return candidate
+                    }
+                }
+            } else {
+                let preferredQualities: [CGFloat]
+                if originalByteCount >= 8 * 1_024 * 1_024 || longestEdge > 3_600 {
+                    preferredQualities = [0.82, 0.76, 0.70, 0.64, 0.58, 0.52, 0.46]
+                } else {
+                    preferredQualities = stillImageJPEGQualities
+                }
+
+                for quality in preferredQualities {
+                    guard let jpegData = renderedImage.jpegData(compressionQuality: quality) else {
+                        continue
+                    }
+
+                    let candidate = PreparedUploadMedia(
+                        data: jpegData,
+                        mimeType: "image/jpeg",
+                        fileExtension: "jpg"
+                    )
+                    smallestCandidate = smallerStillImageCandidate(candidate, than: smallestCandidate)
+
+                    if jpegData.count <= maxStillImageUploadBytes {
+                        return candidate
+                    }
+                }
+            }
+
+            if candidateDimension <= minimumStillImageDimension {
+                break
+            }
+
+            let nextCandidateDimension = floor(candidateDimension * stillImageDownscaleStep)
+            if nextCandidateDimension >= candidateDimension {
+                break
+            }
+            candidateDimension = max(nextCandidateDimension, minimumStillImageDimension)
         }
 
-        let jpegQuality: CGFloat
-        if data.count >= 8 * 1_024 * 1_024 || longestEdge > 3_600 {
-            jpegQuality = 0.82
-        } else {
-            jpegQuality = 0.88
-        }
-
-        guard let jpegData = renderedImage.jpegData(compressionQuality: jpegQuality) else {
-            return nil
-        }
-
-        return PreparedUploadMedia(
-            data: jpegData,
-            mimeType: "image/jpeg",
-            fileExtension: "jpg"
-        )
+        return smallestCandidate
     }
 
     private static func optimizedProfileImagePayload(
@@ -956,6 +986,41 @@ enum MediaUploadPreparation {
         return renderer.image { _ in
             UIImage(cgImage: cgImage).draw(in: CGRect(origin: .zero, size: imageSize))
         }
+    }
+
+    private static func cgImageForStillImageOptimization(
+        from source: CGImageSource,
+        originalLongestEdge: CGFloat,
+        targetMaxDimension: CGFloat
+    ) -> CGImage? {
+        let effectiveDimension = max(1, min(originalLongestEdge, targetMaxDimension))
+        let thumbnailOptions: [CFString: Any] = [
+            kCGImageSourceCreateThumbnailFromImageAlways: true,
+            kCGImageSourceCreateThumbnailWithTransform: true,
+            kCGImageSourceThumbnailMaxPixelSize: effectiveDimension,
+            kCGImageSourceShouldCacheImmediately: false
+        ]
+
+        if effectiveDimension < originalLongestEdge {
+            return CGImageSourceCreateThumbnailAtIndex(source, 0, thumbnailOptions as CFDictionary)
+        }
+
+        return CGImageSourceCreateImageAtIndex(source, 0, nil)
+    }
+
+    private static func smallerStillImageCandidate(
+        _ candidate: PreparedUploadMedia,
+        than current: PreparedUploadMedia?
+    ) -> PreparedUploadMedia {
+        guard let current else {
+            return candidate
+        }
+
+        if candidate.data.count < current.data.count {
+            return candidate
+        }
+
+        return current
     }
 
     private static func renderedBannerImage(

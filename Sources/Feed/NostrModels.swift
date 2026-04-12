@@ -1,6 +1,46 @@
 import Foundation
 import NostrSDK
 
+enum ProfileAvatarURLResolver {
+    static func url(from rawValue: String?) -> URL? {
+        guard let trimmed = rawValue?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !trimmed.isEmpty,
+              let url = URL(string: trimmed),
+              url.scheme != nil else {
+            return nil
+        }
+
+        return thumbnailURLIfNeeded(for: url)
+    }
+
+    private static func thumbnailURLIfNeeded(for url: URL) -> URL {
+        guard var components = URLComponents(url: url, resolvingAgainstBaseURL: false),
+              let host = components.host?.lowercased(),
+              shouldUseNostrBuildThumbnail(forHost: host) else {
+            return url
+        }
+
+        let trimmedPath = components.percentEncodedPath.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        guard !trimmedPath.isEmpty, !trimmedPath.hasPrefix("thumb/") else {
+            return url
+        }
+
+        // nostr.build serves smaller avatar images from the same asset path under /thumb/.
+        components.percentEncodedPath = "/thumb/\(trimmedPath)"
+        return components.url ?? url
+    }
+
+    private static func shouldUseNostrBuildThumbnail(forHost host: String) -> Bool {
+        host == "nostr.build" || host == "image.nostr.build" || host == "cdn.nostr.build"
+    }
+}
+
+extension NostrProfile {
+    var resolvedAvatarURL: URL? {
+        ProfileAvatarURLResolver.url(from: picture)
+    }
+}
+
 struct NostrFilter: Sendable {
     var ids: [String]? = nil
     var authors: [String]? = nil
@@ -642,10 +682,7 @@ struct FeedItem: Identifiable, Hashable, Sendable {
     }
 
     private static func avatarURL(for profile: NostrProfile?) -> URL? {
-        guard let picture = profile?.picture, let url = URL(string: picture) else {
-            return nil
-        }
-        return url
+        profile?.resolvedAvatarURL
     }
 
     private static func mergedAssociatedProfile(
@@ -745,6 +782,7 @@ private enum MediaDetection {
         ".webm",
         ".ogg",
         ".mov",
+        ".m3u8",
         ".mp3",
         ".wav",
         ".flac",

@@ -764,13 +764,7 @@ struct AuthSheetView: View {
     }
 
     private func avatarURL(for account: AuthAccount) -> URL? {
-        guard let picture = normalized(profile(for: account)?.picture),
-              !picture.isEmpty,
-              let url = URL(string: picture),
-              url.scheme != nil else {
-            return nil
-        }
-        return url
+        profile(for: account)?.resolvedAvatarURL
     }
 
     private func accountBackupLabel(for account: AuthAccount) -> String {

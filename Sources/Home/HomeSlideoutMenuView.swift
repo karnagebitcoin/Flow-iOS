@@ -128,7 +128,7 @@ struct HomeSlideoutMenuView: View {
                     .font(appSettings.appFont(.subheadline, weight: .semibold))
                     .lineLimit(1)
                     .truncationMode(.middle)
-                Text("Signed in")
+                Text("Active")
                     .font(appSettings.appFont(.caption1))
                     .foregroundStyle(.secondary)
             }
@@ -255,12 +255,7 @@ struct HomeSlideoutMenuView: View {
     }
 
     private func preferredAvatarURL(from profile: NostrProfile) -> URL? {
-        guard let picture = trimmedNonEmpty(profile.picture),
-              let url = URL(string: picture),
-              url.scheme != nil else {
-            return nil
-        }
-        return url
+        profile.resolvedAvatarURL
     }
 
     private func preferredHandle(from profile: NostrProfile) -> String? {

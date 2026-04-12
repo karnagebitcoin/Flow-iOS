@@ -3,8 +3,6 @@ import NostrSDK
 
 @MainActor
 final class SearchViewModel: ObservableObject {
-    private struct MentionMetadataDecoder: MetadataCoding {}
-
     private struct VisibleItemsCacheKey: Equatable {
         let trendingRevision: Int
         let searchedRevision: Int
@@ -12,88 +10,6 @@ final class SearchViewModel: ObservableObject {
         let hideNSFW: Bool
         let filterRevision: Int
         let mutedConversationRevision: Int
-    }
-
-    struct SuggestedContentSearch: Equatable {
-        enum Kind: Equatable {
-            case notes(query: String)
-            case hashtag(String)
-        }
-
-        let kind: Kind
-
-        var title: String {
-            switch kind {
-            case .notes(let query):
-                return "Search notes for \(query)"
-            case .hashtag(let hashtag):
-                return "Search #\(hashtag) hashtag"
-            }
-        }
-
-        var sectionTitle: String {
-            switch kind {
-            case .notes:
-                return "Notes"
-            case .hashtag(let hashtag):
-                return "#\(hashtag)"
-            }
-        }
-    }
-
-    struct ProfileMatch: Identifiable, Hashable {
-        let pubkey: String
-        let profile: NostrProfile?
-
-        var id: String { pubkey }
-
-        var displayName: String {
-            if let displayName = normalized(profile?.displayName), !displayName.isEmpty {
-                return displayName
-            }
-            if let name = normalized(profile?.name), !name.isEmpty {
-                return name
-            }
-            return shortNostrIdentifier(pubkey)
-        }
-
-        var handle: String {
-            if let name = normalized(profile?.name), !name.isEmpty {
-                return "@\(name.replacingOccurrences(of: " ", with: "").lowercased())"
-            }
-            return "@\(shortNostrIdentifier(pubkey).lowercased())"
-        }
-
-        var avatarURL: URL? {
-            guard let value = normalized(profile?.picture), !value.isEmpty else { return nil }
-            return URL(string: value)
-        }
-        private func normalized(_ value: String?) -> String? {
-            let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-            return trimmed.isEmpty ? nil : trimmed
-        }
-    }
-
-    typealias TrendingNotesLoader = (
-        _ service: NostrFeedService,
-        _ relayURLs: [URL],
-        _ limit: Int,
-        _ until: Int?,
-        _ moderationSnapshot: MuteFilterSnapshot?
-    ) async throws -> [FeedItem]
-
-    private struct FeedFetchResult {
-        let items: [FeedItem]
-        let failed: Bool
-
-        static let empty = FeedFetchResult(items: [], failed: false)
-    }
-
-    private struct ProfileFetchResult {
-        let items: [ProfileSearchResult]
-        let failed: Bool
-
-        static let empty = ProfileFetchResult(items: [], failed: false)
     }
 
     @Published var searchText = ""
@@ -205,8 +121,12 @@ final class SearchViewModel: ObservableObject {
         MuteStore.shared.filterSnapshot
     }
 
+    private var searchQuery: SearchQueryDescriptor {
+        SearchQueryDescriptor(rawText: searchText)
+    }
+
     var isSearching: Bool {
-        !trimmedSearchQuery.isEmpty
+        !searchQuery.isEmpty
     }
 
     var displayedProfiles: [ProfileMatch] {
@@ -214,11 +134,15 @@ final class SearchViewModel: ObservableObject {
     }
 
     var suggestedContentSearch: SuggestedContentSearch? {
-        suggestion(for: trimmedSearchQuery)
+        searchQuery.suggestedContentSearch
     }
 
     var hasAnySearchResults: Bool {
         !displayedProfiles.isEmpty || !visibleItems.isEmpty
+    }
+
+    var presentationState: PresentationState {
+        PresentationState(viewModel: self)
     }
 
     func updateSearchContext(
@@ -251,7 +175,7 @@ final class SearchViewModel: ObservableObject {
         activeContentSearch = nil
         searchedNotes = []
 
-        let query = trimmedSearchQuery
+        let query = searchQuery
         guard !query.isEmpty else {
             latestSearchRequestID = UUID()
             searchedNotes = []
@@ -407,7 +331,7 @@ final class SearchViewModel: ObservableObject {
     }
 
     private func performProfileSearch() async {
-        let query = trimmedSearchQuery
+        let query = searchQuery
         guard !query.isEmpty else {
             profileMatches = []
             errorMessage = nil
@@ -415,7 +339,7 @@ final class SearchViewModel: ObservableObject {
             return
         }
 
-        if normalizedHashtag(from: query) != nil {
+        if query.normalizedHashtag != nil {
             profileMatches = []
             errorMessage = nil
             isLoading = false
@@ -429,8 +353,8 @@ final class SearchViewModel: ObservableObject {
         profileMatches = []
 
         let profileRelayURLs = profileSearchRelayTargets()
-        let normalizedProfileQuery = normalizedProfileQuery(from: query)
-        let exactPubkey = resolvedProfilePubkey(from: query)
+        let normalizedProfileQuery = query.normalizedProfileQuery
+        let exactPubkey = query.resolvedProfilePubkey
 
         async let followedProfileMatchesResult = buildFollowedSuggestions(
             relayURLs: profileRelayURLs,
@@ -455,7 +379,7 @@ final class SearchViewModel: ObservableObject {
         let currentAccountProfile = await currentAccountProfileResult
 
         guard latestSearchRequestID == requestID else { return }
-        guard trimmedSearchQuery == query else { return }
+        guard searchQuery.trimmed == query.trimmed else { return }
 
         let initialProfileMatches = mergeProfileMatches(
             [
@@ -474,7 +398,7 @@ final class SearchViewModel: ObservableObject {
         let remoteProfileMatches = await remoteProfileMatchesResult
 
         guard latestSearchRequestID == requestID else { return }
-        guard trimmedSearchQuery == query else { return }
+        guard searchQuery.trimmed == query.trimmed else { return }
 
         let vertexFirstProfiles = mergeProfileMatches(
             [
@@ -496,7 +420,7 @@ final class SearchViewModel: ObservableObject {
         let exactProfile = await exactProfileResult
 
         guard latestSearchRequestID == requestID else { return }
-        guard trimmedSearchQuery == query else { return }
+        guard searchQuery.trimmed == query.trimmed else { return }
 
         let mergedProfiles = mergeProfileMatches(
             [
@@ -643,7 +567,7 @@ final class SearchViewModel: ObservableObject {
     }
 
     private func performContentSearch(_ target: SuggestedContentSearch) async {
-        let query = trimmedSearchQuery
+        let query = searchQuery
         guard !query.isEmpty else {
             activeContentSearch = nil
             searchedNotes = []
@@ -663,7 +587,7 @@ final class SearchViewModel: ObservableObject {
         let keywordFallbackRelayURLs = fallbackKeywordSearchRelayTargets()
         let hashtagRelayURLs = hashtagSearchRelayTargets()
         let profileRelayURLs = profileSearchRelayTargets()
-        let exactPubkey = resolvedProfilePubkey(from: query)
+        let exactPubkey = query.resolvedProfilePubkey
         let profileAuthorPubkeys = Array(profileMatches.map { $0.pubkey.lowercased() }.prefix(12))
 
         var hadNetworkFailures = false
@@ -672,7 +596,7 @@ final class SearchViewModel: ObservableObject {
         func apply(_ result: FeedFetchResult) -> Bool {
             hadNetworkFailures = hadNetworkFailures || result.failed
             guard latestSearchRequestID == requestID else { return false }
-            guard trimmedSearchQuery == query else { return false }
+            guard searchQuery.trimmed == query.trimmed else { return false }
             guard activeContentSearch == target else { return false }
 
             let mergedNotes = deduplicateAndSort([searchedNotes, result.items])
@@ -1047,7 +971,7 @@ final class SearchViewModel: ObservableObject {
     }
 
     private func rankedProfileMatches(query: String, matches: [ProfileMatch]) -> [ProfileMatch] {
-        let normalizedQuery = normalizedProfileQuery(from: query)
+        let normalizedQuery = SearchQueryDescriptor(rawText: query).normalizedProfileQuery
         guard !normalizedQuery.isEmpty else { return matches }
 
         let followedSet = Set(followedAuthorPubkeys)
@@ -1093,73 +1017,6 @@ final class SearchViewModel: ObservableObject {
         }
 
         return ordered
-    }
-
-    private var trimmedSearchQuery: String {
-        searchText.trimmingCharacters(in: .whitespacesAndNewlines)
-    }
-
-    private func suggestion(for query: String) -> SuggestedContentSearch? {
-        let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return nil }
-
-        if let hashtag = normalizedHashtag(from: trimmed) {
-            return SuggestedContentSearch(kind: .hashtag(hashtag))
-        }
-
-        return SuggestedContentSearch(kind: .notes(query: trimmed))
-    }
-
-    private func normalizedProfileQuery(from query: String) -> String {
-        var value = query.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        if value.hasPrefix("@") {
-            value.removeFirst()
-        }
-        return value
-    }
-
-    private func normalizedHashtag(from query: String) -> String? {
-        let value = query.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        guard value.hasPrefix("#") else { return nil }
-
-        let raw = value
-            .drop(while: { $0 == "#" })
-            .split(whereSeparator: { $0.isWhitespace })
-            .first
-            .map(String.init) ?? ""
-        let hashtag = raw.trimmingCharacters(in: .whitespacesAndNewlines)
-        return hashtag.isEmpty ? nil : hashtag
-    }
-
-    private func resolvedProfilePubkey(from query: String) -> String? {
-        let normalized = normalizedIdentifier(from: query)
-        guard !normalized.isEmpty else { return nil }
-
-        if normalized.range(of: "^[0-9a-f]{64}$", options: .regularExpression) != nil {
-            return normalized
-        }
-
-        if normalized.hasPrefix("npub1") {
-            return PublicKey(npub: normalized)?.hex.lowercased()
-        }
-
-        if normalized.hasPrefix("nprofile1") {
-            let decoder = MentionMetadataDecoder()
-            let metadata = try? decoder.decodedMetadata(from: normalized)
-            return metadata?.pubkey?.lowercased()
-        }
-
-        return nil
-    }
-
-    private func normalizedIdentifier(from raw: String) -> String {
-        let lowered = raw
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-            .lowercased()
-        if lowered.hasPrefix("nostr:") {
-            return String(lowered.dropFirst("nostr:".count))
-        }
-        return lowered
     }
 
     private func keywordSearchRelayTargets() -> [URL] {
@@ -1282,16 +1139,6 @@ final class SearchViewModel: ObservableObject {
         .filter { !$0.isEmpty }
     }
 
-    private func normalizedSearchTerms(from query: String) -> [String] {
-        query
-            .lowercased()
-            .split { character in
-                character.isWhitespace || character.isPunctuation
-            }
-            .map(String.init)
-            .filter { !$0.isEmpty }
-    }
-
     private func normalizedPrivateKey(_ value: String?) -> String? {
         let normalized = value?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() ?? ""
         return normalized.isEmpty ? nil : normalized
@@ -1323,9 +1170,9 @@ final class SearchViewModel: ObservableObject {
         moderationSnapshot: MuteFilterSnapshot?
     ) async throws -> [FeedItem] {
         _ = relayURLs
-        _ = until
         return try await service.fetchTrendingNotes(
             limit: min(limit, 100),
+            until: until,
             moderationSnapshot: moderationSnapshot
         )
     }

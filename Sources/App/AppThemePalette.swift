@@ -46,12 +46,13 @@ struct AppThemePalette {
     private static let sakuraBorder = Color(red: 1.0, green: 0.882, blue: 0.945) // #FFE1F1
     private static let sakuraSoftWhite = Color(red: 1.0, green: 0.985, blue: 0.992)
     private static let sakuraPetalWash = Color(red: 1.0, green: 0.947, blue: 0.979)
-    private static let draculaBackground = Color(red: 0.157, green: 0.165, blue: 0.212) // #282A36
+    private static let draculaBackground = Color(red: 44.0 / 255.0, green: 45.0 / 255.0, blue: 60.0 / 255.0) // #2C2D3C
     private static let draculaFloating = Color(red: 0.204, green: 0.216, blue: 0.275) // #343746
     private static let draculaRaised = Color(red: 0.259, green: 0.278, blue: 0.353) // #44475A
     private static let draculaBorder = Color.white.opacity(0.07) // rgba(255, 255, 255, 0.07)
-    private static let draculaChrome = Color(red: 0.129, green: 0.133, blue: 0.173) // #21222C
-    private static let draculaDarker = Color(red: 0.098, green: 0.102, blue: 0.129) // #191A21
+    private static let draculaChrome = Color(red: 43.0 / 255.0, green: 44.0 / 255.0, blue: 58.0 / 255.0) // #2B2C3A
+    private static let draculaNavigation = Color(red: 32.0 / 255.0, green: 32.0 / 255.0, blue: 43.0 / 255.0) // #20202B
+    private static let draculaDarker = Color(red: 30.0 / 255.0, green: 30.0 / 255.0, blue: 40.0 / 255.0) // #1E1E28
     private static let draculaForeground = Color(red: 0.973, green: 0.973, blue: 0.949) // #F8F8F2
     private static let draculaComment = Color(red: 0.537, green: 0.549, blue: 0.675) // #898CAC
     private static let draculaGreen = Color(red: 0.314, green: 0.980, blue: 0.482) // #50FA7B
@@ -404,7 +405,7 @@ struct AppThemePalette {
         quoteBackground: Self.draculaFloating,
         groupedBackground: Self.draculaDarker,
         secondaryGroupedBackground: Self.draculaChrome,
-        navigationBackground: Self.draculaBackground,
+        navigationBackground: Self.draculaNavigation,
         navigationControlBackground: Self.draculaFloating,
         sheetBackground: Self.draculaBackground,
         sheetCardBackground: Self.draculaFloating,

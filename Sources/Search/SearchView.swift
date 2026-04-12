@@ -261,278 +261,54 @@ struct SearchView: View {
     }
 
     private var searchBar: some View {
-        VStack(spacing: 0) {
-            HStack(spacing: 10) {
-                Image(systemName: "magnifyingglass")
-                    .foregroundStyle(appSettings.themePalette.mutedForeground)
-
-                TextField("Search notes, profiles, and hashtags", text: $viewModel.searchText)
-                    .font(appSettings.appFont(.body))
-                    .textInputAutocapitalization(.never)
-                    .autocorrectionDisabled()
-                    .submitLabel(.search)
-                    .onSubmit {
-                        Task {
-                            await viewModel.activateSuggestedContentSearch()
-                        }
-                    }
-
-                if !viewModel.searchText.isEmpty {
-                    Button {
-                        viewModel.searchText = ""
-                    } label: {
-                        Image(systemName: "xmark.circle.fill")
-                            .font(.headline)
-                            .foregroundStyle(appSettings.themePalette.mutedForeground)
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel("Clear search")
-                }
+        SearchBarSection(searchText: $viewModel.searchText) {
+            Task {
+                await viewModel.activateSuggestedContentSearch()
             }
-            .padding(.horizontal, 14)
-            .padding(.vertical, 12)
-            .background(searchFieldFill, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-            .padding(.horizontal, 16)
-            .padding(.top, 8)
-            .padding(.bottom, 10)
-
-            Rectangle()
-                .fill(appSettings.themePalette.chromeBorder)
-                .frame(height: 0.7)
         }
-        .background(searchBarBackground)
-    }
-
-    @ViewBuilder
-    private var searchBarBackground: some View {
-        if appSettings.activeTheme == .sakura {
-            ZStack {
-                appSettings.themePalette.chromeBackground.opacity(0.78)
-                appSettings.primaryGradient.opacity(0.14)
-            }
-        } else if appSettings.activeTheme == .gamer {
-            ZStack {
-                appSettings.themePalette.chromeBackground
-                appSettings.primaryGradient.opacity(0.18)
-                Color(red: 0.329, green: 0.920, blue: 0.996).opacity(0.04)
-            }
-        } else if appSettings.activeTheme == .dracula {
-            appSettings.themePalette.background
-        } else {
-            appSettings.themePalette.chromeBackground
-        }
-    }
-
-    private var searchFieldFill: Color {
-        if appSettings.activeTheme == .sakura {
-            return Color.white.opacity(0.72)
-        } else if appSettings.activeTheme == .gamer {
-            return appSettings.themePalette.chromeBackground.opacity(0.84)
-        }
-        return appSettings.themePalette.secondaryBackground
     }
 
     private var emptyState: some View {
-        VStack(spacing: 10) {
-            if let errorMessage = viewModel.errorMessage {
-                Text(errorMessage)
-                    .font(.body)
-                    .multilineTextAlignment(.center)
-                    .foregroundStyle(appSettings.themePalette.secondaryForeground)
-
-                Button("Try Again") {
-                    Task {
-                        await viewModel.refresh()
-                    }
-                }
-                .buttonStyle(.borderedProminent)
-            } else if viewModel.isSearching {
-                Text("No people match \"\(viewModel.searchText.trimmingCharacters(in: .whitespacesAndNewlines))\".")
-                    .font(.body)
-                    .multilineTextAlignment(.center)
-                    .foregroundStyle(appSettings.themePalette.secondaryForeground)
-            } else {
-                Text("Popular people will appear here.")
-                .font(.body)
-                .multilineTextAlignment(.center)
-                .foregroundStyle(appSettings.themePalette.secondaryForeground)
+        SearchEmptyStateSection(
+            errorMessage: viewModel.errorMessage,
+            isSearching: viewModel.isSearching,
+            searchText: viewModel.searchText
+        ) {
+            Task {
+                await viewModel.refresh()
             }
         }
-        .frame(maxWidth: .infinity)
-        .padding(.vertical, 28)
     }
 
     private func notesEmptyState(_ activeContentSearch: SearchViewModel.SuggestedContentSearch) -> some View {
-        VStack(spacing: 10) {
-            if let errorMessage = viewModel.errorMessage {
-                Text(errorMessage)
-                    .font(.body)
-                    .multilineTextAlignment(.center)
-                    .foregroundStyle(appSettings.themePalette.secondaryForeground)
-            } else {
-                Text("No results for \(activeContentSearch.title.lowercased()).")
-                    .font(.body)
-                    .multilineTextAlignment(.center)
-                    .foregroundStyle(appSettings.themePalette.secondaryForeground)
-            }
-        }
-        .frame(maxWidth: .infinity)
-        .padding(.vertical, 24)
+        SearchNotesEmptyStateSection(
+            errorMessage: viewModel.errorMessage,
+            activeContentSearch: activeContentSearch
+        )
     }
 
     private var loadingRow: some View {
-        HStack(alignment: .top, spacing: 12) {
-            Circle()
-                .fill(appSettings.themePalette.secondaryFill)
-                .frame(width: 44, height: 44)
-
-            VStack(alignment: .leading, spacing: 8) {
-                RoundedRectangle(cornerRadius: 4)
-                    .fill(appSettings.themePalette.secondaryFill)
-                    .frame(width: 150, height: 14)
-
-                RoundedRectangle(cornerRadius: 4)
-                    .fill(appSettings.themePalette.secondaryFill)
-                    .frame(height: 14)
-
-                RoundedRectangle(cornerRadius: 4)
-                    .fill(appSettings.themePalette.secondaryFill)
-                    .frame(width: 180, height: 14)
-            }
-        }
-        .padding(.vertical, 10)
-        .redacted(reason: .placeholder)
+        SearchLoadingRow()
     }
 
     private func profileResultRow(_ profile: SearchViewModel.ProfileMatch) -> some View {
-        let isCurrentUser = profile.pubkey.lowercased() == auth.currentAccount?.pubkey.lowercased()
-        let isFollowing = followStore.isFollowing(profile.pubkey)
-
-        return HStack(alignment: .center, spacing: 12) {
-            HStack(alignment: .center, spacing: 12) {
-                AvatarView(url: profile.avatarURL, fallback: profile.displayName, size: 36)
-
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(profile.displayName)
-                        .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(appSettings.themePalette.foreground)
-                        .lineLimit(1)
-
-                    Text(profile.handle)
-                        .font(.footnote)
-                        .foregroundStyle(appSettings.themePalette.secondaryForeground)
-                        .lineLimit(1)
-                }
-            }
-            .contentShape(Rectangle())
-            .onTapGesture {
-                openProfile(pubkey: profile.pubkey)
-            }
-
-            Spacer(minLength: 0)
-
-            if isCurrentUser {
-                profileStatusBadge(
-                    title: "You",
-                    systemImage: "person.crop.circle.fill",
-                    foreground: appSettings.themePalette.foreground,
-                    background: appSettings.themePalette.secondaryGroupedBackground
-                )
-            } else {
-                Button {
-                    followStore.toggleFollow(profile.pubkey)
-                } label: {
-                    Text(isFollowing ? "Following" : "Follow")
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(isFollowing ? appSettings.themePalette.mutedForeground : Color.white)
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 7)
-                        .background(
-                            Capsule(style: .continuous)
-                                .fill(isFollowing ? AnyShapeStyle(appSettings.themePalette.secondaryGroupedBackground) : AnyShapeStyle(appSettings.primaryGradient))
-                        )
-                        .overlay {
-                            if isFollowing {
-                                Capsule(style: .continuous)
-                                    .stroke(appSettings.themePalette.separator, lineWidth: 0.8)
-                            }
-                        }
-                }
-                .buttonStyle(.plain)
-            }
+        SearchProfileResultRow(profile: profile) { pubkey in
+            openProfile(pubkey: pubkey)
         }
     }
 
     private func searchActionRow(_ suggestion: SearchViewModel.SuggestedContentSearch) -> some View {
-        let isActive = viewModel.activeContentSearch == suggestion
-        let isPinned = isPinnedFeedSuggestion(suggestion)
-
-        return HStack(spacing: 10) {
-            Button {
-                Task {
-                    await viewModel.activateSuggestedContentSearch()
-                }
-            } label: {
-                HStack(spacing: 12) {
-                    Image(systemName: actionIcon(for: suggestion))
-                        .font(.headline)
-                        .foregroundStyle(isActive ? Color.white : appSettings.primaryColor)
-
-                    Text(suggestion.title)
-                        .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(isActive ? Color.white : .primary)
-                        .lineLimit(1)
-
-                    Spacer(minLength: 0)
-
-                    Image(systemName: "arrow.right")
-                        .font(.caption.weight(.bold))
-                        .foregroundStyle(isActive ? Color.white.opacity(0.9) : .secondary)
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
+        SearchActionCard(
+            suggestion: suggestion,
+            isActive: viewModel.activeContentSearch == suggestion,
+            isPinned: isPinnedFeedSuggestion(suggestion)
+        ) {
+            Task {
+                await viewModel.activateSuggestedContentSearch()
             }
-            .buttonStyle(.plain)
-
-            Button {
-                togglePinnedFeedSuggestion(suggestion)
-            } label: {
-                Image(systemName: isPinned ? "star.fill" : "star")
-                    .font(.headline.weight(.semibold))
-                    .foregroundStyle(isActive ? Color.white : (isPinned ? appSettings.primaryColor : .secondary))
-                    .frame(width: 34, height: 34)
-                    .background(
-                        Capsule(style: .continuous)
-                            .fill(
-                                isActive
-                                    ? Color.white.opacity(0.16)
-                                    : appSettings.themePalette.tertiaryFill
-                            )
-                    )
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel(isPinned ? "Unsave feed" : "Save feed")
+        } onTogglePinned: {
+            togglePinnedFeedSuggestion(suggestion)
         }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 12)
-        .background(
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .fill(isActive ? AnyShapeStyle(appSettings.primaryGradient) : AnyShapeStyle(appSettings.themePalette.secondaryBackground))
-        )
-        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-    }
-
-    private func profileStatusBadge(
-        title: String,
-        systemImage: String,
-        foreground: Color,
-        background: Color
-    ) -> some View {
-        Label(title, systemImage: systemImage)
-            .font(.caption.weight(.semibold))
-            .foregroundStyle(foreground)
-            .padding(.horizontal, 10)
-            .padding(.vertical, 6)
-            .background(background, in: Capsule(style: .continuous))
     }
 
     private func noteResultRow(_ item: FeedItem, visibleReplyCounts: [String: Int]) -> some View {
@@ -593,25 +369,6 @@ struct SearchView: View {
             Task {
                 await viewModel.loadMoreIfNeeded(currentItem: item)
             }
-        }
-    }
-
-    private func actionIcon(for suggestion: SearchViewModel.SuggestedContentSearch) -> String {
-        switch suggestion.kind {
-        case .notes:
-            return "doc.text.magnifyingglass"
-        case .hashtag:
-            return "number"
-        }
-    }
-
-    private func fallbackAvatar(for displayName: String) -> some View {
-        ZStack {
-            Circle()
-                .fill(appSettings.themePalette.secondaryFill)
-            Text(String(displayName.prefix(1)).uppercased())
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(appSettings.themePalette.secondaryForeground)
         }
     }
 

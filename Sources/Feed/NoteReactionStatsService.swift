@@ -1,4 +1,36 @@
+import Combine
 import Foundation
+
+struct NoteReactionEventSnapshot: Equatable, Sendable {
+    static let empty = NoteReactionEventSnapshot(stats: NoteReactionStats(), isPublishing: false)
+
+    let stats: NoteReactionStats
+    let isPublishing: Bool
+
+    var reactionCount: Int {
+        stats.reactions.reduce(0) { partialResult, reaction in
+            partialResult + reaction.totalWeight
+        }
+    }
+
+    func currentUserReaction(currentPubkey: String?) -> NoteReaction? {
+        guard let normalizedCurrentPubkey = Self.normalizePubkey(currentPubkey) else { return nil }
+        return stats.reactions.first(where: { reaction in
+            Self.normalizePubkey(reaction.pubkey) == normalizedCurrentPubkey
+        })
+    }
+
+    func isReactedByCurrentUser(currentPubkey: String?) -> Bool {
+        currentUserReaction(currentPubkey: currentPubkey) != nil
+    }
+
+    private static func normalizePubkey(_ value: String?) -> String? {
+        let trimmed = (value ?? "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+        return trimmed.isEmpty ? nil : trimmed
+    }
+}
 
 @MainActor
 final class NoteReactionStatsService: ObservableObject {
@@ -32,6 +64,7 @@ final class NoteReactionStatsService: ObservableObject {
     private var pendingPersistEventIDs = Set<String>()
     private var suppressedReactionIDs = Set<String>()
     private var lastFetchAttemptByRequestKey: [String: Date] = [:]
+    private var eventSnapshotPublishers: [String: CurrentValueSubject<NoteReactionEventSnapshot, Never>] = [:]
 
     private var fetchTask: Task<Void, Never>?
     private var persistTask: Task<Void, Never>?
@@ -68,37 +101,42 @@ final class NoteReactionStatsService: ObservableObject {
         }
     }
 
+    func publisher(for eventID: String) -> AnyPublisher<NoteReactionEventSnapshot, Never> {
+        let normalizedTargetEventID = normalizedEventID(eventID)
+        guard !normalizedTargetEventID.isEmpty else {
+            return Just(.empty).eraseToAnyPublisher()
+        }
+
+        return snapshotPublisher(for: normalizedTargetEventID)
+            .eraseToAnyPublisher()
+    }
+
     func reactionCount(for eventID: String) -> Int {
-        statsByEventID[normalizedEventID(eventID)]?.reactions.reduce(0) { partialResult, reaction in
-            partialResult + reaction.totalWeight
-        } ?? 0
+        snapshot(for: eventID).reactionCount
     }
 
     func currentUserReaction(for eventID: String, currentPubkey: String?) -> NoteReaction? {
-        guard let currentPubkey = normalizePubkey(currentPubkey) else { return nil }
-        return statsByEventID[normalizedEventID(eventID)]?.reactions.first(where: {
-            normalizePubkey($0.pubkey) == currentPubkey
-        })
+        snapshot(for: eventID).currentUserReaction(currentPubkey: currentPubkey)
     }
 
     func isReactedByCurrentUser(for eventID: String, currentPubkey: String?) -> Bool {
-        currentUserReaction(for: eventID, currentPubkey: currentPubkey) != nil
+        snapshot(for: eventID).isReactedByCurrentUser(currentPubkey: currentPubkey)
     }
 
     func isPublishingReaction(for eventID: String) -> Bool {
-        publishingEventIDs.contains(normalizedEventID(eventID))
+        snapshot(for: eventID).isPublishing
     }
 
     func beginPublishingReaction(for eventID: String) -> Bool {
         let normalizedEventID = normalizedEventID(eventID)
         guard !normalizedEventID.isEmpty else { return false }
         guard !publishingEventIDs.contains(normalizedEventID) else { return false }
-        publishingEventIDs.insert(normalizedEventID)
+        setPublishing(true, for: normalizedEventID)
         return true
     }
 
     func endPublishingReaction(for eventID: String) {
-        publishingEventIDs.remove(normalizedEventID(eventID))
+        setPublishing(false, for: normalizedEventID(eventID))
     }
 
     func applyOptimisticToggle(
@@ -125,7 +163,7 @@ final class NoteReactionStatsService: ObservableObject {
             removeReaction(id: previousReaction.id, from: &stats)
             if ReactionBonusTag.normalizedBonusCount(bonusCount) == 0 {
                 stats.updatedAt = now
-                statsByEventID[normalizedTargetEventID] = stats
+                setStats(stats, for: normalizedTargetEventID)
                 return OptimisticToggleState(previousReaction: previousReaction, optimisticReactionID: nil)
             }
         }
@@ -143,7 +181,7 @@ final class NoteReactionStatsService: ObservableObject {
             in: &stats
         )
         stats.updatedAt = now
-        statsByEventID[normalizedTargetEventID] = stats
+        setStats(stats, for: normalizedTargetEventID)
         return OptimisticToggleState(previousReaction: nil, optimisticReactionID: optimisticReactionID)
     }
 
@@ -162,7 +200,7 @@ final class NoteReactionStatsService: ObservableObject {
             upsertReaction(previousReaction, in: &stats)
         }
         stats.updatedAt = Int(Date().timeIntervalSince1970)
-        statsByEventID[normalizedTargetEventID] = stats
+        setStats(stats, for: normalizedTargetEventID)
     }
 
     func registerPublishedReaction(_ event: NostrEvent, targetEventID: String) {
@@ -180,7 +218,7 @@ final class NoteReactionStatsService: ObservableObject {
         for eventID in touchedIDs {
             var stats = statsByEventID[eventID] ?? NoteReactionStats()
             stats.updatedAt = now
-            statsByEventID[eventID] = stats
+            setStats(stats, for: eventID)
         }
         schedulePersist(eventIDs: Array(touchedIDs))
     }
@@ -198,7 +236,7 @@ final class NoteReactionStatsService: ObservableObject {
         guard removedReactionID || stats.reactions.count != priorReactionCount else { return }
 
         stats.updatedAt = Int(Date().timeIntervalSince1970)
-        statsByEventID[normalizedTargetEventID] = stats
+        setStats(stats, for: normalizedTargetEventID)
         schedulePersist(eventIDs: [normalizedTargetEventID])
     }
 
@@ -229,7 +267,7 @@ final class NoteReactionStatsService: ObservableObject {
             let existingUpdatedAt = statsByEventID[eventID]?.updatedAt ?? 0
             let incomingUpdatedAt = stats.updatedAt ?? 0
             if incomingUpdatedAt >= existingUpdatedAt {
-                statsByEventID[eventID] = stats
+                setStats(stats, for: eventID)
             }
         }
     }
@@ -332,7 +370,7 @@ final class NoteReactionStatsService: ObservableObject {
             for eventID in result.eventIDs {
                 var stats = statsByEventID[eventID] ?? NoteReactionStats()
                 stats.updatedAt = now
-                statsByEventID[eventID] = stats
+                setStats(stats, for: eventID)
                 persistedIDs.insert(eventID)
             }
 
@@ -375,7 +413,7 @@ final class NoteReactionStatsService: ObservableObject {
                 in: &stats
             )
 
-            statsByEventID[targetEventID] = stats
+            setStats(stats, for: targetEventID)
             touched.insert(targetEventID)
         }
 
@@ -429,6 +467,61 @@ final class NoteReactionStatsService: ObservableObject {
 
     private func pendingKey(eventID: String, relayURL: URL) -> String {
         "\(relayURL.absoluteString.lowercased())|\(normalizedEventID(eventID))"
+    }
+
+    private func snapshot(for eventID: String) -> NoteReactionEventSnapshot {
+        let normalizedTargetEventID = normalizedEventID(eventID)
+        guard !normalizedTargetEventID.isEmpty else { return .empty }
+        return buildSnapshot(for: normalizedTargetEventID)
+    }
+
+    private func buildSnapshot(for eventID: String) -> NoteReactionEventSnapshot {
+        NoteReactionEventSnapshot(
+            stats: statsByEventID[eventID] ?? NoteReactionStats(),
+            isPublishing: publishingEventIDs.contains(eventID)
+        )
+    }
+
+    private func snapshotPublisher(for eventID: String) -> CurrentValueSubject<NoteReactionEventSnapshot, Never> {
+        if let existingPublisher = eventSnapshotPublishers[eventID] {
+            return existingPublisher
+        }
+
+        let publisher = CurrentValueSubject<NoteReactionEventSnapshot, Never>(buildSnapshot(for: eventID))
+        eventSnapshotPublishers[eventID] = publisher
+        return publisher
+    }
+
+    private func publishSnapshot(for eventID: String) {
+        let normalizedTargetEventID = normalizedEventID(eventID)
+        guard !normalizedTargetEventID.isEmpty else { return }
+
+        let snapshot = buildSnapshot(for: normalizedTargetEventID)
+        let publisher = snapshotPublisher(for: normalizedTargetEventID)
+        guard publisher.value != snapshot else { return }
+        publisher.send(snapshot)
+    }
+
+    private func setStats(_ stats: NoteReactionStats, for eventID: String) {
+        let normalizedTargetEventID = normalizedEventID(eventID)
+        guard !normalizedTargetEventID.isEmpty else { return }
+        statsByEventID[normalizedTargetEventID] = stats
+        publishSnapshot(for: normalizedTargetEventID)
+    }
+
+    private func setPublishing(_ isPublishing: Bool, for eventID: String) {
+        let normalizedTargetEventID = normalizedEventID(eventID)
+        guard !normalizedTargetEventID.isEmpty else { return }
+
+        let didChange: Bool
+        if isPublishing {
+            didChange = publishingEventIDs.insert(normalizedTargetEventID).inserted
+        } else {
+            didChange = publishingEventIDs.remove(normalizedTargetEventID) != nil
+        }
+
+        guard didChange else { return }
+        publishSnapshot(for: normalizedTargetEventID)
     }
 
     private func normalizedRelayTargets(_ relayURLs: [URL]) -> [URL] {

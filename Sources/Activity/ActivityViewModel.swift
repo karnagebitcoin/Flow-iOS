@@ -22,6 +22,7 @@ final class ActivityViewModel: ObservableObject {
     private var knownEventIDs = Set<String>()
     private var pendingLiveEventIDs = Set<String>()
     private var isActivityTabActive = false
+    private var isSceneActive = false
     private var lastReadCreatedAt = 0
     private var onLiveReactionDetected: ((ActivityReaction) -> Void)?
 
@@ -71,7 +72,9 @@ final class ActivityViewModel: ObservableObject {
     ) {
         let normalizedUser = normalizePubkey(currentUserPubkey)
         let normalizedRelays = normalizedRelayURLs(readRelayURLs)
-        self.onLiveReactionDetected = onLiveReactionDetected
+        if let onLiveReactionDetected {
+            self.onLiveReactionDetected = onLiveReactionDetected
+        }
 
         let relaysChanged = normalizedRelays.map { $0.absoluteString.lowercased() } != self.readRelayURLs.map { $0.absoluteString.lowercased() }
         let userChanged = normalizedUser != self.currentUserPubkey
@@ -107,6 +110,30 @@ final class ActivityViewModel: ObservableObject {
         }
         hasLoadedInitialState = true
         await refreshForCurrentConfiguration(showFullScreenLoading: true)
+    }
+
+    func sceneDidChange(isActive: Bool) async {
+        let wasSceneActive = isSceneActive
+        isSceneActive = isActive
+
+        guard isActive else {
+            stopLiveUpdates()
+            return
+        }
+
+        guard !wasSceneActive else {
+            if !hasLoadedInitialState {
+                await loadIfNeeded()
+            }
+            return
+        }
+
+        if !hasLoadedInitialState {
+            await loadIfNeeded()
+            return
+        }
+
+        await refreshForCurrentConfiguration(showFullScreenLoading: items.isEmpty)
     }
 
     func refresh() async {
@@ -189,6 +216,10 @@ final class ActivityViewModel: ObservableObject {
 
     private func startLiveUpdatesIfNeeded(forceRestart: Bool = false) {
         guard hasLoadedInitialState else { return }
+        guard isSceneActive else {
+            stopLiveUpdates()
+            return
+        }
         guard let user = currentUserPubkey, !user.isEmpty else {
             stopLiveUpdates()
             return
@@ -203,6 +234,7 @@ final class ActivityViewModel: ObservableObject {
         let filter = NostrFilter(
             kinds: Self.activityKinds,
             limit: 100,
+            since: currentLiveSubscriptionSince(),
             tagFilters: ["p": [user]]
         )
         let signature = relays
@@ -371,5 +403,14 @@ final class ActivityViewModel: ObservableObject {
         }
 
         return ordered
+    }
+
+    private func currentLiveSubscriptionSince() -> Int {
+        let newestKnownCreatedAt = items.first?.createdAt ?? 0
+        if newestKnownCreatedAt > 0 {
+            return max(0, newestKnownCreatedAt - 1)
+        }
+
+        return max(0, Int(Date().timeIntervalSince1970) - 2)
     }
 }

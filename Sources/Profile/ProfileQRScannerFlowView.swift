@@ -410,12 +410,7 @@ struct ProfileQRScannerFlowView: View {
     }
 
     private func preferredAvatarURL(from profile: NostrProfile?) -> URL? {
-        guard let picture = trimmedNonEmpty(profile?.picture),
-              let url = URL(string: picture),
-              url.scheme != nil else {
-            return nil
-        }
-        return url
+        profile?.resolvedAvatarURL
     }
 
     private func trimmedNonEmpty(_ value: String?) -> String? {

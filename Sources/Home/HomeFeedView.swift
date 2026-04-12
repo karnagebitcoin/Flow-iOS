@@ -11,7 +11,8 @@ struct HomeFeedView: View {
     @EnvironmentObject private var appSettings: AppSettingsStore
     @EnvironmentObject private var relaySettings: RelaySettingsStore
     @ObservedObject var viewModel: HomeFeedViewModel
-    @ObservedObject private var reactionStats = NoteReactionStatsService.shared
+    @Binding var isShowingSideMenu: Bool
+    private let reactionStats = NoteReactionStatsService.shared
     @ObservedObject private var followStore = FollowStore.shared
     @ObservedObject private var muteStore = MuteStore.shared
     @ObservedObject private var interestFeedStore = InterestFeedStore.shared
@@ -19,11 +20,9 @@ struct HomeFeedView: View {
 
     @State private var isShowingAuthSheet = false
     @State private var authSheetInitialTab: AuthSheetTab = .signIn
-    @State private var isShowingSideMenu = false
     @State private var isShowingFeedSourcePicker = false
     @State private var isShowingFilterSheet = false
     @State private var isShowingSettings = false
-    @State private var isTopNavigationVisible = true
     @StateObject private var settingsSheetState = SettingsSheetState()
 
     @State private var selectedThreadItem: FeedItem?
@@ -32,7 +31,7 @@ struct HomeFeedView: View {
     @State private var topNavAvatarURL: URL?
     @State private var topNavAvatarImage: UIImage?
     @State private var shouldAutoFocusReplyInThread = false
-    @State private var feedTopOffset: CGFloat = 0
+    @State private var isNearFeedTop = true
 
     var body: some View {
         let _ = muteStore.filterRevision
@@ -45,23 +44,26 @@ struct HomeFeedView: View {
                     .ignoresSafeArea()
 
                 VStack(spacing: 0) {
-                    if isTopNavigationVisible || isShowingSideMenu {
-                        topNavigationBar
-                            .transition(.move(edge: .top).combined(with: .opacity))
-                    }
+                    topNavigationBar
 
                     ScrollViewReader { scrollProxy in
                         List {
                             VStack(alignment: .leading, spacing: 8) {
-                                FlowCapsuleTabBar(
-                                    selection: $viewModel.mode,
-                                    items: FeedMode.allCases,
-                                    title: { $0.title }
-                                )
+                                if viewModel.feedSource != .polls {
+                                    FlowCapsuleTabBar(
+                                        selection: $viewModel.mode,
+                                        items: FeedMode.allCases,
+                                        title: { $0.title }
+                                    )
 
-                                if viewModel.mediaOnly {
-                                    Label("Media-only filter enabled", systemImage: "line.3.horizontal.decrease.circle.fill")
-                                        .font(.footnote)
+                                    if viewModel.mediaOnly {
+                                        Label("Media-only filter enabled", systemImage: "line.3.horizontal.decrease.circle.fill")
+                                            .font(.footnote)
+                                            .foregroundStyle(.secondary)
+                                    }
+                                } else {
+                                    Label("Polls from people you follow", systemImage: "chart.bar.xaxis")
+                                        .font(.footnote.weight(.medium))
                                         .foregroundStyle(.secondary)
                                 }
                             }
@@ -213,27 +215,25 @@ struct HomeFeedView: View {
                         .scrollContentBackground(.hidden)
                         .background(Color.clear)
                         .coordinateSpace(name: Self.feedScrollCoordinateSpace)
-                        .simultaneousGesture(
-                            DragGesture(minimumDistance: 10, coordinateSpace: .local)
-                                .onChanged { value in
-                                    handleFeedDragChange(value)
-                                }
-                        )
                         .overlay(alignment: .top) {
-                            if viewModel.visibleBufferedNewItemsCount > 0, !isNearFeedTop {
+                            if viewModel.visibleBufferedNewItemsCount > 0, !isNearFeedTop, !isShowingSideMenu {
                                 newNotesPill {
                                     withAnimation(.easeInOut(duration: 0.2)) {
                                         viewModel.showBufferedNewItems()
                                         scrollProxy.scrollTo(Self.feedTopAnchorID, anchor: .top)
                                     }
                                 }
-                                .padding(.top, isTopNavigationVisible ? 8 : 4)
+                                .padding(.top, 8)
                                 .transition(.move(edge: .top).combined(with: .opacity))
                             }
                         }
                         .onPreferenceChange(HomeFeedTopOffsetPreferenceKey.self) { newValue in
-                            feedTopOffset = newValue
-                            autoShowBufferedItemsIfNeeded()
+                            let nearTop = newValue >= -Self.autoMergeTopThreshold
+                            guard isNearFeedTop != nearTop else { return }
+                            isNearFeedTop = nearTop
+                            if nearTop {
+                                autoShowBufferedItemsIfNeeded()
+                            }
                         }
                         .onChange(of: viewModel.visibleBufferedNewItemsCount) { _, _ in
                             autoShowBufferedItemsIfNeeded()
@@ -259,6 +259,7 @@ struct HomeFeedView: View {
                             viewModel.updateInterestHashtags(interestFeedStore.hashtags)
                             hashtagFavoritesStore.configure(accountPubkey: auth.currentAccount?.pubkey)
                             viewModel.updateFavoriteHashtags(hashtagFavoritesStore.favoriteHashtags)
+                            viewModel.updatePollsFeedVisibility(appSettings.pollsFeedVisible)
                             viewModel.updateCustomFeeds(appSettings.customFeeds)
 
                             viewModel.updateCurrentUserPubkey(auth.currentAccount?.pubkey)
@@ -278,7 +279,6 @@ struct HomeFeedView: View {
                         }
                     }
                 }
-                .animation(.easeInOut(duration: 0.22), value: isTopNavigationVisible)
                 .disabled(isShowingSideMenu)
 
                 if isShowingSideMenu {
@@ -341,6 +341,7 @@ struct HomeFeedView: View {
                 viewModel.updateInterestHashtags(interestFeedStore.hashtags)
                 hashtagFavoritesStore.configure(accountPubkey: newValue)
                 viewModel.updateFavoriteHashtags(hashtagFavoritesStore.favoriteHashtags)
+                viewModel.updatePollsFeedVisibility(appSettings.pollsFeedVisible)
                 viewModel.updateCustomFeeds(appSettings.customFeeds)
 
                 followStore.configure(
@@ -441,8 +442,11 @@ struct HomeFeedView: View {
                     await viewModel.refresh(silent: true)
                 }
             }
+            .onChange(of: appSettings.pollsFeedVisible) { _, newValue in
+                viewModel.updatePollsFeedVisibility(newValue)
+            }
             .onChange(of: followStore.followedPubkeys) { _, _ in
-                guard viewModel.feedSource == .following else { return }
+                guard viewModel.feedSource == .following || viewModel.feedSource == .polls else { return }
                 Task {
                     await viewModel.refresh(silent: true)
                 }
@@ -551,7 +555,7 @@ struct HomeFeedView: View {
                 )
             }
         } else if appSettings.activeTheme == .dracula {
-            appSettings.themePalette.background
+            appSettings.themePalette.chromeBackground
         } else {
             appSettings.themePalette.chromeBackground
         }
@@ -611,18 +615,26 @@ struct HomeFeedView: View {
     }
 
     private var filterButton: some View {
-        Button {
-            isShowingFilterSheet = true
-        } label: {
-            Image(systemName: "line.3.horizontal.decrease")
-                .font(.system(size: 21, weight: .regular))
-                .foregroundStyle(appSettings.themePalette.mutedForeground)
-                .frame(width: 46, height: 46)
-                .contentShape(Rectangle())
+        Group {
+            if viewModel.feedSource == .polls {
+                Color.clear
+                    .frame(width: 46, height: 46)
+                    .accessibilityHidden(true)
+            } else {
+                Button {
+                    isShowingFilterSheet = true
+                } label: {
+                    Image(systemName: "line.3.horizontal.decrease")
+                        .font(.system(size: 21, weight: .regular))
+                        .foregroundStyle(appSettings.themePalette.mutedForeground)
+                        .frame(width: 46, height: 46)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Feed filters")
+                .accessibilityAddTraits(viewModel.isUsingCustomFilters ? [.isSelected] : [])
+            }
         }
-        .buttonStyle(.plain)
-        .accessibilityLabel("Feed filters")
-        .accessibilityAddTraits(viewModel.isUsingCustomFilters ? [.isSelected] : [])
     }
 
     private var filterGridColumns: [GridItem] {
@@ -780,6 +792,13 @@ struct HomeFeedView: View {
                     .font(.subheadline)
                     .multilineTextAlignment(.center)
                     .foregroundStyle(.secondary)
+            } else if viewModel.feedSource == .polls {
+                Text("No polls yet")
+                    .font(.headline)
+                Text("Follow people who post polls or pull down to refresh.")
+                    .font(.subheadline)
+                    .multilineTextAlignment(.center)
+                    .foregroundStyle(.secondary)
             } else {
                 Text("No posts yet")
                     .font(.headline)
@@ -840,30 +859,14 @@ struct HomeFeedView: View {
         selectedProfileRoute = ProfileRoute(pubkey: pubkey)
     }
 
-    private func handleFeedDragChange(_ value: DragGesture.Value) {
-        guard !isShowingSideMenu else { return }
-
-        let verticalTranslation = value.translation.height
-        if verticalTranslation <= -14 {
-            setTopNavigationVisibility(false)
-        } else if verticalTranslation >= 14 {
-            setTopNavigationVisibility(true)
-        }
-    }
-
-    private func setTopNavigationVisibility(_ isVisible: Bool) {
-        guard isTopNavigationVisible != isVisible else { return }
-        withAnimation(.easeInOut(duration: 0.22)) {
-            isTopNavigationVisible = isVisible
-        }
-    }
-
     private func feedSourceLabel(for source: HomePrimaryFeedSource) -> String {
         switch source {
         case .network:
             return "Network"
         case .following:
             return "Following"
+        case .polls:
+            return "Polls"
         case .trending:
             return "Trending"
         case .interests:
@@ -883,6 +886,8 @@ struct HomeFeedView: View {
             return "dot.radiowaves.left.and.right"
         case .following:
             return "person.2"
+        case .polls:
+            return "chart.bar.xaxis"
         case .trending:
             return "chart.line.uptrend.xyaxis"
         case .interests:
@@ -979,13 +984,7 @@ struct HomeFeedView: View {
     }
 
     private func preferredAvatarURL(from profile: NostrProfile) -> URL? {
-        guard let picture = profile.picture?.trimmingCharacters(in: .whitespacesAndNewlines),
-              !picture.isEmpty,
-              let url = URL(string: picture),
-              url.scheme != nil else {
-            return nil
-        }
-        return url
+        profile.resolvedAvatarURL
     }
 
     @MainActor
@@ -1068,10 +1067,6 @@ struct HomeFeedView: View {
         }
 
         return authors
-    }
-
-    private var isNearFeedTop: Bool {
-        feedTopOffset >= -Self.autoMergeTopThreshold
     }
 
     private var feedTopOffsetReader: some View {
