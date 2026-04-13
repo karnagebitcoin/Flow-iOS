@@ -64,9 +64,9 @@ struct AppThemePalette {
     private static let gamerChrome = Color(red: 0.055, green: 0.086, blue: 0.141) // #0E1624
     private static let gamerFloating = Color(red: 0.071, green: 0.114, blue: 0.188) // #121D30
     private static let gamerRaised = Color(red: 0.094, green: 0.153, blue: 0.263) // #182743
-    private static let gamerBorder = Color(red: 0.329, green: 0.920, blue: 0.996).opacity(0.18)
+    private static let gamerBorder = Color(red: 0.329, green: 0.920, blue: 0.996).opacity(0.10)
     private static let gamerForeground = Color(red: 0.933, green: 0.957, blue: 0.988) // #EEF4FC
-    private static let gamerMuted = Color(red: 0.558, green: 0.640, blue: 0.776) // #8EA3C6
+    private static let gamerMuted = Color(red: 0.592, green: 0.735, blue: 0.976) // #97BBF9
     private static let gamerPurple = Color(red: 0.553, green: 0.408, blue: 1.0) // #8D68FF
     private static let gamerCyan = Color(red: 0.329, green: 0.920, blue: 0.996) // #54EBFE
     private static let gamerGreen = Color(red: 0.561, green: 1.0, blue: 0.369) // #8FFF5E
@@ -504,8 +504,8 @@ struct AppThemePalette {
             background: Self.gamerChrome,
             border: Self.gamerBorder,
             foreground: Self.gamerMuted,
-            selectedBackground: Self.gamerPurple.opacity(0.18),
-            selectedBorder: Self.gamerCyan.opacity(0.56),
+            selectedBackground: Self.gamerPurple.opacity(0.20),
+            selectedBorder: Self.gamerCyan.opacity(0.42),
             selectedForeground: Self.gamerForeground
         ),
         profileActionStyle: AppThemeProfileActionStyle(

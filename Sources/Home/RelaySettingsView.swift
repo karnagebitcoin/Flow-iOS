@@ -82,7 +82,7 @@ struct RelaySettingsView: View {
                 )
                 .overlay(
                     RoundedRectangle(cornerRadius: 20, style: .continuous)
-                        .stroke(appSettings.themePalette.separator.opacity(0.14), lineWidth: 1)
+                        .stroke(appSettings.themeSeparator(defaultOpacity: 0.14), lineWidth: 1)
                 )
                 .padding(.vertical, 4)
                 .listRowInsets(EdgeInsets(top: 8, leading: 0, bottom: 4, trailing: 0))
@@ -131,7 +131,7 @@ struct RelaySettingsView: View {
                 )
                 .overlay(
                     RoundedRectangle(cornerRadius: 20, style: .continuous)
-                        .stroke(appSettings.themePalette.separator.opacity(0.14), lineWidth: 1)
+                        .stroke(appSettings.themeSeparator(defaultOpacity: 0.14), lineWidth: 1)
                 )
                 .padding(.vertical, 4)
                 .listRowInsets(EdgeInsets(top: 4, leading: 0, bottom: 8, trailing: 0))
@@ -221,7 +221,7 @@ struct RelaySettingsView: View {
                     )
                     .overlay(
                         RoundedRectangle(cornerRadius: 16, style: .continuous)
-                            .stroke(appSettings.themePalette.separator.opacity(0.12), lineWidth: 1)
+                            .stroke(appSettings.themeSeparator(defaultOpacity: 0.12), lineWidth: 1)
                     )
                 }
             }
@@ -331,7 +331,7 @@ struct RelaySettingsView: View {
         )
         .overlay(
             RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .stroke(appSettings.themePalette.separator.opacity(0.12), lineWidth: 1)
+                .stroke(appSettings.themeSeparator(defaultOpacity: 0.12), lineWidth: 1)
         )
     }
 
@@ -351,7 +351,7 @@ struct RelaySettingsView: View {
                 )
                 .overlay(
                     RoundedRectangle(cornerRadius: 14, style: .continuous)
-                        .stroke(appSettings.themePalette.separator.opacity(0.2), lineWidth: 1)
+                        .stroke(appSettings.themeSeparator(defaultOpacity: 0.2), lineWidth: 1)
                 )
 
             FlowCapsuleTabBar(
@@ -373,7 +373,7 @@ struct RelaySettingsView: View {
         )
         .overlay(
             RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .stroke(appSettings.themePalette.separator.opacity(0.12), lineWidth: 1)
+                .stroke(appSettings.themeSeparator(defaultOpacity: 0.12), lineWidth: 1)
         )
     }
 
@@ -594,7 +594,7 @@ struct RelaySettingsView: View {
         )
         .overlay(
             RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .stroke(appSettings.themePalette.separator.opacity(0.12), lineWidth: 1)
+                .stroke(appSettings.themeSeparator(defaultOpacity: 0.12), lineWidth: 1)
         )
     }
 

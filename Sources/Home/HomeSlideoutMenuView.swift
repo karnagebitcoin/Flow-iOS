@@ -38,6 +38,7 @@ struct HomeSlideoutMenuView: View {
             .padding(.bottom, 14)
 
             Divider()
+                .overlay(appSettings.themeSeparator(defaultOpacity: 0.18))
 
             ScrollView {
                 VStack(alignment: .leading, spacing: 0) {
@@ -47,6 +48,7 @@ struct HomeSlideoutMenuView: View {
                             .padding(.vertical, 14)
 
                         Divider()
+                            .overlay(appSettings.themeSeparator(defaultOpacity: 0.18))
                     }
 
                     menuButton(
@@ -130,7 +132,7 @@ struct HomeSlideoutMenuView: View {
                     .truncationMode(.middle)
                 Text("Active")
                     .font(appSettings.appFont(.caption1))
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(appSettings.themePalette.secondaryForeground)
             }
 
             Spacer(minLength: 0)
@@ -140,7 +142,7 @@ struct HomeSlideoutMenuView: View {
             } label: {
                 Image(systemName: "qrcode")
                     .font(.system(size: 17, weight: .semibold))
-                    .foregroundStyle(.primary)
+                    .foregroundStyle(appSettings.themePalette.foreground)
                     .frame(width: 36, height: 36)
                     .background(appSettings.themePalette.sheetCardBackground, in: Circle())
             }

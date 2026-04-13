@@ -29,7 +29,7 @@ struct SettingsAppearanceView: View {
                             .frame(width: 22, height: 22)
                             .overlay {
                                 Circle()
-                                    .stroke(Color.primary.opacity(0.08), lineWidth: 1)
+                                    .stroke(appSettings.themeSeparator(defaultOpacity: 0.08), lineWidth: 1)
                             }
 
                         Image(systemName: "chevron.right")
@@ -342,7 +342,7 @@ struct SettingsAppearanceView: View {
             .overlay {
                 RoundedRectangle(cornerRadius: 18, style: .continuous)
                     .stroke(
-                        isSelected ? appSettings.primaryColor : appSettings.themePalette.separator.opacity(0.18),
+                        isSelected ? appSettings.primaryColor : appSettings.themeSeparator(defaultOpacity: 0.18),
                         lineWidth: isSelected ? 1.5 : 1
                     )
             }

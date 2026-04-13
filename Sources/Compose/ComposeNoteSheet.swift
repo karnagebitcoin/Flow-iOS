@@ -329,7 +329,7 @@ struct ComposeNoteSheet: View {
                     selectionBehavior: .ordered,
                     matching: .any(of: [.images, .videos])
                 ) {
-                    Group {
+                    composeToolbarCircle {
                         if isUploadingMedia {
                             ProgressView()
                                 .controlSize(.small)
@@ -364,7 +364,7 @@ struct ComposeNoteSheet: View {
                         await handleSpeechToggle()
                     }
                 } label: {
-                    Group {
+                    composeToolbarCircle(isActive: speechTranscriber.isRecording) {
                         if speechTranscriber.isRecording {
                             Image(systemName: "stop.fill")
                                 .font(.system(size: 15, weight: .semibold))
@@ -376,12 +376,6 @@ struct ComposeNoteSheet: View {
                                 .font(.system(size: 17, weight: .medium))
                         }
                     }
-                    .foregroundStyle(speechTranscriber.isRecording ? Color.white : appSettings.themePalette.iconMutedForeground)
-                    .frame(width: 32, height: 32)
-                    .background(
-                        speechTranscriber.isRecording ? appSettings.primaryColor : appSettings.themePalette.tertiaryFill,
-                        in: Circle()
-                    )
                 }
                 .buttonStyle(.plain)
                 .disabled(viewModel.isPublishing || isUploadingMedia)
@@ -390,14 +384,10 @@ struct ComposeNoteSheet: View {
                     Button {
                         togglePollDraft()
                     } label: {
-                        Image(systemName: pollDraft == nil ? "chart.bar.xaxis" : "chart.bar.fill")
-                            .font(.system(size: 17, weight: .medium))
-                            .foregroundStyle(pollDraft == nil ? appSettings.themePalette.iconMutedForeground : Color.white)
-                            .frame(width: 32, height: 32)
-                            .background(
-                                pollDraft == nil ? appSettings.themePalette.tertiaryFill : appSettings.primaryColor,
-                                in: RoundedRectangle(cornerRadius: 10, style: .continuous)
-                            )
+                        composeToolbarCircle(isActive: pollDraft != nil) {
+                            Image(systemName: pollDraft == nil ? "chart.bar.xaxis" : "chart.bar.fill")
+                                .font(.system(size: 17, weight: .medium))
+                        }
                     }
                     .buttonStyle(.plain)
                     .disabled(viewModel.isPublishing || isUploadingMedia)
@@ -802,15 +792,30 @@ struct ComposeNoteSheet: View {
         )
     }
 
+    private func composeToolbarCircle<Content: View>(
+        isActive: Bool = false,
+        @ViewBuilder content: () -> Content
+    ) -> some View {
+        content()
+            .foregroundStyle(isActive ? Color.white : appSettings.themePalette.iconMutedForeground)
+            .tint(isActive ? Color.white : appSettings.themePalette.iconMutedForeground)
+            .frame(width: 32, height: 32)
+            .background(
+                isActive ? appSettings.primaryColor : appSettings.themePalette.tertiaryFill,
+                in: Circle()
+            )
+    }
+
     private func cameraAttachmentButton(symbolFont: Font) -> some View {
         Button {
             handleCameraButtonTap()
         } label: {
-            Image(systemName: "camera")
-                .font(symbolFont)
+            composeToolbarCircle {
+                Image(systemName: "camera")
+                    .font(symbolFont)
+            }
         }
         .buttonStyle(.plain)
-        .foregroundStyle(appSettings.themePalette.iconMutedForeground)
         .disabled(isUploadingMedia || viewModel.isPublishing || isRequestingCaptureAccess)
         .accessibilityLabel("Capture photo or video")
     }

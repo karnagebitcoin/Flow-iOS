@@ -176,6 +176,8 @@ struct ComposeKlipyGIFPickerSheet: View {
 
     let onSelect: (KlipyGIFAttachmentCandidate) -> Void
 
+    private let gifGridSpacing: CGFloat = 12
+
     init(
         currentAccountPubkey: String?,
         onSelect: @escaping (KlipyGIFAttachmentCandidate) -> Void
@@ -227,7 +229,7 @@ struct ComposeKlipyGIFPickerSheet: View {
         HStack(spacing: 10) {
             Image(systemName: "magnifyingglass")
                 .font(.system(size: 15, weight: .medium))
-                .foregroundStyle(.secondary)
+                .foregroundStyle(appSettings.themePalette.secondaryForeground)
 
             TextField("Search", text: $viewModel.searchText)
                 .textInputAutocapitalization(.never)
@@ -247,7 +249,7 @@ struct ComposeKlipyGIFPickerSheet: View {
                 } label: {
                     Image(systemName: "xmark.circle.fill")
                         .font(.system(size: 16))
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(appSettings.themePalette.secondaryForeground)
                 }
                 .buttonStyle(.plain)
             }
@@ -268,7 +270,7 @@ struct ComposeKlipyGIFPickerSheet: View {
         HStack {
             Text(viewModel.isShowingTrending ? "Trending right now" : "Search results")
                 .font(.footnote.weight(.semibold))
-                .foregroundStyle(.secondary)
+                .foregroundStyle(appSettings.themePalette.secondaryForeground)
             Spacer(minLength: 0)
         }
     }
@@ -281,62 +283,75 @@ struct ComposeKlipyGIFPickerSheet: View {
                     .controlSize(.large)
                 Text("Loading GIFs...")
                     .font(.footnote)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(appSettings.themePalette.secondaryForeground)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         } else if viewModel.items.isEmpty {
             VStack(spacing: 14) {
                 Image(systemName: "sparkles.tv")
                     .font(.system(size: 30, weight: .medium))
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(appSettings.themePalette.secondaryForeground)
                 Text("No GIFs found")
                     .font(.headline)
                 Text("Try a different search term or check back for new trending GIFs.")
                     .font(.footnote)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(appSettings.themePalette.secondaryForeground)
                     .multilineTextAlignment(.center)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .padding(.horizontal, 28)
         } else {
-            ScrollView {
-                LazyVGrid(
-                    columns: [
-                        GridItem(.flexible(minimum: 0, maximum: .infinity), spacing: 12, alignment: .top),
-                        GridItem(.flexible(minimum: 0, maximum: .infinity), spacing: 12, alignment: .top)
-                    ],
-                    spacing: 12
-                ) {
-                    ForEach(viewModel.items) { item in
-                        Button {
-                            guard let selection = viewModel.selection(for: item) else { return }
-                            onSelect(selection)
-                            dismiss()
-                        } label: {
-                            KlipyGIFGridTile(item: item)
-                                .frame(maxWidth: .infinity)
-                                .aspectRatio(KlipyGIFGridTile.tileAspectRatio, contentMode: .fit)
-                        }
-                        .buttonStyle(.plain)
-                        .frame(maxWidth: .infinity)
-                        .disabled(viewModel.selection(for: item) == nil)
-                        .onAppear {
-                            viewModel.loadMoreIfNeeded(currentItem: item)
+            GeometryReader { proxy in
+                let columnWidth = gifGridColumnWidth(for: proxy.size.width)
+                let tileHeight = columnWidth / KlipyGIFGridTile.tileAspectRatio
+
+                ScrollView {
+                    LazyVGrid(
+                        columns: gifGridColumns(columnWidth: columnWidth),
+                        spacing: gifGridSpacing
+                    ) {
+                        ForEach(viewModel.items) { item in
+                            Button {
+                                guard let selection = viewModel.selection(for: item) else { return }
+                                onSelect(selection)
+                                dismiss()
+                            } label: {
+                                KlipyGIFGridTile(item: item)
+                                    .frame(width: columnWidth, height: tileHeight)
+                            }
+                            .buttonStyle(.plain)
+                            .frame(width: columnWidth, height: tileHeight)
+                            .clipped()
+                            .disabled(viewModel.selection(for: item) == nil)
+                            .onAppear {
+                                viewModel.loadMoreIfNeeded(currentItem: item)
+                            }
                         }
                     }
-                }
-                .padding(.bottom, 14)
+                    .padding(.bottom, 14)
 
-                if viewModel.isLoadingMore {
-                    ProgressView()
-                        .controlSize(.small)
-                        .padding(.top, 4)
-                        .padding(.bottom, 12)
+                    if viewModel.isLoadingMore {
+                        ProgressView()
+                            .controlSize(.small)
+                            .padding(.top, 4)
+                            .padding(.bottom, 12)
+                    }
                 }
+                .scrollIndicators(.hidden)
+                .safeAreaPadding(.bottom, 16)
             }
-            .scrollIndicators(.hidden)
-            .safeAreaPadding(.bottom, 16)
         }
+    }
+
+    private func gifGridColumnWidth(for availableWidth: CGFloat) -> CGFloat {
+        max((availableWidth - gifGridSpacing) / 2, 1)
+    }
+
+    private func gifGridColumns(columnWidth: CGFloat) -> [GridItem] {
+        [
+            GridItem(.fixed(columnWidth), spacing: gifGridSpacing, alignment: .top),
+            GridItem(.fixed(columnWidth), spacing: gifGridSpacing, alignment: .top)
+        ]
     }
 
     private func errorCard(message: String) -> some View {
@@ -345,7 +360,7 @@ struct ComposeKlipyGIFPickerSheet: View {
                 .foregroundStyle(.orange)
             Text(message)
                 .font(.footnote)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(appSettings.themePalette.secondaryForeground)
             Spacer(minLength: 0)
         }
         .padding(12)
@@ -374,6 +389,8 @@ private struct KlipyGIFGridTile: View {
             appSettings.themePalette.secondaryGroupedBackground
 
             previewContent
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .clipped()
 
             LinearGradient(
                 colors: [
@@ -406,9 +423,9 @@ private struct KlipyGIFGridTile: View {
         .onAppear {
             isVisible = true
         }
-            .onDisappear {
-                isVisible = false
-            }
+        .onDisappear {
+            isVisible = false
+        }
     }
 
     @ViewBuilder
@@ -436,7 +453,7 @@ private struct KlipyGIFGridTile: View {
             .overlay {
                 Image(systemName: "photo.on.rectangle.angled")
                     .font(.system(size: 22, weight: .medium))
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(appSettings.themePalette.secondaryForeground)
             }
     }
 

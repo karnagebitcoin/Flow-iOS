@@ -254,11 +254,7 @@ struct SearchBarSection: View {
                 appSettings.primaryGradient.opacity(0.14)
             }
         } else if appSettings.activeTheme == .gamer {
-            ZStack {
-                appSettings.themePalette.chromeBackground
-                appSettings.primaryGradient.opacity(0.18)
-                Color(red: 0.329, green: 0.920, blue: 0.996).opacity(0.04)
-            }
+            appSettings.themePalette.background
         } else if appSettings.activeTheme == .dracula {
             appSettings.themePalette.background
         } else {
@@ -458,14 +454,14 @@ struct SearchActionCard: View {
 
                     Text(suggestion.title)
                         .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(isActive ? Color.white : .primary)
+                        .foregroundStyle(isActive ? Color.white : appSettings.themePalette.foreground)
                         .lineLimit(1)
 
                     Spacer(minLength: 0)
 
                     Image(systemName: "arrow.right")
                         .font(.caption.weight(.bold))
-                        .foregroundStyle(isActive ? Color.white.opacity(0.9) : .secondary)
+                        .foregroundStyle(isActive ? Color.white.opacity(0.9) : appSettings.themePalette.secondaryForeground)
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
@@ -474,7 +470,11 @@ struct SearchActionCard: View {
             Button(action: onTogglePinned) {
                 Image(systemName: isPinned ? "star.fill" : "star")
                     .font(.headline.weight(.semibold))
-                    .foregroundStyle(isActive ? Color.white : (isPinned ? appSettings.primaryColor : .secondary))
+                    .foregroundStyle(
+                        isActive
+                            ? Color.white
+                            : (isPinned ? appSettings.primaryColor : appSettings.themePalette.secondaryForeground)
+                    )
                     .frame(width: 34, height: 34)
                     .background(
                         Capsule(style: .continuous)

@@ -253,11 +253,7 @@ struct ActivityView: View {
                 appSettings.primaryGradient.opacity(0.14)
             }
         } else if appSettings.activeTheme == .gamer {
-            ZStack {
-                appSettings.themePalette.chromeBackground
-                appSettings.primaryGradient.opacity(0.18)
-                Color(red: 0.329, green: 0.920, blue: 0.996).opacity(0.04)
-            }
+            appSettings.themePalette.background
         } else if appSettings.activeTheme == .dracula {
             appSettings.themePalette.background
         } else {

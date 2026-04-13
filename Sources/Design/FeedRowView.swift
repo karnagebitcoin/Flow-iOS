@@ -838,7 +838,7 @@ struct NoteOptionsBottomSheetView: View {
             )
             .overlay(
                 RoundedRectangle(cornerRadius: 18, style: .continuous)
-                    .stroke(appSettings.themePalette.separator.opacity(0.18), lineWidth: 0.8)
+                    .stroke(appSettings.themeSeparator(defaultOpacity: 0.18), lineWidth: 0.8)
             )
 
             VStack(spacing: 0) {
@@ -877,7 +877,7 @@ struct NoteOptionsBottomSheetView: View {
             )
             .overlay(
                 RoundedRectangle(cornerRadius: 18, style: .continuous)
-                    .stroke(appSettings.themePalette.separator.opacity(0.18), lineWidth: 0.8)
+                    .stroke(appSettings.themeSeparator(defaultOpacity: 0.18), lineWidth: 0.8)
             )
 
             Spacer(minLength: 0)
@@ -891,7 +891,7 @@ struct NoteOptionsBottomSheetView: View {
 
     private var sheetDivider: some View {
         Rectangle()
-            .fill(appSettings.themePalette.separator.opacity(0.18))
+            .fill(appSettings.themeSeparator(defaultOpacity: 0.18))
             .frame(height: 0.75)
             .padding(.leading, 16)
     }

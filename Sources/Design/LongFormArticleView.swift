@@ -15,7 +15,7 @@ struct LongFormArticlePreviewView: View {
 
                 Text(previewDateLabel)
                     .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(appSettings.themePalette.secondaryForeground)
                     .lineLimit(1)
             }
 
@@ -32,7 +32,7 @@ struct LongFormArticlePreviewView: View {
                 Text(FlowLayoutGuardrails.softWrapped(article.title))
                     .font(.title3.weight(.semibold))
                     .tracking(-0.2)
-                    .foregroundStyle(.primary)
+                    .foregroundStyle(appSettings.themePalette.foreground)
                     .multilineTextAlignment(.leading)
                     .lineLimit(3)
                     .fixedSize(horizontal: false, vertical: true)
@@ -40,7 +40,7 @@ struct LongFormArticlePreviewView: View {
                 if let summary = article.summary, !summary.isEmpty {
                     Text(FlowLayoutGuardrails.softWrapped(summary))
                         .font(.subheadline)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(appSettings.themePalette.secondaryForeground)
                         .multilineTextAlignment(.leading)
                         .lineLimit(4)
                         .fixedSize(horizontal: false, vertical: true)
@@ -102,10 +102,10 @@ struct LongFormArticlePreviewView: View {
         .lineLimit(1)
         .fixedSize(horizontal: true, vertical: false)
         .font(.caption.weight(.semibold))
-        .foregroundStyle(.secondary)
+        .foregroundStyle(appSettings.themePalette.secondaryForeground)
         .padding(.horizontal, 10)
         .padding(.vertical, 6)
-        .background(Color(.tertiarySystemFill), in: Capsule())
+        .background(appSettings.themePalette.tertiaryFill, in: Capsule())
     }
 
     @ViewBuilder
@@ -125,15 +125,15 @@ struct LongFormArticlePreviewView: View {
     private func chipLabel(_ tag: String) -> some View {
         Text(FlowLayoutGuardrails.softWrapped("#\(tag)", maxNonBreakingRunLength: 18))
             .font(.caption.weight(.medium))
-            .foregroundStyle(.secondary)
+            .foregroundStyle(appSettings.themePalette.secondaryForeground)
             .lineLimit(1)
             .truncationMode(.tail)
             .padding(.horizontal, 10)
             .padding(.vertical, 6)
-            .background(Color(.secondarySystemBackground), in: Capsule())
+            .background(appSettings.themePalette.secondaryBackground, in: Capsule())
             .overlay {
                 Capsule()
-                    .stroke(Color(.separator).opacity(0.2), lineWidth: 0.8)
+                    .stroke(appSettings.themePalette.separator, lineWidth: 0.8)
             }
     }
 }
@@ -205,7 +205,7 @@ struct LongFormArticleReaderView: View {
 
                 Text(publishedDateLabel)
                     .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(appSettings.themePalette.secondaryForeground)
                     .lineLimit(1)
             }
 
@@ -218,7 +218,7 @@ struct LongFormArticleReaderView: View {
                 if let summary = article.summary, !summary.isEmpty {
                     Text(FlowLayoutGuardrails.softWrapped(summary))
                         .font(.title3)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(appSettings.themePalette.secondaryForeground)
                         .fixedSize(horizontal: false, vertical: true)
                 }
             }
@@ -236,26 +236,27 @@ struct LongFormArticleReaderView: View {
             if isOwnedByCurrentUser {
                 Text("You")
                     .font(.footnote.weight(.semibold))
+                    .foregroundStyle(appSettings.themePalette.secondaryForeground)
                     .padding(.horizontal, 10)
                     .padding(.vertical, 6)
-                    .background(Color(.secondarySystemFill), in: Capsule())
+                    .background(appSettings.themePalette.tertiaryFill, in: Capsule())
             } else {
                 Button(isFollowingAuthor ? "Following" : "Follow") {
                     onFollowToggle()
                 }
                 .font(.footnote.weight(.semibold))
-                .foregroundStyle(isFollowingAuthor ? Color.secondary : Color.white)
+                .foregroundStyle(isFollowingAuthor ? appSettings.themePalette.secondaryForeground : Color.white)
                 .padding(.horizontal, 12)
                 .padding(.vertical, 7)
                 .background(
-                    isFollowingAuthor ? Color(.secondarySystemFill) : appSettings.primaryColor,
+                    isFollowingAuthor ? appSettings.themePalette.tertiaryFill : appSettings.primaryColor,
                     in: Capsule()
                 )
                 .overlay {
                     Capsule()
                         .stroke(
                             isFollowingAuthor
-                                ? Color(.separator).opacity(0.3)
+                                ? appSettings.themePalette.separator
                                 : appSettings.primaryColor.opacity(0.7),
                             lineWidth: 0.9
                         )
@@ -264,10 +265,10 @@ struct LongFormArticleReaderView: View {
             }
         }
         .padding(16)
-        .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+        .background(appSettings.themePalette.secondaryBackground, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
         .overlay {
             RoundedRectangle(cornerRadius: 20, style: .continuous)
-                .stroke(Color(.separator).opacity(0.2), lineWidth: 0.8)
+                .stroke(appSettings.themePalette.separator, lineWidth: 0.8)
         }
     }
 
@@ -292,19 +293,19 @@ struct LongFormArticleReaderView: View {
             VStack(alignment: .leading, spacing: 4) {
                 Text(item.displayName)
                     .font(.headline)
-                    .foregroundStyle(.primary)
+                    .foregroundStyle(appSettings.themePalette.foreground)
                     .lineLimit(1)
 
                 Text(item.handle)
                     .font(.subheadline)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(appSettings.themePalette.secondaryForeground)
                     .lineLimit(1)
 
                 if let nip05 = item.displayProfile?.nip05?.trimmingCharacters(in: .whitespacesAndNewlines),
                    !nip05.isEmpty {
                     Text(nip05)
                         .font(.caption)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(appSettings.themePalette.secondaryForeground)
                         .lineLimit(1)
                 }
             }
@@ -343,7 +344,7 @@ struct LongFormArticleReaderView: View {
                     HStack(alignment: .top, spacing: 10) {
                         Text("•")
                             .font(.body.weight(.semibold))
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(appSettings.themePalette.secondaryForeground)
 
                         ArticleMarkdownText(
                             markdown: item,
@@ -360,7 +361,7 @@ struct LongFormArticleReaderView: View {
                     HStack(alignment: .top, spacing: 10) {
                         Text("\(start + index).")
                             .font(.body.weight(.semibold))
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(appSettings.themePalette.secondaryForeground)
                             .frame(minWidth: 28, alignment: .leading)
 
                         ArticleMarkdownText(
@@ -383,17 +384,17 @@ struct LongFormArticleReaderView: View {
                     font: .body,
                     fontDesign: .serif
                 )
-                .foregroundStyle(.secondary)
+                .foregroundStyle(appSettings.themePalette.secondaryForeground)
                 .lineSpacing(4)
             }
             .padding(18)
-            .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+            .background(appSettings.themePalette.secondaryBackground, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
         case .codeBlock(let language, let code):
             VStack(alignment: .leading, spacing: 10) {
                 if let language, !language.isEmpty {
                     Text(language.uppercased())
                         .font(.caption.weight(.semibold))
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(appSettings.themePalette.secondaryForeground)
                 }
 
                 ScrollView(.horizontal, showsIndicators: false) {
@@ -403,10 +404,10 @@ struct LongFormArticleReaderView: View {
                 }
             }
             .padding(16)
-            .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+            .background(appSettings.themePalette.secondaryBackground, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
             .overlay {
                 RoundedRectangle(cornerRadius: 20, style: .continuous)
-                    .stroke(Color(.separator).opacity(0.18), lineWidth: 0.8)
+                    .stroke(appSettings.themePalette.separator, lineWidth: 0.8)
             }
         case .image(let url, let alt):
             VStack(alignment: .leading, spacing: 8) {
@@ -415,12 +416,13 @@ struct LongFormArticleReaderView: View {
                 if let alt, !alt.isEmpty {
                     Text(alt)
                         .font(.caption)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(appSettings.themePalette.secondaryForeground)
                         .fixedSize(horizontal: false, vertical: true)
                 }
             }
         case .divider:
             Divider()
+                .overlay(appSettings.themePalette.separator)
                 .padding(.vertical, 2)
         }
     }
@@ -479,10 +481,10 @@ struct LongFormArticleReaderView: View {
         .lineLimit(1)
         .fixedSize(horizontal: true, vertical: false)
         .font(.caption.weight(.semibold))
-        .foregroundStyle(.secondary)
+        .foregroundStyle(appSettings.themePalette.secondaryForeground)
         .padding(.horizontal, 10)
         .padding(.vertical, 6)
-        .background(Color(.tertiarySystemFill), in: Capsule())
+        .background(appSettings.themePalette.tertiaryFill, in: Capsule())
     }
 
     private func headingFont(for level: Int) -> Font {
@@ -606,7 +608,7 @@ private struct LongFormArticleRemoteImage: View {
         .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
         .overlay {
             RoundedRectangle(cornerRadius: 24, style: .continuous)
-                .stroke(Color(.separator).opacity(0.18), lineWidth: 0.8)
+                .stroke(appSettings.themePalette.separator, lineWidth: 0.8)
         }
     }
 
@@ -628,13 +630,13 @@ private struct LongFormArticleRemoteImage: View {
                     .frame(maxHeight: maxHeight ?? 520)
             }
         }
-        .background(Color(.secondarySystemBackground))
+        .background(appSettings.themePalette.secondaryBackground)
     }
 
     private var loadingPlaceholder: some View {
         ZStack {
             RoundedRectangle(cornerRadius: 24, style: .continuous)
-                .fill(Color(.secondarySystemBackground))
+                .fill(appSettings.themePalette.secondaryBackground)
 
             ProgressView()
         }
@@ -648,11 +650,11 @@ private struct LongFormArticleRemoteImage: View {
         VStack(spacing: 8) {
             Image(systemName: appSettings.textOnlyMode ? "photo.slash" : "photo")
                 .font(.title3)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(appSettings.themePalette.secondaryForeground)
 
             Text(appSettings.textOnlyMode ? "Image hidden in Text Only Mode" : (alt ?? "Image unavailable"))
                 .font(.footnote)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(appSettings.themePalette.secondaryForeground)
                 .multilineTextAlignment(.center)
         }
         .padding(.horizontal, 18)
@@ -660,7 +662,7 @@ private struct LongFormArticleRemoteImage: View {
         .frame(height: boundedAspectRatio == nil ? 160 : nil)
         .aspectRatio(boundedAspectRatio, contentMode: .fit)
         .frame(maxHeight: maxHeight)
-        .background(Color(.secondarySystemBackground))
+        .background(appSettings.themePalette.secondaryBackground)
     }
 }
 

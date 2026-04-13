@@ -63,29 +63,7 @@ struct AppThemeBackgroundView: View {
 
                 RadialGradient(
                     colors: [
-                        Color(red: 0.553, green: 0.408, blue: 1.0).opacity(0.26),
-                        Color.clear
-                    ],
-                    center: .topLeading,
-                    startRadius: 16,
-                    endRadius: 320
-                )
-                .offset(x: -22, y: -38)
-
-                RadialGradient(
-                    colors: [
-                        Color(red: 0.329, green: 0.920, blue: 0.996).opacity(0.18),
-                        Color.clear
-                    ],
-                    center: .topTrailing,
-                    startRadius: 18,
-                    endRadius: 300
-                )
-                .offset(x: 20, y: -24)
-
-                RadialGradient(
-                    colors: [
-                        Color(red: 0.561, green: 1.0, blue: 0.369).opacity(0.14),
+                        Color(red: 0.553, green: 0.408, blue: 1.0).opacity(0.08),
                         Color.clear
                     ],
                     center: .bottomTrailing,

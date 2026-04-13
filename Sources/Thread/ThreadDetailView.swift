@@ -250,6 +250,7 @@ struct ThreadDetailView: View {
                     )
 
                     Divider()
+                        .overlay(appSettings.themePalette.chromeBorder)
                         .padding(.leading, 16)
 
                     ThreadDetailContentSection(

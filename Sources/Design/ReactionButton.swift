@@ -28,13 +28,14 @@ private struct ReactionSparkleParticle: Identifiable, Equatable {
 
 struct ReactionButton: View {
     @Environment(\.isEnabled) private var isEnabled
+    @EnvironmentObject private var appSettings: AppSettingsStore
 
     let isLiked: Bool
     var isBonusReaction: Bool = false
     let count: Int
     var activeColor: Color = .red
     var bonusActiveColor: Color? = nil
-    var inactiveColor: Color = .secondary
+    var inactiveColor: Color? = nil
     var minWidth: CGFloat = 34
     var minHeight: CGFloat = 28
     var alignment: Alignment = .leading
@@ -83,7 +84,7 @@ struct ReactionButton: View {
         }
         .frame(minWidth: minWidth, minHeight: minHeight, alignment: alignment)
         .buttonStyle(.plain)
-        .foregroundStyle(resolvedIsLiked ? resolvedActiveColor : inactiveColor)
+        .foregroundStyle(resolvedIsLiked ? resolvedActiveColor : resolvedInactiveColor)
         .contentShape(Rectangle())
         .accessibilityLabel(accessibilityLabel)
         .accessibilityAddTraits(.isButton)
@@ -127,6 +128,10 @@ struct ReactionButton: View {
             burstDisplayResetTask?.cancel()
             burstDisplayResetTask = nil
         }
+    }
+
+    private var resolvedInactiveColor: Color {
+        inactiveColor ?? appSettings.themePalette.iconMutedForeground
     }
 
     @ViewBuilder

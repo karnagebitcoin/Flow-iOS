@@ -281,7 +281,7 @@ struct SettingsFlowPlusThemesView: View {
             .overlay {
                 RoundedRectangle(cornerRadius: 18, style: .continuous)
                     .stroke(
-                        isSelected ? appSettings.primaryColor : appSettings.themePalette.separator.opacity(0.18),
+                        isSelected ? appSettings.primaryColor : appSettings.themeSeparator(defaultOpacity: 0.18),
                         lineWidth: isSelected ? 1.5 : 1
                     )
             }
@@ -436,7 +436,7 @@ struct SettingsFlowPlusTypographyView: View {
             .overlay {
                 RoundedRectangle(cornerRadius: 18, style: .continuous)
                     .stroke(
-                        isSelected ? appSettings.primaryColor : appSettings.themePalette.separator.opacity(0.18),
+                        isSelected ? appSettings.primaryColor : appSettings.themeSeparator(defaultOpacity: 0.18),
                         lineWidth: isSelected ? 1.5 : 1
                     )
             }

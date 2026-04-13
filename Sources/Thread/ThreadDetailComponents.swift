@@ -81,7 +81,7 @@ struct ThreadDetailRootNoteCard: View {
 
                         Text(item.handle)
                             .font(.subheadline)
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(appSettings.themePalette.secondaryForeground)
                             .lineLimit(1)
 
                         Spacer(minLength: 8)
@@ -89,13 +89,13 @@ struct ThreadDetailRootNoteCard: View {
                         if let clientName = item.displayEvent.clientName {
                             Text("via \(clientName)")
                                 .font(.subheadline)
-                                .foregroundStyle(.secondary)
+                                .foregroundStyle(appSettings.themePalette.secondaryForeground)
                                 .lineLimit(1)
                         }
 
                         Text(RelativeTimestampFormatter.shortString(from: item.displayEvent.createdAtDate))
                             .font(.subheadline)
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(appSettings.themePalette.secondaryForeground)
                             .lineLimit(1)
 
                         Button {
@@ -148,6 +148,8 @@ struct ThreadDetailRootNoteCard: View {
     }
 
 struct ThreadDetailInteractionRow: View {
+        @EnvironmentObject private var appSettings: AppSettingsStore
+
         let replyCount: Int?
         let reactionCount: Int
         let isLikedByCurrentUser: Bool
@@ -171,7 +173,7 @@ struct ThreadDetailInteractionRow: View {
                     .frame(minWidth: 34, minHeight: 30, alignment: .leading)
                 }
                 .buttonStyle(.plain)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(appSettings.themePalette.iconMutedForeground)
                 .accessibilityLabel("Reply")
 
                 Button(action: onRepostTap) {
@@ -179,7 +181,7 @@ struct ThreadDetailInteractionRow: View {
                         .frame(minWidth: 34, minHeight: 30, alignment: .leading)
                 }
                 .buttonStyle(.plain)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(appSettings.themePalette.iconMutedForeground)
                 .accessibilityLabel("Re-share")
 
                 ReactionButton(
@@ -196,7 +198,7 @@ struct ThreadDetailInteractionRow: View {
                         .frame(minWidth: 34, minHeight: 30, alignment: .leading)
                 }
                 .buttonStyle(.plain)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(appSettings.themePalette.iconMutedForeground)
                 .accessibilityLabel("Share")
             }
             .font(.headline)
@@ -204,6 +206,8 @@ struct ThreadDetailInteractionRow: View {
     }
 
 struct ThreadDetailContentSection: View {
+        @EnvironmentObject private var appSettings: AppSettingsStore
+
         @Binding var selectedContentTab: ThreadDetailContentTab
         let replies: [FeedItem]
         let replyCountsByTarget: [String: Int]
@@ -255,7 +259,7 @@ struct ThreadDetailContentSection: View {
                     if let repliesErrorMessage {
                         Text(repliesErrorMessage)
                             .font(.footnote)
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(appSettings.themePalette.secondaryForeground)
                             .frame(maxWidth: .infinity, alignment: .center)
                             .padding(.horizontal, 16)
                             .padding(.vertical, 10)
@@ -270,7 +274,7 @@ struct ThreadDetailContentSection: View {
                     if let reactionsErrorMessage {
                         Text(reactionsErrorMessage)
                             .font(.footnote)
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(appSettings.themePalette.secondaryForeground)
                             .frame(maxWidth: .infinity, alignment: .center)
                             .padding(.horizontal, 16)
                             .padding(.vertical, 10)
@@ -281,6 +285,7 @@ struct ThreadDetailContentSection: View {
     }
 
 struct ThreadDetailRepliesSection: View {
+        @EnvironmentObject private var appSettings: AppSettingsStore
         @ObservedObject private var reactionStats = NoteReactionStatsService.shared
 
         let replies: [FeedItem]
@@ -312,7 +317,7 @@ struct ThreadDetailRepliesSection: View {
                             .font(.headline)
                         Text("Tap below to post the first reply.")
                             .font(.subheadline)
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(appSettings.themePalette.secondaryForeground)
                     }
                     .frame(maxWidth: .infinity)
                     .padding(.horizontal, 16)
@@ -360,6 +365,7 @@ struct ThreadDetailRepliesSection: View {
                         }
 
                         Divider()
+                            .overlay(appSettings.themePalette.chromeBorder)
                             .padding(.leading, 72)
                     }
                 }
@@ -368,6 +374,8 @@ struct ThreadDetailRepliesSection: View {
     }
 
 struct ThreadDetailReactionsSection: View {
+        @EnvironmentObject private var appSettings: AppSettingsStore
+
         let noteActivityRows: [ActivityRow]
         let isLoading: Bool
         let onOpenProfile: (String) -> Void
@@ -387,7 +395,7 @@ struct ThreadDetailReactionsSection: View {
                             .font(.headline)
                         Text("Likes, reposts, and quote shares will appear here.")
                             .font(.subheadline)
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(appSettings.themePalette.secondaryForeground)
                             .multilineTextAlignment(.center)
                     }
                     .frame(maxWidth: .infinity)
@@ -405,6 +413,7 @@ struct ThreadDetailReactionsSection: View {
                             .padding(.vertical, 10)
 
                         Divider()
+                            .overlay(appSettings.themePalette.chromeBorder)
                             .padding(.leading, 56)
                     }
                 }
@@ -452,6 +461,7 @@ struct ThreadDetailArticleBody: View {
                         if showReactions {
                             VStack(alignment: .leading, spacing: 18) {
                                 Divider()
+                                    .overlay(appSettings.themePalette.chromeBorder)
                                 ThreadDetailInteractionRow(
                                     replyCount: nil,
                                     reactionCount: reactionCount,
@@ -469,7 +479,7 @@ struct ThreadDetailArticleBody: View {
                         if let errorMessage {
                             Text(errorMessage)
                                 .font(.footnote)
-                                .foregroundStyle(.secondary)
+                                .foregroundStyle(appSettings.themePalette.secondaryForeground)
                                 .frame(maxWidth: .infinity, alignment: .center)
                         }
                     }
@@ -484,6 +494,8 @@ struct ThreadDetailArticleBody: View {
     }
 
 struct ThreadDetailReplyDockBar: View {
+        @EnvironmentObject private var appSettings: AppSettingsStore
+
         let primaryColor: Color
         let colorSchemeOverride: ColorScheme
         let onTap: () -> Void
@@ -503,7 +515,7 @@ struct ThreadDetailReplyDockBar: View {
 
                     Text("Post your reply")
                         .font(.subheadline)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(appSettings.themePalette.secondaryForeground)
 
                     Spacer(minLength: 0)
                 }
@@ -512,7 +524,7 @@ struct ThreadDetailReplyDockBar: View {
                 .background(.ultraThinMaterial, in: Capsule())
                 .overlay {
                     Capsule()
-                        .stroke(Color.white.opacity(colorSchemeOverride == .dark ? 0.14 : 0.4), lineWidth: 0.9)
+                        .stroke(appSettings.themePalette.chromeBorder, lineWidth: 0.9)
                 }
                 .shadow(color: Color.black.opacity(colorSchemeOverride == .dark ? 0.2 : 0.08), radius: 14, x: 0, y: 6)
             }
@@ -529,10 +541,10 @@ struct ThreadDetailNSFWHiddenCard: View {
         var body: some View {
             HStack(spacing: 10) {
                 Image(systemName: "eye.slash")
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(appSettings.themePalette.secondaryForeground)
                 Text("Content hidden by NSFW filter.")
                     .font(.subheadline)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(appSettings.themePalette.secondaryForeground)
                 Spacer(minLength: 0)
             }
             .padding(.horizontal, 12)
@@ -543,7 +555,7 @@ struct ThreadDetailNSFWHiddenCard: View {
             )
             .overlay(
                 RoundedRectangle(cornerRadius: 12, style: .continuous)
-                    .stroke(appSettings.themePalette.separator.opacity(0.35), lineWidth: 0.5)
+                    .stroke(appSettings.themePalette.chromeBorder, lineWidth: 0.5)
             )
         }
     }

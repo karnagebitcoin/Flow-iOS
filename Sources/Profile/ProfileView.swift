@@ -203,11 +203,11 @@ struct ProfileView: View {
                             Text(errorMessage)
                                 .font(.body)
                                 .multilineTextAlignment(.center)
-                                .foregroundStyle(.secondary)
+                                .foregroundStyle(appSettings.themePalette.secondaryForeground)
                         } else {
                             Text(viewModel.mode == .posts ? "No posts yet" : "No replies yet")
                                 .font(.body)
-                                .foregroundStyle(.secondary)
+                                .foregroundStyle(appSettings.themePalette.secondaryForeground)
                         }
                     }
                     .frame(maxWidth: .infinity)

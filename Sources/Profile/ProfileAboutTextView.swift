@@ -4,6 +4,8 @@ import SwiftUI
 struct ProfileAboutTextView: View {
     private struct MentionMetadataDecoder: MetadataCoding {}
 
+    @EnvironmentObject private var appSettings: AppSettingsStore
+
     private let text: String
     private let tokens: [NoteContentToken]
     private let mentionIdentifiers: [String]
@@ -27,7 +29,7 @@ struct ProfileAboutTextView: View {
     var body: some View {
         Text(attributedString)
             .font(.body)
-            .foregroundStyle(.primary)
+            .foregroundStyle(appSettings.themePalette.foreground)
             .multilineTextAlignment(.leading)
             .fixedSize(horizontal: false, vertical: true)
             .layoutPriority(1)
@@ -77,7 +79,7 @@ struct ProfileAboutTextView: View {
                     segment.foregroundColor = .accentColor
                 }
             case .websocketURL:
-                segment.foregroundColor = .secondary
+                segment.foregroundColor = appSettings.themePalette.secondaryForeground
             case .text, .emoji, .nostrEvent:
                 break
             }

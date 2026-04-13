@@ -13,7 +13,9 @@ struct ReshareActionSheetView: View {
             VStack(alignment: .leading, spacing: 14) {
                 VStack(spacing: 0) {
                     actionRow(title: "Repost", icon: "arrow.2.squarepath", action: onRepost)
-                    Divider().padding(.leading, 16)
+                    Divider()
+                        .overlay(appSettings.themeSeparator(defaultOpacity: 0.18))
+                        .padding(.leading, 16)
                     actionRow(title: "Quote", icon: "quote.bubble", action: onQuote)
                 }
                 .background(
@@ -22,7 +24,7 @@ struct ReshareActionSheetView: View {
                 )
                 .overlay(
                     RoundedRectangle(cornerRadius: 16, style: .continuous)
-                        .stroke(appSettings.themePalette.separator.opacity(0.18), lineWidth: 0.8)
+                        .stroke(appSettings.themeSeparator(defaultOpacity: 0.18), lineWidth: 0.8)
                 )
 
                 Spacer(minLength: 0)

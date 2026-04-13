@@ -74,12 +74,12 @@ struct DMsView: View {
         VStack(spacing: 0) {
             header
 
-            Picker("Messages Tab", selection: $activeTab) {
-                ForEach(HaloLinkInboxTab.allCases) { tab in
-                    Text(tab.title).tag(tab)
-                }
-            }
-            .pickerStyle(.segmented)
+            FlowCapsuleTabBar(
+                selection: $activeTab,
+                items: HaloLinkInboxTab.allCases,
+                selectedBackground: inboxTabSelectedBackground,
+                title: { $0.title }
+            )
             .padding(.horizontal, 16)
             .padding(.top, 8)
             .padding(.bottom, 12)
@@ -160,6 +160,7 @@ struct DMsView: View {
 
                 if index < visibleConversations.count - 1 {
                     Divider()
+                        .overlay(appSettings.themePalette.separator)
                         .padding(.leading, 78)
                 }
             }
@@ -181,6 +182,15 @@ struct DMsView: View {
         case .requests:
             return store.requests
         }
+    }
+
+    private var inboxTabSelectedBackground: Color {
+        if appSettings.activeTheme == .sakura {
+            return Color.white.opacity(0.88)
+        } else if appSettings.activeTheme == .gamer {
+            return appSettings.themePalette.chromeBackground.opacity(0.88)
+        }
+        return appSettings.themePalette.secondaryBackground
     }
 
     private var signedOutState: some View {

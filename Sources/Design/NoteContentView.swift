@@ -361,7 +361,7 @@ struct NoteContentView: View {
                 .padding(.horizontal, 12)
                 .padding(.vertical, 6)
                 .background(Capsule().fill(appSettings.themePalette.tertiaryFill))
-                .overlay(Capsule().stroke(appSettings.themePalette.separator.opacity(0.3), lineWidth: 0.6))
+                .overlay(Capsule().stroke(appSettings.themeSeparator(defaultOpacity: 0.3), lineWidth: 0.6))
         }
         .buttonStyle(.plain)
         .accessibilityLabel("Show full note")

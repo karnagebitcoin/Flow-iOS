@@ -233,18 +233,7 @@ struct MainTabShellView: View {
                 )
             }
         } else if appSettings.activeTheme == .gamer {
-            ZStack {
-                appSettings.themePalette.navigationBackground
-                LinearGradient(
-                    colors: [
-                        appSettings.primaryColor.opacity(0.16),
-                        Color(red: 0.329, green: 0.920, blue: 0.996).opacity(0.08),
-                        Color.clear
-                    ],
-                    startPoint: .topLeading,
-                    endPoint: .bottomTrailing
-                )
-            }
+            appSettings.themePalette.background
         } else {
             appSettings.themePalette.navigationBackground
         }

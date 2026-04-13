@@ -1,6 +1,8 @@
 import SwiftUI
 
 struct ComposePollEditorView: View {
+    @EnvironmentObject private var appSettings: AppSettingsStore
+
     @Binding var draft: ComposePollDraft
 
     let onRemove: () -> Void
@@ -51,12 +53,12 @@ struct ComposePollEditorView: View {
                     if let endsAt = draft.endsAt {
                         Text(endsAt, format: .dateTime.month(.abbreviated).day().hour().minute())
                             .font(.footnote)
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(appSettings.themePalette.secondaryForeground)
                             .multilineTextAlignment(.trailing)
                     } else {
                         Text("No end date")
                             .font(.footnote)
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(appSettings.themePalette.secondaryForeground)
                     }
                 }
 
@@ -85,7 +87,7 @@ struct ComposePollEditorView: View {
                     .font(.footnote.weight(.semibold))
                 }
                 .buttonStyle(.plain)
-                .foregroundStyle(draft.endsAt == nil ? Color.accentColor : .secondary)
+                .foregroundStyle(draft.endsAt == nil ? Color.accentColor : appSettings.themePalette.secondaryForeground)
             }
 
             Text(
@@ -94,16 +96,16 @@ struct ComposePollEditorView: View {
                     : "Add at least two option labels before posting."
             )
             .font(.footnote.weight(draft.hasMinimumOptions ? .regular : .semibold))
-            .foregroundStyle(draft.hasMinimumOptions ? Color.secondary : Color.orange)
+            .foregroundStyle(draft.hasMinimumOptions ? appSettings.themePalette.secondaryForeground : Color.orange)
         }
         .padding(14)
         .background(
             RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .fill(Color(.secondarySystemGroupedBackground))
+                .fill(appSettings.themePalette.sheetInsetBackground)
         )
         .overlay(
             RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .stroke(Color(.separator).opacity(0.28), lineWidth: 0.8)
+                .stroke(appSettings.themePalette.separator, lineWidth: 0.8)
         )
     }
 
@@ -124,11 +126,11 @@ struct ComposePollEditorView: View {
         HStack(alignment: .center, spacing: 10) {
             Text("\(index + 1)")
                 .font(.footnote.weight(.semibold))
-                .foregroundStyle(.secondary)
+                .foregroundStyle(appSettings.themePalette.secondaryForeground)
                 .frame(width: 28, height: 28)
                 .background(
                     Circle()
-                        .fill(Color(.quaternarySystemFill))
+                        .fill(appSettings.themePalette.tertiaryFill)
                 )
 
             TextField(
@@ -146,7 +148,7 @@ struct ComposePollEditorView: View {
                 } label: {
                     Image(systemName: "minus.circle.fill")
                         .font(.title3)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(appSettings.themePalette.secondaryForeground)
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel("Remove option \(index + 1)")
@@ -156,7 +158,7 @@ struct ComposePollEditorView: View {
         .padding(.vertical, 11)
         .background(
             RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .fill(Color(.tertiarySystemFill))
+                .fill(appSettings.themePalette.tertiaryFill)
         )
     }
 

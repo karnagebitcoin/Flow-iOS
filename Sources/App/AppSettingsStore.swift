@@ -939,6 +939,14 @@ final class AppSettingsStore: ObservableObject {
         activeTheme.palette
     }
 
+    var settingsCardBorder: Color {
+        activeTheme == .gamer ? themePalette.chromeBorder : themePalette.sheetCardBorder
+    }
+
+    func themeSeparator(defaultOpacity: Double) -> Color {
+        activeTheme == .gamer ? themePalette.separator : themePalette.separator.opacity(defaultOpacity)
+    }
+
     var activeFontOption: AppFontOption {
         if let previewFontOption, previewFontOption.isEnabled {
             return previewFontOption

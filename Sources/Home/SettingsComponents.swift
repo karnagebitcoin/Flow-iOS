@@ -33,7 +33,7 @@ struct SettingsNavigationRow<Destination: View>: View {
                 VStack(alignment: .leading, spacing: 2) {
                     Text(title)
                         .font(appSettings.appFont(.body, weight: .regular))
-                        .foregroundStyle(.primary)
+                        .foregroundStyle(appSettings.themePalette.foreground)
 
                     if let subtitle, !subtitle.isEmpty {
                         Text(subtitle)
@@ -79,7 +79,7 @@ struct SettingsValueNavigationRow: View {
                 VStack(alignment: .leading, spacing: 2) {
                     Text(title)
                         .font(appSettings.appFont(.body, weight: .regular))
-                        .foregroundStyle(.primary)
+                        .foregroundStyle(appSettings.themePalette.foreground)
 
                     if let subtitle, !subtitle.isEmpty {
                         Text(subtitle)
@@ -190,7 +190,7 @@ extension AppSettingsStore {
         return SettingsFormSurfaceStyle(
             formBackground: palette.sheetBackground,
             cardBackground: palette.sheetCardBackground,
-            cardBorder: palette.sheetCardBorder,
+            cardBorder: settingsCardBorder,
             subcardBackground: subcardBackground,
             controlBackground: palette.sheetInsetBackground,
             navigationBackground: palette.sheetBackground
@@ -215,6 +215,8 @@ struct ThemedSettingsForm<Content: View>: View {
         return Form {
             content
                 .listRowBackground(surfaceStyle.cardBackground)
+                .listRowSeparatorTint(surfaceStyle.cardBorder)
+                .listSectionSeparatorTint(surfaceStyle.cardBorder)
         }
         .scrollContentBackground(.hidden)
         .background(surfaceStyle.formBackground)
@@ -276,25 +278,15 @@ struct ThemedToolbarDoneButton: View {
     let action: () -> Void
 
     var body: some View {
-        Text(title)
-            .font(appSettings.appFont(.subheadline, weight: .semibold))
-            .foregroundStyle(appSettings.themePalette.foreground)
-            .lineLimit(1)
-            .fixedSize(horizontal: true, vertical: true)
-            .padding(.horizontal, 14)
-            .padding(.vertical, 8)
-            .background(
-                appSettings.themePalette.navigationControlBackground,
-                in: Capsule(style: .continuous)
-            )
-            .contentShape(Capsule(style: .continuous))
-            .onTapGesture(perform: action)
-            .accessibilityElement(children: .ignore)
-            .accessibilityLabel(title)
-            .accessibilityAddTraits(.isButton)
-            .accessibilityAction {
-                action()
-            }
+        Button(action: action) {
+            Image(systemName: "xmark")
+                .font(appSettings.appFont(.footnote, weight: .semibold))
+                .foregroundStyle(appSettings.themePalette.foreground)
+                .frame(width: 32, height: 32)
+                .contentShape(Circle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(title)
     }
 }
 
@@ -339,6 +331,8 @@ struct ThemedSettingsSection: View {
     var body: some View {
         sectionBody
             .listRowBackground(appSettings.themePalette.sheetCardBackground)
+            .listRowSeparatorTint(appSettings.settingsCardBorder)
+            .listSectionSeparatorTint(appSettings.settingsCardBorder)
     }
 
     @ViewBuilder

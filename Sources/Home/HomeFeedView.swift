@@ -61,12 +61,12 @@ struct HomeFeedView: View {
                                     if viewModel.mediaOnly {
                                         Label("Media-only filter enabled", systemImage: "line.3.horizontal.decrease.circle.fill")
                                             .font(.footnote)
-                                            .foregroundStyle(.secondary)
+                                            .foregroundStyle(appSettings.themePalette.secondaryForeground)
                                     }
                                 } else {
                                     Label("Polls from people you follow", systemImage: "chart.bar.xaxis")
                                         .font(.footnote.weight(.medium))
-                                        .foregroundStyle(.secondary)
+                                        .foregroundStyle(appSettings.themePalette.secondaryForeground)
                                 }
                             }
                             .padding(.vertical, 0)
@@ -543,19 +543,7 @@ struct HomeFeedView: View {
                 )
             }
         } else if appSettings.activeTheme == .gamer {
-            ZStack {
-                appSettings.themePalette.chromeBackground
-
-                LinearGradient(
-                    colors: [
-                        appSettings.primaryColor.opacity(0.18),
-                        Color(red: 0.329, green: 0.920, blue: 0.996).opacity(0.08),
-                        Color.clear
-                    ],
-                    startPoint: .topLeading,
-                    endPoint: .bottomTrailing
-                )
-            }
+            appSettings.themePalette.background
         } else if appSettings.activeTheme == .dracula {
             appSettings.themePalette.chromeBackground
         } else {
@@ -735,7 +723,7 @@ struct HomeFeedView: View {
                             .foregroundStyle(appSettings.primaryColor)
                     }
                 }
-                .foregroundStyle(.primary)
+                .foregroundStyle(appSettings.themePalette.foreground)
                 .padding(.horizontal, 12)
                 .padding(.vertical, 8)
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -778,7 +766,7 @@ struct HomeFeedView: View {
             Text(viewModel.filteredOutMessage)
                 .font(.body)
                 .multilineTextAlignment(.center)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(appSettings.themePalette.secondaryForeground)
 
             if viewModel.mediaOnlyFilteredOutAll {
                 Button("Show posts without media") {
@@ -805,35 +793,35 @@ struct HomeFeedView: View {
                 Text(errorMessage)
                     .font(.body)
                     .multilineTextAlignment(.center)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(appSettings.themePalette.secondaryForeground)
             } else if viewModel.interestsFeedHasNoHashtags {
                 Text("No interests selected yet")
                     .font(.headline)
                 Text("Add topic hashtags in Core > Feeds > Interests.")
                     .font(.subheadline)
                     .multilineTextAlignment(.center)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(appSettings.themePalette.secondaryForeground)
             } else if viewModel.followingFeedHasNoFollowings {
                 Text("No followed accounts yet")
                     .font(.headline)
                 Text("Follow people or switch to Network from the feed selector.")
                     .font(.subheadline)
                     .multilineTextAlignment(.center)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(appSettings.themePalette.secondaryForeground)
             } else if viewModel.feedSource == .polls {
                 Text("No polls yet")
                     .font(.headline)
                 Text("Follow people who post polls or pull down to refresh.")
                     .font(.subheadline)
                     .multilineTextAlignment(.center)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(appSettings.themePalette.secondaryForeground)
             } else {
                 Text("No posts yet")
                     .font(.headline)
                 Text("Pull down to refresh and try these relays again.")
                     .font(.subheadline)
                     .multilineTextAlignment(.center)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(appSettings.themePalette.secondaryForeground)
             }
         }
         .frame(maxWidth: .infinity)
@@ -1040,7 +1028,7 @@ struct HomeFeedView: View {
                 Text(newNotesPillLabel)
                     .font(.caption.weight(.semibold))
             }
-            .foregroundStyle(.primary)
+            .foregroundStyle(appSettings.themePalette.foreground)
             .padding(.leading, 8)
             .padding(.trailing, 12)
             .padding(.vertical, 6)
@@ -1124,7 +1112,7 @@ struct HomeFeedView: View {
 
                         if index < viewModel.feedSourceOptions.count - 1 {
                             Divider()
-                                .overlay(appSettings.themePalette.separator.opacity(0.18))
+                                .overlay(appSettings.themeSeparator(defaultOpacity: 0.18))
                                 .padding(.leading, 44)
                         }
                     }
@@ -1136,7 +1124,7 @@ struct HomeFeedView: View {
                 )
                 .overlay(
                     RoundedRectangle(cornerRadius: 22, style: .continuous)
-                        .stroke(appSettings.themePalette.separator.opacity(0.18), lineWidth: 0.8)
+                        .stroke(appSettings.themeSeparator(defaultOpacity: 0.18), lineWidth: 0.8)
                 )
                 .padding(.horizontal, 16)
                 .padding(.top, 14)
@@ -1213,7 +1201,7 @@ private struct FilterKindTileView: View {
                 HStack(spacing: 8) {
                     Image(systemName: iconName)
                         .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(isSelected ? appSettings.primaryColor : .secondary)
+                        .foregroundStyle(isSelected ? appSettings.primaryColor : appSettings.themePalette.secondaryForeground)
                     Spacer()
                     if isSelected {
                         Image(systemName: "checkmark.circle.fill")
@@ -1223,7 +1211,7 @@ private struct FilterKindTileView: View {
 
                 Text(title)
                     .font(.footnote.weight(.semibold))
-                    .foregroundStyle(.primary)
+                    .foregroundStyle(appSettings.themePalette.foreground)
                     .multilineTextAlignment(.leading)
                     .lineLimit(1)
             }
@@ -1242,7 +1230,7 @@ private struct FilterKindTileView: View {
                     .stroke(
                         isSelected
                             ? appSettings.primaryColor.opacity(0.75)
-                            : appSettings.themePalette.separator.opacity(0.35),
+                            : appSettings.themeSeparator(defaultOpacity: 0.35),
                         lineWidth: 1
                     )
             )

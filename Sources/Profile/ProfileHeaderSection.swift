@@ -135,7 +135,7 @@ struct ProfileHeaderSection<BackButton: View, MenuButton: View, ActionRow: View>
                 if let actionMessage = content.actionMessage, !actionMessage.isEmpty {
                     Text(actionMessage)
                         .font(appSettings.appFont(.footnote))
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(appSettings.themePalette.secondaryForeground)
                         .fixedSize(horizontal: false, vertical: true)
                 }
             }
@@ -326,7 +326,7 @@ private struct ProfileIdentityBlock: View {
         VStack(alignment: .leading, spacing: 6) {
             Text(displayName)
                 .font(appSettings.appFont(size: 30, weight: .heavy))
-                .foregroundStyle(.primary)
+                .foregroundStyle(appSettings.themePalette.foreground)
                 .lineLimit(2)
                 .fixedSize(horizontal: false, vertical: true)
 

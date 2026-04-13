@@ -133,7 +133,7 @@ struct NoteMediaPlaceholderView: View {
         .overlay(
             RoundedRectangle(cornerRadius: 12, style: .continuous)
                 .stroke(
-                    (isActionable ? appSettings.primaryColor.opacity(0.35) : appSettings.themePalette.separator.opacity(0.35)),
+                    isActionable ? appSettings.primaryColor.opacity(0.35) : appSettings.themeSeparator(defaultOpacity: 0.35),
                     lineWidth: 0.5
                 )
         )
@@ -1160,21 +1160,17 @@ struct NoteImageFullscreenViewer: View {
                     .tabViewStyle(.page(indexDisplayMode: .automatic))
                     .toolbar {
                         ToolbarItem(placement: .topBarTrailing) {
-                            Text("Done")
-                                .font(.subheadline.weight(.semibold))
-                                .foregroundStyle(doneButtonForegroundColor)
-                                .lineLimit(1)
-                                .fixedSize(horizontal: true, vertical: true)
-                                .contentShape(Rectangle())
-                                .onTapGesture {
-                                    dismiss()
-                                }
-                                .accessibilityElement(children: .ignore)
-                                .accessibilityLabel("Done")
-                                .accessibilityAddTraits(.isButton)
-                                .accessibilityAction {
-                                    dismiss()
-                                }
+                            Button {
+                                dismiss()
+                            } label: {
+                                Image(systemName: "xmark")
+                                    .font(.footnote.weight(.semibold))
+                                    .foregroundStyle(doneButtonForegroundColor)
+                                    .frame(width: 32, height: 32)
+                                    .contentShape(Circle())
+                            }
+                            .buttonStyle(.plain)
+                            .accessibilityLabel("Close")
                         }
                     }
                     .toolbarBackground(.visible, for: .navigationBar)
@@ -1410,7 +1406,7 @@ struct NoteImageFullscreenViewer: View {
                         .fill(appSettings.themePalette.modalBackground)
                         .overlay(
                             RoundedRectangle(cornerRadius: 18, style: .continuous)
-                                .stroke(appSettings.themePalette.separator.opacity(0.35), lineWidth: 0.8)
+                                .stroke(appSettings.themeSeparator(defaultOpacity: 0.35), lineWidth: 0.8)
                         )
                 )
 
@@ -1439,7 +1435,7 @@ struct NoteImageFullscreenViewer: View {
                     .fill(appSettings.themePalette.modalBackground)
                     .overlay(
                         RoundedRectangle(cornerRadius: 28, style: .continuous)
-                            .stroke(appSettings.themePalette.separator.opacity(0.35), lineWidth: 0.7)
+                            .stroke(appSettings.themeSeparator(defaultOpacity: 0.35), lineWidth: 0.7)
                     )
             )
             .padding(.horizontal, 14)
