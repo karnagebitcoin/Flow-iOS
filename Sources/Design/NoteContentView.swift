@@ -146,6 +146,8 @@ struct NoteContentView: View {
     private static let collapsedPreviewCharacterLimit = 520
     private static let collapsedPreviewLineLimit = 9
     private static let maxEmbeddedReferenceDepth = 1
+    private static let maxConcatenatedInlineTokenCount = 64
+    private static let maxConcatenatedWebsocketURLTokenCount = 12
     private static let parsedContentCache = NoteParsedContentCache.shared
     private static let blurRevealStateCache = NoteBlurRevealStateCache.shared
 
@@ -646,7 +648,7 @@ struct NoteContentView: View {
     }
 
     private func inlineText(from tokens: [NoteContentToken]) -> Text {
-        if shouldPreferInteractiveAttributedInlineText(for: tokens) {
+        if Self.shouldUseAttributedInlineText(for: tokens) {
             return Text(attributedInlineString(from: tokens))
         }
 
@@ -655,12 +657,21 @@ struct NoteContentView: View {
         }
     }
 
-    private func shouldPreferInteractiveAttributedInlineText(for tokens: [NoteContentToken]) -> Bool {
-        tokens.contains { token in
+    static func shouldUseAttributedInlineText(for tokens: [NoteContentToken]) -> Bool {
+        var websocketURLCount = 0
+
+        if tokens.count > maxConcatenatedInlineTokenCount {
+            return true
+        }
+
+        return tokens.contains { token in
             switch token.type {
             case .url, .nostrMention, .hashtag:
                 return true
-            case .text, .websocketURL, .emoji, .nostrEvent, .image, .video, .youtubeVideo, .audio:
+            case .websocketURL:
+                websocketURLCount += 1
+                return websocketURLCount > maxConcatenatedWebsocketURLTokenCount
+            case .text, .emoji, .nostrEvent, .image, .video, .youtubeVideo, .audio:
                 return false
             }
         }

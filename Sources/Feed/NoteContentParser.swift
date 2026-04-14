@@ -47,6 +47,32 @@ struct YouTubeVideoEmbed: Hashable, Sendable {
     }
 }
 
+struct NostrEventReferencePointer: Hashable, Sendable {
+    enum Target: Hashable, Sendable {
+        case eventID(String)
+        case replaceable(kind: Int, pubkey: String, identifier: String)
+    }
+
+    let normalizedIdentifier: String
+    let target: Target
+    let relayHints: [URL]
+    let authorPubkey: String?
+
+    var eventID: String? {
+        guard case .eventID(let eventID) = target else { return nil }
+        return eventID
+    }
+
+    var targetPubkey: String? {
+        switch target {
+        case .eventID:
+            return authorPubkey
+        case .replaceable(_, let pubkey, _):
+            return pubkey
+        }
+    }
+}
+
 enum NoteContentParser {
     private enum CandidateType {
         case httpURL
@@ -256,6 +282,94 @@ enum NoteContentParser {
             kind: event.kind,
             relayHints: relayHints
         )
+    }
+
+    static func normalizedNostrReferenceIdentifier(from raw: String) -> String {
+        normalizeReferenceValue(raw)
+    }
+
+    static func eventReferencePointer(from raw: String) -> NostrEventReferencePointer? {
+        let normalized = normalizeReferenceValue(raw)
+        guard !normalized.isEmpty else { return nil }
+
+        if isHex64(normalized) {
+            return NostrEventReferencePointer(
+                normalizedIdentifier: normalized,
+                target: .eventID(normalized),
+                relayHints: [],
+                authorPubkey: nil
+            )
+        }
+
+        if normalized.hasPrefix("note1"),
+           let eventID = decodedNoteIdentifier(normalized) {
+            return NostrEventReferencePointer(
+                normalizedIdentifier: normalized,
+                target: .eventID(eventID),
+                relayHints: [],
+                authorPubkey: nil
+            )
+        }
+
+        if let coordinate = parseReplaceableCoordinate(from: normalized) {
+            return NostrEventReferencePointer(
+                normalizedIdentifier: normalized,
+                target: .replaceable(
+                    kind: coordinate.kind,
+                    pubkey: coordinate.pubkey,
+                    identifier: coordinate.identifier
+                ),
+                relayHints: [],
+                authorPubkey: coordinate.pubkey
+            )
+        }
+
+        if normalized.hasPrefix("nevent1") || normalized.hasPrefix("naddr1") {
+            let decoder = ReferenceMetadataDecoder()
+            guard let metadata = try? decoder.decodedMetadata(from: normalized) else {
+                return nil
+            }
+
+            let relayHints = relayHintURLs(from: metadata.relays ?? [])
+            let authorPubkey: String?
+            if let pubkey = metadata.pubkey?.lowercased(), isHex64(pubkey) {
+                authorPubkey = pubkey
+            } else {
+                authorPubkey = nil
+            }
+
+            if let eventID = metadata.eventId?.lowercased(),
+               isHex64(eventID) {
+                return NostrEventReferencePointer(
+                    normalizedIdentifier: normalized,
+                    target: .eventID(eventID),
+                    relayHints: relayHints,
+                    authorPubkey: authorPubkey
+                )
+            }
+
+            if let kind = metadata.kind,
+               let pubkey = authorPubkey,
+               let identifier = metadata.identifier?.trimmingCharacters(in: .whitespacesAndNewlines),
+               !identifier.isEmpty {
+                return NostrEventReferencePointer(
+                    normalizedIdentifier: normalized,
+                    target: .replaceable(kind: Int(kind), pubkey: pubkey, identifier: identifier),
+                    relayHints: relayHints,
+                    authorPubkey: pubkey
+                )
+            }
+        }
+
+        return nil
+    }
+
+    static func relayHintURL(from raw: String?) -> URL? {
+        guard let raw else { return nil }
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+        guard isSupportedRelayHint(trimmed) else { return nil }
+        return URL(string: trimmed)
     }
     
     static func hashtagActionURL(for tokenValue: String) -> URL? {
@@ -549,7 +663,20 @@ enum NoteContentParser {
             let isMentionedAddressTag = name == "a" && marker == "mention"
             guard isQuoteReferenceTag || isMentionedEventTag || isMentionedAddressTag else { continue }
 
-            let normalized = normalizeReferenceValue(value)
+            let rawNormalized = normalizeReferenceValue(value)
+            let tagRelayHint = relayHintURL(from: tag.count > 2 ? tag[2] : nil)
+            let normalized: String
+            if let eventID = canonicalEventID(from: rawNormalized),
+               let tagRelayHint,
+               let hintedIdentifier = encodedNeventIdentifier(
+                forEventID: eventID,
+                relayHints: [tagRelayHint]
+               ) {
+                normalized = hintedIdentifier
+            } else {
+                normalized = rawNormalized
+            }
+
             guard isRenderableReference(normalized) else { continue }
             let deduplicationKey = referenceDeduplicationKey(for: normalized)
             guard existingReferences.insert(deduplicationKey).inserted else { continue }
@@ -804,6 +931,25 @@ enum NoteContentParser {
         }
 
         return normalized
+    }
+
+    private static func relayHintURLs(from rawRelays: [String]) -> [URL] {
+        var seen = Set<String>()
+        var relayHints: [URL] = []
+
+        for rawRelay in rawRelays {
+            guard let relayURL = relayHintURL(from: rawRelay) else { continue }
+            let key = relayURL.absoluteString.lowercased()
+            guard seen.insert(key).inserted else { continue }
+            relayHints.append(relayURL)
+        }
+
+        return relayHints
+    }
+
+    private static func isSupportedRelayHint(_ value: String) -> Bool {
+        let normalized = value.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        return normalized.hasPrefix("ws://") || normalized.hasPrefix("wss://")
     }
 
     private static func encodedUInt32(_ value: Int) -> Data? {

@@ -61,6 +61,23 @@ final class NoteContentLinkResolverTests: XCTestCase {
         XCTAssertTrue(tokens.contains(where: { $0.type == .video && $0.value == "https://example.com/live/channel" }))
     }
 
+    func testRelayDenseWebsocketNotesUseAttributedInlineRenderer() {
+        let relayLines = (0..<20)
+            .map { "wss://relay-\($0).example.com" }
+            .joined(separator: "\n")
+        let tokens = NoteContentParser.tokenize(content: "Relays:\n\(relayLines)")
+
+        XCTAssertEqual(tokens.filter { $0.type == .websocketURL }.count, 20)
+        XCTAssertTrue(NoteContentView.shouldUseAttributedInlineText(for: tokens))
+    }
+
+    func testSmallWebsocketNotesKeepStandardInlineRenderer() {
+        let tokens = NoteContentParser.tokenize(content: "Relay: wss://relay.example.com")
+
+        XCTAssertEqual(tokens.filter { $0.type == .websocketURL }.count, 1)
+        XCTAssertFalse(NoteContentView.shouldUseAttributedInlineText(for: tokens))
+    }
+
     func testYouTubeWatchURLTokenizesAsPlayableVideoEmbed() throws {
         let urlString = "https://www.youtube.com/watch?v=dQw4w9WgXcQ&t=1m30s"
         let tokens = NoteContentParser.tokenize(content: "Watch \(urlString)")
@@ -106,6 +123,53 @@ final class NoteContentLinkResolverTests: XCTestCase {
         XCTAssertEqual(decoded.pubkey?.lowercased(), event.pubkey)
         XCTAssertEqual(decoded.kind, 1)
         XCTAssertEqual(decoded.relays, [relayURL.absoluteString])
+    }
+
+    func testQuotedEventTagCarriesRelayHintForReferenceLookup() throws {
+        let relayURL = try XCTUnwrap(URL(string: "wss://relay.example.com"))
+        let eventID = String(repeating: "2", count: 64)
+        let event = NostrEvent(
+            id: String(repeating: "1", count: 64),
+            pubkey: String(repeating: "a", count: 64),
+            createdAt: 1_700_000_000,
+            kind: 1,
+            tags: [["q", eventID, relayURL.absoluteString]],
+            content: "",
+            sig: String(repeating: "f", count: 128)
+        )
+
+        let token = try XCTUnwrap(NoteContentParser.tokenize(event: event).first)
+        let decoded = try ReferenceMetadataDecoder().decodedMetadata(from: token.value)
+
+        XCTAssertEqual(token.type, .nostrEvent)
+        XCTAssertTrue(token.value.hasPrefix("nevent1"))
+        XCTAssertEqual(decoded.eventId?.lowercased(), eventID)
+        XCTAssertEqual(decoded.relays, [relayURL.absoluteString])
+    }
+
+    func testNeventSearchDescriptorCreatesEventReferenceSuggestion() throws {
+        let event = NostrEvent(
+            id: String(repeating: "3", count: 64),
+            pubkey: String(repeating: "b", count: 64),
+            createdAt: 1_700_000_000,
+            kind: 1,
+            tags: [],
+            content: "hello",
+            sig: String(repeating: "f", count: 128)
+        )
+        let relayURL = try XCTUnwrap(URL(string: "wss://relay.example.com"))
+        let identifier = try XCTUnwrap(NoteContentParser.neventIdentifier(for: event, relayHints: [relayURL]))
+        let descriptor = SearchViewModel.SearchQueryDescriptor(rawText: "nostr:\(identifier)")
+        let suggestion = try XCTUnwrap(descriptor.suggestedContentSearch)
+
+        guard case .eventReference(let reference) = suggestion.kind else {
+            return XCTFail("Expected event reference search suggestion")
+        }
+
+        XCTAssertEqual(reference.eventID, event.id)
+        XCTAssertEqual(reference.authorPubkey, event.pubkey)
+        XCTAssertEqual(reference.relayHints.map(\.absoluteString), [relayURL.absoluteString])
+        XCTAssertFalse(suggestion.isPinnable)
     }
 
     func testImageAspectRatioHintsReadImetaDimensions() {

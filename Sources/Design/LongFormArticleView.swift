@@ -64,7 +64,7 @@ struct LongFormArticlePreviewView: View {
             .padding(14)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .frame(minHeight: 172, alignment: .bottomLeading)
+        .frame(minHeight: 216, alignment: .bottomLeading)
         .background {
             previewCardBackground
         }

@@ -16,8 +16,8 @@ struct PollNoteView: View {
 
     private let resultsStore = PollResultsStore.shared
     private let votePublishService = PollVotePublishService()
-    private static let prioritizedAutoLoadDelayNanos: UInt64 = 180_000_000
-    private static let deferredAutoLoadDelayNanos: UInt64 = 650_000_000
+    private static let autoLoadDelayNanos: UInt64 = 180_000_000
+    private static let postVoteRefreshDelayNanos: UInt64 = 1_500_000_000
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -170,17 +170,7 @@ struct PollNoteView: View {
 
     private var shouldAutoLoadResults: Bool {
         guard poll.format == .nip88 else { return false }
-        if isExpired || isAuthoredByCurrentUser || hasVoted {
-            return true
-        }
-        return currentPubkey != nil
-    }
-
-    private var autoLoadDelayNanos: UInt64 {
-        if isExpired || isAuthoredByCurrentUser || hasVoted {
-            return Self.prioritizedAutoLoadDelayNanos
-        }
-        return Self.deferredAutoLoadDelayNanos
+        return isExpired || isAuthoredByCurrentUser || hasVoted
     }
 
     private var headerRow: some View {
@@ -507,7 +497,7 @@ struct PollNoteView: View {
         guard shouldAutoLoadResults else { return }
 
         do {
-            try await Task.sleep(nanoseconds: autoLoadDelayNanos)
+            try await Task.sleep(nanoseconds: Self.autoLoadDelayNanos)
         } catch {
             return
         }
@@ -548,6 +538,16 @@ struct PollNoteView: View {
             feedbackIsError = true
             return
         }
+        guard votedOptionIDs.isEmpty else {
+            selectedOptionIDs.removeAll()
+            feedbackMessage = "You've already voted in this poll."
+            feedbackIsError = false
+            return
+        }
+
+        let submittedOptionIDs = Array(selectedOptionIDs)
+        let readRelayURLs = effectiveReadRelayURLs
+        let voteRelayURLs = effectiveVoteRelayURLs
 
         isSubmittingVote = true
         defer {
@@ -555,36 +555,41 @@ struct PollNoteView: View {
         }
 
         do {
-            let latestResults = try await resultsStore.refreshResults(
-                for: event,
-                poll: poll,
-                relayURLs: effectiveReadRelayURLs
-            )
-            if !latestResults.selectedOptionIDs(for: currentPubkey).isEmpty {
-                selectedOptionIDs.removeAll()
-                feedbackMessage = "You've already voted in this poll."
-                feedbackIsError = false
-                return
-            }
-
             _ = try await votePublishService.publishVote(
                 pollEvent: event,
-                selectedOptionIDs: Array(selectedOptionIDs),
+                selectedOptionIDs: submittedOptionIDs,
                 currentNsec: currentNsec,
-                relayURLs: effectiveVoteRelayURLs
+                relayURLs: voteRelayURLs
             )
             resultsStore.applyOptimisticVote(
                 pollEventID: event.id,
                 poll: poll,
                 pubkey: currentPubkey,
-                selectedOptionIDs: Array(selectedOptionIDs)
+                selectedOptionIDs: submittedOptionIDs
             )
-            selectedOptionIDs.removeAll()
+            self.selectedOptionIDs.removeAll()
             feedbackMessage = "Vote submitted."
             feedbackIsError = false
+            schedulePostVoteResultsRefresh(readRelayURLs: readRelayURLs)
         } catch {
             feedbackMessage = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
             feedbackIsError = true
+        }
+    }
+
+    private func schedulePostVoteResultsRefresh(readRelayURLs: [URL]) {
+        Task {
+            do {
+                try await Task.sleep(nanoseconds: Self.postVoteRefreshDelayNanos)
+                guard !Task.isCancelled else { return }
+                _ = try await resultsStore.refreshResults(
+                    for: event,
+                    poll: poll,
+                    relayURLs: readRelayURLs
+                )
+            } catch {
+                // Keep the optimistic vote visible; manual refresh can surface relay failures.
+            }
         }
     }
 

@@ -188,6 +188,15 @@ final class SearchViewModel: ObservableObject {
         profileMatches = []
         errorMessage = nil
 
+        if query.eventReference != nil {
+            searchTask = Task { [weak self] in
+                try? await Task.sleep(nanoseconds: 220_000_000)
+                guard !Task.isCancelled else { return }
+                await self?.activateSuggestedContentSearch()
+            }
+            return
+        }
+
         searchTask = Task { [weak self] in
             try? await Task.sleep(nanoseconds: 320_000_000)
             guard !Task.isCancelled else { return }
@@ -346,6 +355,13 @@ final class SearchViewModel: ObservableObject {
             return
         }
 
+        if query.eventReference != nil {
+            profileMatches = []
+            errorMessage = nil
+            isLoading = false
+            return
+        }
+
         let requestID = UUID()
         latestSearchRequestID = requestID
         isLoading = true
@@ -492,6 +508,23 @@ final class SearchViewModel: ObservableObject {
             moderationSnapshot: muteFilterSnapshot
         )
         return FeedFetchResult(items: items, failed: false)
+    }
+
+    private func fetchReferencedNote(
+        reference: NostrEventReferencePointer
+    ) async -> FeedFetchResult {
+        let relayURLs = Self.normalizedRelayURLs(readRelayURLs + Self.bigRelayURLs)
+        guard let item = await service.fetchReferencedFeedItem(
+            reference: reference,
+            relayURLs: relayURLs,
+            hydrationMode: .cachedProfilesOnly,
+            fetchTimeout: Self.noteSearchFetchTimeout,
+            moderationSnapshot: muteFilterSnapshot
+        ) else {
+            return .empty
+        }
+
+        return FeedFetchResult(items: [item], failed: false)
     }
 
     private func performKeywordNoteSearch(query: String, relayURLs: [URL]) async -> FeedFetchResult {
@@ -644,6 +677,9 @@ final class SearchViewModel: ObservableObject {
 
             let remoteHashtagNotes = await fetchHashtagNotes(hashtag: hashtag, relayURLs: hashtagRelayURLs)
             guard apply(remoteHashtagNotes) else { return }
+        case .eventReference(let reference):
+            let referencedNote = await fetchReferencedNote(reference: reference)
+            guard apply(referencedNote) else { return }
         }
 
         if searchedNotes.isEmpty && hadNetworkFailures {

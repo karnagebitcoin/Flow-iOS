@@ -36,6 +36,17 @@ extension SearchViewModel {
             return hashtag.isEmpty ? nil : hashtag
         }
 
+        var eventReference: NostrEventReferencePointer? {
+            let normalized = normalizedIdentifier(from: trimmed)
+            guard normalized.hasPrefix("note1") ||
+                normalized.hasPrefix("nevent1") ||
+                normalized.hasPrefix("naddr1") ||
+                isReplaceableCoordinate(normalized) else {
+                return nil
+            }
+            return NoteContentParser.eventReferencePointer(from: normalized)
+        }
+
         var resolvedProfilePubkey: String? {
             let normalized = normalizedIdentifier(from: trimmed)
             guard !normalized.isEmpty else { return nil }
@@ -60,6 +71,10 @@ extension SearchViewModel {
         var suggestedContentSearch: SuggestedContentSearch? {
             guard !trimmed.isEmpty else { return nil }
 
+            if let eventReference {
+                return SuggestedContentSearch(kind: .eventReference(eventReference))
+            }
+
             if let hashtag = normalizedHashtag {
                 return SuggestedContentSearch(kind: .hashtag(hashtag))
             }
@@ -75,6 +90,13 @@ extension SearchViewModel {
                 return String(lowered.dropFirst("nostr:".count))
             }
             return lowered
+        }
+
+        private func isReplaceableCoordinate(_ value: String) -> Bool {
+            let parts = value.split(separator: ":", maxSplits: 2, omittingEmptySubsequences: false)
+            guard parts.count == 3 else { return false }
+            guard Int(parts[0]) != nil else { return false }
+            return parts[1].count == 64
         }
     }
 
@@ -113,6 +135,7 @@ extension SearchViewModel {
         enum Kind: Equatable {
             case notes(query: String)
             case hashtag(String)
+            case eventReference(NostrEventReferencePointer)
         }
 
         let kind: Kind
@@ -123,6 +146,8 @@ extension SearchViewModel {
                 return "Search notes for \(query)"
             case .hashtag(let hashtag):
                 return "Search #\(hashtag) hashtag"
+            case .eventReference(let reference):
+                return "Find note \(shortIdentifier(reference.normalizedIdentifier))"
             }
         }
 
@@ -132,7 +157,23 @@ extension SearchViewModel {
                 return "Notes"
             case .hashtag(let hashtag):
                 return "#\(hashtag)"
+            case .eventReference:
+                return "Note"
             }
+        }
+
+        var isPinnable: Bool {
+            switch kind {
+            case .notes, .hashtag:
+                return true
+            case .eventReference:
+                return false
+            }
+        }
+
+        private func shortIdentifier(_ value: String) -> String {
+            guard value.count > 20 else { return value }
+            return "\(value.prefix(10))...\(value.suffix(6))"
         }
     }
 

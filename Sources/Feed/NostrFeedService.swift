@@ -1370,6 +1370,49 @@ struct NostrFeedService: Sendable {
         )
     }
 
+    func fetchReferencedFeedItem(
+        reference: NostrEventReferencePointer,
+        relayURLs: [URL],
+        hydrationMode: FeedItemHydrationMode = .full,
+        fetchTimeout: TimeInterval = 8,
+        moderationSnapshot: MuteFilterSnapshot? = nil
+    ) async -> FeedItem? {
+        let relayTargets = await referenceRelayTargets(
+            for: reference,
+            baseRelayURLs: relayURLs
+        )
+        guard !relayTargets.isEmpty else { return nil }
+
+        let event: NostrEvent?
+        switch reference.target {
+        case .eventID(let eventID):
+            event = await fetchReferencedEventByID(
+                eventID,
+                relayURLs: relayTargets,
+                fetchTimeout: fetchTimeout
+            )
+        case .replaceable(let kind, let pubkey, let identifier):
+            event = await fetchReplaceableReferencedEvent(
+                kind: kind,
+                pubkey: pubkey,
+                identifier: identifier,
+                relayURLs: relayTargets,
+                fetchTimeout: fetchTimeout
+            )
+        }
+
+        guard let event else { return nil }
+        await seenEventStore.store(events: [event])
+
+        let items = await buildFeedItems(
+            relayURLs: relayTargets,
+            events: [event],
+            hydrationMode: hydrationMode,
+            moderationSnapshot: moderationSnapshot
+        )
+        return items.first
+    }
+
     func searchProfiles(
         query: String,
         limit: Int,
@@ -2203,6 +2246,99 @@ struct NostrFeedService: Sendable {
         }
 
         return profilesByPubkey
+    }
+
+    private func referenceRelayTargets(
+        for reference: NostrEventReferencePointer,
+        baseRelayURLs: [URL]
+    ) async -> [URL] {
+        let primaryRelayURLs = normalizedRelayURLs(reference.relayHints + baseRelayURLs)
+        let relayTargets = metadataRelayURLs(primaryRelayURLs: primaryRelayURLs)
+
+        guard let targetPubkey = reference.targetPubkey else {
+            return relayTargets
+        }
+
+        return await relayHintCache.prioritizedRelayURLs(
+            for: [targetPubkey],
+            baseRelayURLs: relayTargets
+        )
+    }
+
+    private func fetchReferencedEventByID(
+        _ eventID: String,
+        relayURLs: [URL],
+        fetchTimeout: TimeInterval
+    ) async -> NostrEvent? {
+        let normalizedEventID = eventID.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard normalizedEventID.range(of: "^[0-9a-f]{64}$", options: .regularExpression) != nil else {
+            return nil
+        }
+
+        if let cached = await seenEventStore.events(ids: [normalizedEventID])[normalizedEventID] {
+            return cached
+        }
+
+        let filter = NostrFilter(ids: [normalizedEventID], limit: 1)
+        guard let fetchedEvents = try? await fetchTimelineEvents(
+            relayURLs: relayURLs,
+            filter: filter,
+            timeout: fetchTimeout,
+            useCache: false,
+            relayFetchMode: .allRelays
+        ) else {
+            return nil
+        }
+
+        return deduplicateEvents(fetchedEvents)
+            .first { $0.id.lowercased() == normalizedEventID }
+    }
+
+    private func fetchReplaceableReferencedEvent(
+        kind: Int,
+        pubkey: String,
+        identifier: String,
+        relayURLs: [URL],
+        fetchTimeout: TimeInterval
+    ) async -> NostrEvent? {
+        let normalizedPubkey = normalizePubkey(pubkey)
+        let normalizedIdentifier = identifier.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard kind >= 0, !normalizedPubkey.isEmpty, !normalizedIdentifier.isEmpty else {
+            return nil
+        }
+
+        let filter = NostrFilter(
+            authors: [normalizedPubkey],
+            kinds: [kind],
+            limit: 40,
+            tagFilters: ["d": [normalizedIdentifier]]
+        )
+        guard let fetchedEvents = try? await fetchTimelineEvents(
+            relayURLs: relayURLs,
+            filter: filter,
+            timeout: fetchTimeout,
+            useCache: false,
+            relayFetchMode: .allRelays
+        ) else {
+            return nil
+        }
+
+        return deduplicateEvents(fetchedEvents)
+            .sorted {
+                if $0.createdAt == $1.createdAt {
+                    return $0.id > $1.id
+                }
+                return $0.createdAt > $1.createdAt
+            }
+            .first { event in
+                guard event.kind == kind else { return false }
+                guard event.pubkey.lowercased() == normalizedPubkey else { return false }
+                return event.tags.contains { tag in
+                    guard let name = tag.first?.lowercased(), name == "d" else { return false }
+                    guard tag.count > 1 else { return false }
+                    return tag[1].trimmingCharacters(in: .whitespacesAndNewlines) == normalizedIdentifier
+                }
+            }
     }
 
     func buildFeedItems(

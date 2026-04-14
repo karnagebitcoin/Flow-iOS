@@ -68,13 +68,7 @@ private enum EmbeddedReferencedNoteResolver {
     private static let feedService = NostrFeedService()
 
     static func normalizedIdentifier(from nostrURI: String) -> String {
-        let trimmed = nostrURI
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-            .lowercased()
-        if trimmed.hasPrefix("nostr:") {
-            return String(trimmed.dropFirst("nostr:".count))
-        }
-        return trimmed
+        NoteContentParser.normalizedNostrReferenceIdentifier(from: nostrURI)
     }
 
     static func shortIdentifier(_ value: String) -> String {
@@ -107,30 +101,18 @@ private enum EmbeddedReferencedNoteResolver {
     }
 
     private static func fetchReferencedFeedItem(identifier: String) async -> FeedItem? {
-        guard let parsed = parseReference(from: identifier) else {
+        guard let reference = NoteContentParser.eventReferencePointer(from: identifier) else {
             return nil
         }
 
-        let relayURLs = await effectiveRelayURLs(with: parsed.relayHints)
+        let relayURLs = await effectiveRelayURLs(with: [])
         guard !relayURLs.isEmpty else { return nil }
 
-        let event: NostrEvent?
-        switch parsed.target {
-        case .eventID(let eventID):
-            event = await fetchEventByID(eventID, relayURLs: relayURLs)
-        case .replaceable(let kind, let pubkey, let replaceableIdentifier):
-            event = await fetchReplaceableEvent(
-                kind: kind,
-                pubkey: pubkey,
-                identifier: replaceableIdentifier,
-                relayURLs: relayURLs
-            )
-        }
-
-        guard let event else { return nil }
-        await SeenEventStore.shared.store(events: [event])
-        let hydrated = await feedService.buildFeedItems(relayURLs: relayURLs, events: [event])
-        return hydrated.first ?? FeedItem(event: event, profile: nil)
+        return await feedService.fetchReferencedFeedItem(
+            reference: reference,
+            relayURLs: relayURLs,
+            hydrationMode: .cachedProfilesOnly
+        )
     }
 
     private static func parseReference(from identifier: String) -> ParsedReference? {
@@ -387,7 +369,7 @@ struct NostrEventReferenceFallbackView: View {
                     .foregroundStyle(appSettings.themePalette.mutedForeground)
             }
             VStack(alignment: .leading, spacing: 2) {
-                Text("Open referenced note")
+                Text(isLoading ? "Finding referenced note" : "Referenced note")
                     .font(.subheadline.weight(.semibold))
                 Text(EmbeddedReferencedNoteResolver.shortIdentifier(identifier))
                     .font(.caption)

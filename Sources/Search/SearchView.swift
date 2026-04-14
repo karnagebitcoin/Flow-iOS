@@ -421,6 +421,8 @@ struct SearchView: View {
             return hashtagFavoritesStore.isFavorite(hashtag)
         case .notes(let query):
             return appSettings.customFeed(withID: savedSearchFeedID(for: query)) != nil
+        case .eventReference:
+            return false
         }
     }
 
@@ -435,6 +437,8 @@ struct SearchView: View {
             } else if let feed = savedSearchFeedDefinition(for: query) {
                 try? appSettings.saveCustomFeed(feed)
             }
+        case .eventReference:
+            break
         }
     }
 

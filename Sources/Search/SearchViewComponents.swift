@@ -467,26 +467,28 @@ struct SearchActionCard: View {
             }
             .buttonStyle(.plain)
 
-            Button(action: onTogglePinned) {
-                Image(systemName: isPinned ? "star.fill" : "star")
-                    .font(.headline.weight(.semibold))
-                    .foregroundStyle(
-                        isActive
-                            ? Color.white
-                            : (isPinned ? appSettings.primaryColor : appSettings.themePalette.secondaryForeground)
-                    )
-                    .frame(width: 34, height: 34)
-                    .background(
-                        Capsule(style: .continuous)
-                            .fill(
-                                isActive
-                                    ? Color.white.opacity(0.16)
-                                    : appSettings.themePalette.tertiaryFill
-                            )
-                    )
+            if suggestion.isPinnable {
+                Button(action: onTogglePinned) {
+                    Image(systemName: isPinned ? "star.fill" : "star")
+                        .font(.headline.weight(.semibold))
+                        .foregroundStyle(
+                            isActive
+                                ? Color.white
+                                : (isPinned ? appSettings.primaryColor : appSettings.themePalette.secondaryForeground)
+                        )
+                        .frame(width: 34, height: 34)
+                        .background(
+                            Capsule(style: .continuous)
+                                .fill(
+                                    isActive
+                                        ? Color.white.opacity(0.16)
+                                        : appSettings.themePalette.tertiaryFill
+                                )
+                        )
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(isPinned ? "Unsave feed" : "Save feed")
             }
-            .buttonStyle(.plain)
-            .accessibilityLabel(isPinned ? "Unsave feed" : "Save feed")
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 12)
@@ -503,6 +505,8 @@ struct SearchActionCard: View {
             return "doc.text.magnifyingglass"
         case .hashtag:
             return "number"
+        case .eventReference:
+            return "quote.bubble"
         }
     }
 }
