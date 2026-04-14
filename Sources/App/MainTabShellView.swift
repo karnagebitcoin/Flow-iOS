@@ -142,7 +142,10 @@ struct MainTabShellView: View {
             )
         }
         .sheet(isPresented: $isShowingAuthSheet) {
-            AuthSheetView(initialTab: authSheetInitialTab)
+            AuthSheetView(
+                initialTab: authSheetInitialTab,
+                onSelectedTabChange: { authSheetInitialTab = $0 }
+            )
                 .environmentObject(auth)
                 .environmentObject(appSettings)
                 .environmentObject(relaySettings)

@@ -291,7 +291,10 @@ struct HomeFeedView: View {
             .animation(.easeInOut(duration: 0.2), value: isShowingSideMenu)
             .toolbar(.hidden, for: .navigationBar)
             .sheet(isPresented: $isShowingAuthSheet) {
-                AuthSheetView(initialTab: authSheetInitialTab)
+                AuthSheetView(
+                    initialTab: authSheetInitialTab,
+                    onSelectedTabChange: { authSheetInitialTab = $0 }
+                )
                     .environmentObject(auth)
                     .environmentObject(appSettings)
                     .environmentObject(relaySettings)

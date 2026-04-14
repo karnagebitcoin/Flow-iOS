@@ -246,7 +246,7 @@ struct ComposeNoteSheet: View {
     }
 
     private var composeSheetBackground: Color {
-        appSettings.activeTheme == .white ? .white : appSettings.themePalette.groupedBackground
+        appSettings.activeTheme == .light ? .white : appSettings.themePalette.groupedBackground
     }
 
     private var draftLibraryToolbarButton: some View {
@@ -1916,7 +1916,7 @@ struct ComposeNoteSheet: View {
     }
 
     nonisolated private static func previewHasVideo(in tokens: [NoteContentToken]) -> Bool {
-        tokens.contains(where: { $0.type == .video })
+        tokens.contains(where: { $0.type == .video || $0.type == .youtubeVideo })
     }
 
     nonisolated private static func previewHasAudio(in tokens: [NoteContentToken]) -> Bool {

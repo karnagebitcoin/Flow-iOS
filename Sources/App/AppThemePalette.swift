@@ -75,6 +75,15 @@ struct AppThemePalette {
     private static let blackSheet = Color(red: 0.082, green: 0.082, blue: 0.082) // #151515
     private static let blackSheetCard = Color(red: 0.137, green: 0.137, blue: 0.137) // #232323
     private static let blackSheetCardBorder = Color(red: 0.235, green: 0.235, blue: 0.235) // #3C3C3C
+    private static let darkBackground = Color(red: 23.0 / 255.0, green: 23.0 / 255.0, blue: 25.0 / 255.0) // #171719
+    private static let darkNavigation = Color(red: 19.0 / 255.0, green: 19.0 / 255.0, blue: 20.0 / 255.0) // #131314
+    private static let darkSurface = Color(red: 41.0 / 255.0, green: 41.0 / 255.0, blue: 41.0 / 255.0) // #292929
+    private static let darkRaised = Color(red: 58.0 / 255.0, green: 58.0 / 255.0, blue: 58.0 / 255.0) // #3A3A3A
+    private static let darkBorder = Color(red: 75.0 / 255.0, green: 75.0 / 255.0, blue: 75.0 / 255.0) // #4B4B4B
+    private static let darkForeground = Color(red: 226.0 / 255.0, green: 226.0 / 255.0, blue: 227.0 / 255.0) // #E2E2E3
+    private static let darkSecondaryForeground = Color(red: 211.0 / 255.0, green: 211.0 / 255.0, blue: 213.0 / 255.0) // #D3D3D5
+    private static let darkMuted = Color(red: 125.0 / 255.0, green: 125.0 / 255.0, blue: 126.0 / 255.0) // #7D7D7E
+    private static let darkIconMuted = Color(red: 128.0 / 255.0, green: 128.0 / 255.0, blue: 137.0 / 255.0) // #808089
     private static let whiteSurface = Color(red: 0.965, green: 0.965, blue: 0.972)
     private static let whiteRaised = Color(red: 0.945, green: 0.945, blue: 0.955)
     private static let whiteBorder = Color.black.opacity(0.08)
@@ -103,6 +112,125 @@ struct AppThemePalette {
             UIColor { traits in
                 traits.userInterfaceStyle == .dark ? dark : light
             }
+        )
+    }
+
+    private static func adaptiveColor(light: Color, dark: Color) -> Color {
+        Color(
+            UIColor { traits in
+                let source = traits.userInterfaceStyle == .dark ? UIColor(dark) : UIColor(light)
+                return source.resolvedColor(with: traits)
+            }
+        )
+    }
+
+    private static func adaptiveCapsuleTabStyle(
+        light: AppThemeCapsuleTabStyle?,
+        dark: AppThemeCapsuleTabStyle?
+    ) -> AppThemeCapsuleTabStyle? {
+        guard let light, let dark else {
+            return light ?? dark
+        }
+
+        return AppThemeCapsuleTabStyle(
+            background: adaptiveColor(light: light.background, dark: dark.background),
+            border: adaptiveColor(light: light.border, dark: dark.border),
+            foreground: adaptiveColor(light: light.foreground, dark: dark.foreground),
+            selectedBackground: adaptiveColor(light: light.selectedBackground, dark: dark.selectedBackground),
+            selectedBorder: adaptiveColor(light: light.selectedBorder, dark: dark.selectedBorder),
+            selectedForeground: adaptiveColor(light: light.selectedForeground, dark: dark.selectedForeground)
+        )
+    }
+
+    private static func adaptiveProfileActionStyle(
+        light: AppThemeProfileActionStyle?,
+        dark: AppThemeProfileActionStyle?
+    ) -> AppThemeProfileActionStyle? {
+        guard let light, let dark else {
+            return light ?? dark
+        }
+
+        return AppThemeProfileActionStyle(
+            background: adaptiveColor(light: light.background, dark: dark.background),
+            border: adaptiveColor(light: light.border, dark: dark.border),
+            foreground: adaptiveColor(light: light.foreground, dark: dark.foreground),
+            primaryBackground: adaptiveColor(light: light.primaryBackground, dark: dark.primaryBackground),
+            primaryBorder: adaptiveColor(light: light.primaryBorder, dark: dark.primaryBorder),
+            primaryForeground: adaptiveColor(light: light.primaryForeground, dark: dark.primaryForeground),
+            bannerBackground: adaptiveColor(light: light.bannerBackground, dark: dark.bannerBackground),
+            bannerBorder: adaptiveColor(light: light.bannerBorder, dark: dark.bannerBorder),
+            bannerForeground: adaptiveColor(light: light.bannerForeground, dark: dark.bannerForeground)
+        )
+    }
+
+    private static func adaptivePollStyle(
+        light: AppThemePollStyle?,
+        dark: AppThemePollStyle?
+    ) -> AppThemePollStyle? {
+        guard let light, let dark else {
+            return light ?? dark
+        }
+
+        return AppThemePollStyle(
+            cardBackground: adaptiveColor(light: light.cardBackground, dark: dark.cardBackground),
+            cardBorder: adaptiveColor(light: light.cardBorder, dark: dark.cardBorder),
+            metadataForeground: adaptiveColor(light: light.metadataForeground, dark: dark.metadataForeground),
+            optionBackground: adaptiveColor(light: light.optionBackground, dark: dark.optionBackground),
+            optionResultBackground: adaptiveColor(light: light.optionResultBackground, dark: dark.optionResultBackground),
+            optionBorder: adaptiveColor(light: light.optionBorder, dark: dark.optionBorder),
+            optionSelectedBackground: adaptiveColor(light: light.optionSelectedBackground, dark: dark.optionSelectedBackground),
+            optionSelectedBorder: adaptiveColor(light: light.optionSelectedBorder, dark: dark.optionSelectedBorder),
+            optionWinningBackground: adaptiveColor(light: light.optionWinningBackground, dark: dark.optionWinningBackground),
+            optionWinningBorder: adaptiveColor(light: light.optionWinningBorder, dark: dark.optionWinningBorder),
+            imagePlaceholderBackground: adaptiveColor(light: light.imagePlaceholderBackground, dark: dark.imagePlaceholderBackground),
+            imagePlaceholderForeground: adaptiveColor(light: light.imagePlaceholderForeground, dark: dark.imagePlaceholderForeground),
+            neutralBadgeBackground: adaptiveColor(light: light.neutralBadgeBackground, dark: dark.neutralBadgeBackground),
+            neutralBadgeForeground: adaptiveColor(light: light.neutralBadgeForeground, dark: dark.neutralBadgeForeground),
+            refreshButtonBackground: adaptiveColor(light: light.refreshButtonBackground, dark: dark.refreshButtonBackground),
+            refreshButtonForeground: adaptiveColor(light: light.refreshButtonForeground, dark: dark.refreshButtonForeground)
+        )
+    }
+
+    private static func adaptivePalette(light: AppThemePalette, dark: AppThemePalette) -> AppThemePalette {
+        AppThemePalette(
+            background: adaptiveColor(light: light.background, dark: dark.background),
+            chromeBackground: adaptiveColor(light: light.chromeBackground, dark: dark.chromeBackground),
+            chromeBorder: adaptiveColor(light: light.chromeBorder, dark: dark.chromeBorder),
+            mutedForeground: adaptiveColor(light: light.mutedForeground, dark: dark.mutedForeground),
+            foreground: adaptiveColor(light: light.foreground, dark: dark.foreground),
+            secondaryForeground: adaptiveColor(light: light.secondaryForeground, dark: dark.secondaryForeground),
+            tertiaryForeground: adaptiveColor(light: light.tertiaryForeground, dark: dark.tertiaryForeground),
+            inverseForeground: adaptiveColor(light: light.inverseForeground, dark: dark.inverseForeground),
+            placeholderForeground: adaptiveColor(light: light.placeholderForeground, dark: dark.placeholderForeground),
+            iconForeground: adaptiveColor(light: light.iconForeground, dark: dark.iconForeground),
+            iconMutedForeground: adaptiveColor(light: light.iconMutedForeground, dark: dark.iconMutedForeground),
+            secondaryBackground: adaptiveColor(light: light.secondaryBackground, dark: dark.secondaryBackground),
+            quoteBackground: adaptiveColor(light: light.quoteBackground, dark: dark.quoteBackground),
+            groupedBackground: adaptiveColor(light: light.groupedBackground, dark: dark.groupedBackground),
+            secondaryGroupedBackground: adaptiveColor(light: light.secondaryGroupedBackground, dark: dark.secondaryGroupedBackground),
+            navigationBackground: adaptiveColor(light: light.navigationBackground, dark: dark.navigationBackground),
+            navigationControlBackground: adaptiveColor(light: light.navigationControlBackground, dark: dark.navigationControlBackground),
+            sheetBackground: adaptiveColor(light: light.sheetBackground, dark: dark.sheetBackground),
+            sheetCardBackground: adaptiveColor(light: light.sheetCardBackground, dark: dark.sheetCardBackground),
+            sheetCardBorder: adaptiveColor(light: light.sheetCardBorder, dark: dark.sheetCardBorder),
+            sheetInsetBackground: adaptiveColor(light: light.sheetInsetBackground, dark: dark.sheetInsetBackground),
+            modalBackground: adaptiveColor(light: light.modalBackground, dark: dark.modalBackground),
+            elevatedBackground: adaptiveColor(light: light.elevatedBackground, dark: dark.elevatedBackground),
+            overlayBackground: adaptiveColor(light: light.overlayBackground, dark: dark.overlayBackground),
+            secondaryFill: adaptiveColor(light: light.secondaryFill, dark: dark.secondaryFill),
+            tertiaryFill: adaptiveColor(light: light.tertiaryFill, dark: dark.tertiaryFill),
+            separator: adaptiveColor(light: light.separator, dark: dark.separator),
+            successForeground: adaptiveColor(light: light.successForeground, dark: dark.successForeground),
+            warningForeground: adaptiveColor(light: light.warningForeground, dark: dark.warningForeground),
+            errorForeground: adaptiveColor(light: light.errorForeground, dark: dark.errorForeground),
+            linkPreviewBackground: adaptiveColor(light: light.linkPreviewBackground, dark: dark.linkPreviewBackground),
+            linkPreviewBorder: adaptiveColor(light: light.linkPreviewBorder, dark: dark.linkPreviewBorder),
+            articlePreviewBackgroundTop: adaptiveColor(light: light.articlePreviewBackgroundTop, dark: dark.articlePreviewBackgroundTop),
+            articlePreviewBackgroundBottom: adaptiveColor(light: light.articlePreviewBackgroundBottom, dark: dark.articlePreviewBackgroundBottom),
+            articlePreviewBorder: adaptiveColor(light: light.articlePreviewBorder, dark: dark.articlePreviewBorder),
+            capsuleTabStyle: adaptiveCapsuleTabStyle(light: light.capsuleTabStyle, dark: dark.capsuleTabStyle),
+            profileActionStyle: adaptiveProfileActionStyle(light: light.profileActionStyle, dark: dark.profileActionStyle),
+            pollStyle: adaptivePollStyle(light: light.pollStyle, dark: dark.pollStyle)
         )
     }
 
@@ -144,59 +272,6 @@ struct AppThemePalette {
     let capsuleTabStyle: AppThemeCapsuleTabStyle?
     let profileActionStyle: AppThemeProfileActionStyle?
     let pollStyle: AppThemePollStyle?
-
-    static let system = AppThemePalette(
-        background: Color(.systemBackground),
-        chromeBackground: Color(.systemBackground),
-        chromeBorder: adaptiveSeparator(darkAlpha: 0.10),
-        mutedForeground: .secondary,
-        foreground: Color(UIColor.label),
-        secondaryForeground: Color(UIColor.secondaryLabel),
-        tertiaryForeground: Color(UIColor.tertiaryLabel),
-        inverseForeground: adaptiveColor(light: .white, dark: .black),
-        placeholderForeground: Color(UIColor.placeholderText),
-        iconForeground: Color(UIColor.label),
-        iconMutedForeground: Color(UIColor.secondaryLabel),
-        secondaryBackground: Color(.secondarySystemBackground),
-        quoteBackground: Color(.secondarySystemBackground),
-        groupedBackground: Color(.systemGroupedBackground),
-        secondaryGroupedBackground: Color(.secondarySystemGroupedBackground),
-        navigationBackground: Color(.systemBackground),
-        navigationControlBackground: Color(.secondarySystemBackground),
-        sheetBackground: adaptiveColor(
-            light: .systemGroupedBackground,
-            dark: .systemBackground
-        ),
-        sheetCardBackground: adaptiveColor(
-            light: .white,
-            dark: .secondarySystemGroupedBackground
-        ),
-        sheetCardBorder: adaptiveSeparator(darkAlpha: 0.14),
-        sheetInsetBackground: Color(.secondarySystemBackground),
-        modalBackground: adaptiveColor(
-            light: .white,
-            dark: .secondarySystemGroupedBackground
-        ),
-        elevatedBackground: Color(.secondarySystemBackground),
-        overlayBackground: adaptiveColor(
-            light: UIColor.black.withAlphaComponent(0.18),
-            dark: UIColor.black.withAlphaComponent(0.30)
-        ),
-        secondaryFill: Color(.secondarySystemFill),
-        tertiaryFill: Color(.tertiarySystemFill),
-        separator: adaptiveSeparator(darkAlpha: 0.14),
-        successForeground: .green,
-        warningForeground: .orange,
-        errorForeground: .red,
-        linkPreviewBackground: Color(.secondarySystemBackground),
-        linkPreviewBorder: adaptiveSeparator(darkAlpha: 0.14),
-        articlePreviewBackgroundTop: Color(.secondarySystemBackground),
-        articlePreviewBackgroundBottom: Color(.systemBackground),
-        articlePreviewBorder: adaptiveSeparator(lightMultiplier: 0.24, darkAlpha: 0.16),
-        capsuleTabStyle: nil,
-        profileActionStyle: nil,
-        pollStyle: nil
-    )
 
     static let black = AppThemePalette(
         background: .black,
@@ -313,6 +388,83 @@ struct AppThemePalette {
             refreshButtonForeground: Self.whitePrimary
         )
     )
+
+    static let dark = AppThemePalette(
+        background: Self.darkBackground,
+        chromeBackground: Self.darkBackground,
+        chromeBorder: Self.darkSurface,
+        mutedForeground: Self.darkMuted,
+        foreground: Self.darkForeground,
+        secondaryForeground: Self.darkSecondaryForeground,
+        tertiaryForeground: Self.darkMuted,
+        inverseForeground: Self.darkBackground,
+        placeholderForeground: Self.darkMuted.opacity(0.68),
+        iconForeground: Self.darkForeground,
+        iconMutedForeground: Self.darkIconMuted,
+        secondaryBackground: Self.darkSurface,
+        quoteBackground: Self.darkSurface,
+        groupedBackground: Self.darkBackground,
+        secondaryGroupedBackground: Self.darkSurface,
+        navigationBackground: Self.darkNavigation,
+        navigationControlBackground: Self.darkSurface,
+        sheetBackground: Self.darkSurface,
+        sheetCardBackground: Self.darkRaised,
+        sheetCardBorder: Self.darkBorder,
+        sheetInsetBackground: Self.darkRaised,
+        modalBackground: Self.darkSurface,
+        elevatedBackground: Self.darkRaised,
+        overlayBackground: Color.black.opacity(0.34),
+        secondaryFill: Self.darkRaised,
+        tertiaryFill: Self.darkSurface,
+        separator: Self.darkBorder,
+        successForeground: .green,
+        warningForeground: .orange,
+        errorForeground: .red,
+        linkPreviewBackground: Self.darkSurface,
+        linkPreviewBorder: Self.darkSurface,
+        articlePreviewBackgroundTop: Self.darkSurface,
+        articlePreviewBackgroundBottom: Self.darkBackground,
+        articlePreviewBorder: Self.darkBorder,
+        capsuleTabStyle: AppThemeCapsuleTabStyle(
+            background: Self.darkSurface,
+            border: Self.darkSurface,
+            foreground: Self.darkMuted,
+            selectedBackground: Color.accentColor.opacity(0.18),
+            selectedBorder: Color.accentColor.opacity(0.54),
+            selectedForeground: Color.accentColor
+        ),
+        profileActionStyle: AppThemeProfileActionStyle(
+            background: Self.darkSurface,
+            border: Self.darkSurface,
+            foreground: Self.darkForeground,
+            primaryBackground: Color.accentColor,
+            primaryBorder: Color.accentColor,
+            primaryForeground: .white,
+            bannerBackground: Self.darkSurface,
+            bannerBorder: Self.darkSurface,
+            bannerForeground: Self.darkForeground
+        ),
+        pollStyle: AppThemePollStyle(
+            cardBackground: Self.darkSurface,
+            cardBorder: Self.darkSurface,
+            metadataForeground: Self.darkMuted,
+            optionBackground: Self.darkRaised,
+            optionResultBackground: Self.darkRaised,
+            optionBorder: Self.darkBorder,
+            optionSelectedBackground: Color.accentColor.opacity(0.18),
+            optionSelectedBorder: Color.accentColor.opacity(0.54),
+            optionWinningBackground: Color.accentColor.opacity(0.18),
+            optionWinningBorder: Color.accentColor.opacity(0.54),
+            imagePlaceholderBackground: Self.darkRaised,
+            imagePlaceholderForeground: Self.darkMuted,
+            neutralBadgeBackground: Self.darkRaised,
+            neutralBadgeForeground: Self.darkSecondaryForeground,
+            refreshButtonBackground: Self.darkRaised,
+            refreshButtonForeground: Self.darkSecondaryForeground
+        )
+    )
+
+    static let system = adaptivePalette(light: Self.white, dark: Self.dark)
 
     static let sakura = AppThemePalette(
         background: Color(red: 1.0, green: 0.994, blue: 0.997),

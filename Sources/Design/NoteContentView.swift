@@ -90,7 +90,7 @@ enum NoteContentLinkResolver {
             return NoteContentParser.njumpURL(for: normalized)
         case .hashtag:
             return NoteContentParser.hashtagActionURL(for: token.value)
-        case .text, .websocketURL, .emoji, .nostrEvent, .image, .video, .audio:
+        case .text, .websocketURL, .emoji, .nostrEvent, .image, .video, .youtubeVideo, .audio:
             return nil
         }
     }
@@ -101,6 +101,7 @@ struct NoteContentView: View {
         case inlineTokens([NoteContentToken])
         case imageGallery([URL])
         case video(URL)
+        case youtubeVideo(URL)
         case audio(URL)
         case nostrEventReference(String)
     }
@@ -267,6 +268,20 @@ struct NoteContentView: View {
                                     )
                                 }
                             }
+                        case .youtubeVideo(let url):
+                            if appSettings.textOnlyMode {
+                                NoteMediaPlaceholderView(
+                                    systemImage: "play.rectangle",
+                                    text: "YouTube video hidden in Text Only Mode"
+                                )
+                            } else {
+                                restrictedMediaView {
+                                    YouTubeInlinePlayerView(
+                                        url: url,
+                                        layout: mediaLayout
+                                    )
+                                }
+                            }
                         case .audio(let url):
                             if appSettings.textOnlyMode {
                                 NoteMediaPlaceholderView(
@@ -412,7 +427,7 @@ struct NoteContentView: View {
     private var inlineCharacterCount: Int {
         tokens.reduce(into: 0) { partialResult, token in
             switch token.type {
-            case .image, .video, .audio, .nostrEvent:
+            case .image, .video, .youtubeVideo, .audio, .nostrEvent:
                 break
             case .text, .url, .websocketURL, .nostrMention, .hashtag, .emoji:
                 partialResult += token.value.count
@@ -459,7 +474,7 @@ struct NoteContentView: View {
                 if preview.didTruncate {
                     shouldOnlyLookForReference = true
                 }
-            case .imageGallery, .video, .audio:
+            case .imageGallery, .video, .youtubeVideo, .audio:
                 if !renderedAny {
                     output.append(part)
                     renderedAny = true
@@ -576,6 +591,11 @@ struct NoteContentView: View {
                 if let url = URL(string: token.value) {
                     parts.append(.video(url))
                 }
+            case .youtubeVideo:
+                flushInlineBuffer(trimTrailingWhitespace: true)
+                if let url = URL(string: token.value) {
+                    parts.append(.youtubeVideo(url))
+                }
             case .audio:
                 flushInlineBuffer(trimTrailingWhitespace: true)
                 if let url = URL(string: token.value) {
@@ -637,7 +657,7 @@ struct NoteContentView: View {
             switch token.type {
             case .url, .nostrMention, .hashtag:
                 return true
-            case .text, .websocketURL, .emoji, .nostrEvent, .image, .video, .audio:
+            case .text, .websocketURL, .emoji, .nostrEvent, .image, .video, .youtubeVideo, .audio:
                 return false
             }
         }
@@ -691,7 +711,7 @@ struct NoteContentView: View {
             break
         case .emoji:
             break
-        case .nostrEvent, .image, .video, .audio:
+        case .nostrEvent, .image, .video, .youtubeVideo, .audio:
             break
         }
 

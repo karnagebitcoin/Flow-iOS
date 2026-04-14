@@ -100,6 +100,22 @@ struct ProfileView: View {
             : "plus.circle.fill"
     }
 
+    private var isProfileMuted: Bool {
+        muteStore.isMuted(viewModel.pubkey)
+    }
+
+    private var profileMuteActionTitle: String {
+        isProfileMuted ? "Unmute" : "Mute"
+    }
+
+    private var profileMuteActionSystemImage: String {
+        isProfileMuted ? "speaker.wave.2" : "speaker.slash"
+    }
+
+    private var profileMuteActionDisabled: Bool {
+        muteStore.isPublishing || auth.currentNsec == nil
+    }
+
     private var effectiveReadRelayURLs: [URL] {
         appSettings.effectiveReadRelayURLs(from: viewModel.readRelayURLs)
     }
@@ -509,12 +525,12 @@ struct ProfileView: View {
 
     private var muteActionButton: some View {
         ProfileActionIconButton(
-            systemImage: muteStore.isMuted(viewModel.pubkey) ? "speaker.wave.2" : "speaker.slash",
+            systemImage: profileMuteActionSystemImage,
             isPrimary: false,
-            isDisabled: muteStore.isPublishing || auth.currentNsec == nil,
-            accessibilityLabel: muteStore.isMuted(viewModel.pubkey) ? "Unmute" : "Mute",
+            isDisabled: profileMuteActionDisabled,
+            accessibilityLabel: profileMuteActionTitle,
             action: {
-                muteStore.toggleMute(viewModel.pubkey)
+                toggleProfileMute()
             }
         )
     }
@@ -558,6 +574,16 @@ struct ProfileView: View {
                             : "person.crop.circle.badge.plus"
                     )
                 }
+
+                Button {
+                    toggleProfileMute()
+                } label: {
+                    ProfileMenuOptionLabel(
+                        title: profileMuteActionTitle,
+                        systemImage: profileMuteActionSystemImage
+                    )
+                }
+                .disabled(profileMuteActionDisabled)
             }
 
             Button {
@@ -581,6 +607,10 @@ struct ProfileView: View {
         }
         .buttonStyle(.plain)
         .accessibilityLabel("Profile options")
+    }
+
+    private func toggleProfileMute() {
+        muteStore.toggleMute(viewModel.pubkey)
     }
 
     private func primaryAction() {

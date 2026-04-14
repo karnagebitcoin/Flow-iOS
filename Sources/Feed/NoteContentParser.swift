@@ -11,12 +11,40 @@ enum NoteContentTokenType: Hashable {
     case emoji
     case image
     case video
+    case youtubeVideo
     case audio
 }
 
 struct NoteContentToken: Hashable {
     let type: NoteContentTokenType
     let value: String
+}
+
+struct YouTubeVideoEmbed: Hashable, Sendable {
+    let videoID: String
+    let originalURL: URL
+    let startSeconds: Int?
+
+    func embedURL(autoplay: Bool = false) -> URL? {
+        var components = URLComponents()
+        components.scheme = "https"
+        components.host = "www.youtube.com"
+        components.path = "/embed/\(videoID)"
+
+        var queryItems = [
+            URLQueryItem(name: "playsinline", value: "1"),
+            URLQueryItem(name: "rel", value: "0")
+        ]
+        if autoplay {
+            queryItems.append(URLQueryItem(name: "autoplay", value: "1"))
+        }
+        if let startSeconds, startSeconds > 0 {
+            queryItems.append(URLQueryItem(name: "start", value: "\(startSeconds)"))
+        }
+        components.queryItems = queryItems
+
+        return components.url
+    }
 }
 
 enum NoteContentParser {
@@ -279,6 +307,44 @@ enum NoteContentParser {
         return nil
     }
 
+    static func youtubeVideoEmbed(from urlString: String) -> YouTubeVideoEmbed? {
+        let trimmed = urlString.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let url = URL(string: trimmed),
+              let scheme = url.scheme?.lowercased(),
+              scheme == "http" || scheme == "https",
+              let components = URLComponents(url: url, resolvingAgainstBaseURL: false),
+              let host = components.host?.lowercased() else {
+            return nil
+        }
+
+        let pathSegments = components.path
+            .split(separator: "/", omittingEmptySubsequences: true)
+            .map(String.init)
+
+        let rawVideoID: String?
+        if host == "youtu.be" {
+            rawVideoID = pathSegments.first
+        } else if isYouTubeHost(host) {
+            switch pathSegments.first?.lowercased() {
+            case "watch":
+                rawVideoID = queryValue(named: "v", in: components)
+            case "embed", "shorts", "live":
+                rawVideoID = pathSegments.dropFirst().first
+            default:
+                rawVideoID = nil
+            }
+        } else {
+            rawVideoID = nil
+        }
+
+        guard let videoID = sanitizedYouTubeVideoID(rawVideoID) else { return nil }
+        return YouTubeVideoEmbed(
+            videoID: videoID,
+            originalURL: url,
+            startSeconds: youtubeStartSeconds(in: components)
+        )
+    }
+
     static func imageURLs(in event: NostrEvent) -> [URL] {
         let tokens = tokenize(event: event)
         var seen = Set<String>()
@@ -326,6 +392,9 @@ enum NoteContentParser {
         case .websocketURL:
             return NoteContentToken(type: .websocketURL, value: candidate.value)
         case .httpURL:
+            if youtubeVideoEmbed(from: candidate.value) != nil {
+                return NoteContentToken(type: .youtubeVideo, value: candidate.value)
+            }
             let mediaType = classifyMediaType(urlString: candidate.value, mimeType: nil)
             switch mediaType {
             case .image:
@@ -428,17 +497,21 @@ enum NoteContentParser {
             guard let urlString, !urlString.isEmpty else { continue }
             guard !existingURLs.contains(urlString) else { continue }
 
-            let mediaType = classifyMediaType(urlString: urlString, mimeType: mimeType)
             let tokenType: NoteContentTokenType
-            switch mediaType {
-            case .image:
-                tokenType = .image
-            case .video:
-                tokenType = .video
-            case .audio:
-                tokenType = .audio
-            case .none:
-                tokenType = .url
+            if youtubeVideoEmbed(from: urlString) != nil {
+                tokenType = .youtubeVideo
+            } else {
+                let mediaType = classifyMediaType(urlString: urlString, mimeType: mimeType)
+                switch mediaType {
+                case .image:
+                    tokenType = .image
+                case .video:
+                    tokenType = .video
+                case .audio:
+                    tokenType = .audio
+                case .none:
+                    tokenType = .url
+                }
             }
 
             if let last = result.last, last.type != .text {
@@ -567,6 +640,93 @@ enum NoteContentParser {
         guard !identifier.isEmpty else { return nil }
 
         return (kind, pubkey, identifier)
+    }
+
+    private static func isYouTubeHost(_ host: String) -> Bool {
+        host == "youtube.com" ||
+        host.hasSuffix(".youtube.com") ||
+        host == "youtube-nocookie.com" ||
+        host.hasSuffix(".youtube-nocookie.com")
+    }
+
+    private static func queryValue(named name: String, in components: URLComponents) -> String? {
+        components.queryItems?
+            .first { $0.name.lowercased() == name.lowercased() }?
+            .value?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private static func sanitizedYouTubeVideoID(_ rawValue: String?) -> String? {
+        guard let rawValue else { return nil }
+        let trimmed = rawValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+
+        let allowed = CharacterSet(charactersIn: "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-")
+        let scalars = trimmed.unicodeScalars.prefix { allowed.contains($0) }
+        let videoID = String(String.UnicodeScalarView(scalars))
+        guard videoID.count == 11 else { return nil }
+        return videoID
+    }
+
+    private static func youtubeStartSeconds(in components: URLComponents) -> Int? {
+        if let start = queryValue(named: "start", in: components),
+           let seconds = Int(start),
+           seconds > 0 {
+            return seconds
+        }
+        if let timestamp = queryValue(named: "t", in: components) {
+            return parseYouTubeTimestamp(timestamp)
+        }
+        return nil
+    }
+
+    private static func parseYouTubeTimestamp(_ rawValue: String) -> Int? {
+        let trimmed = rawValue
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+        guard !trimmed.isEmpty else { return nil }
+
+        let numericValue = trimmed.hasSuffix("s") ? String(trimmed.dropLast()) : trimmed
+        if let seconds = Int(numericValue), seconds > 0 {
+            return seconds
+        }
+
+        var total = 0
+        var currentNumber = ""
+        var consumedUnit = false
+
+        for character in trimmed {
+            if character.isNumber {
+                currentNumber.append(character)
+                continue
+            }
+
+            guard let value = Int(currentNumber) else {
+                currentNumber = ""
+                continue
+            }
+
+            switch character {
+            case "h":
+                total += value * 60 * 60
+                consumedUnit = true
+            case "m":
+                total += value * 60
+                consumedUnit = true
+            case "s":
+                total += value
+                consumedUnit = true
+            default:
+                break
+            }
+            currentNumber = ""
+        }
+
+        if !consumedUnit, let seconds = Int(currentNumber), seconds > 0 {
+            return seconds
+        }
+
+        return total > 0 ? total : nil
     }
 
     private static func decodedNoteIdentifier(_ identifier: String) -> String? {

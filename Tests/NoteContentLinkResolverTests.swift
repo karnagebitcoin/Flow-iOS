@@ -61,6 +61,31 @@ final class NoteContentLinkResolverTests: XCTestCase {
         XCTAssertTrue(tokens.contains(where: { $0.type == .video && $0.value == "https://example.com/live/channel" }))
     }
 
+    func testYouTubeWatchURLTokenizesAsPlayableVideoEmbed() throws {
+        let urlString = "https://www.youtube.com/watch?v=dQw4w9WgXcQ&t=1m30s"
+        let tokens = NoteContentParser.tokenize(content: "Watch \(urlString)")
+        let embed = try XCTUnwrap(NoteContentParser.youtubeVideoEmbed(from: urlString))
+
+        XCTAssertTrue(tokens.contains(where: { $0.type == .youtubeVideo && $0.value == urlString }))
+        XCTAssertNil(NoteContentParser.lastWebsiteURL(in: tokens))
+        XCTAssertEqual(embed.videoID, "dQw4w9WgXcQ")
+        XCTAssertEqual(embed.startSeconds, 90)
+        XCTAssertEqual(
+            embed.embedURL()?.absoluteString,
+            "https://www.youtube.com/embed/dQw4w9WgXcQ?playsinline=1&rel=0&start=90"
+        )
+    }
+
+    func testYouTubeShortURLTokenizesAsPlayableVideoEmbed() throws {
+        let urlString = "https://youtu.be/dQw4w9WgXcQ?si=abc"
+        let tokens = NoteContentParser.tokenize(content: urlString)
+        let embed = try XCTUnwrap(NoteContentParser.youtubeVideoEmbed(from: urlString))
+
+        XCTAssertTrue(tokens.contains(where: { $0.type == .youtubeVideo && $0.value == urlString }))
+        XCTAssertNil(NoteContentParser.lastWebsiteURL(in: tokens))
+        XCTAssertEqual(embed.videoID, "dQw4w9WgXcQ")
+    }
+
     func testNeventIdentifierEncodesEventMetadataForCopying() throws {
         let event = NostrEvent(
             id: String(repeating: "1", count: 64),

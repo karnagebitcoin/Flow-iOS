@@ -339,13 +339,16 @@ struct SettingsFlowPlusThemesView: View {
             )
         case .dark:
             return LinearGradient(
-                colors: [Color(red: 0.19, green: 0.16, blue: 0.28), Color(red: 0.09, green: 0.08, blue: 0.14)],
+                colors: [
+                    Color(red: 23.0 / 255.0, green: 23.0 / 255.0, blue: 25.0 / 255.0),
+                    Color(red: 41.0 / 255.0, green: 41.0 / 255.0, blue: 41.0 / 255.0)
+                ],
                 startPoint: .topLeading,
                 endPoint: .bottomTrailing
             )
         case .light:
             return LinearGradient(
-                colors: [Color(red: 0.99, green: 0.95, blue: 0.86), Color(red: 0.94, green: 0.98, blue: 1.0)],
+                colors: [Color.white, Color(.systemGray6)],
                 startPoint: .topLeading,
                 endPoint: .bottomTrailing
             )

@@ -34,6 +34,80 @@ final class AuthManagerTests: XCTestCase {
     }
 
     @MainActor
+    func testGeneratedPrivateKeyAccountIsAddedWhenSecureStorageFails() throws {
+        let suiteName = #function
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defaults.removePersistentDomain(forName: suiteName)
+
+        let store = AuthStore(
+            defaults: defaults,
+            privateKeyStore: FailingPrivateKeyStore()
+        )
+        let auth = AuthManager(store: store)
+        let keypair = try XCTUnwrap(Keypair())
+
+        let account = try auth.loginWithNsecOrHex(
+            keypair.privateKey.nsec,
+            backupPrivateKeyToICloud: true
+        )
+
+        XCTAssertEqual(auth.accounts.count, 1)
+        XCTAssertEqual(auth.currentAccount?.id, account.id)
+        XCTAssertEqual(auth.currentNsec, keypair.privateKey.nsec)
+        XCTAssertTrue(auth.privateKeyNeedsSecureStorageRepair(for: account))
+        XCTAssertNotNil(auth.currentPrivateKeySecurityWarning)
+
+        let persistedData = try XCTUnwrap(defaults.data(forKey: "flow.auth.accounts"))
+        let persistedAccounts = try JSONDecoder().decode([StoredAuthAccount].self, from: persistedData)
+        XCTAssertEqual(persistedAccounts.count, 1)
+        XCTAssertNil(persistedAccounts[0].nsec)
+
+        let relaunchedAuth = AuthManager(
+            store: AuthStore(
+                defaults: defaults,
+                privateKeyStore: FailingPrivateKeyStore()
+            )
+        )
+
+        XCTAssertEqual(relaunchedAuth.accounts.count, 1)
+        XCTAssertEqual(relaunchedAuth.currentAccount?.id, account.id)
+        XCTAssertNil(relaunchedAuth.currentNsec)
+        XCTAssertNotNil(relaunchedAuth.currentPrivateKeySecurityWarning)
+
+        defaults.removePersistentDomain(forName: suiteName)
+    }
+
+    @MainActor
+    func testPrivateKeyBackupPreferenceCanOptOutDuringSignup() throws {
+        let suiteName = #function
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defaults.removePersistentDomain(forName: suiteName)
+
+        let privateKeyStore = RecordingPrivateKeyStore()
+        let store = AuthStore(defaults: defaults, privateKeyStore: privateKeyStore)
+        let auth = AuthManager(store: store)
+        let keypair = try XCTUnwrap(Keypair())
+
+        let account = try auth.loginWithNsecOrHex(
+            keypair.privateKey.nsec,
+            backupPrivateKeyToICloud: false
+        )
+
+        XCTAssertFalse(account.privateKeyBackupEnabled)
+        XCTAssertFalse(auth.currentAccount?.privateKeyBackupEnabled ?? true)
+        XCTAssertEqual(auth.currentNsec, keypair.privateKey.nsec)
+        XCTAssertEqual(privateKeyStore.backupFlagsByAccountID[account.id], false)
+
+        let persistedData = try XCTUnwrap(defaults.data(forKey: "flow.auth.accounts"))
+        let persistedAccounts = try JSONDecoder().decode([StoredAuthAccount].self, from: persistedData)
+        XCTAssertEqual(persistedAccounts.count, 1)
+        XCTAssertFalse(persistedAccounts[0].privateKeyBackupEnabled)
+        XCTAssertNil(persistedAccounts[0].nsec)
+
+        defaults.removePersistentDomain(forName: suiteName)
+    }
+
+    @MainActor
     func testLegacyPlaintextKeyIsScrubbedFromDefaultsWhenSecureMigrationFails() throws {
         let suiteName = #function
         let defaults = UserDefaults(suiteName: suiteName)!
@@ -111,4 +185,34 @@ private struct FailingPrivateKeyStore: AuthPrivateKeyStoring {
     }
     func iCloudPrivateKeyBackups() -> [AuthICloudPrivateKeyBackup] { [] }
     func removePrivateKey(for accountID: String) {}
+}
+
+private final class RecordingPrivateKeyStore: AuthPrivateKeyStoring, @unchecked Sendable {
+    private var privateKeysByAccountID: [String: String] = [:]
+    private(set) var backupFlagsByAccountID: [String: Bool] = [:]
+
+    func privateKey(for accountID: String) -> String? {
+        privateKeysByAccountID[accountID]
+    }
+
+    func privateKeyMetadata(for accountID: String) -> AuthPrivateKeyMetadata? {
+        guard let isSynchronizable = backupFlagsByAccountID[accountID] else { return nil }
+        return AuthPrivateKeyMetadata(
+            isSynchronizable: isSynchronizable,
+            createdAt: nil,
+            modifiedAt: nil
+        )
+    }
+
+    func savePrivateKey(_ nsec: String, for accountID: String, backupToICloud: Bool) throws {
+        privateKeysByAccountID[accountID] = nsec
+        backupFlagsByAccountID[accountID] = backupToICloud
+    }
+
+    func iCloudPrivateKeyBackups() -> [AuthICloudPrivateKeyBackup] { [] }
+
+    func removePrivateKey(for accountID: String) {
+        privateKeysByAccountID.removeValue(forKey: accountID)
+        backupFlagsByAccountID.removeValue(forKey: accountID)
+    }
 }

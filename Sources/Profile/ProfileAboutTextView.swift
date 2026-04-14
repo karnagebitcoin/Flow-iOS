@@ -73,7 +73,7 @@ struct ProfileAboutTextView: View {
                     segment.link = url
                     segment.foregroundColor = .accentColor
                 }
-            case .url, .image, .video, .audio:
+            case .url, .image, .video, .youtubeVideo, .audio:
                 if let url = URL(string: token.value) {
                     segment.link = url
                     segment.foregroundColor = .accentColor

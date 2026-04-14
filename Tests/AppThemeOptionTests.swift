@@ -122,7 +122,7 @@ final class AppThemeOptionTests: XCTestCase {
         )
         assertColor(
             AppThemeOption.gamer.palette.mutedForeground,
-            matches: UIColor(red: 0.558, green: 0.640, blue: 0.776, alpha: 1)
+            matches: UIColor(red: 0.592, green: 0.735, blue: 0.976, alpha: 1)
         )
         XCTAssertNotNil(AppThemeOption.gamer.palette.capsuleTabStyle)
         XCTAssertNotNil(AppThemeOption.gamer.palette.profileActionStyle)
@@ -134,9 +134,11 @@ final class AppThemeOptionTests: XCTestCase {
     }
 
     @MainActor
-    func testComingSoonThemesRemainDisabled() {
-        XCTAssertFalse(AppThemeOption.dark.isEnabled)
-        XCTAssertFalse(AppThemeOption.light.isEnabled)
+    func testLightAndDarkBaseThemesAreEnabled() {
+        XCTAssertTrue(AppThemeOption.light.isEnabled)
+        XCTAssertTrue(AppThemeOption.dark.isEnabled)
+        XCTAssertEqual(AppThemeOption.appearanceOptions, [.system, .light, .dark, .black])
+        XCTAssertFalse(AppThemeOption.appearanceOptions.contains(.white))
     }
 
     @MainActor
@@ -170,6 +172,20 @@ final class AppThemeOptionTests: XCTestCase {
         XCTAssertTrue(settings.hasFlowPlusCustomizationAccess)
         XCTAssertEqual(settings.activeTheme, .system)
         XCTAssertNil(settings.previewTheme)
+    }
+
+    @MainActor
+    func testLegacyWhiteThemeSelectionNormalizesToLight() {
+        let defaults = UserDefaults(suiteName: #function)!
+        defaults.removePersistentDomain(forName: #function)
+        let authStore = AuthStore(defaults: defaults)
+        let settings = AppSettingsStore(defaults: defaults, authStore: authStore)
+
+        settings.theme = .white
+
+        XCTAssertEqual(settings.theme, .light)
+        XCTAssertEqual(settings.activeTheme, .light)
+        XCTAssertEqual(settings.preferredColorScheme, .light)
     }
 
     @MainActor
@@ -372,78 +388,109 @@ final class AppThemeOptionTests: XCTestCase {
     }
 
     @MainActor
-    func testWhiteThemeKeepsPureWhiteBackgroundAndChrome() {
-        assertColor(AppThemeOption.white.palette.background, matches: .white)
-        assertColor(AppThemeOption.white.palette.chromeBackground, matches: .white)
+    func testLightThemeUsesFormerWhitePalette() {
+        assertColor(AppThemeOption.light.palette.background, matches: .white)
+        assertColor(AppThemeOption.light.palette.chromeBackground, matches: .white)
         assertColor(
-            AppThemeOption.white.palette.chromeBorder,
+            AppThemeOption.light.palette.chromeBorder,
             matches: UIColor.black.withAlphaComponent(0.10)
         )
-        XCTAssertNotNil(AppThemeOption.white.palette.capsuleTabStyle)
-        XCTAssertNotNil(AppThemeOption.white.palette.profileActionStyle)
-        XCTAssertNotNil(AppThemeOption.white.palette.pollStyle)
+        XCTAssertNotNil(AppThemeOption.light.palette.capsuleTabStyle)
+        XCTAssertNotNil(AppThemeOption.light.palette.profileActionStyle)
+        XCTAssertNotNil(AppThemeOption.light.palette.pollStyle)
         assertColor(
-            AppThemeOption.white.palette.capsuleTabStyle!.background,
+            AppThemeOption.light.palette.capsuleTabStyle!.background,
             matches: UIColor(red: 0.965, green: 0.965, blue: 0.972, alpha: 1)
         )
         assertColor(
-            AppThemeOption.white.palette.profileActionStyle!.primaryBackground,
+            AppThemeOption.light.palette.profileActionStyle!.primaryBackground,
             matches: .white
         )
         assertColor(
-            AppThemeOption.white.palette.pollStyle!.cardBorder,
+            AppThemeOption.light.palette.pollStyle!.cardBorder,
             matches: UIColor.black.withAlphaComponent(0.08)
         )
+        XCTAssertEqual(AppThemeOption.white.normalizedSelection, .light)
+        XCTAssertFalse(AppThemeOption.white.isEnabled)
     }
 
     @MainActor
-    func testSystemThemePreservesNativeLightSeparatorsAndUsesTunedDarkBorders() {
-        let lightTraits = UITraitCollection(userInterfaceStyle: .light)
-        let darkTraits = UITraitCollection(userInterfaceStyle: .dark)
-        let lightSeparator = UIColor.separator.resolvedColor(with: lightTraits)
-        let lightArticleBorder = lightSeparator.withAlphaComponent(lightSeparator.cgColor.alpha * 0.24)
+    func testDarkThemeMatchesReferencePalette() {
+        XCTAssertEqual(AppThemeOption.dark.preferredColorScheme, .dark)
+        XCTAssertNil(AppThemeOption.dark.fixedPrimaryColor)
+        XCTAssertNil(AppThemeOption.dark.fixedPrimaryGradient)
+        assertColor(
+            AppThemeOption.dark.palette.background,
+            matches: UIColor(red: 23.0 / 255.0, green: 23.0 / 255.0, blue: 25.0 / 255.0, alpha: 1)
+        )
+        assertColor(
+            AppThemeOption.dark.palette.navigationBackground,
+            matches: UIColor(red: 19.0 / 255.0, green: 19.0 / 255.0, blue: 20.0 / 255.0, alpha: 1)
+        )
+        assertColor(
+            AppThemeOption.dark.palette.secondaryBackground,
+            matches: UIColor(red: 41.0 / 255.0, green: 41.0 / 255.0, blue: 41.0 / 255.0, alpha: 1)
+        )
+        assertColor(
+            AppThemeOption.dark.palette.sheetBackground,
+            matches: UIColor(red: 41.0 / 255.0, green: 41.0 / 255.0, blue: 41.0 / 255.0, alpha: 1)
+        )
+        assertColor(
+            AppThemeOption.dark.palette.sheetCardBackground,
+            matches: UIColor(red: 58.0 / 255.0, green: 58.0 / 255.0, blue: 58.0 / 255.0, alpha: 1)
+        )
+        assertColor(
+            AppThemeOption.dark.palette.sheetCardBorder,
+            matches: UIColor(red: 75.0 / 255.0, green: 75.0 / 255.0, blue: 75.0 / 255.0, alpha: 1)
+        )
+        assertColor(
+            AppThemeOption.dark.palette.foreground,
+            matches: UIColor(red: 226.0 / 255.0, green: 226.0 / 255.0, blue: 227.0 / 255.0, alpha: 1)
+        )
+        assertColor(
+            AppThemeOption.dark.palette.mutedForeground,
+            matches: UIColor(red: 125.0 / 255.0, green: 125.0 / 255.0, blue: 126.0 / 255.0, alpha: 1)
+        )
+        XCTAssertNotNil(AppThemeOption.dark.palette.capsuleTabStyle)
+        XCTAssertNotNil(AppThemeOption.dark.palette.profileActionStyle)
+        XCTAssertNotNil(AppThemeOption.dark.palette.pollStyle)
+    }
 
+    @MainActor
+    func testSystemThemeSwitchesBetweenLightAndDarkPalettes() {
+        assertColor(
+            AppThemeOption.system.palette.background,
+            matches: .white,
+            style: .light
+        )
         assertColor(
             AppThemeOption.system.palette.chromeBorder,
-            matches: lightSeparator,
+            matches: UIColor.black.withAlphaComponent(0.10),
             style: .light
         )
         assertColor(
-            AppThemeOption.system.palette.separator,
-            matches: lightSeparator,
+            AppThemeOption.system.palette.sheetCardBackground,
+            matches: .white,
             style: .light
         )
         assertColor(
-            AppThemeOption.system.palette.linkPreviewBorder,
-            matches: lightSeparator,
-            style: .light
-        )
-        assertColor(
-            AppThemeOption.system.palette.articlePreviewBorder,
-            matches: lightArticleBorder,
-            style: .light
-        )
-
-        XCTAssertLessThan(lightSeparator.cgColor.alpha, 1)
-
-        assertColor(
-            AppThemeOption.system.palette.chromeBorder,
-            matches: UIColor.white.withAlphaComponent(0.10),
+            AppThemeOption.system.palette.background,
+            matches: UIColor(red: 23.0 / 255.0, green: 23.0 / 255.0, blue: 25.0 / 255.0, alpha: 1),
             style: .dark
         )
         assertColor(
-            AppThemeOption.system.palette.separator,
-            matches: UIColor.white.withAlphaComponent(0.14),
+            AppThemeOption.system.palette.navigationBackground,
+            matches: UIColor(red: 19.0 / 255.0, green: 19.0 / 255.0, blue: 20.0 / 255.0, alpha: 1),
             style: .dark
         )
         assertColor(
-            AppThemeOption.system.palette.linkPreviewBorder,
-            matches: UIColor.white.withAlphaComponent(0.14),
+            AppThemeOption.system.palette.sheetCardBackground,
+            matches: UIColor(red: 58.0 / 255.0, green: 58.0 / 255.0, blue: 58.0 / 255.0, alpha: 1),
             style: .dark
         )
         assertColor(
-            AppThemeOption.system.palette.articlePreviewBorder,
-            matches: UIColor.white.withAlphaComponent(0.16),
+            AppThemeOption.system.palette.sheetCardBorder,
+            matches: UIColor(red: 75.0 / 255.0, green: 75.0 / 255.0, blue: 75.0 / 255.0, alpha: 1),
             style: .dark
         )
     }
@@ -452,7 +499,8 @@ final class AppThemeOptionTests: XCTestCase {
     func testDefaultThemesKeepSharedQRCodePresentationBackground() {
         XCTAssertNil(AppThemeOption.system.qrShareBackgroundResourceName)
         XCTAssertNil(AppThemeOption.black.qrShareBackgroundResourceName)
-        XCTAssertNil(AppThemeOption.white.qrShareBackgroundResourceName)
+        XCTAssertNil(AppThemeOption.light.qrShareBackgroundResourceName)
+        XCTAssertNil(AppThemeOption.dark.qrShareBackgroundResourceName)
         XCTAssertEqual(
             ProfileQRCodePresentationBackground.resourceName(for: .system),
             ProfileQRCodePresentationBackground.defaultResourceName
@@ -462,7 +510,11 @@ final class AppThemeOptionTests: XCTestCase {
             ProfileQRCodePresentationBackground.defaultResourceName
         )
         XCTAssertEqual(
-            ProfileQRCodePresentationBackground.resourceName(for: .white),
+            ProfileQRCodePresentationBackground.resourceName(for: .light),
+            ProfileQRCodePresentationBackground.defaultResourceName
+        )
+        XCTAssertEqual(
+            ProfileQRCodePresentationBackground.resourceName(for: .dark),
             ProfileQRCodePresentationBackground.defaultResourceName
         )
     }

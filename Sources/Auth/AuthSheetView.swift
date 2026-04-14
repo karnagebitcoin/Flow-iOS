@@ -23,22 +23,26 @@ struct AuthSheetView: View {
 
     private let initialTab: AuthSheetTab
     private let availableTabs: [AuthSheetTab]
+    private let onSelectedTabChange: (AuthSheetTab) -> Void
     @State private var selectedTab: AuthSheetTab
     @State private var privateKeyInput = ""
     @State private var signInError: String?
     @State private var accountProfiles: [String: NostrProfile] = [:]
     @State private var pendingAccountRemoval: AuthAccount?
-    @State private var postAuthDestination: PostAuthDestination = .dismiss
+    @State private var postAuthDestination: PostAuthDestination
 
     init(
         initialTab: AuthSheetTab = .signIn,
-        availableTabs: [AuthSheetTab] = AuthSheetTab.allCases
+        availableTabs: [AuthSheetTab] = AuthSheetTab.allCases,
+        onSelectedTabChange: @escaping (AuthSheetTab) -> Void = { _ in }
     ) {
         let validTabs = availableTabs.isEmpty ? [.signIn] : availableTabs
         self.initialTab = initialTab
         self.availableTabs = validTabs
+        self.onSelectedTabChange = onSelectedTabChange
         let resolvedInitialTab = validTabs.contains(initialTab) ? initialTab : validTabs[0]
         _selectedTab = State(initialValue: resolvedInitialTab)
+        _postAuthDestination = State(initialValue: resolvedInitialTab == .accounts ? .accounts : .dismiss)
     }
 
     var body: some View {
@@ -89,14 +93,8 @@ struct AuthSheetView: View {
             .navigationTitle(selectedTab == .signUp ? "Create Account" : "Account")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar(selectedTab == .signIn ? .hidden : .visible, for: .navigationBar)
-            .onAppear {
-                let resolvedInitialTab = availableTabs.contains(initialTab) ? initialTab : availableTabs[0]
-                if selectedTab != resolvedInitialTab {
-                    selectedTab = resolvedInitialTab
-                }
-                postAuthDestination = resolvedInitialTab == .accounts ? .accounts : .dismiss
-            }
             .onChange(of: selectedTab) { _, newValue in
+                onSelectedTabChange(newValue)
                 switch newValue {
                 case .accounts:
                     postAuthDestination = .accounts

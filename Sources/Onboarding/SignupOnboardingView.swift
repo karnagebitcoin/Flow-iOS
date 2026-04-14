@@ -78,6 +78,8 @@ struct SignupOnboardingView: View {
     @State private var selectedPrimaryColorOption: PrimaryColorOption = .sandstone
     @State private var hasEditedHandle = false
     @State private var selectedTopics = Set<InterestTopic>()
+    @State private var signupPrivateKeyBackupEnabled = true
+    @State private var signupNotificationsEnabled = false
     @State private var selectedAvatarItem: PhotosPickerItem?
     @State private var selectedAvatarData: Data?
     @State private var selectedAvatarPreviewImage: UIImage?
@@ -87,9 +89,6 @@ struct SignupOnboardingView: View {
     @State private var isLoadingAvatar = false
     @State private var isFinishing = false
     @State private var errorMessage: String?
-    @State private var showConfetti = false
-    @State private var confettiBurstID = 0
-    @State private var showCompletionAlert = false
     @State private var animateFinishingButton = false
 
     private let relayClient = NostrRelayClient()
@@ -112,32 +111,11 @@ struct SignupOnboardingView: View {
                 .padding(.horizontal, 18)
                 .padding(.vertical, 20)
             }
-
-            if showConfetti {
-                OnboardingConfettiOverlayView(burstID: confettiBurstID)
-                    .ignoresSafeArea()
-                    .allowsHitTesting(false)
-                    .transition(.opacity)
-            }
         }
         .background(Color(.systemBackground))
         .tint(onboardingInputTint)
-        .alert("You're all set", isPresented: $showCompletionAlert) {
-            Button("Got It") {
-                showConfetti = false
-                onComplete()
-            }
-        } message: {
-            Text("We've generated your feed, feel free to edit it in your Feeds settings.")
-        }
         .task {
             await preparePendingAccountIfNeeded()
-        }
-        .onChange(of: step) { _, newValue in
-            guard newValue == .notifications else { return }
-            Task {
-                await appSettings.refreshNotificationAuthorizationStatus()
-            }
         }
         .onChange(of: selectedAvatarItem) { _, newValue in
             guard let newValue else { return }
@@ -242,7 +220,12 @@ struct SignupOnboardingView: View {
     }
 
     private var imageStep: some View {
-        VStack {
+        let avatarPreviewImage = selectedAvatarPreviewImage
+        let avatarDisplayName = displayName
+        let avatarAccentColor = onboardingSecondaryAccent
+        let avatarIsLoading = isLoadingAvatar
+
+        return VStack {
             Spacer(minLength: 24)
 
             VStack(spacing: 26) {
@@ -254,10 +237,10 @@ struct SignupOnboardingView: View {
                 VStack(spacing: 12) {
                     PhotosPicker(selection: $selectedAvatarItem, matching: .images) {
                         SignupAvatarPickerLabel(
-                            previewImage: selectedAvatarPreviewImage,
-                            displayName: displayName,
-                            accentColor: onboardingSecondaryAccent,
-                            isLoadingAvatar: isLoadingAvatar
+                            previewImage: avatarPreviewImage,
+                            displayName: avatarDisplayName,
+                            accentColor: avatarAccentColor,
+                            isLoadingAvatar: avatarIsLoading
                         )
                     }
                     .buttonStyle(.plain)
@@ -332,9 +315,37 @@ struct SignupOnboardingView: View {
     private var notificationsStep: some View {
         VStack(alignment: .leading, spacing: 18) {
             stepIntro(
-                title: "Notifications",
-                subtitle: "Your Interests feed is ready. Turn on notifications now, or skip and change this later in Settings."
+                title: "Protect your account",
+                subtitle: "Your Interests feed is ready. We’ll save your private key in Keychain. Keep iCloud backup on to restore it on your devices."
             )
+
+            onboardingFieldCard {
+                VStack(alignment: .leading, spacing: 14) {
+                    HStack(alignment: .top, spacing: 12) {
+                        Image(systemName: "icloud.and.arrow.up.fill")
+                            .font(.system(size: 20, weight: .semibold))
+                            .foregroundStyle(onboardingSecondaryAccent)
+                            .frame(width: 28)
+
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("iCloud Keychain Backup")
+                                .font(.headline)
+
+                            Text("Keep a private backup so you can restore this account on another device.")
+                                .font(.footnote)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+
+                    Toggle("Back Up Private Key", isOn: privateKeyBackupBinding)
+                        .tint(onboardingToggleTint)
+
+                    Text(signupPrivateKeyBackupStatusDescription)
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
 
             onboardingFieldCard {
                 VStack(alignment: .leading, spacing: 14) {
@@ -357,7 +368,7 @@ struct SignupOnboardingView: View {
                     Toggle("Enable Notifications", isOn: notificationsBinding)
                         .tint(onboardingToggleTint)
 
-                    Text(appSettings.notificationsStatusDescription)
+                    Text(signupNotificationsStatusDescription)
                         .font(.footnote)
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
@@ -646,7 +657,7 @@ struct SignupOnboardingView: View {
     }
 
     private var onboardingToggleTint: Color {
-        Color(.systemGray3)
+        Color(.systemGreen)
     }
 
     private var onboardingInputTint: Color {
@@ -679,9 +690,28 @@ struct SignupOnboardingView: View {
 
     private var notificationsBinding: Binding<Bool> {
         Binding(
-            get: { appSettings.notificationsEnabled },
-            set: { appSettings.notificationsEnabled = $0 }
+            get: { signupNotificationsEnabled },
+            set: { signupNotificationsEnabled = $0 }
         )
+    }
+
+    private var privateKeyBackupBinding: Binding<Bool> {
+        Binding(
+            get: { signupPrivateKeyBackupEnabled },
+            set: { signupPrivateKeyBackupEnabled = $0 }
+        )
+    }
+
+    private var signupPrivateKeyBackupStatusDescription: String {
+        signupPrivateKeyBackupEnabled
+            ? "On. Your private key will be saved to iCloud Keychain so you can restore it on your devices."
+            : "Off. Your private key will stay in this device’s Keychain and will not sync to iCloud."
+    }
+
+    private var signupNotificationsStatusDescription: String {
+        signupNotificationsEnabled
+            ? "iOS will ask for permission when you finish."
+            : "Off for now. You can change this later in Settings."
     }
 
     private var welcomeName: String {
@@ -799,14 +829,33 @@ struct SignupOnboardingView: View {
         errorMessage = nil
 
         do {
-            relaySettings.configure(accountPubkey: pendingAccount.pubkey, nsec: pendingAccount.nsec)
+            let account = try auth.loginWithNsecOrHex(
+                pendingAccount.nsec,
+                backupPrivateKeyToICloud: signupPrivateKeyBackupEnabled
+            )
+            onComplete()
+
+            appSettings.configure(accountPubkey: account.pubkey)
+            appSettings.theme = .system
+            appSettings.primaryColor = selectedPrimaryColorOption.color
+            if signupNotificationsEnabled {
+                appSettings.notificationsEnabled = true
+            }
+
+            relaySettings.configure(accountPubkey: account.pubkey, nsec: auth.currentNsec ?? pendingAccount.nsec)
             relaySettings.seedDefaultRelaysForCurrentAccount(publishToBootstrapRelays: true)
 
-            let avatarURL = try await uploadAvatarIfNeeded(using: pendingAccount)
+            let avatarURL: String?
+            do {
+                avatarURL = try await uploadAvatarIfNeeded(using: pendingAccount)
+            } catch {
+                avatarURL = nil
+            }
+
             let interestTopics = InterestTopic.allCases.filter { selectedTopics.contains($0) }
             let interestHashtags = InterestTopic.combinedHashtags(for: interestTopics)
 
-            try await publishProfileMetadata(
+            try? await publishProfileMetadata(
                 account: pendingAccount,
                 displayName: normalizedDisplayName,
                 handle: normalizedHandle,
@@ -825,21 +874,7 @@ struct SignupOnboardingView: View {
                 forKey: HomeFeedViewModel.persistedFeedSourceKey(pubkey: pendingAccount.pubkey.lowercased())
             )
 
-            let account = try auth.loginWithNsecOrHex(
-                pendingAccount.nsec,
-                backupPrivateKeyToICloud: true
-            )
-            appSettings.configure(accountPubkey: account.pubkey)
-            appSettings.theme = .system
-            appSettings.primaryColor = selectedPrimaryColorOption.color
-
-            confettiBurstID += 1
-            withAnimation(.easeInOut(duration: 0.2)) {
-                showConfetti = true
-            }
-            try? await Task.sleep(nanoseconds: 350_000_000)
             isFinishing = false
-            showCompletionAlert = true
             return
         } catch {
             errorMessage = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
@@ -959,70 +994,6 @@ struct SignupOnboardingView: View {
             }
         }
         return filtered.lowercased()
-    }
-}
-
-private struct OnboardingConfettiOverlayView: View {
-    private struct Particle: Identifiable {
-        let id = UUID()
-        let x: CGFloat
-        let delay: Double
-        let duration: Double
-        let scale: CGFloat
-        let rotation: Double
-        let color: Color
-    }
-
-    let burstID: Int
-
-    @State private var animate = false
-
-    private let particles: [Particle] = (0..<28).map { index in
-        let baseColors: [Color] = [
-            .pink, .orange, .yellow, .green, .blue, .mint, .teal
-        ]
-        return Particle(
-            x: CGFloat.random(in: 0.06...0.94),
-            delay: Double(index) * 0.015,
-            duration: Double.random(in: 1.1...1.7),
-            scale: CGFloat.random(in: 0.75...1.25),
-            rotation: Double.random(in: -180...180),
-            color: baseColors[index % baseColors.count]
-        )
-    }
-
-    var body: some View {
-        GeometryReader { proxy in
-            ZStack {
-                ForEach(particles) { particle in
-                    RoundedRectangle(cornerRadius: 3, style: .continuous)
-                        .fill(particle.color.gradient)
-                        .frame(width: 10 * particle.scale, height: 18 * particle.scale)
-                        .rotationEffect(.degrees(animate ? particle.rotation : 0))
-                        .position(
-                            x: proxy.size.width * particle.x,
-                            y: animate ? proxy.size.height + 80 : -40
-                        )
-                        .opacity(animate ? 0 : 1)
-                        .animation(
-                            .easeIn(duration: particle.duration).delay(particle.delay),
-                            value: animate
-                        )
-                }
-            }
-            .onAppear {
-                animate = false
-                DispatchQueue.main.async {
-                    animate = true
-                }
-            }
-            .onChange(of: burstID) { _, _ in
-                animate = false
-                DispatchQueue.main.async {
-                    animate = true
-                }
-            }
-        }
     }
 }
 

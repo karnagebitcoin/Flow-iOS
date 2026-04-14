@@ -290,75 +290,66 @@ struct PollNoteView: View {
         return Button {
             toggleSelection(for: option.id)
         } label: {
-            ZStack(alignment: .leading) {
-                RoundedRectangle(cornerRadius: 16, style: .continuous)
-                    .fill(pollOptionBackground)
-
-                GeometryReader { proxy in
-                    RoundedRectangle(cornerRadius: 16, style: .continuous)
-                        .fill(fillColor(isWinningOption: isWinningOption, isHighlighted: isHighlighted))
-                        .frame(
-                            width: max(
-                                proxy.size.width * fillFraction,
-                                shouldShowResults ? 0 : (isSelectedForSubmission ? 52 : 0)
-                            )
-                        )
-                }
-                .allowsHitTesting(false)
-
-                HStack(alignment: .center, spacing: 10) {
-                    if let imageURL = option.imageURL {
-                        AsyncImage(url: imageURL) { phase in
-                            switch phase {
-                            case .success(let image):
-                                image
-                                    .resizable()
-                                    .scaledToFill()
-                            default:
-                                RoundedRectangle(cornerRadius: 10, style: .continuous)
-                                    .fill(pollImagePlaceholderBackground)
-                                    .overlay {
-                                        Image(systemName: "photo")
-                                            .foregroundStyle(pollImagePlaceholderForeground)
-                                    }
-                            }
-                        }
-                        .frame(width: 34, height: 34)
-                        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-                    }
-
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(option.label)
-                            .font(.subheadline.weight(isWinningOption ? .semibold : .regular))
-                            .foregroundStyle(.primary)
-                            .multilineTextAlignment(.leading)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-
-                        if shouldShowResults {
-                            Text("\(voteCount) vote\(voteCount == 1 ? "" : "s")")
-                                .font(.caption)
-                                .foregroundStyle(pollMetadataForeground)
+            HStack(alignment: .top, spacing: 10) {
+                if let imageURL = option.imageURL {
+                    AsyncImage(url: imageURL) { phase in
+                        switch phase {
+                        case .success(let image):
+                            image
+                                .resizable()
+                                .scaledToFill()
+                        default:
+                            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                                .fill(pollImagePlaceholderBackground)
+                                .overlay {
+                                    Image(systemName: "photo")
+                                        .foregroundStyle(pollImagePlaceholderForeground)
+                                }
                         }
                     }
+                    .frame(width: 34, height: 34)
+                    .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                }
 
-                    if isSelectedInExistingVote {
-                        Image(systemName: "checkmark.circle.fill")
-                            .font(.headline)
-                            .foregroundStyle(Color.accentColor)
-                    } else if shouldShowResults {
-                        Text(fillFraction.formatted(.percent.precision(.fractionLength(0))))
-                            .font(.caption.weight(.semibold))
-                            .foregroundStyle(isWinningOption ? appSettings.primaryColor : pollMetadataForeground)
-                    } else {
-                        Image(systemName: isSelectedForSubmission ? "checkmark.circle.fill" : "circle")
-                            .font(.headline)
-                            .foregroundStyle(isSelectedForSubmission ? Color.accentColor : pollMetadataForeground)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(option.label)
+                        .font(.subheadline.weight(isWinningOption ? .semibold : .regular))
+                        .foregroundStyle(.primary)
+                        .lineLimit(nil)
+                        .multilineTextAlignment(.leading)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .layoutPriority(1)
+
+                    if shouldShowResults {
+                        Text("\(voteCount) vote\(voteCount == 1 ? "" : "s")")
+                            .font(.caption)
+                            .foregroundStyle(pollMetadataForeground)
                     }
                 }
-                .padding(.horizontal, 12)
-                .padding(.vertical, 11)
+                .layoutPriority(1)
+
+                if isSelectedInExistingVote {
+                    Image(systemName: "checkmark.circle.fill")
+                        .font(.headline)
+                        .foregroundStyle(Color.accentColor)
+                        .padding(.top, 1)
+                } else if shouldShowResults {
+                    Text(fillFraction.formatted(.percent.precision(.fractionLength(0))))
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(isWinningOption ? appSettings.primaryColor : pollMetadataForeground)
+                        .padding(.top, 2)
+                } else {
+                    Image(systemName: isSelectedForSubmission ? "checkmark.circle.fill" : "circle")
+                        .font(.headline)
+                        .foregroundStyle(isSelectedForSubmission ? Color.accentColor : pollMetadataForeground)
+                        .padding(.top, 1)
+                }
             }
-            .frame(minHeight: 58)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 11)
+            .frame(maxWidth: .infinity, minHeight: 58, alignment: .leading)
+            .background(optionBackground(fillFraction: fillFraction, isWinningOption: isWinningOption, isHighlighted: isHighlighted))
             .overlay(
                 RoundedRectangle(cornerRadius: 16, style: .continuous)
                     .stroke(
@@ -372,6 +363,30 @@ struct PollNoteView: View {
         }
         .buttonStyle(.plain)
         .disabled(!canSelectOptions)
+    }
+
+    private func optionBackground(
+        fillFraction: Double,
+        isWinningOption: Bool,
+        isHighlighted: Bool
+    ) -> some View {
+        ZStack(alignment: .leading) {
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .fill(pollOptionBackground)
+
+            GeometryReader { proxy in
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    .fill(fillColor(isWinningOption: isWinningOption, isHighlighted: isHighlighted))
+                    .frame(
+                        width: max(
+                            proxy.size.width * fillFraction,
+                            shouldShowResults ? 0 : (isHighlighted ? 52 : 0)
+                        )
+                    )
+            }
+            .allowsHitTesting(false)
+        }
+        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
     }
 
     private var footerRow: some View {

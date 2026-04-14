@@ -16,6 +16,12 @@ enum AppThemeOption: String, CaseIterable, Codable, Identifiable, Hashable, Send
 
     var id: String { rawValue }
 
+    static let appearanceOptions: [AppThemeOption] = [.system, .light, .dark, .black]
+
+    var normalizedSelection: AppThemeOption {
+        self == .white ? .light : self
+    }
+
     var title: String {
         switch self {
         case .system:
@@ -23,7 +29,7 @@ enum AppThemeOption: String, CaseIterable, Codable, Identifiable, Hashable, Send
         case .black:
             return "Black"
         case .white:
-            return "White"
+            return "Light"
         case .sakura:
             return "Sakura"
         case .dracula:
@@ -44,7 +50,7 @@ enum AppThemeOption: String, CaseIterable, Codable, Identifiable, Hashable, Send
         case .black:
             return "moon.fill"
         case .white:
-            return "sun.max.fill"
+            return "sun.haze.fill"
         case .sakura:
             return "leaf.fill"
         case .dracula:
@@ -52,7 +58,7 @@ enum AppThemeOption: String, CaseIterable, Codable, Identifiable, Hashable, Send
         case .gamer:
             return "gamecontroller.fill"
         case .dark:
-            return "sparkles"
+            return "moon.stars.fill"
         case .light:
             return "sun.haze.fill"
         }
@@ -61,11 +67,11 @@ enum AppThemeOption: String, CaseIterable, Codable, Identifiable, Hashable, Send
     var subtitle: String {
         switch self {
         case .system:
-            return "Follow the device setting"
+            return "Switches between Light and Dark"
         case .black:
-            return "Dark appearance"
+            return "Pure black appearance"
         case .white:
-            return "Light appearance"
+            return "Bright appearance"
         case .sakura:
             return "Paper whites with gradient blossom pinks"
         case .dracula:
@@ -73,17 +79,17 @@ enum AppThemeOption: String, CaseIterable, Codable, Identifiable, Hashable, Send
         case .gamer:
             return "Carbon black with neon violet, cyan, and energy-green accents"
         case .dark:
-            return "Coming soon"
+            return "Dark appearance"
         case .light:
-            return "Coming soon"
+            return "Bright appearance"
         }
     }
 
     var isEnabled: Bool {
         switch self {
-        case .system, .black, .white, .sakura, .dracula, .gamer:
+        case .system, .black, .sakura, .dracula, .gamer, .dark, .light:
             return true
-        case .dark, .light:
+        case .white:
             return false
         }
     }
@@ -179,7 +185,7 @@ enum AppThemeOption: String, CaseIterable, Codable, Identifiable, Hashable, Send
         case .gamer:
             return AppThemePalette.gamer
         case .dark:
-            return AppThemePalette.black
+            return AppThemePalette.dark
         case .light:
             return AppThemePalette.white
         }
@@ -466,7 +472,7 @@ final class AppSettingsStore: ObservableObject {
         init(from decoder: Decoder) throws {
             let container = try decoder.container(keyedBy: CodingKeys.self)
             primaryColor = try container.decodeIfPresent(StoredColor.self, forKey: .primaryColor)
-            theme = (try? container.decode(AppThemeOption.self, forKey: .theme)) ?? .system
+            theme = ((try? container.decode(AppThemeOption.self, forKey: .theme)) ?? .system).normalizedSelection
             fontOption = (try? container.decode(AppFontOption.self, forKey: .fontOption)) ?? .system
             fontSize = (try? container.decode(AppFontSize.self, forKey: .fontSize)) ?? .medium
             breakReminderInterval = (try? container.decode(BreakReminderInterval.self, forKey: .breakReminderInterval)) ?? .fortyMinutes
@@ -634,10 +640,10 @@ final class AppSettingsStore: ObservableObject {
     }
 
     var theme: AppThemeOption {
-        get { persistedSettings.theme }
+        get { persistedSettings.theme.normalizedSelection }
         set {
             previewTheme = nil
-            persistedSettings.theme = newValue
+            persistedSettings.theme = newValue.normalizedSelection
             persist()
         }
     }
@@ -931,7 +937,7 @@ final class AppSettingsStore: ObservableObject {
         if let previewTheme, previewTheme.isEnabled {
             return previewTheme
         }
-        let requestedTheme = persistedSettings.theme
+        let requestedTheme = persistedSettings.theme.normalizedSelection
         return requestedTheme.isSelectable(with: premiumThemesUnlocked) ? requestedTheme : .system
     }
 

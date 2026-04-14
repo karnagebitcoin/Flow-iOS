@@ -1,5 +1,6 @@
 import LinkPresentation
 import SwiftUI
+import WebKit
 
 struct WebsiteLinkCardView: View {
     private static let imageSize: CGFloat = 64
@@ -128,6 +129,136 @@ struct WebsiteLinkCardView: View {
             return String(absoluteString.prefix(87)) + "..."
         }
         return absoluteString
+    }
+}
+
+struct YouTubeInlinePlayerView: View {
+    let url: URL
+    let layout: NoteContentMediaLayout
+    @EnvironmentObject private var appSettings: AppSettingsStore
+
+    var body: some View {
+        if let embed = NoteContentParser.youtubeVideoEmbed(from: url.absoluteString),
+           let embedURL = embed.embedURL() {
+            YouTubeEmbedWebView(url: embedURL)
+                .background(Color.black)
+                .frame(maxWidth: .infinity, maxHeight: maxVideoHeight, alignment: .leading)
+                .aspectRatio(16.0 / 9.0, contentMode: .fit)
+                .clipShape(
+                    RoundedRectangle(cornerRadius: mediaCornerRadius, style: .continuous)
+                )
+                .contentShape(
+                    RoundedRectangle(cornerRadius: mediaCornerRadius, style: .continuous)
+                )
+                .frame(maxWidth: .infinity, alignment: .leading)
+        } else {
+            WebsiteLinkCardView(
+                url: url,
+                backgroundColor: appSettings.themePalette.linkPreviewBackground,
+                borderColor: appSettings.themePalette.linkPreviewBorder
+            )
+        }
+    }
+
+    private var maxVideoHeight: CGFloat {
+        min(UIScreen.main.bounds.height * 0.72, 620)
+    }
+
+    private var mediaCornerRadius: CGFloat {
+        layout == .feed ? 18 : 12
+    }
+}
+
+private struct YouTubeEmbedWebView: UIViewRepresentable {
+    let url: URL
+
+    final class Coordinator {
+        var loadedURL: URL?
+    }
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator()
+    }
+
+    func makeUIView(context: Context) -> WKWebView {
+        let configuration = WKWebViewConfiguration()
+        configuration.allowsInlineMediaPlayback = true
+        configuration.mediaTypesRequiringUserActionForPlayback = .all
+        configuration.defaultWebpagePreferences.allowsContentJavaScript = true
+
+        let webView = WKWebView(frame: .zero, configuration: configuration)
+        webView.backgroundColor = .black
+        webView.isOpaque = true
+        webView.scrollView.backgroundColor = .black
+        webView.scrollView.isScrollEnabled = false
+        webView.scrollView.bounces = false
+        return webView
+    }
+
+    func updateUIView(_ webView: WKWebView, context: Context) {
+        guard context.coordinator.loadedURL != url else { return }
+        context.coordinator.loadedURL = url
+        webView.loadHTMLString(Self.embedHTML(for: url), baseURL: Self.refererBaseURL)
+    }
+
+    static func dismantleUIView(_ webView: WKWebView, coordinator: Coordinator) {
+        coordinator.loadedURL = nil
+        webView.stopLoading()
+        webView.loadHTMLString("", baseURL: nil)
+    }
+
+    private static func embedHTML(for url: URL) -> String {
+        let source = htmlEscaped(url.absoluteString)
+        return """
+        <!doctype html>
+        <html>
+        <head>
+          <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+          <style>
+            html, body, iframe {
+              width: 100%;
+              height: 100%;
+              margin: 0;
+              padding: 0;
+              border: 0;
+              overflow: hidden;
+              background: #000;
+            }
+            iframe {
+              position: fixed;
+              inset: 0;
+            }
+          </style>
+        </head>
+        <body>
+          <iframe
+            src="\(source)"
+            title="YouTube video player"
+            allow="accelerometer; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+            referrerpolicy="strict-origin-when-cross-origin"
+            allowfullscreen>
+          </iframe>
+        </body>
+        </html>
+        """
+    }
+
+    private static func htmlEscaped(_ value: String) -> String {
+        value
+            .replacingOccurrences(of: "&", with: "&amp;")
+            .replacingOccurrences(of: "\"", with: "&quot;")
+            .replacingOccurrences(of: "<", with: "&lt;")
+            .replacingOccurrences(of: ">", with: "&gt;")
+    }
+
+    private static var refererBaseURL: URL? {
+        let bundleIdentifier = Bundle.main.bundleIdentifier ?? "com.21media.flow"
+        let safeIdentifier = bundleIdentifier
+            .lowercased()
+            .filter { character in
+                character.isLetter || character.isNumber || character == "." || character == "-"
+            }
+        return URL(string: "https://\(safeIdentifier.isEmpty ? "com.21media.flow" : safeIdentifier)")
     }
 }
 

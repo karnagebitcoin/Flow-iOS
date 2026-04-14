@@ -271,14 +271,20 @@ final class AuthManager: ObservableObject {
         }
 
         if account.signerType == .nsec, let privateKey {
-            try store.savePrivateKey(
-                privateKey,
-                for: account.id,
-                backupToICloud: resolvedBackupSetting
-            )
-            transientPrivateKeysByAccountID.removeValue(forKey: account.id)
-            accountsNeedingSecureStorageRepair.remove(account.id)
-            store.setPrivateKeyNeedsSecureStorageRepair(false, for: account.id)
+            do {
+                try store.savePrivateKey(
+                    privateKey,
+                    for: account.id,
+                    backupToICloud: resolvedBackupSetting
+                )
+                transientPrivateKeysByAccountID.removeValue(forKey: account.id)
+                accountsNeedingSecureStorageRepair.remove(account.id)
+                store.setPrivateKeyNeedsSecureStorageRepair(false, for: account.id)
+            } catch {
+                transientPrivateKeysByAccountID[account.id] = privateKey
+                accountsNeedingSecureStorageRepair.insert(account.id)
+                store.setPrivateKeyNeedsSecureStorageRepair(true, for: account.id)
+            }
         }
 
         let persistedAccount = StoredAuthAccount(

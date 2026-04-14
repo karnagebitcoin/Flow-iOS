@@ -1846,11 +1846,8 @@ private func generateNoteVideoThumbnail(for url: URL, maximumPixelSize: CGSize) 
 struct NoteVideoPlayerView: View {
     let url: URL
     let layout: NoteContentMediaLayout
-    @EnvironmentObject private var appSettings: AppSettingsStore
-    @Environment(\.colorScheme) private var colorScheme
     @State private var videoAspectRatio: CGFloat = 16.0 / 9.0
     @State private var videoThumbnail: UIImage?
-    @State private var didAttemptThumbnailLoad = false
     @State private var isPlaying = false
 
     init(
@@ -1863,8 +1860,6 @@ struct NoteVideoPlayerView: View {
 
     var body: some View {
         ZStack {
-            thumbnailLayer
-
             NoteNativeVideoPlayerController(
                 url: url,
                 autoplay: false,
@@ -1877,6 +1872,10 @@ struct NoteVideoPlayerView: View {
             )
 
             if !isPlaying {
+                thumbnailLayer
+                    .allowsHitTesting(false)
+                    .transition(.opacity)
+
                 previewPlayAffordance
             }
         }
@@ -1892,7 +1891,6 @@ struct NoteVideoPlayerView: View {
         .task(id: url, priority: .utility) {
             await MainActor.run {
                 videoThumbnail = NoteVideoThumbnailCache.shared.image(for: url)
-                didAttemptThumbnailLoad = videoThumbnail != nil
             }
             await loadVideoAspectRatio()
             await loadVideoThumbnailIfNeeded()
@@ -1905,55 +1903,6 @@ struct NoteVideoPlayerView: View {
             Image(uiImage: videoThumbnail)
                 .resizable()
                 .scaledToFill()
-        } else if isLiveStream {
-            Color.black
-        } else if !didAttemptThumbnailLoad {
-            ZStack {
-                LinearGradient(
-                    colors: [
-                        appSettings.themePalette.secondaryFill,
-                        appSettings.themePalette.tertiaryFill
-                    ],
-                    startPoint: .topLeading,
-                    endPoint: .bottomTrailing
-                )
-
-                ProgressView()
-                    .controlSize(.small)
-            }
-        } else {
-            ZStack {
-                LinearGradient(
-                    colors: [
-                        Color.black.opacity(colorScheme == .dark ? 0.92 : 0.82),
-                        Color.black.opacity(colorScheme == .dark ? 0.72 : 0.58)
-                    ],
-                    startPoint: .topLeading,
-                    endPoint: .bottomTrailing
-                )
-
-                VStack(alignment: .leading, spacing: 10) {
-                    Image(systemName: videoFallbackIconName)
-                        .font(.system(size: 22, weight: .semibold))
-                        .foregroundStyle(.white.opacity(0.92))
-
-                    Spacer(minLength: 0)
-
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text(videoFallbackTitle)
-                            .font(appSettings.appFont(.subheadline, weight: .semibold))
-                            .foregroundStyle(.white)
-                            .lineLimit(2)
-
-                        Text(videoFallbackSubtitle)
-                            .font(appSettings.appFont(.caption1))
-                            .foregroundStyle(.white.opacity(0.76))
-                            .lineLimit(1)
-                    }
-                }
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
-                .padding(16)
-            }
         }
     }
 
@@ -1982,24 +1931,6 @@ struct NoteVideoPlayerView: View {
         .transition(.opacity)
     }
 
-    private var isLiveStream: Bool {
-        url.pathExtension.lowercased() == "m3u8"
-    }
-
-    private var videoFallbackIconName: String {
-        "video.fill"
-    }
-
-    private var videoFallbackTitle: String {
-        let fileName = url.deletingPathExtension().lastPathComponent.trimmingCharacters(in: .whitespacesAndNewlines)
-        return fileName.isEmpty ? "Video" : fileName
-    }
-
-    private var videoFallbackSubtitle: String {
-        let host = (url.host ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-        return host.isEmpty ? "Tap to play with controls" : "\(host) • Tap to play"
-    }
-
     private func loadVideoAspectRatio() async {
         if layout == .feed {
             try? await Task.sleep(for: .milliseconds(180))
@@ -2019,7 +1950,6 @@ struct NoteVideoPlayerView: View {
         if let cached = NoteVideoThumbnailCache.shared.image(for: url) {
             await MainActor.run {
                 videoThumbnail = cached
-                didAttemptThumbnailLoad = true
             }
             return
         }
@@ -2039,7 +1969,6 @@ struct NoteVideoPlayerView: View {
 
         await MainActor.run {
             videoThumbnail = generatedThumbnail
-            didAttemptThumbnailLoad = true
         }
 
         guard let generatedThumbnail else { return }
