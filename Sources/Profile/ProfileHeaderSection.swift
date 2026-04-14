@@ -70,7 +70,10 @@ struct ProfileHeaderSection<BackButton: View, MenuButton: View, ActionRow: View>
     var body: some View {
         Group {
             if isLoading {
-                ProfileHeaderSkeleton(backButton: backButton)
+                ProfileHeaderSkeleton(
+                    backButton: backButton,
+                    menuButton: menuButton
+                )
             } else {
                 loadedContent
             }
@@ -80,17 +83,11 @@ struct ProfileHeaderSection<BackButton: View, MenuButton: View, ActionRow: View>
     private var loadedContent: some View {
         VStack(alignment: .leading, spacing: 0) {
             ProfileBannerArtwork(bannerURL: content.bannerURL)
-                .overlay(alignment: .topLeading) {
-                    backButton
-                        .padding(.leading, 16)
-                        .padding(.top, 12)
-                        .zIndex(3)
-                }
-                .overlay(alignment: .topTrailing) {
-                    menuButton
-                        .padding(.trailing, 16)
-                        .padding(.top, 12)
-                        .zIndex(4)
+                .overlay(alignment: .top) {
+                    ProfileHeaderTopControls(
+                        backButton: backButton,
+                        menuButton: menuButton
+                    )
                 }
 
             VStack(alignment: .leading, spacing: 14) {
@@ -149,6 +146,25 @@ struct ProfileHeaderSection<BackButton: View, MenuButton: View, ActionRow: View>
 
     private var profileContentWidth: CGFloat {
         max(UIScreen.main.bounds.width - (profileHeaderContentHorizontalPadding * 2), 0)
+    }
+}
+
+private struct ProfileHeaderTopControls<BackButton: View, MenuButton: View>: View {
+    let backButton: BackButton
+    let menuButton: MenuButton
+
+    var body: some View {
+        HStack {
+            backButton
+
+            Spacer(minLength: 0)
+
+            menuButton
+        }
+        .padding(.horizontal, 16)
+        .padding(.top, 12)
+        .zIndex(4)
+        .unredacted()
     }
 }
 
@@ -518,8 +534,9 @@ private struct ProfileInfoRow: View {
     }
 }
 
-private struct ProfileHeaderSkeleton<BackButton: View>: View {
+private struct ProfileHeaderSkeleton<BackButton: View, MenuButton: View>: View {
     let backButton: BackButton
+    let menuButton: MenuButton
 
     @EnvironmentObject private var appSettings: AppSettingsStore
 
@@ -528,19 +545,11 @@ private struct ProfileHeaderSkeleton<BackButton: View>: View {
             Rectangle()
                 .fill(appSettings.themePalette.secondaryFill)
                 .frame(height: profileHeaderBannerHeight)
-                .overlay(alignment: .topLeading) {
-                    backButton
-                        .padding(.leading, 16)
-                        .padding(.top, 12)
-                        .zIndex(3)
-                }
-                .overlay(alignment: .topTrailing) {
-                    Circle()
-                        .fill(appSettings.themePalette.tertiaryFill)
-                        .frame(width: 36, height: 36)
-                        .padding(.trailing, 16)
-                        .padding(.top, 12)
-                        .zIndex(4)
+                .overlay(alignment: .top) {
+                    ProfileHeaderTopControls(
+                        backButton: backButton,
+                        menuButton: menuButton
+                    )
                 }
 
             VStack(alignment: .leading, spacing: 14) {

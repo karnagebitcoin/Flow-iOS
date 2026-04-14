@@ -119,6 +119,7 @@ struct NoteContentView: View {
     private let websitePreviewURL: URL?
     private let sourceEvent: NostrEvent
     private let articleMetadata: NostrLongFormArticleMetadata?
+    private let articleAuthor: LongFormArticleAuthorSummary?
     private let pollEvent: NostrEvent
     private let pollMetadata: NostrPollMetadata?
     private let onHashtagTap: ((String) -> Void)?
@@ -155,6 +156,7 @@ struct NoteContentView: View {
         commentCount: Int = 0,
         embedDepth: Int = 0,
         trustedMediaSharerPubkey: String? = nil,
+        articleAuthor: LongFormArticleAuthorSummary? = nil,
         onHashtagTap: ((String) -> Void)? = nil,
         onProfileTap: ((String) -> Void)? = nil,
         onReferencedEventTap: ((FeedItem) -> Void)? = nil
@@ -162,6 +164,7 @@ struct NoteContentView: View {
         sourceEvent = event
         let renderEvent = Self.renderEvent(for: event)
         articleMetadata = renderEvent.longFormArticleMetadata
+        self.articleAuthor = articleAuthor
         pollEvent = renderEvent
         pollMetadata = renderEvent.pollMetadata
         let parsedContent = Self.parsedContentCache.parsedContent(for: event) {
@@ -198,7 +201,7 @@ struct NoteContentView: View {
             if let articleMetadata {
                 LongFormArticlePreviewView(
                     article: articleMetadata,
-                    onHashtagTap: onHashtagTap
+                    author: articleAuthor ?? .fallback(pubkey: pollEvent.pubkey)
                 )
             } else {
                 let pollInsertionOffsets = NoteContentPollPlacement.insertionOffsets(

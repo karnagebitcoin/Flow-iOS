@@ -284,6 +284,7 @@ final class ActivityViewModel: ObservableObject {
         guard event.activityAction != nil else { return }
         guard event.mentionedPubkeys.contains(where: { $0.lowercased() == user }) else { return }
         guard normalizePubkey(event.pubkey) != user else { return }
+        let isMutedActor = MuteStore.shared.isMuted(event.pubkey)
 
         let normalizedEventID = event.id.lowercased()
         guard !knownEventIDs.contains(normalizedEventID) else { return }
@@ -292,7 +293,7 @@ final class ActivityViewModel: ObservableObject {
 
         await service.ingestLiveEvents([event])
 
-        if let reaction = event.activityAction?.reaction {
+        if !isMutedActor, let reaction = event.activityAction?.reaction {
             onLiveReactionDetected?(reaction)
         }
 
@@ -340,11 +341,16 @@ final class ActivityViewModel: ObservableObject {
 
         unreadCount = items.reduce(into: 0) { count, item in
             guard item.createdAt > lastReadCreatedAt else { return }
-            guard AppSettingsStore.shared.isActivityNotificationEnabled(for: item.action.notificationPreference) else {
-                return
-            }
+            guard shouldCountAsUnreadNotification(item) else { return }
             count += 1
         }
+    }
+
+    private func shouldCountAsUnreadNotification(_ item: ActivityRow) -> Bool {
+        guard AppSettingsStore.shared.isActivityNotificationEnabled(for: item.action.notificationPreference) else {
+            return false
+        }
+        return !MuteStore.shared.isMuted(item.actorPubkey)
     }
 
     private func resetStateForSignedOutUser() {

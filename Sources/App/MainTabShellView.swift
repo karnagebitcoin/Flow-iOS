@@ -31,6 +31,7 @@ struct MainTabShellView: View {
     @EnvironmentObject private var appSettings: AppSettingsStore
     @EnvironmentObject private var relaySettings: RelaySettingsStore
     @EnvironmentObject private var composeSheetCoordinator: AppComposeSheetCoordinator
+    @ObservedObject private var muteStore = MuteStore.shared
 
     @State private var selectedTab: Tab = .home
     @State private var homeRootResetID = UUID()
@@ -155,6 +156,7 @@ struct MainTabShellView: View {
                 accountPubkey: auth.currentAccount?.pubkey,
                 nsec: auth.currentNsec
             )
+            configureMuteStore()
             configureActivityViewModel()
             await activityViewModel.sceneDidChange(isActive: scenePhase == .active)
             configureLiveReactsSubscription()
@@ -165,14 +167,23 @@ struct MainTabShellView: View {
                 accountPubkey: auth.currentAccount?.pubkey,
                 nsec: auth.currentNsec
             )
+            configureMuteStore()
             configureActivityViewModel()
             configureLiveReactsSubscription()
+        }
+        .onChange(of: auth.currentNsec) { _, _ in
+            configureMuteStore()
         }
         .onChange(of: relaySettings.readRelays) { _, _ in
+            configureMuteStore()
             configureActivityViewModel()
             configureLiveReactsSubscription()
         }
+        .onChange(of: relaySettings.writeRelays) { _, _ in
+            configureMuteStore()
+        }
         .onChange(of: appSettings.slowConnectionMode) { _, _ in
+            configureMuteStore()
             configureActivityViewModel()
             configureLiveReactsSubscription()
         }
@@ -180,6 +191,9 @@ struct MainTabShellView: View {
             configureLiveReactsSubscription()
         }
         .onChange(of: appSettings.activityNotificationPreferenceSignature) { _, _ in
+            activityViewModel.notificationPreferencesChanged()
+        }
+        .onChange(of: muteStore.filterRevision) { _, _ in
             activityViewModel.notificationPreferencesChanged()
         }
         .onChange(of: isActivityRootVisible) { _, _ in
@@ -293,11 +307,14 @@ struct MainTabShellView: View {
     }
 
     private var effectiveWriteRelayURLs: [URL] {
-        let readRelayURLs = appSettings.effectiveReadRelayURLs(from: relaySettings.readRelayURLs)
         return appSettings.effectiveWriteRelayURLs(
             from: relaySettings.writeRelayURLs,
-            fallbackReadRelayURLs: readRelayURLs
+            fallbackReadRelayURLs: effectiveReadRelayURLs
         )
+    }
+
+    private var effectiveReadRelayURLs: [URL] {
+        appSettings.effectiveReadRelayURLs(from: relaySettings.readRelayURLs)
     }
 
     private var isBottomTabBarVisible: Bool {
@@ -346,19 +363,28 @@ struct MainTabShellView: View {
     private func configureActivityViewModel() {
         activityViewModel.configure(
             currentUserPubkey: auth.currentAccount?.pubkey,
-            readRelayURLs: appSettings.effectiveReadRelayURLs(from: relaySettings.readRelayURLs)
+            readRelayURLs: effectiveReadRelayURLs
         )
     }
 
     private func configureLiveReactsSubscription() {
         liveReactsSubscriptionController.update(
             currentUserPubkey: auth.currentAccount?.pubkey,
-            readRelayURLs: appSettings.effectiveReadRelayURLs(from: relaySettings.readRelayURLs),
+            readRelayURLs: effectiveReadRelayURLs,
             isEnabled: appSettings.liveReactsEnabled,
             scenePhase: scenePhase,
             onReaction: { reaction in
                 liveReactsCoordinator.emit(reaction)
             }
+        )
+    }
+
+    private func configureMuteStore() {
+        muteStore.configure(
+            accountPubkey: auth.currentAccount?.pubkey,
+            nsec: auth.currentNsec,
+            readRelayURLs: effectiveReadRelayURLs,
+            writeRelayURLs: effectiveWriteRelayURLs
         )
     }
 

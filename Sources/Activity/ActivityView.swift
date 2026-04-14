@@ -7,6 +7,7 @@ struct ActivityView: View {
     @EnvironmentObject private var relaySettings: RelaySettingsStore
 
     @ObservedObject var viewModel: ActivityViewModel
+    @ObservedObject private var muteStore = MuteStore.shared
     @State private var isShowingAuthSheet = false
     @State private var authSheetInitialTab: AuthSheetTab = .signIn
     @State private var isShowingSideMenu = false
@@ -67,6 +68,7 @@ struct ActivityView: View {
                             ForEach(viewModel.visibleItems) { item in
                                 ActivityRowCell(
                                     item: item,
+                                    isMuted: muteStore.isMuted(item.actorPubkey),
                                     onTap: {
                                         selectedThreadRoute = threadRoute(for: item)
                                     },
@@ -88,6 +90,7 @@ struct ActivityView: View {
                             accountPubkey: auth.currentAccount?.pubkey,
                             nsec: auth.currentNsec
                         )
+                        configureMuteStore()
                         viewModel.configure(
                             currentUserPubkey: auth.currentAccount?.pubkey,
                             readRelayURLs: effectiveReadRelayURLs
@@ -110,6 +113,7 @@ struct ActivityView: View {
                     accountPubkey: auth.currentAccount?.pubkey,
                     nsec: auth.currentNsec
                 )
+                configureMuteStore()
                 viewModel.configure(
                     currentUserPubkey: auth.currentAccount?.pubkey,
                     readRelayURLs: effectiveReadRelayURLs
@@ -117,18 +121,27 @@ struct ActivityView: View {
                 await viewModel.loadIfNeeded()
             }
             .onChange(of: auth.currentAccount?.pubkey) { _, newValue in
+                configureMuteStore()
                 viewModel.configure(
                     currentUserPubkey: newValue,
                     readRelayURLs: effectiveReadRelayURLs
                 )
             }
+            .onChange(of: auth.currentNsec) { _, _ in
+                configureMuteStore()
+            }
             .onChange(of: relaySettings.readRelays) { _, _ in
+                configureMuteStore()
                 viewModel.configure(
                     currentUserPubkey: auth.currentAccount?.pubkey,
                     readRelayURLs: effectiveReadRelayURLs
                 )
             }
+            .onChange(of: relaySettings.writeRelays) { _, _ in
+                configureMuteStore()
+            }
             .onChange(of: appSettings.slowConnectionMode) { _, _ in
+                configureMuteStore()
                 viewModel.configure(
                     currentUserPubkey: auth.currentAccount?.pubkey,
                     readRelayURLs: effectiveReadRelayURLs
@@ -192,6 +205,9 @@ struct ActivityView: View {
             }
             .onChange(of: selectedProfileRoute) { _, _ in
                 notifyRootVisibilityChanged()
+            }
+            .onChange(of: muteStore.filterRevision) { _, _ in
+                viewModel.notificationPreferencesChanged()
             }
         }
     }
@@ -428,6 +444,15 @@ struct ActivityView: View {
         selectedProfileRoute = ProfileRoute(pubkey: pubkey)
     }
 
+    private func configureMuteStore() {
+        muteStore.configure(
+            accountPubkey: auth.currentAccount?.pubkey,
+            nsec: auth.currentNsec,
+            readRelayURLs: effectiveReadRelayURLs,
+            writeRelayURLs: effectiveWriteRelayURLs
+        )
+    }
+
     @MainActor
     private var topNavAvatarLookupID: String {
         let accountID = auth.currentAccount?.id ?? "none"
@@ -539,25 +564,78 @@ struct ActivityView: View {
 struct ActivityRowCell: View {
     @EnvironmentObject private var appSettings: AppSettingsStore
     let item: ActivityRow
+    let isMuted: Bool
     let onTap: (() -> Void)?
     let onAvatarTap: (() -> Void)?
 
     init(
         item: ActivityRow,
+        isMuted: Bool = false,
         onTap: (() -> Void)? = nil,
         onAvatarTap: (() -> Void)? = nil
     ) {
         self.item = item
+        self.isMuted = isMuted
         self.onTap = onTap
         self.onAvatarTap = onAvatarTap
     }
 
     var body: some View {
-        HStack(spacing: 10) {
-            avatarView
-            rowBodyView
+        Group {
+            if isMuted {
+                mutedRowView
+            } else {
+                HStack(spacing: 10) {
+                    avatarView
+                    rowBodyView
+                }
+            }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private var mutedRowView: some View {
+        HStack(spacing: 10) {
+            Image(systemName: "speaker.slash.fill")
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(appSettings.themePalette.secondaryForeground)
+                .frame(width: 30, height: 30)
+                .background(appSettings.themePalette.secondaryFill, in: Circle())
+
+            mutedRowBodyView
+        }
+    }
+
+    @ViewBuilder
+    private var mutedRowBodyView: some View {
+        if let onTap {
+            Button(action: onTap) {
+                mutedRowContent
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Muted item")
+        } else {
+            mutedRowContent
+        }
+    }
+
+    private var mutedRowContent: some View {
+        HStack(spacing: 8) {
+            Text("Muted item")
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(appSettings.themePalette.secondaryForeground)
+                .lineLimit(1)
+
+            Spacer(minLength: 8)
+
+            Text(RelativeTimestampFormatter.shortString(from: item.createdAtDate))
+                .font(.caption2)
+                .foregroundStyle(appSettings.themePalette.secondaryForeground)
+                .monospacedDigit()
+                .lineLimit(1)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .contentShape(Rectangle())
     }
 
     @ViewBuilder

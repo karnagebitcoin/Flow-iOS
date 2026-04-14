@@ -121,6 +121,7 @@ struct ThreadDetailRootNoteCard: View {
                         mediaLayout: .feed,
                         reactionCount: showReactions ? reactionCount : 0,
                         commentCount: showReactions ? commentCount : 0,
+                        articleAuthor: LongFormArticleAuthorSummary(item: item),
                         onHashtagTap: onOpenHashtag,
                         onProfileTap: onOpenProfile,
                         onReferencedEventTap: onOpenReferencedEvent

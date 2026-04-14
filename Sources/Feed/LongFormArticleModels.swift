@@ -8,6 +8,7 @@ struct NostrLongFormArticleMetadata: Hashable, Sendable {
     let title: String
     let summary: String?
     let imageURL: URL?
+    let imageIsContentFallback: Bool
     let identifier: String?
     let publishedAt: Int
     let tags: [String]
@@ -69,11 +70,15 @@ struct NostrLongFormArticleMetadata: Hashable, Sendable {
         }
 
         let resolvedTitle = title ?? identifier ?? "Untitled"
+        let contentImageURL = imageURL == nil
+            ? LongFormArticleMarkdownParser.firstImageURL(in: event.content)
+            : nil
         let wordCount = Self.wordCount(in: event.content)
 
         self.title = resolvedTitle
         self.summary = summary
-        self.imageURL = imageURL
+        self.imageURL = imageURL ?? contentImageURL
+        self.imageIsContentFallback = imageURL == nil && contentImageURL != nil
         self.identifier = identifier
         self.publishedAt = publishedAt
         self.tags = tags
@@ -123,6 +128,21 @@ enum LongFormArticleBlock: Hashable, Sendable {
 }
 
 enum LongFormArticleMarkdownParser {
+    static func firstImageURL(in markdown: String) -> URL? {
+        let normalized = markdown
+            .replacingOccurrences(of: "\r\n", with: "\n")
+            .replacingOccurrences(of: "\r", with: "\n")
+
+        for line in normalized.components(separatedBy: "\n") {
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            if case .image(let url, _) = standaloneImage(in: trimmed) {
+                return url
+            }
+        }
+
+        return nil
+    }
+
     static func parseBlocks(from markdown: String) -> [LongFormArticleBlock] {
         let normalized = markdown
             .replacingOccurrences(of: "\r\n", with: "\n")

@@ -534,6 +534,7 @@ struct NostrEventReferenceCardView: View {
             NoteContentView(
                 event: item.displayEvent,
                 embedDepth: embedDepth,
+                articleAuthor: LongFormArticleAuthorSummary(item: item),
                 onHashtagTap: onHashtagTap,
                 onProfileTap: onProfileTap,
                 onReferencedEventTap: onOpenThread
