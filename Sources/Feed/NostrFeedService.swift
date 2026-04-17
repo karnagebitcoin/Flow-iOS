@@ -210,6 +210,7 @@ private actor LocalProfileSearchIndex {
     static let shared = LocalProfileSearchIndex()
 
     private struct Signature: Equatable {
+        let databasePath: String
         let persistedProfileCount: Int
         let sessionIngestedProfileCount: Int
     }
@@ -385,6 +386,7 @@ private actor LocalProfileSearchIndex {
     private static func signature(for nostrDatabase: FlowNostrDB) -> Signature {
         let diagnostics = nostrDatabase.diagnosticsSnapshot()
         return Signature(
+            databasePath: diagnostics.databasePath,
             persistedProfileCount: diagnostics.persistedProfileCount,
             sessionIngestedProfileCount: diagnostics.sessionIngestedProfileCount
         )

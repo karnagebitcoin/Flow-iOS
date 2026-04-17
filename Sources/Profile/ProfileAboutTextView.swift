@@ -11,17 +11,20 @@ struct ProfileAboutTextView: View {
     private let mentionIdentifiers: [String]
     private let onProfileTap: (String) -> Void
     private let onHashtagTap: ((String) -> Void)?
+    private let onRelayTap: ((URL) -> Void)?
 
     @State private var mentionLabels: [String: String] = [:]
 
     init(
         text: String,
         onProfileTap: @escaping (String) -> Void,
-        onHashtagTap: ((String) -> Void)? = nil
+        onHashtagTap: ((String) -> Void)? = nil,
+        onRelayTap: ((URL) -> Void)? = nil
     ) {
         self.text = text
         self.onProfileTap = onProfileTap
         self.onHashtagTap = onHashtagTap
+        self.onRelayTap = onRelayTap
         self.tokens = NoteContentParser.tokenize(content: text)
         self.mentionIdentifiers = Self.collectMentionIdentifiers(tokens: tokens)
     }
@@ -41,6 +44,12 @@ struct ProfileAboutTextView: View {
                 }
                 if let hashtag = NoteContentParser.hashtagFromActionURL(url) {
                     onHashtagTap?(hashtag)
+                    return .handled
+                }
+                if let relayURL = RelayURLSupport.relayURL(fromActionURL: url) {
+                    if let onRelayTap {
+                        onRelayTap(relayURL)
+                    }
                     return .handled
                 }
                 return .systemAction(url)
@@ -79,7 +88,13 @@ struct ProfileAboutTextView: View {
                     segment.foregroundColor = .accentColor
                 }
             case .websocketURL:
-                segment.foregroundColor = appSettings.themePalette.secondaryForeground
+                if let url = RelayURLSupport.actionURL(for: token.value),
+                   onRelayTap != nil {
+                    segment.link = url
+                    segment.foregroundColor = .accentColor
+                } else {
+                    segment.foregroundColor = appSettings.themePalette.secondaryForeground
+                }
             case .text, .emoji, .nostrEvent:
                 break
             }

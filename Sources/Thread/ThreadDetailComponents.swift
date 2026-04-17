@@ -17,6 +17,7 @@ struct ThreadDetailRootNoteCard: View {
         let onOpenProfile: (String) -> Void
         let onOpenHashtag: (String) -> Void
         let onOpenReferencedEvent: (FeedItem) -> Void
+        let onOpenRelay: (URL) -> Void
         let onOptionsTap: () -> Void
         let onReplyTap: () -> Void
         let onReactionTap: (Int) -> Void
@@ -124,7 +125,8 @@ struct ThreadDetailRootNoteCard: View {
                         articleAuthor: LongFormArticleAuthorSummary(item: item),
                         onHashtagTap: onOpenHashtag,
                         onProfileTap: onOpenProfile,
-                        onReferencedEventTap: onOpenReferencedEvent
+                        onReferencedEventTap: onOpenReferencedEvent,
+                        onRelayTap: onOpenRelay
                     )
                     .frame(maxWidth: .infinity, alignment: .leading)
                 }
@@ -211,6 +213,8 @@ struct ThreadDetailContentSection: View {
 
         @Binding var selectedContentTab: ThreadDetailContentTab
         let replies: [FeedItem]
+        let spamReplies: [FeedItem]
+        let spamRepliesExpanded: Bool
         let replyCountsByTarget: [String: Int]
         let noteActivityRows: [ActivityRow]
         let isLoadingReplies: Bool
@@ -225,8 +229,11 @@ struct ThreadDetailContentSection: View {
         let onFollowToggle: (String) -> Void
         let onOpenHashtag: (String) -> Void
         let onOpenProfile: (String) -> Void
+        let onOpenRelay: (URL) -> Void
         let onOpenThread: (FeedItem) -> Void
         let onReplyTap: (FeedItem) -> Void
+        let onToggleSpamReplies: () -> Void
+        let onMarkNotSpam: (String) -> Void
 
         var body: some View {
             VStack(alignment: .leading, spacing: 0) {
@@ -243,6 +250,8 @@ struct ThreadDetailContentSection: View {
                 case .replies:
                     ThreadDetailRepliesSection(
                         replies: replies,
+                        spamReplies: spamReplies,
+                        spamRepliesExpanded: spamRepliesExpanded,
                         replyCountsByTarget: replyCountsByTarget,
                         isLoading: isLoadingReplies,
                         rootEventID: rootEventID,
@@ -253,8 +262,11 @@ struct ThreadDetailContentSection: View {
                         onFollowToggle: onFollowToggle,
                         onOpenHashtag: onOpenHashtag,
                         onOpenProfile: onOpenProfile,
+                        onOpenRelay: onOpenRelay,
                         onOpenThread: onOpenThread,
-                        onReplyTap: onReplyTap
+                        onReplyTap: onReplyTap,
+                        onToggleSpamReplies: onToggleSpamReplies,
+                        onMarkNotSpam: onMarkNotSpam
                     )
 
                     if let repliesErrorMessage {
@@ -290,6 +302,8 @@ struct ThreadDetailRepliesSection: View {
         @ObservedObject private var reactionStats = NoteReactionStatsService.shared
 
         let replies: [FeedItem]
+        let spamReplies: [FeedItem]
+        let spamRepliesExpanded: Bool
         let replyCountsByTarget: [String: Int]
         let isLoading: Bool
         let rootEventID: String
@@ -300,19 +314,22 @@ struct ThreadDetailRepliesSection: View {
         let onFollowToggle: (String) -> Void
         let onOpenHashtag: (String) -> Void
         let onOpenProfile: (String) -> Void
+        let onOpenRelay: (URL) -> Void
         let onOpenThread: (FeedItem) -> Void
         let onReplyTap: (FeedItem) -> Void
+        let onToggleSpamReplies: () -> Void
+        let onMarkNotSpam: (String) -> Void
 
         var body: some View {
-            Group {
-                if isLoading && replies.isEmpty {
+            VStack(alignment: .leading, spacing: 0) {
+                if isLoading && replies.isEmpty && spamReplies.isEmpty {
                     HStack {
                         Spacer()
                         ProgressView()
                         Spacer()
                     }
                     .padding(.vertical, 16)
-                } else if replies.isEmpty {
+                } else if replies.isEmpty && spamReplies.isEmpty {
                     VStack(spacing: 6) {
                         Text("No replies yet")
                             .font(.headline)
@@ -324,6 +341,137 @@ struct ThreadDetailRepliesSection: View {
                     .padding(.horizontal, 16)
                     .padding(.vertical, 18)
                 } else {
+                    ForEach(replies) { reply in
+                        replyRow(reply)
+                    }
+
+                    if !spamReplies.isEmpty {
+                        ThreadDetailSpamRepliesGroup(
+                            replies: spamReplies,
+                            isExpanded: spamRepliesExpanded,
+                            replyCountsByTarget: replyCountsByTarget,
+                            rootEventID: rootEventID,
+                            showReactions: showReactions,
+                            effectiveReadRelayURLs: effectiveReadRelayURLs,
+                            currentUserPubkey: currentUserPubkey,
+                            isFollowingAuthor: isFollowingAuthor,
+                            onFollowToggle: onFollowToggle,
+                            onOpenHashtag: onOpenHashtag,
+                            onOpenProfile: onOpenProfile,
+                            onOpenRelay: onOpenRelay,
+                            onOpenThread: onOpenThread,
+                            onReplyTap: onReplyTap,
+                            onToggle: onToggleSpamReplies,
+                            onMarkNotSpam: onMarkNotSpam
+                        )
+                    }
+                }
+            }
+        }
+
+        private func replyRow(_ reply: FeedItem) -> some View {
+            FeedRowView(
+                item: reply,
+                reactionCount: reactionStats.reactionCount(for: reply.displayEventID),
+                isLikedByCurrentUser: reactionStats.isReactedByCurrentUser(
+                    for: reply.displayEventID,
+                    currentPubkey: currentUserPubkey
+                ),
+                commentCount: replyCountsByTarget[reply.displayEventID.lowercased()] ?? 0,
+                showReactions: showReactions,
+                avatarMenuActions: .init(
+                    followLabel: isFollowingAuthor(reply.displayAuthorPubkey) ? "Unfollow" : "Follow",
+                    onFollowToggle: {
+                        onFollowToggle(reply.displayAuthorPubkey)
+                    },
+                    onViewProfile: {
+                        onOpenProfile(reply.displayAuthorPubkey)
+                    }
+                ),
+                onHashtagTap: onOpenHashtag,
+                onProfileTap: onOpenProfile,
+                onOpenThread: {
+                    onOpenThread(reply)
+                },
+                onRepostActorTap: onOpenProfile,
+                onReferencedEventTap: { referencedItem in
+                    onOpenThread(referencedItem)
+                },
+                onRelayTap: onOpenRelay,
+                onReplyTap: {
+                    onReplyTap(reply)
+                },
+                suppressReplyContextForDirectReplyTargetEventID: rootEventID
+            )
+            .id("thread-detail-reply-\(reply.id.lowercased())")
+            .padding(.horizontal, 16)
+            .onAppear {
+                if showReactions {
+                    reactionStats.prefetch(events: [reply.displayEvent], relayURLs: effectiveReadRelayURLs)
+                }
+            }
+            .overlay(alignment: .bottom) {
+                Divider()
+                    .overlay(appSettings.themePalette.chromeBorder)
+                    .padding(.leading, 56)
+            }
+        }
+    }
+
+struct ThreadDetailSpamRepliesGroup: View {
+        @EnvironmentObject private var appSettings: AppSettingsStore
+        @ObservedObject private var reactionStats = NoteReactionStatsService.shared
+
+        let replies: [FeedItem]
+        let isExpanded: Bool
+        let replyCountsByTarget: [String: Int]
+        let rootEventID: String
+        let showReactions: Bool
+        let effectiveReadRelayURLs: [URL]
+        let currentUserPubkey: String?
+        let isFollowingAuthor: (String) -> Bool
+        let onFollowToggle: (String) -> Void
+        let onOpenHashtag: (String) -> Void
+        let onOpenProfile: (String) -> Void
+        let onOpenRelay: (URL) -> Void
+        let onOpenThread: (FeedItem) -> Void
+        let onReplyTap: (FeedItem) -> Void
+        let onToggle: () -> Void
+        let onMarkNotSpam: (String) -> Void
+
+        var body: some View {
+            VStack(alignment: .leading, spacing: 0) {
+                Button(action: onToggle) {
+                    HStack(spacing: 8) {
+                        Image(systemName: isExpanded ? "chevron.up" : "chevron.down")
+                            .font(.caption.weight(.bold))
+
+                        Text("\(replies.count) hidden \(replies.count == 1 ? "reply" : "replies") from likely spam accounts")
+                            .font(.footnote.weight(.semibold))
+                            .frame(maxWidth: .infinity, alignment: .leading)
+
+                        Text(isExpanded ? "Hide" : "Show")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(appSettings.themePalette.secondaryForeground)
+                    }
+                    .foregroundStyle(appSettings.themePalette.foreground)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 11)
+                    .background(
+                        RoundedRectangle(cornerRadius: 8, style: .continuous)
+                            .fill(appSettings.themePalette.secondaryBackground)
+                    )
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 8, style: .continuous)
+                            .stroke(appSettings.themePalette.chromeBorder, lineWidth: 0.7)
+                    )
+                }
+                .buttonStyle(.plain)
+                .padding(.horizontal, 16)
+                .padding(.vertical, 12)
+                .accessibilityLabel("Hidden likely spam replies")
+
+                if isExpanded {
                     ForEach(replies) { reply in
                         FeedRowView(
                             item: reply,
@@ -352,18 +500,31 @@ struct ThreadDetailRepliesSection: View {
                             onReferencedEventTap: { referencedItem in
                                 onOpenThread(referencedItem)
                             },
+                            onRelayTap: onOpenRelay,
                             onReplyTap: {
                                 onReplyTap(reply)
                             },
                             suppressReplyContextForDirectReplyTargetEventID: rootEventID
                         )
-                        .id("thread-detail-reply-\(reply.id.lowercased())")
+                        .id("thread-detail-spam-reply-\(reply.id.lowercased())")
                         .padding(.horizontal, 16)
                         .onAppear {
                             if showReactions {
                                 reactionStats.prefetch(events: [reply.displayEvent], relayURLs: effectiveReadRelayURLs)
                             }
                         }
+
+                        HStack {
+                            Spacer(minLength: 0)
+                            Button("Not spam") {
+                                onMarkNotSpam(reply.displayAuthorPubkey)
+                            }
+                            .buttonStyle(.borderless)
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(appSettings.primaryColor)
+                        }
+                        .padding(.horizontal, 16)
+                        .padding(.bottom, 8)
 
                         Divider()
                             .overlay(appSettings.themePalette.chromeBorder)

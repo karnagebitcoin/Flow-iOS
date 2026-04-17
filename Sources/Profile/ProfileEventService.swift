@@ -29,6 +29,22 @@ struct MuteListSnapshot: Sendable {
     }
 }
 
+struct ProfileRelayConnectionsSnapshot: Sendable, Equatable {
+    static let empty = ProfileRelayConnectionsSnapshot(
+        readRelays: [],
+        writeRelays: [],
+        inboxRelays: []
+    )
+
+    let readRelays: [URL]
+    let writeRelays: [URL]
+    let inboxRelays: [URL]
+
+    var isEmpty: Bool {
+        readRelays.isEmpty && writeRelays.isEmpty && inboxRelays.isEmpty
+    }
+}
+
 struct ProfileEventService {
     private let relayClient: any NostrRelayEventFetching
     private let seenEventStore: any SeenEventStoring
@@ -77,6 +93,48 @@ struct ProfileEventService {
         }
 
         return MuteListSnapshot(content: event.content, tags: event.tags)
+    }
+
+    func fetchRelayConnectionsSnapshot(
+        relayURLs: [URL],
+        pubkey: String
+    ) async -> ProfileRelayConnectionsSnapshot {
+        async let relayListEvent = fetchOptionalLatestReplaceableEvent(
+            relayURLs: relayURLs,
+            authorPubkey: pubkey,
+            kind: 10_002,
+            limit: 20
+        )
+        async let inboxRelayEvent = fetchOptionalLatestReplaceableEvent(
+            relayURLs: relayURLs,
+            authorPubkey: pubkey,
+            kind: 10_050,
+            limit: 20
+        )
+
+        let relayList = await relayListEvent
+        let inboxRelayList = await inboxRelayEvent
+        let readWriteRelays = Self.readWriteRelayURLs(from: relayList?.tags ?? [])
+
+        return ProfileRelayConnectionsSnapshot(
+            readRelays: readWriteRelays.read,
+            writeRelays: readWriteRelays.write,
+            inboxRelays: Self.inboxRelayURLs(from: inboxRelayList?.tags ?? [])
+        )
+    }
+
+    private func fetchOptionalLatestReplaceableEvent(
+        relayURLs: [URL],
+        authorPubkey: String,
+        kind: Int,
+        limit: Int
+    ) async -> NostrEvent? {
+        try? await fetchLatestReplaceableEvent(
+            relayURLs: relayURLs,
+            authorPubkey: authorPubkey,
+            kind: kind,
+            limit: limit
+        )
     }
 
     private func fetchLatestReplaceableEvent(
@@ -160,5 +218,44 @@ struct ProfileEventService {
         }
 
         return ordered
+    }
+
+    private static func readWriteRelayURLs(from tags: [[String]]) -> (read: [URL], write: [URL]) {
+        var readRelays: [URL] = []
+        var writeRelays: [URL] = []
+
+        for tag in tags {
+            guard tag.count >= 2,
+                  tag[0].lowercased() == "r",
+                  let relayURL = RelayURLSupport.normalizedURL(from: tag[1]) else {
+                continue
+            }
+
+            let marker = tag.count >= 3 ? tag[2].trimmingCharacters(in: .whitespacesAndNewlines).lowercased() : ""
+            switch marker {
+            case "read":
+                readRelays.append(relayURL)
+            case "write":
+                writeRelays.append(relayURL)
+            default:
+                readRelays.append(relayURL)
+                writeRelays.append(relayURL)
+            }
+        }
+
+        return (
+            read: RelayURLSupport.normalizedRelayURLs(readRelays),
+            write: RelayURLSupport.normalizedRelayURLs(writeRelays)
+        )
+    }
+
+    private static func inboxRelayURLs(from tags: [[String]]) -> [URL] {
+        let relays = tags.compactMap { tag -> URL? in
+            guard tag.count >= 2 else { return nil }
+            let tagName = tag[0].lowercased()
+            guard tagName == "relay" || tagName == "r" else { return nil }
+            return RelayURLSupport.normalizedURL(from: tag[1])
+        }
+        return RelayURLSupport.normalizedRelayURLs(relays)
     }
 }

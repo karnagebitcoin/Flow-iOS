@@ -53,6 +53,9 @@ enum MediaUploadPreparation {
     private static let maxProfileBannerBytes = 500 * 1_024
     private static let animatedProfileGIFVideoThresholdBytes = 1 * 1_024 * 1_024
     private static let animatedProfileVideoBitRate = 420_000
+    private static let animatedGIFUploadVideoMaxDimension: CGFloat = 720
+    private static let animatedGIFUploadVideoBitRate = 900_000
+    private static let animatedGIFUploadMinimumSavingsRatio = 0.98
     private static let stillImageDownscaleStep: CGFloat = 0.88
     private static let minimumStillImageDimension: CGFloat = 1_200
     private static let stillImageJPEGQualities: [CGFloat] = [0.92, 0.88, 0.84, 0.80, 0.76, 0.72]
@@ -116,6 +119,36 @@ enum MediaUploadPreparation {
         fileExtension: String
     ) async throws -> PreparedUploadMedia {
         try await prepareVideoUpload(from: fileURL, mimeType: mimeType, fallbackFileExtension: fileExtension)
+    }
+
+    static func prepareGIFKeyboardUploadMedia(
+        data: Data,
+        mimeType: String,
+        fileExtension: String
+    ) async throws -> PreparedUploadMedia {
+        guard !data.isEmpty else {
+            throw MediaUploadError.missingFileData
+        }
+
+        let contentType = UTType(mimeType: mimeType) ?? UTType(filenameExtension: fileExtension)
+        if isGIFAsset(mimeType: mimeType, fileExtension: fileExtension),
+           let optimizedVideo = await optimizedAnimatedGIFVideoPayload(
+               from: data,
+               contentType: contentType,
+               maxDimension: animatedGIFUploadVideoMaxDimension,
+               bitRate: animatedGIFUploadVideoBitRate,
+               minimumSavingsRatio: animatedGIFUploadMinimumSavingsRatio,
+               outputFilePrefix: "gif-upload-",
+               requiresProfileOptimizationThreshold: false
+           ) {
+            return optimizedVideo
+        }
+
+        return try prepareUploadMedia(
+            data: data,
+            mimeType: mimeType,
+            fileExtension: fileExtension
+        )
     }
 
     static func prepareProfileImageUpload(from item: PhotosPickerItem) async throws -> PreparedUploadMedia {
@@ -231,6 +264,26 @@ enum MediaUploadPreparation {
         from data: Data,
         contentType: UTType?
     ) async -> PreparedUploadMedia? {
+        await optimizedAnimatedGIFVideoPayload(
+            from: data,
+            contentType: contentType,
+            maxDimension: maxProfileImageDimension,
+            bitRate: animatedProfileVideoBitRate,
+            minimumSavingsRatio: 1.0,
+            outputFilePrefix: "profile-gif-",
+            requiresProfileOptimizationThreshold: true
+        )
+    }
+
+    private static func optimizedAnimatedGIFVideoPayload(
+        from data: Data,
+        contentType: UTType?,
+        maxDimension: CGFloat,
+        bitRate: Int,
+        minimumSavingsRatio: Double,
+        outputFilePrefix: String,
+        requiresProfileOptimizationThreshold: Bool
+    ) async -> PreparedUploadMedia? {
         if let contentType, contentType.conforms(to: .movie) {
             return nil
         }
@@ -248,24 +301,28 @@ enum MediaUploadPreparation {
         let pixelWidth = (sourceProperties?[kCGImagePropertyPixelWidth] as? NSNumber)?.doubleValue ?? 0
         let pixelHeight = (sourceProperties?[kCGImagePropertyPixelHeight] as? NSNumber)?.doubleValue ?? 0
         let longestEdge = max(pixelWidth, pixelHeight)
-        guard data.count >= animatedProfileGIFVideoThresholdBytes || longestEdge > maxProfileImageDimension else {
+        if requiresProfileOptimizationThreshold,
+           data.count < animatedProfileGIFVideoThresholdBytes,
+           longestEdge <= maxProfileImageDimension {
             return nil
         }
 
-        let outputURL = temporaryFileURL(prefix: "profile-gif-", fileExtension: "mp4")
+        let outputURL = temporaryFileURL(prefix: outputFilePrefix, fileExtension: "mp4")
         defer {
             try? FileManager.default.removeItem(at: outputURL)
         }
 
-        let previewImage = profileGIFPreviewImage(from: source, targetMaxDimension: maxProfileImageDimension)
+        let previewImage = animatedGIFPreviewImage(from: source, targetMaxDimension: maxDimension)
 
         do {
-            try await transcodeProfileGIFToVideo(
+            try await transcodeAnimatedGIFToVideo(
                 source: source,
                 outputURL: outputURL,
                 originalWidth: pixelWidth,
                 originalHeight: pixelHeight,
-                frameCount: frameCount
+                frameCount: frameCount,
+                maxDimension: maxDimension,
+                bitRate: bitRate
             )
         } catch {
             return nil
@@ -273,7 +330,7 @@ enum MediaUploadPreparation {
 
         guard let outputData = try? Data(contentsOf: outputURL),
               !outputData.isEmpty,
-              outputData.count < data.count else {
+              Double(outputData.count) < Double(data.count) * minimumSavingsRatio else {
             return nil
         }
 
@@ -774,16 +831,19 @@ enum MediaUploadPreparation {
         return nil
     }
 
-    private static func transcodeProfileGIFToVideo(
+    private static func transcodeAnimatedGIFToVideo(
         source: CGImageSource,
         outputURL: URL,
         originalWidth: Double,
         originalHeight: Double,
-        frameCount: Int
+        frameCount: Int,
+        maxDimension: CGFloat,
+        bitRate: Int
     ) async throws {
-        let outputSize = profileVideoOutputSize(
+        let outputSize = animatedGIFVideoOutputSize(
             originalWidth: originalWidth,
-            originalHeight: originalHeight
+            originalHeight: originalHeight,
+            maxDimension: maxDimension
         )
 
         let writer = try AVAssetWriter(outputURL: outputURL, fileType: .mp4)
@@ -792,7 +852,7 @@ enum MediaUploadPreparation {
             AVVideoWidthKey: outputSize.width,
             AVVideoHeightKey: outputSize.height,
             AVVideoCompressionPropertiesKey: [
-                AVVideoAverageBitRateKey: animatedProfileVideoBitRate,
+                AVVideoAverageBitRateKey: bitRate,
                 AVVideoExpectedSourceFrameRateKey: 15,
                 AVVideoMaxKeyFrameIntervalKey: 15,
                 AVVideoProfileLevelKey: AVVideoProfileLevelH264HighAutoLevel
@@ -875,13 +935,14 @@ enum MediaUploadPreparation {
         }
     }
 
-    private static func profileVideoOutputSize(
+    private static func animatedGIFVideoOutputSize(
         originalWidth: Double,
-        originalHeight: Double
+        originalHeight: Double,
+        maxDimension: CGFloat
     ) -> CGSize {
         let safeWidth = max(originalWidth, 1)
         let safeHeight = max(originalHeight, 1)
-        let scale = min(1, Double(maxProfileImageDimension) / max(safeWidth, safeHeight))
+        let scale = min(1, Double(maxDimension) / max(safeWidth, safeHeight))
         let scaledWidth = evenPixelDimension(Int((safeWidth * scale).rounded()))
         let scaledHeight = evenPixelDimension(Int((safeHeight * scale).rounded()))
         return CGSize(width: scaledWidth, height: scaledHeight)
@@ -930,7 +991,7 @@ enum MediaUploadPreparation {
         return pixelBuffer
     }
 
-    private static func profileGIFPreviewImage(
+    private static func animatedGIFPreviewImage(
         from source: CGImageSource,
         targetMaxDimension: CGFloat
     ) -> UIImage? {

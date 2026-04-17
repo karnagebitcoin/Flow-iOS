@@ -560,6 +560,43 @@ final class AppThemeOptionTests: XCTestCase {
         XCTAssertTrue(reloaded.fullWidthNoteRows)
     }
 
+    @MainActor
+    func testMarkedSpamIsSharedAcrossAccountsAndNotSpamOverridesLocally() {
+        let defaults = UserDefaults(suiteName: #function)!
+        defaults.removePersistentDomain(forName: #function)
+        let authStore = AuthStore(defaults: defaults)
+        let firstAccountPubkey = String(repeating: "a", count: 64)
+        let secondAccountPubkey = String(repeating: "c", count: 64)
+        let targetPubkey = String(repeating: "b", count: 64)
+
+        let settings = AppSettingsStore(defaults: defaults, authStore: authStore)
+        settings.configure(accountPubkey: firstAccountPubkey)
+        settings.addSpamFilterMarkedPubkey(targetPubkey)
+
+        XCTAssertTrue(settings.isSpamFilterMarked(targetPubkey))
+        XCTAssertTrue(settings.shouldHideSpamMarkedPubkey(targetPubkey))
+        XCTAssertFalse(settings.isSpamReplySafelisted(targetPubkey))
+
+        settings.addSpamReplySafelistedPubkey(targetPubkey)
+
+        XCTAssertTrue(settings.isSpamFilterMarked(targetPubkey))
+        XCTAssertTrue(settings.isSpamReplySafelisted(targetPubkey))
+        XCTAssertFalse(settings.shouldHideSpamMarkedPubkey(targetPubkey))
+
+        let reloaded = AppSettingsStore(defaults: defaults, authStore: authStore)
+        reloaded.configure(accountPubkey: firstAccountPubkey)
+
+        XCTAssertTrue(reloaded.isSpamFilterMarked(targetPubkey))
+        XCTAssertTrue(reloaded.isSpamReplySafelisted(targetPubkey))
+        XCTAssertFalse(reloaded.shouldHideSpamMarkedPubkey(targetPubkey))
+
+        reloaded.configure(accountPubkey: secondAccountPubkey)
+
+        XCTAssertTrue(reloaded.isSpamFilterMarked(targetPubkey))
+        XCTAssertFalse(reloaded.isSpamReplySafelisted(targetPubkey))
+        XCTAssertTrue(reloaded.shouldHideSpamMarkedPubkey(targetPubkey))
+    }
+
     private func assertColor(
         _ color: Color,
         matches expected: UIColor,

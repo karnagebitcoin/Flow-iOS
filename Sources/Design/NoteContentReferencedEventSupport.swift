@@ -420,6 +420,7 @@ struct NostrEventReferenceCardView: View {
     let onHashtagTap: ((String) -> Void)?
     let onProfileTap: ((String) -> Void)?
     let onOpenThread: ((FeedItem) -> Void)?
+    let onRelayTap: ((URL) -> Void)?
     @EnvironmentObject private var appSettings: AppSettingsStore
 
     @State private var state: LoadState = .idle
@@ -519,7 +520,8 @@ struct NostrEventReferenceCardView: View {
                 articleAuthor: LongFormArticleAuthorSummary(item: item),
                 onHashtagTap: onHashtagTap,
                 onProfileTap: onProfileTap,
-                onReferencedEventTap: onOpenThread
+                onReferencedEventTap: onOpenThread,
+                onRelayTap: onRelayTap
             )
         }
         .padding(10)

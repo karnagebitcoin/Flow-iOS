@@ -356,6 +356,11 @@ final class ProfileViewModel: ObservableObject {
         }
     }
 
+    func insertOptimisticPublishedItem(_ item: FeedItem) {
+        guard item.displayAuthorPubkey.lowercased() == pubkey.lowercased() else { return }
+        mergeKeepingNewest(itemsToMerge: [item])
+    }
+
     func prepareForSelectedModeIfNeeded() async {
         guard hasCompletedInitialLoad else { return }
         guard mode == .postsAndReplies else { return }

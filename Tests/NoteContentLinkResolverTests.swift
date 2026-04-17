@@ -71,11 +71,33 @@ final class NoteContentLinkResolverTests: XCTestCase {
         XCTAssertTrue(NoteContentView.shouldUseAttributedInlineText(for: tokens))
     }
 
-    func testSmallWebsocketNotesKeepStandardInlineRenderer() {
+    func testSmallWebsocketNotesUseAttributedInlineRendererForRelayLinks() {
         let tokens = NoteContentParser.tokenize(content: "Relay: wss://relay.example.com")
 
         XCTAssertEqual(tokens.filter { $0.type == .websocketURL }.count, 1)
-        XCTAssertFalse(NoteContentView.shouldUseAttributedInlineText(for: tokens))
+        XCTAssertTrue(NoteContentView.shouldUseAttributedInlineText(for: tokens))
+    }
+
+    func testWebsocketURLUsesInAppRelayRoute() throws {
+        let token = NoteContentToken(type: .websocketURL, value: "wss://relay.damus.io")
+
+        let url = try XCTUnwrap(
+            NoteContentLinkResolver.linkURL(
+                for: token,
+                allowsInAppProfileRouting: true
+            )
+        )
+
+        XCTAssertEqual(url.scheme, "x21-relay")
+        XCTAssertEqual(RelayURLSupport.relayURL(fromActionURL: url)?.absoluteString, "wss://relay.damus.io/")
+    }
+
+    func testRelayRouteUsesFriendlyDisplayName() throws {
+        let relayURL = try XCTUnwrap(URL(string: "wss://relay.damus.io"))
+        let route = try XCTUnwrap(RelayRoute(relayURL: relayURL))
+
+        XCTAssertEqual(route.displayName, "Damus Relay")
+        XCTAssertEqual(route.relayURL.absoluteString, "wss://relay.damus.io/")
     }
 
     func testYouTubeWatchURLTokenizesAsPlayableVideoEmbed() throws {

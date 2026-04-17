@@ -90,7 +90,9 @@ enum NoteContentLinkResolver {
             return NoteContentParser.njumpURL(for: normalized)
         case .hashtag:
             return NoteContentParser.hashtagActionURL(for: token.value)
-        case .text, .websocketURL, .emoji, .nostrEvent, .image, .video, .youtubeVideo, .audio:
+        case .websocketURL:
+            return RelayURLSupport.actionURL(for: token.value)
+        case .text, .emoji, .nostrEvent, .image, .video, .youtubeVideo, .audio:
             return nil
         }
     }
@@ -117,6 +119,8 @@ struct NoteContentView: View {
     private let tokens: [NoteContentToken]
     private let parts: [RenderPart]
     private let websitePreviewURL: URL?
+    private let mediaAspectRatioHints: [String: CGFloat]
+    private let gifLikeVideoURLKeys: Set<String>
     private let sourceEvent: NostrEvent
     private let articleMetadata: NostrLongFormArticleMetadata?
     private let articleAuthor: LongFormArticleAuthorSummary?
@@ -125,6 +129,7 @@ struct NoteContentView: View {
     private let onHashtagTap: ((String) -> Void)?
     private let onProfileTap: ((String) -> Void)?
     private let onReferencedEventTap: ((FeedItem) -> Void)?
+    private let onRelayTap: ((URL) -> Void)?
     private let trustedMediaSharerPubkey: String?
     private let mediaLayout: NoteContentMediaLayout
     private let reactionCount: Int
@@ -147,7 +152,6 @@ struct NoteContentView: View {
     private static let collapsedPreviewLineLimit = 9
     private static let maxEmbeddedReferenceDepth = 1
     private static let maxConcatenatedInlineTokenCount = 64
-    private static let maxConcatenatedWebsocketURLTokenCount = 12
     private static let parsedContentCache = NoteParsedContentCache.shared
     private static let blurRevealStateCache = NoteBlurRevealStateCache.shared
 
@@ -161,7 +165,8 @@ struct NoteContentView: View {
         articleAuthor: LongFormArticleAuthorSummary? = nil,
         onHashtagTap: ((String) -> Void)? = nil,
         onProfileTap: ((String) -> Void)? = nil,
-        onReferencedEventTap: ((FeedItem) -> Void)? = nil
+        onReferencedEventTap: ((FeedItem) -> Void)? = nil,
+        onRelayTap: ((URL) -> Void)? = nil
     ) {
         sourceEvent = event
         let renderEvent = Self.renderEvent(for: event)
@@ -184,10 +189,13 @@ struct NoteContentView: View {
         mentionIdentifiers = parsedContent.mentionIdentifiers
         emojiTagURLs = parsedContent.emojiTagURLs
         websitePreviewURL = parsedContent.websitePreviewURL
+        mediaAspectRatioHints = NoteImageLayoutGuide.mediaAspectRatioHints(from: renderEvent.tags)
+        gifLikeVideoURLKeys = Self.gifLikeVideoURLKeys(from: renderEvent.tags)
         mediaRevealCacheKey = event.id.lowercased()
         self.onHashtagTap = onHashtagTap
         self.onProfileTap = onProfileTap
         self.onReferencedEventTap = onReferencedEventTap
+        self.onRelayTap = onRelayTap
         self.trustedMediaSharerPubkey = trustedMediaSharerPubkey
         self.mediaLayout = mediaLayout
         self.reactionCount = reactionCount
@@ -254,6 +262,7 @@ struct NoteContentView: View {
                                         imageURLs: imageURLs,
                                         layout: mediaLayout,
                                         sourceEvent: sourceEvent,
+                                        mediaAspectRatioHints: mediaAspectRatioHints,
                                         reactionCount: reactionCount,
                                         commentCount: commentCount
                                     )
@@ -269,7 +278,15 @@ struct NoteContentView: View {
                                 restrictedMediaView {
                                     NoteVideoPlayerView(
                                         url: url,
-                                        layout: mediaLayout
+                                        layout: mediaLayout,
+                                        isGIFLike: Self.isGIFLikeVideoURL(
+                                            url,
+                                            in: gifLikeVideoURLKeys
+                                        ),
+                                        aspectRatioHint: NoteImageLayoutGuide.aspectRatioHint(
+                                            for: url,
+                                            in: mediaAspectRatioHints
+                                        )
                                     )
                                 }
                             }
@@ -303,7 +320,8 @@ struct NoteContentView: View {
                                     embedDepth: embedDepth + 1,
                                     onHashtagTap: onHashtagTap,
                                     onProfileTap: onProfileTap,
-                                    onOpenThread: onReferencedEventTap
+                                    onOpenThread: onReferencedEventTap,
+                                    onRelayTap: onRelayTap
                                 )
                             } else {
                                 NostrEventReferenceFallbackView(
@@ -341,6 +359,12 @@ struct NoteContentView: View {
             }
             if let hashtag = NoteContentParser.hashtagFromActionURL(url) {
                 onHashtagTap?(hashtag)
+                return .handled
+            }
+            if let relayURL = RelayURLSupport.relayURL(fromActionURL: url) {
+                if let onRelayTap {
+                    onRelayTap(relayURL)
+                }
                 return .handled
             }
             return .systemAction(url)
@@ -658,19 +682,14 @@ struct NoteContentView: View {
     }
 
     static func shouldUseAttributedInlineText(for tokens: [NoteContentToken]) -> Bool {
-        var websocketURLCount = 0
-
         if tokens.count > maxConcatenatedInlineTokenCount {
             return true
         }
 
         return tokens.contains { token in
             switch token.type {
-            case .url, .nostrMention, .hashtag:
+            case .url, .nostrMention, .hashtag, .websocketURL:
                 return true
-            case .websocketURL:
-                websocketURLCount += 1
-                return websocketURLCount > maxConcatenatedWebsocketURLTokenCount
             case .text, .emoji, .nostrEvent, .image, .video, .youtubeVideo, .audio:
                 return false
             }
@@ -720,7 +739,16 @@ struct NoteContentView: View {
                 segment.foregroundColor = .accentColor
             }
         case .websocketURL:
-            segment.foregroundColor = .secondary
+            if onRelayTap != nil,
+               let url = NoteContentLinkResolver.linkURL(
+                for: token,
+                allowsInAppProfileRouting: onProfileTap != nil
+            ) {
+                segment.link = url
+                segment.foregroundColor = .accentColor
+            } else {
+                segment.foregroundColor = .secondary
+            }
         case .text:
             break
         case .emoji:
@@ -841,6 +869,66 @@ struct NoteContentView: View {
         }
 
         return result
+    }
+
+    private static func gifLikeVideoURLKeys(from tags: [[String]]) -> Set<String> {
+        var keys = Set<String>()
+
+        for tag in tags {
+            guard tag.first?.lowercased() == "imeta" else { continue }
+
+            var urlString: String?
+            var mimeType: String?
+            var hasGIFLoopHint = false
+
+            for value in tag.dropFirst() {
+                let normalizedValue = value.trimmingCharacters(in: .whitespacesAndNewlines)
+                let loweredValue = normalizedValue.lowercased()
+
+                if loweredValue.hasPrefix("url ") {
+                    urlString = String(normalizedValue.dropFirst(4)).trimmingCharacters(in: .whitespacesAndNewlines)
+                } else if loweredValue.hasPrefix("m ") {
+                    mimeType = String(normalizedValue.dropFirst(2)).trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+                } else if loweredValue == "flow-gif-loop 1" ||
+                            loweredValue == "flow-gif-loop true" ||
+                            loweredValue == "flow-gif-loop yes" {
+                    hasGIFLoopHint = true
+                }
+            }
+
+            guard hasGIFLoopHint, let urlString, !urlString.isEmpty else { continue }
+            if let mimeType, !mimeType.hasPrefix("video/") {
+                continue
+            }
+
+            keys.formUnion(normalizedVideoURLKeys(for: urlString))
+        }
+
+        return keys
+    }
+
+    private static func isGIFLikeVideoURL(_ url: URL, in keys: Set<String>) -> Bool {
+        !keys.isDisjoint(with: normalizedVideoURLKeys(for: url.absoluteString))
+    }
+
+    private static func normalizedVideoURLKeys(for rawValue: String) -> Set<String> {
+        let trimmed = rawValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return [] }
+
+        var keys = Set<String>()
+        keys.insert(trimmed)
+        keys.insert(trimmed.lowercased())
+
+        if var components = URLComponents(string: trimmed) {
+            components.scheme = components.scheme?.lowercased()
+            components.host = components.host?.lowercased()
+            if let normalized = components.url?.absoluteString {
+                keys.insert(normalized)
+                keys.insert(normalized.lowercased())
+            }
+        }
+
+        return keys
     }
 
     private func loadCustomEmojiImagesIfNeeded() async {

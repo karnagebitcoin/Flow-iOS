@@ -16,6 +16,7 @@ struct ThreadDetailView: View {
     @State private var activeReplyTarget: FeedItem?
     @State private var selectedHashtagRoute: HashtagRoute?
     @State private var selectedProfileRoute: ProfileRoute?
+    @State private var selectedRelayRoute: RelayRoute?
     @State private var selectedContentTab: ThreadDetailContentTab = .replies
     @State private var hasAppliedInitialReplyFocus = false
     @State private var hasAppliedInitialReplyScroll = false
@@ -62,6 +63,8 @@ struct ThreadDetailView: View {
     }
 
     var body: some View {
+        let _ = appSettings.spamReplyFilterSignature
+
         Group {
             if let articleMetadata {
                 articleDetailBody(articleMetadata: articleMetadata)
@@ -87,6 +90,12 @@ struct ThreadDetailView: View {
         .onChange(of: appSettings.slowConnectionMode) { _, _ in
             configureStores()
         }
+        .onChange(of: appSettings.spamReplyFilterSignature) { _, _ in
+            viewModel.spamPreferencesChanged()
+        }
+        .onChange(of: followStore.followedPubkeys) { _, _ in
+            configureSpamFilterContext()
+        }
         .navigationDestination(item: $selectedHashtagRoute) { route in
             HashtagFeedView(
                 hashtag: route.normalizedHashtag,
@@ -109,6 +118,9 @@ struct ThreadDetailView: View {
                 readRelayURLs: effectiveReadRelayURLs,
                 writeRelayURLs: effectiveWriteRelayURLs
             )
+        }
+        .navigationDestination(item: $selectedRelayRoute) { route in
+            RelayFeedView(relayURL: route.relayURL, title: route.displayName)
         }
         .sheet(isPresented: $isShowingReshareSheet) {
             ReshareActionSheetView(
@@ -138,6 +150,11 @@ struct ThreadDetailView: View {
                 quotedDisplayNameHint: draft.quotedDisplayNameHint,
                 quotedHandleHint: draft.quotedHandleHint,
                 quotedAvatarURLHint: draft.quotedAvatarURLHint,
+                onOptimisticPublished: { item in
+                    if item.displayEvent.referencesConversation(id: viewModel.rootItem.displayEventID) {
+                        viewModel.appendLocalReply(item)
+                    }
+                },
                 onPublished: {
                     Task {
                         await viewModel.refresh()
@@ -154,6 +171,9 @@ struct ThreadDetailView: View {
                 replyTargetDisplayNameHint: target.displayName,
                 replyTargetHandleHint: target.handle,
                 replyTargetAvatarURLHint: target.avatarURL,
+                onOptimisticPublished: { item in
+                    viewModel.appendLocalReply(item)
+                },
                 onPublished: {
                     Task {
                         await viewModel.refresh()
@@ -183,11 +203,17 @@ struct ThreadDetailView: View {
                 onMute: {
                     handleRootMuteAuthor()
                 },
+                spamMarkTitle: rootSpamMarkActionTitle,
+                spamMarkIcon: rootSpamMarkActionIcon,
+                canToggleSpamMark: !isRootOwnedByCurrentAccount,
+                onToggleSpamMark: {
+                    handleRootToggleSpamMark()
+                },
                 onReport: {
                     presentRootReportFlow()
                 }
             )
-            .presentationDetents([.height(rootCanTranslateNote ? 545 : 490), .medium])
+            .presentationDetents([.height(rootCanTranslateNote ? 600 : 545), .medium])
             .presentationDragIndicator(.visible)
         }
         .sheet(isPresented: $isShowingRootReportSheet) {
@@ -232,6 +258,7 @@ struct ThreadDetailView: View {
                         onOpenReferencedEvent: { referencedItem in
                             selectedThreadItem = referencedItem.threadNavigationItem
                         },
+                        onOpenRelay: openRelayFeed,
                         onOptionsTap: {
                             isShowingRootNoteOptionsSheet = true
                         },
@@ -256,6 +283,8 @@ struct ThreadDetailView: View {
                     ThreadDetailContentSection(
                         selectedContentTab: $selectedContentTab,
                         replies: threadReplies,
+                        spamReplies: threadSpamReplies,
+                        spamRepliesExpanded: viewModel.isSpamRepliesExpanded,
                         replyCountsByTarget: replyCountsByTarget,
                         noteActivityRows: noteActivityRows,
                         isLoadingReplies: viewModel.isLoading,
@@ -270,11 +299,19 @@ struct ThreadDetailView: View {
                         onFollowToggle: { followStore.toggleFollow($0) },
                         onOpenHashtag: openHashtagFeed,
                         onOpenProfile: openProfile,
+                        onOpenRelay: openRelayFeed,
                         onOpenThread: { item in
                             selectedThreadItem = item.threadNavigationItem
                         },
                         onReplyTap: { item in
                             presentReplyComposer(for: item)
+                        },
+                        onToggleSpamReplies: {
+                            viewModel.toggleSpamRepliesExpanded()
+                        },
+                        onMarkNotSpam: { pubkey in
+                            viewModel.markSpamReplyAuthorAsNotSpam(pubkey)
+                            toastCenter.show("Moved replies back into the thread", style: .info)
                         }
                     )
                 }
@@ -413,6 +450,18 @@ struct ThreadDetailView: View {
         return false
     }
 
+    private var isRootAuthorMarkedSpam: Bool {
+        appSettings.isSpamFilterMarked(viewModel.rootItem.displayAuthorPubkey)
+    }
+
+    private var rootSpamMarkActionTitle: String {
+        isRootAuthorMarkedSpam ? "Remove Spam Mark" : "Mark as Spam"
+    }
+
+    private var rootSpamMarkActionIcon: String {
+        isRootAuthorMarkedSpam ? "checkmark.shield" : "exclamationmark.shield"
+    }
+
     private func presentRootTranslation() {
         guard rootCanTranslateNote else { return }
         Task { @MainActor in
@@ -437,6 +486,17 @@ struct ThreadDetailView: View {
         }
     }
 
+    private func handleRootToggleSpamMark() {
+        guard !isRootOwnedByCurrentAccount else { return }
+        if isRootAuthorMarkedSpam {
+            appSettings.removeSpamFilterMarkedPubkey(viewModel.rootItem.displayAuthorPubkey)
+            toastCenter.show("Removed spam mark", style: .info)
+        } else {
+            appSettings.addSpamFilterMarkedPubkey(viewModel.rootItem.displayAuthorPubkey)
+            toastCenter.show("Marked \(viewModel.rootItem.displayName) as spam")
+        }
+    }
+
     private func presentRootReportFlow() {
         Task { @MainActor in
             try? await Task.sleep(nanoseconds: 180_000_000)
@@ -454,7 +514,12 @@ struct ThreadDetailView: View {
             writeRelayURLs: effectiveWriteRelayURLs
         )
         await MainActor.run {
-            toastCenter.show("Report sent")
+            if type == .spam {
+                appSettings.addSpamFilterMarkedPubkey(viewModel.rootItem.displayAuthorPubkey)
+                toastCenter.show("Report sent and marked as spam")
+            } else {
+                toastCenter.show("Report sent")
+            }
         }
     }
 
@@ -571,6 +636,10 @@ struct ThreadDetailView: View {
         selectedProfileRoute = ProfileRoute(pubkey: pubkey)
     }
 
+    private func openRelayFeed(relayURL: URL) {
+        selectedRelayRoute = RelayRoute(relayURL: relayURL)
+    }
+
     private var hideNSFWEnabled: Bool {
         appSettings.hideNSFWContent
     }
@@ -579,12 +648,28 @@ struct ThreadDetailView: View {
         filteredReplies
     }
 
+    private var threadSpamReplies: [FeedItem] {
+        filteredSpamReplies
+    }
+
     private var replyCountsByTarget: [String: Int] {
-        ReplyCountEstimator.counts(for: threadReplies)
+        ReplyCountEstimator.counts(for: threadReplies + threadSpamReplies)
     }
 
     private var filteredReplies: [FeedItem] {
         viewModel.replies.filter { item in
+            if muteStore.shouldHideAny(item.moderationEvents) {
+                return false
+            }
+            if hideNSFWEnabled && item.moderationEvents.contains(where: { $0.containsNSFWHashtag }) {
+                return false
+            }
+            return true
+        }
+    }
+
+    private var filteredSpamReplies: [FeedItem] {
+        viewModel.spamReplies.filter { item in
             if muteStore.shouldHideAny(item.moderationEvents) {
                 return false
             }
@@ -615,6 +700,14 @@ struct ThreadDetailView: View {
             nsec: auth.currentNsec,
             readRelayURLs: effectiveReadRelayURLs,
             writeRelayURLs: effectiveWriteRelayURLs
+        )
+        configureSpamFilterContext()
+    }
+
+    private func configureSpamFilterContext() {
+        viewModel.configureSpamFilter(
+            currentUserPubkey: auth.currentAccount?.pubkey,
+            followedPubkeys: followStore.followedPubkeys
         )
     }
 

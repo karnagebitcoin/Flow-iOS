@@ -37,6 +37,7 @@ struct ProfileHeaderSection<BackButton: View, MenuButton: View, ActionRow: View>
     let onFollowingTap: () -> Void
     let onProfileTap: (String) -> Void
     let onHashtagTap: (String) -> Void
+    let onRelayTap: (URL) -> Void
     let onAvatarTap: () -> Void
 
     private let backButton: BackButton
@@ -51,6 +52,7 @@ struct ProfileHeaderSection<BackButton: View, MenuButton: View, ActionRow: View>
         onFollowingTap: @escaping () -> Void,
         onProfileTap: @escaping (String) -> Void,
         onHashtagTap: @escaping (String) -> Void,
+        onRelayTap: @escaping (URL) -> Void = { _ in },
         onAvatarTap: @escaping () -> Void,
         @ViewBuilder backButton: () -> BackButton,
         @ViewBuilder menuButton: () -> MenuButton,
@@ -61,6 +63,7 @@ struct ProfileHeaderSection<BackButton: View, MenuButton: View, ActionRow: View>
         self.onFollowingTap = onFollowingTap
         self.onProfileTap = onProfileTap
         self.onHashtagTap = onHashtagTap
+        self.onRelayTap = onRelayTap
         self.onAvatarTap = onAvatarTap
         self.backButton = backButton()
         self.menuButton = menuButton()
@@ -117,7 +120,8 @@ struct ProfileHeaderSection<BackButton: View, MenuButton: View, ActionRow: View>
                     ProfileAboutTextView(
                         text: about,
                         onProfileTap: onProfileTap,
-                        onHashtagTap: onHashtagTap
+                        onHashtagTap: onHashtagTap,
+                        onRelayTap: onRelayTap
                     )
                 }
 

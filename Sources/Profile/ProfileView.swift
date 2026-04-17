@@ -20,8 +20,10 @@ struct ProfileView: View {
     @State private var selectedThreadItem: FeedItem?
     @State private var selectedHashtagRoute: HashtagRoute?
     @State private var selectedProfileRoute: ProfileRoute?
+    @State private var selectedRelayRoute: RelayRoute?
     @State private var selectedFollowingRoute: FollowingListRoute?
     @State private var isShowingProfileEditor = false
+    @State private var isShowingConnectionsSheet = false
     @State private var isShowingProfileQR = false
     @State private var isShowingAvatarViewer = false
     @State private var shouldAutoFocusReplyInThread = false
@@ -116,6 +118,18 @@ struct ProfileView: View {
         muteStore.isPublishing || auth.currentNsec == nil
     }
 
+    private var isProfileMarkedSpam: Bool {
+        appSettings.isSpamFilterMarked(viewModel.pubkey)
+    }
+
+    private var profileSpamActionTitle: String {
+        isProfileMarkedSpam ? "Remove Spam Mark" : "Mark as Spam"
+    }
+
+    private var profileSpamActionSystemImage: String {
+        isProfileMarkedSpam ? "checkmark.shield" : "exclamationmark.shield"
+    }
+
     private var effectiveReadRelayURLs: [URL] {
         appSettings.effectiveReadRelayURLs(from: viewModel.readRelayURLs)
     }
@@ -126,6 +140,18 @@ struct ProfileView: View {
 
     private var effectivePrimaryRelayURL: URL {
         effectiveReadRelayURLs.first ?? AppSettingsStore.slowModeRelayURL
+    }
+
+    private var profileConnectionLookupRelayURLs: [URL] {
+        let defaultRelays = (RelaySettingsStore.defaultReadRelayURLs + RelaySettingsStore.defaultWriteRelayURLs)
+            .compactMap(URL.init(string:))
+        return RelayURLSupport.normalizedRelayURLs(
+            viewModel.readRelayURLs +
+            viewModel.writeRelayURLs +
+            effectiveReadRelayURLs +
+            effectiveWriteRelayURLs +
+            defaultRelays
+        )
     }
 
     init(
@@ -167,6 +193,9 @@ struct ProfileView: View {
                         },
                         onHashtagTap: { hashtag in
                             openHashtagFeed(hashtag: hashtag)
+                        },
+                        onRelayTap: { relayURL in
+                            openRelayFeed(relayURL: relayURL)
                         },
                         onAvatarTap: {
                             isShowingAvatarViewer = true
@@ -274,6 +303,12 @@ struct ProfileView: View {
                             onReferencedEventTap: { referencedItem in
                                 shouldAutoFocusReplyInThread = false
                                 selectedThreadItem = referencedItem.threadNavigationItem
+                            },
+                            onRelayTap: { relayURL in
+                                openRelayFeed(relayURL: relayURL)
+                            },
+                            onOptimisticPublished: { publishedItem in
+                                viewModel.insertOptimisticPublishedItem(publishedItem)
                             }
                         )
                         .listRowInsets(
@@ -383,6 +418,17 @@ struct ProfileView: View {
                 }
             )
         }
+        .sheet(isPresented: $isShowingConnectionsSheet) {
+            ProfileConnectionsSheet(
+                pubkey: viewModel.pubkey,
+                displayName: viewModel.displayName,
+                lookupRelayURLs: profileConnectionLookupRelayURLs,
+                onOpenRelay: { relayURL in
+                    isShowingConnectionsSheet = false
+                    openRelayFeed(relayURL: relayURL)
+                }
+            )
+        }
         .navigationDestination(item: $selectedThreadItem) { item in
             ThreadDetailView(
                 initialItem: item,
@@ -406,6 +452,9 @@ struct ProfileView: View {
                 readRelayURLs: effectiveReadRelayURLs,
                 writeRelayURLs: effectiveWriteRelayURLs
             )
+        }
+        .navigationDestination(item: $selectedRelayRoute) { route in
+            RelayFeedView(relayURL: route.relayURL, title: route.displayName)
         }
         .navigationDestination(item: $selectedFollowingRoute) { route in
             FollowingListView(
@@ -584,6 +633,21 @@ struct ProfileView: View {
                     )
                 }
                 .disabled(profileMuteActionDisabled)
+
+                Button {
+                    toggleProfileSpamMark()
+                } label: {
+                    ProfileMenuOptionLabel(
+                        title: profileSpamActionTitle,
+                        systemImage: profileSpamActionSystemImage
+                    )
+                }
+            }
+
+            Button {
+                isShowingConnectionsSheet = true
+            } label: {
+                ProfileMenuOptionLabel(title: "Connections", systemImage: "server.rack")
             }
 
             Button {
@@ -611,6 +675,16 @@ struct ProfileView: View {
 
     private func toggleProfileMute() {
         muteStore.toggleMute(viewModel.pubkey)
+    }
+
+    private func toggleProfileSpamMark() {
+        if isProfileMarkedSpam {
+            appSettings.removeSpamFilterMarkedPubkey(viewModel.pubkey)
+            toastCenter.show("Removed spam mark", style: .info)
+        } else {
+            appSettings.addSpamFilterMarkedPubkey(viewModel.pubkey)
+            toastCenter.show("Marked \(viewModel.displayName) as spam")
+        }
     }
 
     private func primaryAction() {
@@ -671,6 +745,10 @@ struct ProfileView: View {
         selectedProfileRoute = ProfileRoute(pubkey: pubkey)
     }
 
+    private func openRelayFeed(relayURL: URL) {
+        selectedRelayRoute = RelayRoute(relayURL: relayURL)
+    }
+
     private func websiteDisplayText(for url: URL) -> String {
         if let host = url.host(), !host.isEmpty {
             return host.lowercased()
@@ -682,5 +760,296 @@ struct ProfileView: View {
         (value ?? "")
             .trimmingCharacters(in: .whitespacesAndNewlines)
             .lowercased()
+    }
+}
+
+private enum ProfileConnectionSourceTab: String, CaseIterable, Identifiable {
+    case receive
+    case publish
+    case messages
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .receive:
+            return "Receive"
+        case .publish:
+            return "Publish"
+        case .messages:
+            return "Messages"
+        }
+    }
+
+    var emptyTitle: String {
+        switch self {
+        case .receive:
+            return "No receive relays found"
+        case .publish:
+            return "No publish relays found"
+        case .messages:
+            return "No message relays found"
+        }
+    }
+
+    var emptySubtitle: String {
+        switch self {
+        case .receive:
+            return "This user has not published receive relays yet."
+        case .publish:
+            return "This user has not published publishing relays yet."
+        case .messages:
+            return "This user has not published message relays yet."
+        }
+    }
+
+    var relayScope: RelayScope {
+        switch self {
+        case .receive:
+            return .read
+        case .publish:
+            return .write
+        case .messages:
+            return .inbox
+        }
+    }
+}
+
+private struct ProfileConnectionsSheet: View {
+    @Environment(\.dismiss) private var dismiss
+    @EnvironmentObject private var appSettings: AppSettingsStore
+    @EnvironmentObject private var relaySettings: RelaySettingsStore
+    @EnvironmentObject private var toastCenter: AppToastCenter
+
+    let pubkey: String
+    let displayName: String
+    let lookupRelayURLs: [URL]
+    let onOpenRelay: (URL) -> Void
+
+    @State private var selectedTab: ProfileConnectionSourceTab = .receive
+    @State private var snapshot = ProfileRelayConnectionsSnapshot.empty
+    @State private var isLoading = false
+
+    private let service = ProfileEventService()
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 16) {
+                    Text("Relays for \(displayName)")
+                        .font(appSettings.appFont(.title2, weight: .bold))
+                        .foregroundStyle(appSettings.themePalette.foreground)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+
+                    FlowCapsuleTabBar(
+                        selection: $selectedTab,
+                        items: ProfileConnectionSourceTab.allCases,
+                        selectedBackground: appSettings.themePalette.secondaryBackground,
+                        title: { $0.title }
+                    )
+
+                    Group {
+                        if isLoading && selectedRelays.isEmpty {
+                            loadingState
+                        } else if selectedRelays.isEmpty {
+                            emptyState
+                        } else {
+                            relayList
+                        }
+                    }
+                }
+                .padding(.horizontal, 16)
+                .padding(.top, 18)
+                .padding(.bottom, 34)
+            }
+            .background(appSettings.themePalette.background)
+            .navigationTitle("Connections")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    ThemedToolbarDoneButton {
+                        dismiss()
+                    }
+                }
+            }
+            .task(id: loadID) {
+                await loadConnections()
+            }
+        }
+        .presentationDetents([.medium, .large])
+        .presentationDragIndicator(.visible)
+        .presentationBackground(appSettings.themePalette.background)
+    }
+
+    private var selectedRelays: [URL] {
+        switch selectedTab {
+        case .receive:
+            return snapshot.readRelays
+        case .publish:
+            return snapshot.writeRelays
+        case .messages:
+            return snapshot.inboxRelays
+        }
+    }
+
+    private var loadID: String {
+        let relaySignature = lookupRelayURLs
+            .compactMap { RelayURLSupport.normalizedRelayURLString($0) }
+            .joined(separator: ",")
+        return "\(pubkey.lowercased())|\(relaySignature)"
+    }
+
+    private var relayList: some View {
+        VStack(spacing: 0) {
+            ForEach(Array(selectedRelays.enumerated()), id: \.element.absoluteString) { index, relayURL in
+                ProfileConnectionRelayRow(
+                    relayName: RelayURLSupport.displayName(for: relayURL),
+                    isAdded: relayIsAdded(relayURL),
+                    onOpen: {
+                        onOpenRelay(relayURL)
+                    },
+                    onAdd: {
+                        addRelay(relayURL)
+                    }
+                )
+
+                if index < selectedRelays.count - 1 {
+                    Divider()
+                        .overlay(appSettings.themePalette.separator.opacity(0.8))
+                        .padding(.leading, 48)
+                }
+            }
+        }
+        .background(
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .fill(appSettings.themePalette.sheetCardBackground)
+        )
+        .overlay {
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .stroke(appSettings.themePalette.sheetCardBorder, lineWidth: 1)
+        }
+    }
+
+    private var loadingState: some View {
+        HStack(spacing: 12) {
+            ProgressView()
+            Text("Checking relays...")
+                .font(appSettings.appFont(.body, weight: .medium))
+                .foregroundStyle(appSettings.themePalette.secondaryForeground)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(18)
+        .background(
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .fill(appSettings.themePalette.sheetCardBackground)
+        )
+    }
+
+    private var emptyState: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(selectedTab.emptyTitle)
+                .font(appSettings.appFont(.headline, weight: .semibold))
+                .foregroundStyle(appSettings.themePalette.foreground)
+
+            Text(selectedTab.emptySubtitle)
+                .font(appSettings.appFont(.subheadline))
+                .foregroundStyle(appSettings.themePalette.secondaryForeground)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(18)
+        .background(
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .fill(appSettings.themePalette.sheetCardBackground)
+        )
+        .overlay {
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .stroke(appSettings.themePalette.sheetCardBorder, lineWidth: 1)
+        }
+    }
+
+    private func loadConnections() async {
+        isLoading = true
+        let loaded = await service.fetchRelayConnectionsSnapshot(
+            relayURLs: lookupRelayURLs,
+            pubkey: pubkey
+        )
+        snapshot = loaded
+        isLoading = false
+    }
+
+    private func relayIsAdded(_ relayURL: URL) -> Bool {
+        guard let key = RelayURLSupport.normalizedRelayURLString(relayURL) else { return false }
+
+        switch selectedTab {
+        case .receive:
+            return relaySettings.readRelays.contains(key)
+        case .publish:
+            return relaySettings.writeRelays.contains(key)
+        case .messages:
+            return relaySettings.inboxRelays.contains(key)
+        }
+    }
+
+    private func addRelay(_ relayURL: URL) {
+        guard let key = RelayURLSupport.normalizedRelayURLString(relayURL) else { return }
+
+        do {
+            try relaySettings.addRelay(key, scope: selectedTab.relayScope)
+            toastCenter.show("Added")
+        } catch {
+            let message = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+            toastCenter.show(message, style: .error)
+        }
+    }
+}
+
+private struct ProfileConnectionRelayRow: View {
+    @EnvironmentObject private var appSettings: AppSettingsStore
+
+    let relayName: String
+    let isAdded: Bool
+    let onOpen: () -> Void
+    let onAdd: () -> Void
+
+    var body: some View {
+        HStack(spacing: 12) {
+            Button(action: onOpen) {
+                HStack(spacing: 12) {
+                    Image(systemName: "server.rack")
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(appSettings.primaryColor)
+                        .frame(width: 22)
+
+                    Text(relayName)
+                        .font(appSettings.appFont(.body, weight: .medium))
+                        .foregroundStyle(appSettings.themePalette.foreground)
+                        .lineLimit(1)
+
+                    Spacer()
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Open \(relayName)")
+
+            if isAdded {
+                Image(systemName: "checkmark.circle.fill")
+                    .font(.title3.weight(.semibold))
+                    .foregroundStyle(appSettings.primaryColor)
+                    .accessibilityLabel("\(relayName) added")
+            } else {
+                Button(action: onAdd) {
+                    Image(systemName: "plus.circle.fill")
+                        .font(.title3.weight(.semibold))
+                        .foregroundStyle(appSettings.primaryColor)
+                        .frame(width: 34, height: 34)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Add \(relayName)")
+            }
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 14)
     }
 }

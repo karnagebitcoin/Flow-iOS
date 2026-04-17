@@ -9,6 +9,7 @@ final class SearchViewModel: ObservableObject {
         let hasActiveContentSearch: Bool
         let hideNSFW: Bool
         let filterRevision: Int
+        let spamFilterSignature: String
         let mutedConversationRevision: Int
     }
 
@@ -103,6 +104,7 @@ final class SearchViewModel: ObservableObject {
             hasActiveContentSearch: activeContentSearch != nil,
             hideNSFW: AppSettingsStore.shared.hideNSFWContent,
             filterRevision: MuteStore.shared.filterRevision,
+            spamFilterSignature: AppSettingsStore.shared.spamFilterLabelSignature,
             mutedConversationRevision: mutedConversationRevision
         )
 
@@ -782,6 +784,9 @@ final class SearchViewModel: ObservableObject {
             if MuteStore.shared.shouldHideAny(item.moderationEvents) {
                 return false
             }
+            if AppSettingsStore.shared.shouldHideSpamMarkedPubkey(item.displayAuthorPubkey) {
+                return false
+            }
             if hideNSFW && item.moderationEvents.contains(where: { $0.containsNSFWHashtag }) {
                 return false
             }
@@ -794,10 +799,12 @@ final class SearchViewModel: ObservableObject {
         snapshot: MuteFilterSnapshot? = nil
     ) -> [FeedItem] {
         let snapshot = snapshot ?? muteFilterSnapshot
-        guard snapshot.hasAnyRules else { return items }
+        let hasMarkedSpam = !AppSettingsStore.shared.spamFilterMarkedPubkeys.isEmpty
+        guard snapshot.hasAnyRules || hasMarkedSpam else { return items }
 
         return items.filter { item in
             !snapshot.shouldHideAny(in: item.moderationEvents)
+                && !AppSettingsStore.shared.shouldHideSpamMarkedPubkey(item.displayAuthorPubkey)
         }
     }
 

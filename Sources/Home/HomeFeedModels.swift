@@ -37,6 +37,7 @@ enum HomePrimaryFeedSource: Identifiable, Hashable {
     case news
     case custom(String)
     case hashtag(String)
+    case relay(String)
 
     var id: String {
         switch self {
@@ -56,6 +57,8 @@ enum HomePrimaryFeedSource: Identifiable, Hashable {
             return "custom:\(Self.normalizeCustomFeedID(feedID))"
         case .hashtag(let hashtag):
             return "hashtag:\(Self.normalizeHashtag(hashtag))"
+        case .relay(let relayURL):
+            return "relay:\(Self.normalizeRelayURLString(relayURL))"
         }
     }
 
@@ -77,6 +80,8 @@ enum HomePrimaryFeedSource: Identifiable, Hashable {
             return "custom:\(Self.normalizeCustomFeedID(feedID))"
         case .hashtag(let hashtag):
             return "hashtag:\(Self.normalizeHashtag(hashtag))"
+        case .relay(let relayURL):
+            return "relay:\(Self.normalizeRelayURLString(relayURL))"
         }
     }
 
@@ -123,6 +128,13 @@ enum HomePrimaryFeedSource: Identifiable, Hashable {
             self = .hashtag(hashtag)
             return
         }
+        if normalized.hasPrefix("relay:") {
+            let value = String(normalized.dropFirst("relay:".count))
+            let relayURL = Self.normalizeRelayURLString(value)
+            guard !relayURL.isEmpty else { return nil }
+            self = .relay(relayURL)
+            return
+        }
         return nil
     }
 
@@ -137,6 +149,14 @@ enum HomePrimaryFeedSource: Identifiable, Hashable {
         value
             .trimmingCharacters(in: .whitespacesAndNewlines)
             .lowercased()
+    }
+
+    static func normalizeRelayURLString(_ value: String) -> String {
+        guard let relayURL = RelayURLSupport.normalizedURL(from: value),
+              let normalized = RelayURLSupport.normalizedRelayURLString(relayURL) else {
+            return ""
+        }
+        return normalized
     }
 }
 
@@ -196,6 +216,20 @@ enum HomeFeedSourceResolver {
         return ordered
     }
 
+    static func normalizedFavoriteRelayURLs(_ relayURLs: [String]) -> [String] {
+        var seen = Set<String>()
+        var ordered: [String] = []
+
+        for relayURL in relayURLs {
+            let normalized = HomePrimaryFeedSource.normalizeRelayURLString(relayURL)
+            guard !normalized.isEmpty else { continue }
+            guard seen.insert(normalized).inserted else { continue }
+            ordered.append(normalized)
+        }
+
+        return ordered
+    }
+
     static func normalizedOrderedPubkeys(_ pubkeys: [String]) -> [String] {
         var seen = Set<String>()
         var ordered: [String] = []
@@ -212,6 +246,7 @@ enum HomeFeedSourceResolver {
     static func resolvedFeedSource(
         _ source: HomePrimaryFeedSource,
         favoriteHashtags: [String],
+        favoriteRelayURLs: [String],
         interestHashtags: [String],
         customFeeds: [CustomFeedDefinition]
     ) -> HomePrimaryFeedSource {
@@ -224,6 +259,12 @@ enum HomeFeedSourceResolver {
                 return .network
             }
             return .hashtag(normalizedHashtag)
+        case .relay(let relayURL):
+            let normalizedRelayURL = HomePrimaryFeedSource.normalizeRelayURLString(relayURL)
+            guard favoriteRelayURLs.contains(normalizedRelayURL) else {
+                return .network
+            }
+            return .relay(normalizedRelayURL)
         case .polls:
             return AppSettingsStore.shared.pollsFeedVisible ? .polls : .network
         case .interests:
@@ -246,6 +287,11 @@ enum HomeFeedSourceResolver {
         case .custom:
             let combined = normalizedRelayURLs(readRelayURLs + customFeedSupplementalRelayURLs)
             return combined.isEmpty ? readRelayURLs : combined
+        case .relay(let relayURL):
+            guard let normalizedRelayURL = RelayURLSupport.normalizedURL(from: relayURL) else {
+                return readRelayURLs
+            }
+            return [normalizedRelayURL]
         default:
             return readRelayURLs
         }
@@ -264,6 +310,9 @@ enum HomeFeedSourceResolver {
             return combined.isEmpty ? [newsFallbackRelayURL] : combined
         case .custom:
             return relayURLs(for: source, readRelayURLs: readRelayURLs)
+        case .relay:
+            let combined = normalizedRelayURLs(readRelayURLs + relayURLs(for: source, readRelayURLs: readRelayURLs))
+            return combined.isEmpty ? relayURLs(for: source, readRelayURLs: readRelayURLs) : combined
         default:
             return relayURLs(for: source, readRelayURLs: readRelayURLs)
         }
@@ -271,7 +320,7 @@ enum HomeFeedSourceResolver {
 
     static func feedKinds(for source: HomePrimaryFeedSource, showKinds: [Int]) -> [Int] {
         switch source {
-        case .interests, .custom, .network, .following, .hashtag:
+        case .interests, .custom, .network, .following, .hashtag, .relay:
             return FeedKindFilters.normalizedKinds(showKinds)
         case .polls:
             return FeedKindFilters.pollKinds
@@ -686,6 +735,15 @@ enum HomeFeedLiveUpdatePlanner {
                 relayURLs: HomeFeedSourceResolver.relayURLs(for: .network, readRelayURLs: readRelayURLs),
                 filter: NostrFilter(kinds: kinds, limit: 100),
                 scopeSignature: "network"
+            )
+
+        case .relay(let relayURL):
+            let normalizedRelayURL = HomePrimaryFeedSource.normalizeRelayURLString(relayURL)
+            guard !normalizedRelayURL.isEmpty else { return [] }
+            return targets(
+                relayURLs: HomeFeedSourceResolver.relayURLs(for: source, readRelayURLs: readRelayURLs),
+                filter: NostrFilter(kinds: kinds, limit: 100),
+                scopeSignature: "relay:\(normalizedRelayURL)"
             )
 
         case .trending:

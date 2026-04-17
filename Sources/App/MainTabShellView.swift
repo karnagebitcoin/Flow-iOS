@@ -32,6 +32,7 @@ struct MainTabShellView: View {
     @EnvironmentObject private var relaySettings: RelaySettingsStore
     @EnvironmentObject private var composeSheetCoordinator: AppComposeSheetCoordinator
     @ObservedObject private var muteStore = MuteStore.shared
+    @ObservedObject private var followStore = FollowStore.shared
 
     @State private var selectedTab: Tab = .home
     @State private var homeRootResetID = UUID()
@@ -128,6 +129,18 @@ struct MainTabShellView: View {
                 quotedHandleHint: draft.quotedHandleHint,
                 quotedAvatarURLHint: draft.quotedAvatarURLHint,
                 savedDraftID: draft.savedDraftID,
+                onOptimisticPublished: { item in
+                    switch selectedTab {
+                    case .home:
+                        homeViewModel.insertOptimisticPublishedItem(item)
+                    case .search:
+                        Task {
+                            await searchViewModel.refresh()
+                        }
+                    case .dms, .activity:
+                        break
+                    }
+                },
                 onPublished: {
                     Task {
                         switch selectedTab {
@@ -156,6 +169,7 @@ struct MainTabShellView: View {
                 accountPubkey: auth.currentAccount?.pubkey,
                 nsec: auth.currentNsec
             )
+            configureFollowStore()
             configureMuteStore()
             configureActivityViewModel()
             await activityViewModel.sceneDidChange(isActive: scenePhase == .active)
@@ -167,22 +181,27 @@ struct MainTabShellView: View {
                 accountPubkey: auth.currentAccount?.pubkey,
                 nsec: auth.currentNsec
             )
+            configureFollowStore()
             configureMuteStore()
             configureActivityViewModel()
             configureLiveReactsSubscription()
         }
         .onChange(of: auth.currentNsec) { _, _ in
+            configureFollowStore()
             configureMuteStore()
         }
         .onChange(of: relaySettings.readRelays) { _, _ in
+            configureFollowStore()
             configureMuteStore()
             configureActivityViewModel()
             configureLiveReactsSubscription()
         }
         .onChange(of: relaySettings.writeRelays) { _, _ in
+            configureFollowStore()
             configureMuteStore()
         }
         .onChange(of: appSettings.slowConnectionMode) { _, _ in
+            configureFollowStore()
             configureMuteStore()
             configureActivityViewModel()
             configureLiveReactsSubscription()
@@ -193,7 +212,13 @@ struct MainTabShellView: View {
         .onChange(of: appSettings.activityNotificationPreferenceSignature) { _, _ in
             activityViewModel.notificationPreferencesChanged()
         }
+        .onChange(of: appSettings.spamReplyFilterSignature) { _, _ in
+            activityViewModel.notificationPreferencesChanged()
+        }
         .onChange(of: muteStore.filterRevision) { _, _ in
+            activityViewModel.notificationPreferencesChanged()
+        }
+        .onChange(of: followStore.followedPubkeys) { _, _ in
             activityViewModel.notificationPreferencesChanged()
         }
         .onChange(of: isActivityRootVisible) { _, _ in
@@ -381,6 +406,15 @@ struct MainTabShellView: View {
 
     private func configureMuteStore() {
         muteStore.configure(
+            accountPubkey: auth.currentAccount?.pubkey,
+            nsec: auth.currentNsec,
+            readRelayURLs: effectiveReadRelayURLs,
+            writeRelayURLs: effectiveWriteRelayURLs
+        )
+    }
+
+    private func configureFollowStore() {
+        followStore.configure(
             accountPubkey: auth.currentAccount?.pubkey,
             nsec: auth.currentNsec,
             readRelayURLs: effectiveReadRelayURLs,

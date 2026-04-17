@@ -17,11 +17,11 @@ final class FlowLayoutGuardrailsTests: XCTestCase {
         XCTAssertEqual(wrapped.replacingOccurrences(of: "\u{200B}", with: ""), value)
     }
 
-    func testClampedAspectRatioRejectsInvalidValuesAndCapsOutliers() {
+    func testClampedAspectRatioRejectsInvalidValuesAndCapsOutliers() throws {
         XCTAssertNil(FlowLayoutGuardrails.clampedAspectRatio(nil))
         XCTAssertNil(FlowLayoutGuardrails.clampedAspectRatio(0))
-        XCTAssertEqual(FlowLayoutGuardrails.clampedAspectRatio(0.05), 0.28, accuracy: 0.0001)
-        XCTAssertEqual(FlowLayoutGuardrails.clampedAspectRatio(10), 3.2, accuracy: 0.0001)
-        XCTAssertEqual(FlowLayoutGuardrails.clampedAspectRatio(1.6), 1.6, accuracy: 0.0001)
+        XCTAssertEqual(try XCTUnwrap(FlowLayoutGuardrails.clampedAspectRatio(0.05)), 0.28, accuracy: 0.0001)
+        XCTAssertEqual(try XCTUnwrap(FlowLayoutGuardrails.clampedAspectRatio(10)), 3.2, accuracy: 0.0001)
+        XCTAssertEqual(try XCTUnwrap(FlowLayoutGuardrails.clampedAspectRatio(1.6)), 1.6, accuracy: 0.0001)
     }
 }

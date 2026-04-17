@@ -8,6 +8,7 @@ struct ActivityView: View {
 
     @ObservedObject var viewModel: ActivityViewModel
     @ObservedObject private var muteStore = MuteStore.shared
+    @ObservedObject private var followStore = FollowStore.shared
     @State private var isShowingAuthSheet = false
     @State private var authSheetInitialTab: AuthSheetTab = .signIn
     @State private var isShowingSideMenu = false
@@ -33,6 +34,7 @@ struct ActivityView: View {
 
     var body: some View {
         let _ = appSettings.activityNotificationPreferenceSignature
+        let _ = appSettings.spamReplyFilterSignature
 
         NavigationStack {
             ZStack(alignment: .leading) {
@@ -90,6 +92,7 @@ struct ActivityView: View {
                             accountPubkey: auth.currentAccount?.pubkey,
                             nsec: auth.currentNsec
                         )
+                        configureFollowStore()
                         configureMuteStore()
                         viewModel.configure(
                             currentUserPubkey: auth.currentAccount?.pubkey,
@@ -113,6 +116,7 @@ struct ActivityView: View {
                     accountPubkey: auth.currentAccount?.pubkey,
                     nsec: auth.currentNsec
                 )
+                configureFollowStore()
                 configureMuteStore()
                 viewModel.configure(
                     currentUserPubkey: auth.currentAccount?.pubkey,
@@ -121,6 +125,7 @@ struct ActivityView: View {
                 await viewModel.loadIfNeeded()
             }
             .onChange(of: auth.currentAccount?.pubkey) { _, newValue in
+                configureFollowStore()
                 configureMuteStore()
                 viewModel.configure(
                     currentUserPubkey: newValue,
@@ -128,9 +133,11 @@ struct ActivityView: View {
                 )
             }
             .onChange(of: auth.currentNsec) { _, _ in
+                configureFollowStore()
                 configureMuteStore()
             }
             .onChange(of: relaySettings.readRelays) { _, _ in
+                configureFollowStore()
                 configureMuteStore()
                 viewModel.configure(
                     currentUserPubkey: auth.currentAccount?.pubkey,
@@ -138,9 +145,11 @@ struct ActivityView: View {
                 )
             }
             .onChange(of: relaySettings.writeRelays) { _, _ in
+                configureFollowStore()
                 configureMuteStore()
             }
             .onChange(of: appSettings.slowConnectionMode) { _, _ in
+                configureFollowStore()
                 configureMuteStore()
                 viewModel.configure(
                     currentUserPubkey: auth.currentAccount?.pubkey,
@@ -207,6 +216,12 @@ struct ActivityView: View {
                 notifyRootVisibilityChanged()
             }
             .onChange(of: muteStore.filterRevision) { _, _ in
+                viewModel.notificationPreferencesChanged()
+            }
+            .onChange(of: appSettings.spamReplyFilterSignature) { _, _ in
+                viewModel.notificationPreferencesChanged()
+            }
+            .onChange(of: followStore.followedPubkeys) { _, _ in
                 viewModel.notificationPreferencesChanged()
             }
         }
@@ -446,6 +461,15 @@ struct ActivityView: View {
 
     private func configureMuteStore() {
         muteStore.configure(
+            accountPubkey: auth.currentAccount?.pubkey,
+            nsec: auth.currentNsec,
+            readRelayURLs: effectiveReadRelayURLs,
+            writeRelayURLs: effectiveWriteRelayURLs
+        )
+    }
+
+    private func configureFollowStore() {
+        followStore.configure(
             accountPubkey: auth.currentAccount?.pubkey,
             nsec: auth.currentNsec,
             readRelayURLs: effectiveReadRelayURLs,

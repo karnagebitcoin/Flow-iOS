@@ -11,6 +11,7 @@ final class HashtagFeedViewModel: ObservableObject {
         let itemsRevision: Int
         let hideNSFW: Bool
         let filterRevision: Int
+        let spamFilterSignature: String
     }
 
     @Published private(set) var items: [FeedItem] = [] {
@@ -92,7 +93,8 @@ final class HashtagFeedViewModel: ObservableObject {
         let key = VisibleItemsCacheKey(
             itemsRevision: itemsRevision,
             hideNSFW: AppSettingsStore.shared.hideNSFWContent,
-            filterRevision: MuteStore.shared.filterRevision
+            filterRevision: MuteStore.shared.filterRevision,
+            spamFilterSignature: AppSettingsStore.shared.spamFilterLabelSignature
         )
 
         if visibleItemsCacheKey == key {
@@ -102,6 +104,9 @@ final class HashtagFeedViewModel: ObservableObject {
         let hideNSFW = AppSettingsStore.shared.hideNSFWContent
         let filtered = items.filter { item in
             if MuteStore.shared.shouldHideAny(item.moderationEvents) {
+                return false
+            }
+            if AppSettingsStore.shared.shouldHideSpamMarkedPubkey(item.displayAuthorPubkey) {
                 return false
             }
             if hideNSFW && item.moderationEvents.contains(where: { $0.containsNSFWHashtag }) {
@@ -228,6 +233,11 @@ final class HashtagFeedViewModel: ObservableObject {
         }
     }
 
+    func insertOptimisticPublishedItem(_ item: FeedItem) {
+        guard item.displayEvent.containsHashtag(normalizedHashtag) else { return }
+        mergeKeepingNewest(itemsToMerge: [item])
+    }
+
     private func mergeKeepingNewest(itemsToMerge: [FeedItem]) {
         var byID = Dictionary(uniqueKeysWithValues: items.map { ($0.id, $0) })
         for item in itemsToMerge {
@@ -246,10 +256,12 @@ final class HashtagFeedViewModel: ObservableObject {
         snapshot: MuteFilterSnapshot? = nil
     ) -> [FeedItem] {
         let snapshot = snapshot ?? muteFilterSnapshot
-        guard snapshot.hasAnyRules else { return sourceItems }
+        let hasMarkedSpam = !AppSettingsStore.shared.spamFilterMarkedPubkeys.isEmpty
+        guard snapshot.hasAnyRules || hasMarkedSpam else { return sourceItems }
 
         return sourceItems.filter { item in
             !snapshot.shouldHideAny(in: item.moderationEvents)
+                && !AppSettingsStore.shared.shouldHideSpamMarkedPubkey(item.displayAuthorPubkey)
         }
     }
 
@@ -379,6 +391,253 @@ final class HashtagFeedViewModel: ObservableObject {
         }
 
         return ordered
+    }
+
+    private static func sortedNewestFirst(_ items: [FeedItem]) -> [FeedItem] {
+        var byID: [String: FeedItem] = [:]
+        for item in items {
+            byID[item.id.lowercased()] = item
+        }
+
+        return byID.values.sorted {
+            if $0.event.createdAt == $1.event.createdAt {
+                return $0.id.lowercased() > $1.id.lowercased()
+            }
+            return $0.event.createdAt > $1.event.createdAt
+        }
+    }
+}
+
+@MainActor
+final class RelayFeedViewModel: ObservableObject {
+    private struct VisibleItemsCacheKey: Equatable {
+        let itemsRevision: Int
+        let hideNSFW: Bool
+        let filterRevision: Int
+        let spamFilterSignature: String
+    }
+
+    @Published private(set) var items: [FeedItem] = [] {
+        didSet {
+            itemsRevision &+= 1
+            clearVisibleItemsCache()
+        }
+    }
+    @Published private(set) var isLoading = false
+    @Published private(set) var isLoadingMore = false
+    @Published var errorMessage: String?
+
+    let relayURL: URL
+    let title: String
+
+    private let pageSize: Int
+    private let service: NostrFeedService
+    private let requestKinds = FeedKindFilters.supportedKinds
+    private var oldestCreatedAt: Int?
+    private var hasReachedEnd = false
+    private var hasLoadedInitialState = false
+    private var itemHydrationTask: Task<Void, Never>?
+    private var itemsRevision = 0
+    private var visibleItemsCacheKey: VisibleItemsCacheKey?
+    private var visibleItemsCache: [FeedItem] = []
+
+    init(
+        relayURL: URL,
+        title: String? = nil,
+        pageSize: Int = 70,
+        service: NostrFeedService = NostrFeedService()
+    ) {
+        let normalizedURL = RelayURLSupport.normalizedURL(from: relayURL.absoluteString) ?? relayURL
+        self.relayURL = normalizedURL
+        self.title = title ?? RelayURLSupport.displayName(for: normalizedURL)
+        self.pageSize = pageSize
+        self.service = service
+    }
+
+    deinit {
+        itemHydrationTask?.cancel()
+    }
+
+    var relayHostLabel: String {
+        relayURL.host()?.lowercased() ?? relayURL.absoluteString
+    }
+
+    var routeID: String {
+        RelayURLSupport.normalizedRelayURLString(relayURL) ?? relayURL.absoluteString.lowercased()
+    }
+
+    var visibleItems: [FeedItem] {
+        let key = VisibleItemsCacheKey(
+            itemsRevision: itemsRevision,
+            hideNSFW: AppSettingsStore.shared.hideNSFWContent,
+            filterRevision: MuteStore.shared.filterRevision,
+            spamFilterSignature: AppSettingsStore.shared.spamFilterLabelSignature
+        )
+
+        if visibleItemsCacheKey == key {
+            return visibleItemsCache
+        }
+
+        let hideNSFW = AppSettingsStore.shared.hideNSFWContent
+        let filtered = items.filter { item in
+            if MuteStore.shared.shouldHideAny(item.moderationEvents) {
+                return false
+            }
+            if AppSettingsStore.shared.shouldHideSpamMarkedPubkey(item.displayAuthorPubkey) {
+                return false
+            }
+            if hideNSFW && item.moderationEvents.contains(where: { $0.containsNSFWHashtag }) {
+                return false
+            }
+            return true
+        }
+
+        visibleItemsCacheKey = key
+        visibleItemsCache = filtered
+        return filtered
+    }
+
+    private var muteFilterSnapshot: MuteFilterSnapshot {
+        MuteStore.shared.filterSnapshot
+    }
+
+    func loadIfNeeded() async {
+        guard !hasLoadedInitialState else { return }
+        hasLoadedInitialState = true
+        await refresh()
+    }
+
+    func refresh() async {
+        guard !isLoading else { return }
+
+        isLoading = true
+        errorMessage = nil
+        hasReachedEnd = false
+        oldestCreatedAt = nil
+        itemHydrationTask?.cancel()
+        itemHydrationTask = nil
+
+        defer {
+            isLoading = false
+        }
+
+        do {
+            let fetched = try await fetchPage(until: nil, hydrationMode: .cachedProfilesOnly)
+            let visibleFetched = pruneMutedItems(fetched)
+            items = visibleFetched
+            oldestCreatedAt = visibleFetched.last?.event.createdAt
+            hasReachedEnd = FeedPaginationHeuristic.shouldStopPaging(afterFetchedCount: fetched.count)
+            scheduleItemHydration(for: visibleFetched)
+        } catch {
+            if items.isEmpty {
+                errorMessage = "Couldn't load \(title) right now."
+            } else {
+                errorMessage = "Couldn't refresh \(title)."
+            }
+        }
+    }
+
+    func loadMoreIfNeeded(currentItem: FeedItem) async {
+        guard !isLoading, !isLoadingMore, !hasReachedEnd else { return }
+        guard let lastVisibleID = visibleItems.last?.id, lastVisibleID == currentItem.id else { return }
+
+        let until = max((oldestCreatedAt ?? Int(Date().timeIntervalSince1970)) - 1, 0)
+        guard until > 0 else { return }
+
+        isLoadingMore = true
+        itemHydrationTask?.cancel()
+        itemHydrationTask = nil
+        defer {
+            isLoadingMore = false
+        }
+
+        do {
+            let fetched = try await fetchPage(until: until, hydrationMode: .cachedProfilesOnly)
+            if fetched.isEmpty {
+                hasReachedEnd = true
+                return
+            }
+
+            let visibleFetched = pruneMutedItems(fetched)
+            oldestCreatedAt = visibleFetched.last?.event.createdAt ?? fetched.last?.event.createdAt
+            hasReachedEnd = FeedPaginationHeuristic.shouldStopPaging(afterFetchedCount: fetched.count)
+            mergeKeepingNewest(itemsToMerge: visibleFetched)
+            scheduleItemHydration(for: items)
+        } catch {
+            errorMessage = "Couldn't load more posts."
+        }
+    }
+
+    func insertOptimisticPublishedItem(_ item: FeedItem) {
+        mergeKeepingNewest(itemsToMerge: [item])
+    }
+
+    private func fetchPage(
+        until: Int?,
+        hydrationMode: FeedItemHydrationMode
+    ) async throws -> [FeedItem] {
+        try await service.fetchFeed(
+            relayURLs: [relayURL],
+            kinds: requestKinds,
+            limit: pageSize,
+            until: until,
+            hydrationMode: hydrationMode,
+            fetchTimeout: 12,
+            relayFetchMode: .allRelays,
+            moderationSnapshot: muteFilterSnapshot
+        )
+    }
+
+    private func mergeKeepingNewest(itemsToMerge: [FeedItem]) {
+        var byID = Dictionary(uniqueKeysWithValues: items.map { ($0.id.lowercased(), $0) })
+        for item in itemsToMerge {
+            byID[item.id.lowercased()] = item
+        }
+
+        items = pruneMutedItems(Self.sortedNewestFirst(Array(byID.values)))
+    }
+
+    private func pruneMutedItems(
+        _ sourceItems: [FeedItem],
+        snapshot: MuteFilterSnapshot? = nil
+    ) -> [FeedItem] {
+        let snapshot = snapshot ?? muteFilterSnapshot
+        let hasMarkedSpam = !AppSettingsStore.shared.spamFilterMarkedPubkeys.isEmpty
+        guard snapshot.hasAnyRules || hasMarkedSpam else { return sourceItems }
+
+        return sourceItems.filter { item in
+            !snapshot.shouldHideAny(in: item.moderationEvents)
+                && !AppSettingsStore.shared.shouldHideSpamMarkedPubkey(item.displayAuthorPubkey)
+        }
+    }
+
+    private func scheduleItemHydration(for sourceItems: [FeedItem]) {
+        itemHydrationTask?.cancel()
+
+        let events = sourceItems.map(\.event)
+        guard !events.isEmpty else { return }
+        let relayTargets = [relayURL]
+
+        itemHydrationTask = Task { [weak self] in
+            guard let self else { return }
+            let hydrated = await self.service.buildFeedItems(
+                relayURLs: relayTargets,
+                events: events,
+                hydrationMode: .full,
+                moderationSnapshot: self.muteFilterSnapshot
+            )
+            guard !Task.isCancelled else { return }
+            guard !hydrated.isEmpty else { return }
+
+            await MainActor.run {
+                self.mergeKeepingNewest(itemsToMerge: hydrated)
+            }
+        }
+    }
+
+    private func clearVisibleItemsCache() {
+        visibleItemsCacheKey = nil
+        visibleItemsCache = []
     }
 
     private static func sortedNewestFirst(_ items: [FeedItem]) -> [FeedItem] {

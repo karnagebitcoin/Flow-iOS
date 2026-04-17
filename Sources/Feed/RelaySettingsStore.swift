@@ -4,6 +4,7 @@ import NostrSDK
 enum RelayScope: String, CaseIterable, Identifiable {
     case read
     case write
+    case inbox
     case both
 
     var id: String { rawValue }
@@ -42,6 +43,8 @@ final class RelaySettingsStore: ObservableObject {
         "wss://sendit.nosflare.com/"
     ]
 
+    static let defaultInboxRelayURLs: [String] = []
+
     private static let bootstrapPublishRelayURLs = [
         "wss://relay.damus.io/",
         "wss://nos.lol/",
@@ -51,11 +54,13 @@ final class RelaySettingsStore: ObservableObject {
 
     @Published private(set) var readRelays: [String]
     @Published private(set) var writeRelays: [String]
+    @Published private(set) var inboxRelays: [String]
     @Published private(set) var lastPublishError: String?
 
     private struct PersistedRelaySettings: Codable {
         let readRelays: [String]
         let writeRelays: [String]
+        let inboxRelays: [String]?
     }
 
     private let defaults: UserDefaults
@@ -66,6 +71,7 @@ final class RelaySettingsStore: ObservableObject {
     private var accountPubkey: String?
     private var nsec: String?
     private var publishTask: Task<Void, Never>?
+    private var inboxPublishTask: Task<Void, Never>?
 
     init(
         defaults: UserDefaults = .standard,
@@ -75,10 +81,12 @@ final class RelaySettingsStore: ObservableObject {
         self.relayClient = relayClient
         self.readRelays = Self.defaultReadRelayURLs
         self.writeRelays = Self.defaultWriteRelayURLs
+        self.inboxRelays = Self.defaultInboxRelayURLs
     }
 
     deinit {
         publishTask?.cancel()
+        inboxPublishTask?.cancel()
     }
 
     var readRelayURLs: [URL] {
@@ -87,6 +95,10 @@ final class RelaySettingsStore: ObservableObject {
 
     var writeRelayURLs: [URL] {
         writeRelays.compactMap(URL.init(string:))
+    }
+
+    var inboxRelayURLs: [URL] {
+        inboxRelays.compactMap(URL.init(string:))
     }
 
     var primaryReadRelayURL: URL? {
@@ -109,25 +121,39 @@ final class RelaySettingsStore: ObservableObject {
 
         lastPublishError = nil
         publishTask?.cancel()
+        inboxPublishTask?.cancel()
 
         guard let normalizedAccount else {
-            apply(readRelays: Self.defaultReadRelayURLs, writeRelays: Self.defaultWriteRelayURLs)
+            apply(
+                readRelays: Self.defaultReadRelayURLs,
+                writeRelays: Self.defaultWriteRelayURLs,
+                inboxRelays: Self.defaultInboxRelayURLs
+            )
             return
         }
 
         if let persisted = loadPersistedSettings(for: normalizedAccount) {
             apply(
                 readRelays: persisted.readRelays,
-                writeRelays: persisted.writeRelays
+                writeRelays: persisted.writeRelays,
+                inboxRelays: persisted.inboxRelays ?? Self.defaultInboxRelayURLs
             )
         } else {
-            apply(readRelays: Self.defaultReadRelayURLs, writeRelays: Self.defaultWriteRelayURLs)
+            apply(
+                readRelays: Self.defaultReadRelayURLs,
+                writeRelays: Self.defaultWriteRelayURLs,
+                inboxRelays: Self.defaultInboxRelayURLs
+            )
         }
     }
 
     func seedDefaultRelaysForCurrentAccount(publishToBootstrapRelays: Bool) {
         guard accountPubkey != nil else { return }
-        apply(readRelays: Self.defaultReadRelayURLs, writeRelays: Self.defaultWriteRelayURLs)
+        apply(
+            readRelays: Self.defaultReadRelayURLs,
+            writeRelays: Self.defaultWriteRelayURLs,
+            inboxRelays: Self.defaultInboxRelayURLs
+        )
         persistCurrentSettings()
         if publishToBootstrapRelays {
             schedulePublishRelayList(useBootstrapRelayTargets: true)
@@ -148,6 +174,10 @@ final class RelaySettingsStore: ObservableObject {
             if !writeRelays.contains(normalized) {
                 writeRelays.append(normalized)
             }
+        case .inbox:
+            if !inboxRelays.contains(normalized) {
+                inboxRelays.append(normalized)
+            }
         case .both:
             if !readRelays.contains(normalized) {
                 readRelays.append(normalized)
@@ -158,7 +188,12 @@ final class RelaySettingsStore: ObservableObject {
         }
 
         persistCurrentSettings()
-        schedulePublishRelayList(useBootstrapRelayTargets: false)
+        switch scope {
+        case .inbox:
+            schedulePublishInboxRelayList()
+        case .read, .write, .both:
+            schedulePublishRelayList(useBootstrapRelayTargets: false)
+        }
     }
 
     func removeReadRelay(_ relayURL: String) throws {
@@ -171,6 +206,13 @@ final class RelaySettingsStore: ObservableObject {
 
         persistCurrentSettings()
         schedulePublishRelayList(useBootstrapRelayTargets: false)
+    }
+
+    func removeInboxRelay(_ relayURL: String) throws {
+        guard inboxRelays.contains(relayURL) else { return }
+        inboxRelays.removeAll { $0 == relayURL }
+        persistCurrentSettings()
+        schedulePublishInboxRelayList()
     }
 
     func removeWriteRelay(_ relayURL: String) throws {
@@ -203,7 +245,8 @@ final class RelaySettingsStore: ObservableObject {
 
         let payload = PersistedRelaySettings(
             readRelays: readRelays,
-            writeRelays: writeRelays
+            writeRelays: writeRelays,
+            inboxRelays: inboxRelays
         )
         if let data = try? JSONEncoder().encode(payload) {
             defaults.set(data, forKey: defaultsKey(for: accountPubkey))
@@ -214,6 +257,13 @@ final class RelaySettingsStore: ObservableObject {
         publishTask?.cancel()
         publishTask = Task { [weak self] in
             await self?.publishRelayList(useBootstrapRelayTargets: useBootstrapRelayTargets)
+        }
+    }
+
+    private func schedulePublishInboxRelayList() {
+        inboxPublishTask?.cancel()
+        inboxPublishTask = Task { [weak self] in
+            await self?.publishInboxRelayList()
         }
     }
 
@@ -296,6 +346,53 @@ final class RelaySettingsStore: ObservableObject {
         }
     }
 
+    private func publishInboxRelayList() async {
+        guard let accountPubkey, let nsec else { return }
+        guard !inboxRelays.isEmpty else { return }
+        guard let keypair = Keypair(nsec: nsec.lowercased()) else {
+            guard self.accountPubkey == accountPubkey else { return }
+            lastPublishError = "Couldn't sign inbox relay settings. Please sign in again."
+            return
+        }
+
+        let sdkTags = inboxRelays.compactMap { decodeSDKTag(from: ["relay", $0]) }
+        guard !sdkTags.isEmpty else { return }
+
+        do {
+            let event = try NostrSDK.NostrEvent.Builder<NostrSDK.NostrEvent>(kind: .unknown(10_050))
+                .content("")
+                .appendTags(contentsOf: sdkTags)
+                .build(signedBy: keypair)
+
+            let eventData = try JSONEncoder().encode(event)
+            guard let eventObject = try JSONSerialization.jsonObject(with: eventData) as? [String: Any] else {
+                throw RelayClientError.publishRejected("Malformed inbox relay event")
+            }
+
+            let targets = normalizeRelayList(writeRelays + inboxRelays + Self.bootstrapPublishRelayURLs)
+            var successfulPublishes = 0
+            for relayString in targets {
+                guard let relayURL = URL(string: relayString) else { continue }
+                do {
+                    try await relayClient.publishEvent(
+                        relayURL: relayURL,
+                        eventObject: eventObject,
+                        eventID: event.id
+                    )
+                    successfulPublishes += 1
+                } catch {
+                    continue
+                }
+            }
+
+            guard self.accountPubkey == accountPubkey else { return }
+            lastPublishError = successfulPublishes > 0 ? nil : "Couldn't publish inbox relay settings right now."
+        } catch {
+            guard self.accountPubkey == accountPubkey else { return }
+            lastPublishError = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+        }
+    }
+
     private func decodeSDKTag(from raw: [String]) -> NostrSDK.Tag? {
         guard raw.count >= 2 else { return nil }
         guard let data = try? JSONSerialization.data(withJSONObject: raw),
@@ -305,12 +402,14 @@ final class RelaySettingsStore: ObservableObject {
         return tag
     }
 
-    private func apply(readRelays: [String], writeRelays: [String]) {
+    private func apply(readRelays: [String], writeRelays: [String], inboxRelays: [String]) {
         let normalizedRead = normalizeRelayList(readRelays)
         let normalizedWrite = normalizeRelayList(writeRelays)
+        let normalizedInbox = normalizeRelayList(inboxRelays)
 
         self.readRelays = normalizedRead.isEmpty ? Self.defaultReadRelayURLs : normalizedRead
         self.writeRelays = normalizedWrite.isEmpty ? Self.defaultWriteRelayURLs : normalizedWrite
+        self.inboxRelays = normalizedInbox
     }
 
     private func normalizeRelayList(_ relays: [String]) -> [String] {

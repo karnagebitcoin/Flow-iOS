@@ -75,22 +75,106 @@ struct FlowMediaFetchedResponse: Sendable {
 final class FlowMediaAspectRatioCache {
     static let shared = FlowMediaAspectRatioCache()
 
-    private let cache = NSCache<NSURL, NSNumber>()
+    private static let storageKey = "flow.mediaAspectRatios.v1"
+    private static let maxPersistedRatios = 2_048
 
-    private init() {
+    private let cache = NSCache<NSString, NSNumber>()
+    private let defaults: UserDefaults
+    private let lock = NSLock()
+    private var persistedRatios: [String: Double]
+
+    private init(defaults: UserDefaults = .standard) {
+        self.defaults = defaults
+        self.persistedRatios = Self.loadPersistedRatios(from: defaults)
         cache.countLimit = 512
     }
 
     func ratio(for url: URL) -> CGFloat? {
-        guard let cached = cache.object(forKey: url as NSURL) else { return nil }
-        let ratio = CGFloat(truncating: cached)
-        guard ratio.isFinite, ratio > 0 else { return nil }
+        let key = Self.cacheKey(for: url)
+        if let cached = cache.object(forKey: key as NSString) {
+            let ratio = CGFloat(truncating: cached)
+            guard ratio.isFinite, ratio > 0 else { return nil }
+            return ratio
+        }
+
+        lock.lock()
+        let persisted = persistedRatios[key]
+        lock.unlock()
+
+        guard let persisted, persisted.isFinite, persisted > 0 else { return nil }
+        let ratio = CGFloat(persisted)
+        cache.setObject(NSNumber(value: persisted), forKey: key as NSString)
         return ratio
     }
 
     func insert(_ ratio: CGFloat, for url: URL) {
+        insert(ratio, forKey: Self.cacheKey(for: url))
+    }
+
+    func insert(_ ratio: CGFloat, forURLString urlString: String) {
+        let key = Self.cacheKey(forURLString: urlString)
+        guard !key.isEmpty else { return }
+        insert(ratio, forKey: key)
+    }
+
+    private func insert(_ ratio: CGFloat, forKey key: String) {
         guard ratio.isFinite, ratio > 0 else { return }
-        cache.setObject(NSNumber(value: Double(ratio)), forKey: url as NSURL)
+        let normalizedRatio = min(max(Double(ratio), 0.28), 3.2)
+        cache.setObject(NSNumber(value: normalizedRatio), forKey: key as NSString)
+
+        lock.lock()
+        persistedRatios[key] = normalizedRatio
+        trimPersistedRatiosIfNeeded()
+        let snapshot = persistedRatios
+        lock.unlock()
+
+        defaults.set(snapshot, forKey: Self.storageKey)
+    }
+
+    private func trimPersistedRatiosIfNeeded() {
+        let overflow = persistedRatios.count - Self.maxPersistedRatios
+        guard overflow > 0 else { return }
+
+        for key in persistedRatios.keys.sorted().prefix(overflow) {
+            persistedRatios.removeValue(forKey: key)
+        }
+    }
+
+    private static func loadPersistedRatios(from defaults: UserDefaults) -> [String: Double] {
+        guard let rawValues = defaults.dictionary(forKey: storageKey) else { return [:] }
+
+        var ratios: [String: Double] = [:]
+        for (key, value) in rawValues {
+            let ratio: Double?
+            switch value {
+            case let number as NSNumber:
+                ratio = number.doubleValue
+            case let double as Double:
+                ratio = double
+            default:
+                ratio = nil
+            }
+
+            guard let ratio, ratio.isFinite, ratio > 0 else { continue }
+            ratios[key] = min(max(ratio, 0.28), 3.2)
+        }
+        return ratios
+    }
+
+    private static func cacheKey(for url: URL) -> String {
+        cacheKey(forURLString: url.absoluteString)
+    }
+
+    private static func cacheKey(forURLString urlString: String) -> String {
+        let trimmed = urlString.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return "" }
+
+        guard var components = URLComponents(string: trimmed) else {
+            return trimmed
+        }
+        components.scheme = components.scheme?.lowercased()
+        components.host = components.host?.lowercased()
+        return components.url?.absoluteString ?? trimmed
     }
 }
 

@@ -25,11 +25,15 @@ final class ActivityViewModel: ObservableObject {
     private var isSceneActive = false
     private var lastReadCreatedAt = 0
     private var onLiveReactionDetected: ((ActivityReaction) -> Void)?
+    private var spamAuthorScores: [String: Float] = [:]
+    private var spamScoreTasks: [String: Task<Void, Never>] = [:]
+    private var spamScoreAttemptedPubkeys = Set<String>()
 
     private static let fastActivityFetchTimeout: TimeInterval = 3
     private static let fastActivityRelayFetchMode: RelayFetchMode = .firstNonEmptyRelay
     private static let activityKinds = [1, 6, 7, 16, 1111, 1244]
     private static let lastReadStoragePrefix = "flow.activity.lastRead"
+    private static let spamThreshold: Float = 0.5
 
     init(
         service: NostrFeedService = NostrFeedService(),
@@ -44,11 +48,14 @@ final class ActivityViewModel: ObservableObject {
 
     deinit {
         liveUpdatesTask?.cancel()
+        spamScoreTasks.values.forEach { $0.cancel() }
     }
 
     var visibleItems: [ActivityRow] {
         itemsMatchingSelectedFilter.filter { item in
             AppSettingsStore.shared.isActivityNotificationEnabled(for: item.action.notificationPreference)
+                && !isHiddenByManualSpam(item)
+                && !isHiddenSpamReply(item)
         }
     }
 
@@ -82,6 +89,7 @@ final class ActivityViewModel: ObservableObject {
         if userChanged {
             self.currentUserPubkey = normalizedUser
             lastReadCreatedAt = normalizedUser.map(loadLastReadCreatedAt(for:)) ?? 0
+            resetSpamScores()
         }
 
         if !normalizedRelays.isEmpty {
@@ -152,6 +160,8 @@ final class ActivityViewModel: ObservableObject {
     }
 
     func notificationPreferencesChanged() {
+        resetSpamScores()
+        scheduleSpamScoring(for: items)
         recomputeUnreadCount()
     }
 
@@ -197,6 +207,7 @@ final class ActivityViewModel: ObservableObject {
             items = sortAndDeduplicate(items: fetched)
             knownEventIDs = Set(items.map { $0.id.lowercased() })
             pendingLiveEventIDs = []
+            scheduleSpamScoring(for: items)
             if isActivityTabActive {
                 markAllAsRead()
             } else {
@@ -311,6 +322,7 @@ final class ActivityViewModel: ObservableObject {
 
         items = sortAndDeduplicate(items: newRows + items)
         knownEventIDs = Set(items.map { $0.id.lowercased() })
+        scheduleSpamScoring(for: newRows)
 
         if isActivityTabActive {
             markAllAsRead()
@@ -350,6 +362,9 @@ final class ActivityViewModel: ObservableObject {
         guard AppSettingsStore.shared.isActivityNotificationEnabled(for: item.action.notificationPreference) else {
             return false
         }
+        guard !isHiddenSpamReply(item) else {
+            return false
+        }
         return !MuteStore.shared.isMuted(item.actorPubkey)
     }
 
@@ -360,6 +375,7 @@ final class ActivityViewModel: ObservableObject {
         pendingLiveEventIDs = []
         unreadCount = 0
         errorMessage = nil
+        resetSpamScores()
     }
 
     private func sortAndDeduplicate(items: [ActivityRow]) -> [ActivityRow] {
@@ -392,6 +408,76 @@ final class ActivityViewModel: ObservableObject {
         guard let value else { return nil }
         let normalized = value.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         return normalized.isEmpty ? nil : normalized
+    }
+
+    private func isHiddenSpamReply(_ item: ActivityRow) -> Bool {
+        guard case .reply = item.action else { return false }
+        guard AppSettingsStore.shared.spamReplyFilterEnabled else { return false }
+        guard let pubkey = normalizePubkey(item.actorPubkey) else { return false }
+        if pubkey == currentUserPubkey {
+            return false
+        }
+        if FollowStore.shared.isFollowing(pubkey) {
+            return false
+        }
+        if AppSettingsStore.shared.isSpamReplySafelisted(pubkey) {
+            return false
+        }
+        return (spamAuthorScores[pubkey] ?? 0) >= Self.spamThreshold
+    }
+
+    private func isHiddenByManualSpam(_ item: ActivityRow) -> Bool {
+        guard let pubkey = normalizePubkey(item.actorPubkey) else { return false }
+        guard pubkey != currentUserPubkey else { return false }
+        return AppSettingsStore.shared.shouldHideSpamMarkedPubkey(pubkey)
+    }
+
+    private func scheduleSpamScoring(for sourceItems: [ActivityRow]) {
+        guard AppSettingsStore.shared.spamReplyFilterEnabled else { return }
+        let settings = AppSettingsStore.shared
+        let markedSpamPubkeys = settings.spamFilterMarkedPubkeys
+        let notSpamPubkeys = settings.spamReplyFilterSafelistedPubkeys
+        var candidates = Set<String>()
+
+        for item in sourceItems {
+            guard case .reply = item.action else { continue }
+            guard let pubkey = normalizePubkey(item.actorPubkey) else { continue }
+            guard pubkey != currentUserPubkey else { continue }
+            guard !settings.shouldHideSpamMarkedPubkey(pubkey) else { continue }
+            guard !FollowStore.shared.isFollowing(pubkey) else { continue }
+            guard !settings.isSpamReplySafelisted(pubkey) else { continue }
+            guard spamAuthorScores[pubkey] == nil else { continue }
+            guard spamScoreTasks[pubkey] == nil else { continue }
+            guard !spamScoreAttemptedPubkeys.contains(pubkey) else { continue }
+            candidates.insert(pubkey)
+        }
+
+        for pubkey in candidates {
+            spamScoreAttemptedPubkeys.insert(pubkey)
+            let task = Task { [weak self] in
+                let score = await NSpamAuthorScorer.shared.scoreAuthor(
+                    pubkey: pubkey,
+                    markedSpamPubkeys: markedSpamPubkeys,
+                    notSpamPubkeys: notSpamPubkeys
+                )
+                await MainActor.run {
+                    guard let self else { return }
+                    if let score {
+                        self.spamAuthorScores[pubkey] = score
+                    }
+                    self.spamScoreTasks[pubkey] = nil
+                    self.recomputeUnreadCount()
+                }
+            }
+            spamScoreTasks[pubkey] = task
+        }
+    }
+
+    private func resetSpamScores() {
+        spamScoreTasks.values.forEach { $0.cancel() }
+        spamScoreTasks = [:]
+        spamAuthorScores = [:]
+        spamScoreAttemptedPubkeys = []
     }
 
     private var itemsMatchingSelectedFilter: [ActivityRow] {

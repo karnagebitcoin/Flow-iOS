@@ -27,6 +27,13 @@ enum ComposeNotePublishError: LocalizedError {
     }
 }
 
+struct PreparedNotePublication: Sendable {
+    let item: FeedItem
+    let targets: [URL]
+    let eventData: Data
+    let eventID: String
+}
+
 final class ComposeNotePublishService {
     private let relayClient: any NostrRelayEventPublishing
 
@@ -40,6 +47,21 @@ final class ComposeNotePublishService {
         writeRelayURLs: [URL],
         additionalTags: [[String]] = []
     ) async throws -> Int {
+        let prepared = try await prepareNote(
+            content: content,
+            currentNsec: currentNsec,
+            writeRelayURLs: writeRelayURLs,
+            additionalTags: additionalTags
+        )
+        return try await publishPrepared(prepared)
+    }
+
+    func prepareNote(
+        content: String,
+        currentNsec: String?,
+        writeRelayURLs: [URL],
+        additionalTags: [[String]] = []
+    ) async throws -> PreparedNotePublication {
         let publishedContent = ComposePublishedMediaContentBuilder.content(
             baseText: content,
             additionalTags: additionalTags
@@ -48,7 +70,7 @@ final class ComposeNotePublishService {
             throw ComposeNotePublishError.emptyContent
         }
 
-        return try await publishEvent(
+        return try await prepareEvent(
             kind: .textNote,
             content: publishedContent,
             currentNsec: currentNsec,
@@ -64,6 +86,23 @@ final class ComposeNotePublishService {
         writeRelayURLs: [URL],
         additionalTags: [[String]] = []
     ) async throws -> Int {
+        let prepared = try await preparePoll(
+            content: content,
+            poll: poll,
+            currentNsec: currentNsec,
+            writeRelayURLs: writeRelayURLs,
+            additionalTags: additionalTags
+        )
+        return try await publishPrepared(prepared)
+    }
+
+    func preparePoll(
+        content: String,
+        poll: ComposePollDraft,
+        currentNsec: String?,
+        writeRelayURLs: [URL],
+        additionalTags: [[String]] = []
+    ) async throws -> PreparedNotePublication {
         let publishedContent = ComposePublishedMediaContentBuilder.content(
             baseText: content,
             additionalTags: additionalTags
@@ -95,7 +134,7 @@ final class ComposeNotePublishService {
             pollTags.append(["relay", relayURL.absoluteString])
         }
 
-        return try await publishEvent(
+        return try await prepareEvent(
             kind: .unknown(NostrPollKind.poll),
             content: publishedContent,
             currentNsec: currentNsec,
@@ -104,13 +143,31 @@ final class ComposeNotePublishService {
         )
     }
 
-    private func publishEvent(
+    func publishPrepared(_ prepared: PreparedNotePublication) async throws -> Int {
+        let publishOutcome = await relayClient.publishEvent(
+            to: prepared.targets,
+            eventData: prepared.eventData,
+            eventID: prepared.eventID,
+            successPolicy: .returnAfterFirstSuccess
+        )
+
+        if publishOutcome.successfulSourceCount == 0 {
+            if let firstFailureMessage = publishOutcome.firstFailureMessage {
+                throw SourcePublishTransportError(message: firstFailureMessage)
+            }
+            throw ComposeNotePublishError.publishFailed
+        }
+
+        return publishOutcome.successfulSourceCount
+    }
+
+    private func prepareEvent(
         kind: NostrSDK.EventKind,
         content: String,
         currentNsec: String?,
         writeRelayURLs: [URL],
         additionalTags: [[String]]
-    ) async throws -> Int {
+    ) async throws -> PreparedNotePublication {
         guard let normalizedNsec = normalizeNsec(currentNsec),
               let keypair = Keypair(nsec: normalizedNsec.lowercased()) else {
             throw ComposeNotePublishError.missingPrivateKey
@@ -135,21 +192,17 @@ final class ComposeNotePublishService {
             .build(signedBy: keypair)
 
         let eventData = try JSONEncoder().encode(event)
-        let publishOutcome = await relayClient.publishEvent(
-            to: targets,
+        let localEvent = Self.localEvent(from: event)
+        _ = FlowNostrDB.shared.ingest(events: [localEvent])
+        let profile = await ProfileCache.shared.cachedProfile(pubkey: localEvent.pubkey)
+        let item = FeedItem(event: localEvent, profile: profile)
+
+        return PreparedNotePublication(
+            item: item,
+            targets: targets,
             eventData: eventData,
-            eventID: event.id,
-            successPolicy: .returnAfterFirstSuccess
+            eventID: event.id
         )
-
-        if publishOutcome.successfulSourceCount == 0 {
-            if let firstFailureMessage = publishOutcome.firstFailureMessage {
-                throw SourcePublishTransportError(message: firstFailureMessage)
-            }
-            throw ComposeNotePublishError.publishFailed
-        }
-
-        return publishOutcome.successfulSourceCount
     }
 
     private func normalizedRelayURLs(_ relayURLs: [URL]) -> [URL] {
@@ -177,6 +230,18 @@ final class ComposeNotePublishService {
             return nil
         }
         return tag
+    }
+
+    private static func localEvent(from event: NostrSDK.NostrEvent) -> NostrEvent {
+        NostrEvent(
+            id: event.id.lowercased(),
+            pubkey: event.pubkey.lowercased(),
+            createdAt: Int(event.createdAt),
+            kind: event.kind.rawValue,
+            tags: event.tags.map { [$0.name, $0.value] + $0.otherParameters },
+            content: event.content,
+            sig: event.signature ?? ""
+        )
     }
 }
 

@@ -1,10 +1,14 @@
 import ImageIO
 import UIKit
+import UniformTypeIdentifiers
 import XCTest
 @testable import Flow
 
 final class MediaUploadPreparationTests: XCTestCase {
-    func testPrepareUploadMediaKeepsOversizedJPEGUnderSixHundredKilobytes() throws {
+    private let maxStillImageUploadBytes = 1_500 * 1_024
+    private let maxStillImageDimension = 3_000.0
+
+    func testPrepareUploadMediaOptimizesOversizedJPEGWithinUploadLimits() throws {
         let originalImage = makeLargeTestImage(size: CGSize(width: 4_000, height: 3_000))
         let originalData = try XCTUnwrap(originalImage.jpegData(compressionQuality: 0.92))
 
@@ -19,11 +23,45 @@ final class MediaUploadPreparationTests: XCTestCase {
         XCTAssertEqual(prepared.mimeType, "image/jpeg")
         XCTAssertEqual(prepared.fileExtension, "jpg")
         XCTAssertLessThan(prepared.data.count, originalData.count)
-        XCTAssertLessThanOrEqual(prepared.data.count, 600 * 1_024)
+        XCTAssertLessThanOrEqual(prepared.data.count, maxStillImageUploadBytes)
 
         let preparedDimensions = try XCTUnwrap(imageDimensions(for: prepared.data))
-        XCTAssertLessThanOrEqual(preparedDimensions.width, 2_400)
-        XCTAssertLessThanOrEqual(preparedDimensions.height, 2_400)
+        XCTAssertLessThanOrEqual(preparedDimensions.width, maxStillImageDimension)
+        XCTAssertLessThanOrEqual(preparedDimensions.height, maxStillImageDimension)
+    }
+
+    func testPrepareGIFKeyboardUploadMediaConvertsAnimatedGIFToSmallerMP4() async throws {
+        let originalData = try XCTUnwrap(makeAnimatedGIFData(
+            frameCount: 20,
+            size: CGSize(width: 360, height: 240)
+        ))
+
+        let prepared = try await MediaUploadPreparation.prepareGIFKeyboardUploadMedia(
+            data: originalData,
+            mimeType: "image/gif",
+            fileExtension: "gif"
+        )
+
+        XCTAssertEqual(prepared.mimeType, "video/mp4")
+        XCTAssertEqual(prepared.fileExtension, "mp4")
+        XCTAssertLessThan(prepared.data.count, originalData.count)
+    }
+
+    func testPrepareGIFKeyboardUploadMediaKeepsStaticGIFAsGIF() async throws {
+        let staticGIFData = Data(
+            base64Encoded: "R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw=="
+        )
+
+        let originalData = try XCTUnwrap(staticGIFData)
+        let prepared = try await MediaUploadPreparation.prepareGIFKeyboardUploadMedia(
+            data: originalData,
+            mimeType: "image/gif",
+            fileExtension: "gif"
+        )
+
+        XCTAssertEqual(prepared.mimeType, "image/gif")
+        XCTAssertEqual(prepared.fileExtension, "gif")
+        XCTAssertEqual(prepared.data, originalData)
     }
 
     private func makeLargeTestImage(size: CGSize) -> UIImage {
@@ -57,6 +95,123 @@ final class MediaUploadPreparationTests: XCTestCase {
             )
             UIColor.white.withAlphaComponent(0.25).setFill()
             context.cgContext.fillEllipse(in: insetRect)
+        }
+    }
+
+    private func makeAnimatedGIFData(frameCount: Int, size: CGSize) -> Data? {
+        let data = NSMutableData()
+        guard let destination = CGImageDestinationCreateWithData(
+            data,
+            UTType.gif.identifier as CFString,
+            frameCount,
+            nil
+        ) else {
+            return nil
+        }
+
+        CGImageDestinationSetProperties(
+            destination,
+            [
+                kCGImagePropertyGIFDictionary: [
+                    kCGImagePropertyGIFLoopCount: 0
+                ]
+            ] as CFDictionary
+        )
+
+        let frameProperties = [
+            kCGImagePropertyGIFDictionary: [
+                kCGImagePropertyGIFDelayTime: 0.08
+            ]
+        ] as CFDictionary
+
+        for frameIndex in 0..<frameCount {
+            let image = makeAnimatedGIFFrame(
+                size: size,
+                frameIndex: frameIndex,
+                frameCount: frameCount
+            )
+            guard let cgImage = image.cgImage else { return nil }
+            CGImageDestinationAddImage(destination, cgImage, frameProperties)
+        }
+
+        guard CGImageDestinationFinalize(destination) else { return nil }
+        return data as Data
+    }
+
+    private func makeAnimatedGIFFrame(
+        size: CGSize,
+        frameIndex: Int,
+        frameCount: Int
+    ) -> UIImage {
+        let format = UIGraphicsImageRendererFormat.default()
+        format.scale = 1
+        format.opaque = true
+
+        let renderer = UIGraphicsImageRenderer(size: size, format: format)
+        return renderer.image { context in
+            let cgContext = context.cgContext
+            let progress = CGFloat(frameIndex) / CGFloat(max(frameCount - 1, 1))
+            let colors = [
+                UIColor(
+                    hue: progress,
+                    saturation: 0.76,
+                    brightness: 0.94,
+                    alpha: 1
+                ).cgColor,
+                UIColor(
+                    hue: (progress + 0.33).truncatingRemainder(dividingBy: 1),
+                    saturation: 0.82,
+                    brightness: 0.72,
+                    alpha: 1
+                ).cgColor,
+                UIColor(
+                    hue: (progress + 0.67).truncatingRemainder(dividingBy: 1),
+                    saturation: 0.68,
+                    brightness: 0.88,
+                    alpha: 1
+                ).cgColor
+            ] as CFArray
+
+            let colorSpace = CGColorSpaceCreateDeviceRGB()
+            guard let gradient = CGGradient(
+                colorsSpace: colorSpace,
+                colors: colors,
+                locations: [0, 0.52, 1]
+            ) else {
+                return
+            }
+            cgContext.drawLinearGradient(
+                gradient,
+                start: CGPoint(x: 0, y: 0),
+                end: CGPoint(x: size.width, y: size.height),
+                options: []
+            )
+
+            for stripeIndex in 0..<18 {
+                let stripeProgress = CGFloat(stripeIndex) / 18
+                let x = (stripeProgress * size.width + progress * 120)
+                    .truncatingRemainder(dividingBy: size.width + 80) - 40
+                UIColor(
+                    hue: (progress + stripeProgress * 0.28).truncatingRemainder(dividingBy: 1),
+                    saturation: 0.52,
+                    brightness: 1,
+                    alpha: 0.46
+                ).setFill()
+                cgContext.fill(CGRect(
+                    x: x,
+                    y: 0,
+                    width: 24,
+                    height: size.height
+                ))
+            }
+
+            UIColor.white.withAlphaComponent(0.22).setFill()
+            cgContext.fillEllipse(in: CGRect(
+                x: size.width * (0.16 + progress * 0.48),
+                y: size.height * 0.28,
+                width: size.width * 0.24,
+                height: size.height * 0.36
+            ))
         }
     }
 

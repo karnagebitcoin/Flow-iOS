@@ -64,6 +64,9 @@ struct DMsView: View {
         .onChange(of: relaySettings.writeRelays) { _, _ in
             configureStore()
         }
+        .onChange(of: relaySettings.inboxRelays) { _, _ in
+            configureStore()
+        }
         .onChange(of: followStore.followedPubkeys) { _, _ in
             configureStore()
         }
@@ -291,6 +294,7 @@ struct DMsView: View {
             nsec: auth.currentNsec,
             readRelayURLs: relaySettings.readRelayURLs,
             writeRelayURLs: relaySettings.writeRelayURLs,
+            inboxRelayURLs: relaySettings.inboxRelayURLs,
             followedPubkeys: followStore.followedPubkeys
         )
     }

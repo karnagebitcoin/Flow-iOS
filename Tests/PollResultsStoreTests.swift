@@ -113,10 +113,12 @@ final class PollResultsStoreTests: XCTestCase {
 
         let cancellable = store.publisher(for: pollEvent.id)
             .dropFirst()
-            .sink { snapshot in
-                if snapshot.results?.totalVotes == 1 {
-                    updated.fulfill()
-                }
+            .filter { snapshot in
+                snapshot.results?.totalVotes == 1
+            }
+            .first()
+            .sink { _ in
+                updated.fulfill()
             }
         defer { cancellable.cancel() }
 

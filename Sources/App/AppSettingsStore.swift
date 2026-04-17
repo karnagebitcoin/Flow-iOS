@@ -392,6 +392,7 @@ final class AppSettingsStore: ObservableObject {
     nonisolated static let legacyScopedStorageKeyPrefix = "x21.app.settings.v2"
     nonisolated static let storageKeyPrefix = "flow.app.settings.v2"
     nonisolated static let legacyMigrationAccountKey = "flow.app.settings.legacyMigratedAccount"
+    nonisolated static let sharedSpamFilterMarkedPubkeysKey = "flow.app.spamFilter.markedPubkeys.v1"
 
     private struct MentionMetadataDecoder: MetadataCoding {}
 
@@ -404,6 +405,7 @@ final class AppSettingsStore: ObservableObject {
     @Published private(set) var isFlowPlusPreviewUnlocked = false
     @Published private(set) var hasUsedFlowPlusPreviewThisSession = false
     @Published private(set) var hasUsedPremiumThemePreviewThisSession = false
+    @Published private var sharedSpamFilterMarkedPubkeys: [String]
 
     private let defaults: UserDefaults
     private let authStore: AuthStore
@@ -419,6 +421,9 @@ final class AppSettingsStore: ObservableObject {
             case breakReminderInterval
             case liveReactsEnabled
             case hideNSFWContent
+            case spamReplyFilterEnabled
+            case spamFilterMarkedPubkeys
+            case spamReplyFilterSafelistedPubkeys
             case autoplayVideos
             case autoplayVideoSoundEnabled
             case blurMediaFromUnfollowedAuthors
@@ -447,6 +452,9 @@ final class AppSettingsStore: ObservableObject {
         var breakReminderInterval: BreakReminderInterval = .fortyMinutes
         var liveReactsEnabled: Bool = true
         var hideNSFWContent: Bool = true
+        var spamReplyFilterEnabled: Bool = true
+        var spamFilterMarkedPubkeys: [String] = []
+        var spamReplyFilterSafelistedPubkeys: [String] = []
         var autoplayVideos: Bool = true
         var autoplayVideoSoundEnabled: Bool = false
         var blurMediaFromUnfollowedAuthors: Bool = true
@@ -478,6 +486,13 @@ final class AppSettingsStore: ObservableObject {
             breakReminderInterval = (try? container.decode(BreakReminderInterval.self, forKey: .breakReminderInterval)) ?? .fortyMinutes
             liveReactsEnabled = try container.decodeIfPresent(Bool.self, forKey: .liveReactsEnabled) ?? true
             hideNSFWContent = try container.decodeIfPresent(Bool.self, forKey: .hideNSFWContent) ?? true
+            spamReplyFilterEnabled = try container.decodeIfPresent(Bool.self, forKey: .spamReplyFilterEnabled) ?? true
+            spamFilterMarkedPubkeys = AppSettingsStore.normalizedNewsAuthorPubkeys(
+                try container.decodeIfPresent([String].self, forKey: .spamFilterMarkedPubkeys) ?? []
+            )
+            spamReplyFilterSafelistedPubkeys = AppSettingsStore.normalizedNewsAuthorPubkeys(
+                try container.decodeIfPresent([String].self, forKey: .spamReplyFilterSafelistedPubkeys) ?? []
+            )
             autoplayVideos = try container.decodeIfPresent(Bool.self, forKey: .autoplayVideos) ?? true
             autoplayVideoSoundEnabled = try container.decodeIfPresent(Bool.self, forKey: .autoplayVideoSoundEnabled) ?? false
             blurMediaFromUnfollowedAuthors = try container.decodeIfPresent(Bool.self, forKey: .blurMediaFromUnfollowedAuthors) ?? true
@@ -519,6 +534,9 @@ final class AppSettingsStore: ObservableObject {
             try container.encode(breakReminderInterval, forKey: .breakReminderInterval)
             try container.encode(liveReactsEnabled, forKey: .liveReactsEnabled)
             try container.encode(hideNSFWContent, forKey: .hideNSFWContent)
+            try container.encode(spamReplyFilterEnabled, forKey: .spamReplyFilterEnabled)
+            try container.encode(spamFilterMarkedPubkeys, forKey: .spamFilterMarkedPubkeys)
+            try container.encode(spamReplyFilterSafelistedPubkeys, forKey: .spamReplyFilterSafelistedPubkeys)
             try container.encode(autoplayVideos, forKey: .autoplayVideos)
             try container.encode(autoplayVideoSoundEnabled, forKey: .autoplayVideoSoundEnabled)
             try container.encode(blurMediaFromUnfollowedAuthors, forKey: .blurMediaFromUnfollowedAuthors)
@@ -561,6 +579,7 @@ final class AppSettingsStore: ObservableObject {
     init(defaults: UserDefaults = .standard, authStore: AuthStore = .shared) {
         self.defaults = defaults
         self.authStore = authStore
+        self.sharedSpamFilterMarkedPubkeys = Self.loadSharedSpamFilterMarkedPubkeys(defaults: defaults)
         let authState = authStore.load()
         let initialAccountStorageID = Self.normalizedSettingsAccountID(
             authState.accounts.first(where: { $0.id == authState.currentAccountID })?.pubkey
@@ -584,6 +603,7 @@ final class AppSettingsStore: ObservableObject {
         } else {
             persistedSettings = PersistedSettings()
         }
+        migrateScopedSpamFilterMarkedPubkeysIfNeeded()
     }
 
     deinit {
@@ -608,6 +628,7 @@ final class AppSettingsStore: ObservableObject {
             allowLegacyGlobalMigration: allowLegacyGlobalMigration
         ) {
             persistedSettings = migratedSettings
+            migrateScopedSpamFilterMarkedPubkeysIfNeeded()
             return
         }
 
@@ -616,6 +637,7 @@ final class AppSettingsStore: ObservableObject {
             accountStorageID: normalizedAccountStorageID,
             allowLegacyFallback: false
         )
+        migrateScopedSpamFilterMarkedPubkeysIfNeeded()
     }
 
     var primaryColor: Color {
@@ -695,6 +717,86 @@ final class AppSettingsStore: ObservableObject {
             persistedSettings.hideNSFWContent = newValue
             persist()
         }
+    }
+
+    var spamReplyFilterEnabled: Bool {
+        get { persistedSettings.spamReplyFilterEnabled }
+        set {
+            persistedSettings.spamReplyFilterEnabled = newValue
+            persist()
+        }
+    }
+
+    var spamReplyFilterSafelistedPubkeys: [String] {
+        persistedSettings.spamReplyFilterSafelistedPubkeys
+    }
+
+    var spamFilterMarkedPubkeys: [String] {
+        sharedSpamFilterMarkedPubkeys
+    }
+
+    var spamFilterLabelSignature: String {
+        [
+            spamFilterMarkedPubkeys.joined(separator: "|"),
+            spamReplyFilterSafelistedPubkeys.joined(separator: "|")
+        ]
+        .joined(separator: "-")
+    }
+
+    func isSpamReplySafelisted(_ pubkey: String) -> Bool {
+        let normalized = pubkey.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !normalized.isEmpty else { return false }
+        return persistedSettings.spamReplyFilterSafelistedPubkeys.contains(normalized)
+    }
+
+    func isSpamFilterMarked(_ pubkey: String) -> Bool {
+        let normalized = pubkey.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !normalized.isEmpty else { return false }
+        return sharedSpamFilterMarkedPubkeys.contains(normalized)
+    }
+
+    func shouldHideSpamMarkedPubkey(_ pubkey: String) -> Bool {
+        isSpamFilterMarked(pubkey) && !isSpamReplySafelisted(pubkey)
+    }
+
+    func addSpamReplySafelistedPubkey(_ pubkey: String) {
+        guard let normalized = Self.normalizedNewsAuthorPubkey(from: pubkey) else { return }
+        if !persistedSettings.spamReplyFilterSafelistedPubkeys.contains(normalized) {
+            persistedSettings.spamReplyFilterSafelistedPubkeys.append(normalized)
+            persistedSettings.spamReplyFilterSafelistedPubkeys.sort()
+            persist()
+        }
+    }
+
+    func removeSpamReplySafelistedPubkey(_ pubkey: String) {
+        let normalized = pubkey.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !normalized.isEmpty else { return }
+        let updated = persistedSettings.spamReplyFilterSafelistedPubkeys.filter { $0 != normalized }
+        guard updated.count != persistedSettings.spamReplyFilterSafelistedPubkeys.count else { return }
+        persistedSettings.spamReplyFilterSafelistedPubkeys = updated
+        persist()
+    }
+
+    func addSpamFilterMarkedPubkey(_ pubkey: String) {
+        guard let normalized = Self.normalizedNewsAuthorPubkey(from: pubkey) else { return }
+        if persistedSettings.spamReplyFilterSafelistedPubkeys.contains(normalized) {
+            persistedSettings.spamReplyFilterSafelistedPubkeys.removeAll { $0 == normalized }
+            persist()
+        }
+        if !sharedSpamFilterMarkedPubkeys.contains(normalized) {
+            sharedSpamFilterMarkedPubkeys.append(normalized)
+            sharedSpamFilterMarkedPubkeys.sort()
+            persistSharedSpamFilterMarkedPubkeys()
+        }
+    }
+
+    func removeSpamFilterMarkedPubkey(_ pubkey: String) {
+        let normalized = pubkey.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !normalized.isEmpty else { return }
+        let updated = sharedSpamFilterMarkedPubkeys.filter { $0 != normalized }
+        guard updated.count != sharedSpamFilterMarkedPubkeys.count else { return }
+        sharedSpamFilterMarkedPubkeys = updated
+        persistSharedSpamFilterMarkedPubkeys()
     }
 
     var autoplayVideos: Bool {
@@ -1101,6 +1203,15 @@ final class AppSettingsStore: ObservableObject {
         .joined(separator: "-")
     }
 
+    var spamReplyFilterSignature: String {
+        [
+            spamReplyFilterEnabled ? "1" : "0",
+            spamFilterMarkedPubkeys.joined(separator: "|"),
+            spamReplyFilterSafelistedPubkeys.joined(separator: "|")
+        ]
+        .joined(separator: "-")
+    }
+
     func isActivityNotificationEnabled(for preference: ActivityNotificationPreference) -> Bool {
         switch preference {
         case .mentions:
@@ -1176,6 +1287,23 @@ final class AppSettingsStore: ObservableObject {
         defaults.set(data, forKey: Self.storageKey(for: currentAccountStorageID))
     }
 
+    private func persistSharedSpamFilterMarkedPubkeys() {
+        defaults.set(sharedSpamFilterMarkedPubkeys, forKey: Self.sharedSpamFilterMarkedPubkeysKey)
+    }
+
+    private func migrateScopedSpamFilterMarkedPubkeysIfNeeded() {
+        guard !persistedSettings.spamFilterMarkedPubkeys.isEmpty else { return }
+        let merged = Self.normalizedNewsAuthorPubkeys(
+            sharedSpamFilterMarkedPubkeys + persistedSettings.spamFilterMarkedPubkeys
+        )
+        if merged != sharedSpamFilterMarkedPubkeys {
+            sharedSpamFilterMarkedPubkeys = merged
+            persistSharedSpamFilterMarkedPubkeys()
+        }
+        persistedSettings.spamFilterMarkedPubkeys = []
+        persist()
+    }
+
     nonisolated private static func storageKey(for accountStorageID: String?) -> String {
         "\(storageKeyPrefix).\(accountStorageID ?? "anonymous")"
     }
@@ -1187,6 +1315,10 @@ final class AppSettingsStore: ObservableObject {
     nonisolated private static func decodeSettings(from data: Data?) -> PersistedSettings? {
         guard let data else { return nil }
         return try? JSONDecoder().decode(PersistedSettings.self, from: data)
+    }
+
+    nonisolated private static func loadSharedSpamFilterMarkedPubkeys(defaults: UserDefaults) -> [String] {
+        normalizedNewsAuthorPubkeys(defaults.stringArray(forKey: sharedSpamFilterMarkedPubkeysKey) ?? [])
     }
 
     nonisolated private static func loadPersistedSettings(

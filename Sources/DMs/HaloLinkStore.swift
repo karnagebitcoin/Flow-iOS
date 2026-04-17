@@ -43,6 +43,7 @@ private struct HaloLinkSession: Equatable {
     let nsec: String
     let readRelayURLs: [URL]
     let writeRelayURLs: [URL]
+    let inboxRelayURLs: [URL]
 
     var keypair: Keypair? {
         Keypair(nsec: nsec.lowercased())
@@ -368,6 +369,7 @@ final class HaloLinkStore: ObservableObject {
         nsec: String?,
         readRelayURLs: [URL],
         writeRelayURLs: [URL],
+        inboxRelayURLs: [URL],
         followedPubkeys: Set<String>
     ) {
         self.followedPubkeys = Set(followedPubkeys.map(HaloLinkSupport.normalizePubkey))
@@ -378,6 +380,7 @@ final class HaloLinkStore: ObservableObject {
             .lowercased()
         let normalizedReadRelays = HaloLinkSupport.normalizedRelayURLs(readRelayURLs)
         let normalizedWriteRelays = HaloLinkSupport.normalizedRelayURLs(writeRelayURLs)
+        let normalizedInboxRelays = HaloLinkSupport.normalizedRelayURLs(inboxRelayURLs)
 
         guard !normalizedAccountPubkey.isEmpty, !normalizedNsec.isEmpty else {
             resetState()
@@ -388,7 +391,8 @@ final class HaloLinkStore: ObservableObject {
             accountPubkey: normalizedAccountPubkey,
             nsec: normalizedNsec,
             readRelayURLs: normalizedReadRelays,
-            writeRelayURLs: normalizedWriteRelays
+            writeRelayURLs: normalizedWriteRelays,
+            inboxRelayURLs: normalizedInboxRelays
         )
 
         guard nextSession != session else {
@@ -1029,6 +1033,11 @@ final class HaloLinkStore: ObservableObject {
     }
 
     private func resolveOwnInboxRelayURLs(for session: HaloLinkSession) async -> [URL] {
+        if !session.inboxRelayURLs.isEmpty {
+            inboxRelayCache[session.accountPubkey] = session.inboxRelayURLs
+            return session.inboxRelayURLs
+        }
+
         let lookupTargets = HaloLinkSupport.normalizedRelayURLs(
             session.readRelayURLs + session.writeRelayURLs + bootstrapLookupRelayURLs
         )
@@ -1087,9 +1096,10 @@ final class HaloLinkStore: ObservableObject {
         for recipientPubkey in wrapRecipients {
             let relayURLs: [URL]
             if recipientPubkey == session.accountPubkey {
-                relayURLs = ownInboxRelayURLs.isEmpty
+                let configuredInboxRelays = session.inboxRelayURLs.isEmpty
                     ? Array(session.writeRelayURLs.prefix(HaloLinkSupport.maxPublishedInboxRelays))
-                    : ownInboxRelayURLs
+                    : session.inboxRelayURLs
+                relayURLs = ownInboxRelayURLs.isEmpty ? configuredInboxRelays : ownInboxRelayURLs
             } else {
                 relayURLs = await fetchInboxRelayURLs(for: recipientPubkey, relayTargets: lookupTargets)
             }
@@ -1108,6 +1118,7 @@ final class HaloLinkStore: ObservableObject {
     private func lookupRelayTargets(for session: HaloLinkSession) -> [URL] {
         HaloLinkSupport.normalizedRelayURLs(
             ownInboxRelayURLs +
+            session.inboxRelayURLs +
             session.readRelayURLs +
             session.writeRelayURLs +
             bootstrapLookupRelayURLs

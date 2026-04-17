@@ -20,11 +20,13 @@ final class HomeFeedViewModel: ObservableObject {
 
     private struct VisibleItemsCacheKey: Equatable {
         let itemsRevision: Int
+        let feedSource: HomePrimaryFeedSource
         let mode: FeedMode
         let showKinds: [Int]
         let mediaOnly: Bool
         let hideNSFW: Bool
         let filterRevision: Int
+        let spamFilterSignature: String
         let mutedConversationRevision: Int
         let ignoreMediaOnly: Bool
     }
@@ -51,6 +53,7 @@ final class HomeFeedViewModel: ObservableObject {
     @Published var feedSource: HomePrimaryFeedSource = .network
     @Published private(set) var interestHashtags: [String] = []
     @Published private(set) var favoriteHashtags: [String] = []
+    @Published private(set) var favoriteRelayURLs: [String] = []
     @Published private(set) var pollsFeedVisible = true
     @Published private(set) var customFeeds: [CustomFeedDefinition] = []
     @Published var errorMessage: String?
@@ -160,10 +163,11 @@ final class HomeFeedViewModel: ObservableObject {
 
     var feedSourceOptions: [HomePrimaryFeedSource] {
         let hashtagSources = favoriteHashtags.map { HomePrimaryFeedSource.hashtag($0) }
+        let relaySources = favoriteRelayURLs.map { HomePrimaryFeedSource.relay($0) }
         let interestSources: [HomePrimaryFeedSource] = interestHashtags.isEmpty ? [] : [.interests]
         let customSources = customFeeds.map { HomePrimaryFeedSource.custom($0.id) }
         let pollsSources: [HomePrimaryFeedSource] = pollsFeedVisible ? [.polls] : []
-        return [.network, .following] + pollsSources + [.trending] + interestSources + [.news] + customSources + hashtagSources
+        return [.network, .following] + pollsSources + [.trending] + interestSources + [.news] + customSources + relaySources + hashtagSources
     }
 
     var kindFilterOptions: [FeedKindFilterOption] {
@@ -278,6 +282,8 @@ final class HomeFeedViewModel: ObservableObject {
             }
         case .hashtag(let hashtag):
             sourceDescriptor = "hashtag:\(HomePrimaryFeedSource.normalizeHashtag(hashtag))"
+        case .relay(let relayURL):
+            sourceDescriptor = "relay:\(HomePrimaryFeedSource.normalizeRelayURLString(relayURL))"
         }
 
         let relaySignature = sourceRelayURLs
@@ -309,6 +315,20 @@ final class HomeFeedViewModel: ObservableObject {
 
         if case .hashtag(let selectedHashtag) = feedSource,
            !normalized.contains(HomePrimaryFeedSource.normalizeHashtag(selectedHashtag)) {
+            feedSource = .network
+            storeFeedSourcePreference(feedSource, pubkey: currentUserPubkey)
+            resetFeedStateAndReload()
+        }
+    }
+
+    func updateFavoriteRelays(_ relayURLs: [String]) {
+        let normalized = HomeFeedSourceResolver.normalizedFavoriteRelayURLs(relayURLs)
+        guard favoriteRelayURLs != normalized else { return }
+
+        favoriteRelayURLs = normalized
+
+        if case .relay(let selectedRelayURL) = feedSource,
+           !normalized.contains(HomePrimaryFeedSource.normalizeRelayURLString(selectedRelayURL)) {
             feedSource = .network
             storeFeedSourcePreference(feedSource, pubkey: currentUserPubkey)
             resetFeedStateAndReload()
@@ -384,6 +404,11 @@ final class HomeFeedViewModel: ObservableObject {
         bufferedNewItems.removeAll { $0.event.referencesConversation(id: normalized) }
         knownEventIDs = Set(items.map(\.id))
         knownEventIDs.formUnion(bufferedNewItems.map(\.id))
+    }
+
+    func insertOptimisticPublishedItem(_ item: FeedItem) {
+        guard itemIsAllowedForCurrentSource(item) else { return }
+        mergeKeepingNewest(itemsToMerge: [item])
     }
 
     func selectFeedSource(_ source: HomePrimaryFeedSource) {
@@ -522,7 +547,7 @@ final class HomeFeedViewModel: ObservableObject {
             }
 
             switch requestSource {
-            case .network:
+            case .network, .relay:
                 followingPubkeys = []
                 fetched = try await service.fetchFeed(
                     relayURLs: requestRelayURLs,
@@ -833,7 +858,7 @@ final class HomeFeedViewModel: ObservableObject {
             let requestKinds = feedKinds(for: requestSource)
 
             switch requestSource {
-            case .network:
+            case .network, .relay:
                 fetched = try await service.fetchFeed(
                     relayURLs: requestRelayURLs,
                     kinds: requestKinds,
@@ -1282,6 +1307,15 @@ final class HomeFeedViewModel: ObservableObject {
                 scopeSignature: "network"
             )
 
+        case .relay(let relayURL):
+            let normalizedRelayURL = HomePrimaryFeedSource.normalizeRelayURLString(relayURL)
+            guard !normalizedRelayURL.isEmpty else { return [] }
+            return subscriptionTargets(
+                relayURLs: relayURLs(for: source),
+                filter: NostrFilter(kinds: kinds, limit: 100),
+                scopeSignature: "relay:\(normalizedRelayURL)"
+            )
+
         case .trending:
             return []
 
@@ -1455,6 +1489,10 @@ final class HomeFeedViewModel: ObservableObject {
                 return false
             }
 
+            if isHiddenByManualSpam(item) {
+                return false
+            }
+
             if hideNSFW && item.moderationEvents.contains(where: { $0.containsNSFWHashtag }) {
                 return false
             }
@@ -1485,10 +1523,11 @@ final class HomeFeedViewModel: ObservableObject {
         snapshot: MuteFilterSnapshot? = nil
     ) -> [FeedItem] {
         let snapshot = snapshot ?? muteFilterSnapshot
-        guard snapshot.hasAnyRules else { return source }
+        let hasMarkedSpam = !AppSettingsStore.shared.spamFilterMarkedPubkeys.isEmpty
+        guard snapshot.hasAnyRules || hasMarkedSpam else { return source }
 
         return source.filter { item in
-            !snapshot.shouldHideAny(in: item.moderationEvents)
+            !snapshot.shouldHideAny(in: item.moderationEvents) && !isHiddenByManualSpam(item)
         }
     }
 
@@ -1531,6 +1570,11 @@ final class HomeFeedViewModel: ObservableObject {
         }
     }
 
+    private func isHiddenByManualSpam(_ item: FeedItem) -> Bool {
+        guard normalizePubkey(item.displayAuthorPubkey) != currentUserPubkey else { return false }
+        return AppSettingsStore.shared.shouldHideSpamMarkedPubkey(item.displayAuthorPubkey)
+    }
+
     private func allowedFollowingAuthors(followingPubkeys: [String]? = nil) -> Set<String> {
         let followings = followingPubkeys ?? (self.followingPubkeys.isEmpty ? localFollowings() : self.followingPubkeys)
         return Set(
@@ -1544,11 +1588,13 @@ final class HomeFeedViewModel: ObservableObject {
     private func filteredMainItems(ignoreMediaOnly: Bool = false) -> [FeedItem] {
         let key = VisibleItemsCacheKey(
             itemsRevision: itemsRevision,
+            feedSource: feedSource,
             mode: mode,
             showKinds: showKinds,
             mediaOnly: mediaOnly,
             hideNSFW: AppSettingsStore.shared.hideNSFWContent,
             filterRevision: MuteStore.shared.filterRevision,
+            spamFilterSignature: AppSettingsStore.shared.spamFilterLabelSignature,
             mutedConversationRevision: mutedConversationRevision,
             ignoreMediaOnly: ignoreMediaOnly
         )
@@ -1709,6 +1755,12 @@ final class HomeFeedViewModel: ObservableObject {
                 return .network
             }
             return .hashtag(normalizedHashtag)
+        case .relay(let relayURL):
+            let normalizedRelayURL = HomePrimaryFeedSource.normalizeRelayURLString(relayURL)
+            guard favoriteRelayURLs.contains(normalizedRelayURL) else {
+                return .network
+            }
+            return .relay(normalizedRelayURL)
         case .polls:
             return pollsFeedVisible ? .polls : .network
         case .interests:
@@ -1728,6 +1780,11 @@ final class HomeFeedViewModel: ObservableObject {
         case .custom:
             let combined = Self.normalizedRelayURLs(readRelayURLs + Self.customFeedSupplementalRelayURLs)
             return combined.isEmpty ? readRelayURLs : combined
+        case .relay(let relayURL):
+            guard let normalizedRelayURL = RelayURLSupport.normalizedURL(from: relayURL) else {
+                return readRelayURLs
+            }
+            return [normalizedRelayURL]
         default:
             return readRelayURLs
         }
@@ -1743,6 +1800,9 @@ final class HomeFeedViewModel: ObservableObject {
             return combined.isEmpty ? [Self.newsFallbackRelayURL] : combined
         case .custom:
             return relayURLs(for: source)
+        case .relay:
+            let combined = Self.normalizedRelayURLs(readRelayURLs + relayURLs(for: source))
+            return combined.isEmpty ? relayURLs(for: source) : combined
         default:
             return relayURLs(for: source)
         }
@@ -2375,15 +2435,17 @@ final class HomeFeedViewModel: ObservableObject {
     }
 
     private func scheduleAssetPrefetch(for sourceItems: [FeedItem]) {
+        let prefetchItems = Array(sourceItems.prefix(assetPrefetchItemCount))
         let urls = Array(
-            sourceItems
-                .prefix(assetPrefetchItemCount)
-                .flatMap(\.prefetchImageURLs)
+            prefetchItems.flatMap(\.prefetchImageURLs)
         )
-        guard !urls.isEmpty else { return }
+        let mediaEvents = prefetchItems.map(\.displayEvent)
+        guard !urls.isEmpty || !mediaEvents.isEmpty else { return }
 
         Task(priority: .utility) {
-            await FlowImageCache.shared.prefetch(urls: urls)
+            async let imagePrefetch: Void = FlowImageCache.shared.prefetch(urls: urls)
+            async let geometryPrefetch: Void = NoteMediaGeometryPrefetcher.shared.prefetch(events: mediaEvents)
+            _ = await (imagePrefetch, geometryPrefetch)
         }
     }
 }

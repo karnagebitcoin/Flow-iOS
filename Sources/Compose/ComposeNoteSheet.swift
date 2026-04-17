@@ -85,6 +85,7 @@ struct ComposeNoteSheet: View {
     var quotedHandleHint: String? = nil
     var quotedAvatarURLHint: URL? = nil
     var savedDraftID: UUID? = nil
+    var onOptimisticPublished: ((FeedItem) -> Void)? = nil
     var onPublished: (() -> Void)? = nil
 
     var body: some View {
@@ -1252,7 +1253,7 @@ struct ComposeNoteSheet: View {
         normalizedNsec: String
     ) async throws -> ComposeMediaAttachment {
         let downloadedData = try await klipyGIFService.downloadGIFData(for: selection)
-        let preparedMedia = try MediaUploadPreparation.prepareUploadMedia(
+        let preparedMedia = try await MediaUploadPreparation.prepareGIFKeyboardUploadMedia(
             data: downloadedData,
             mimeType: selection.mimeType,
             fileExtension: selection.fileExtension
@@ -1267,12 +1268,46 @@ struct ComposeNoteSheet: View {
             provider: .blossom
         )
 
+        let imetaTag = gifKeyboardIMetaTag(
+            from: result.imetaTag,
+            preparedMedia: preparedMedia
+        )
+
         return ComposeMediaAttachment(
             url: result.url,
-            imetaTag: result.imetaTag,
+            imetaTag: imetaTag,
             mimeType: preparedMedia.mimeType,
             fileSizeBytes: preparedMedia.data.count
         )
+    }
+
+    private func gifKeyboardIMetaTag(
+        from imetaTag: [String],
+        preparedMedia: PreparedUploadMedia
+    ) -> [String] {
+        guard preparedMedia.mimeType.lowercased().hasPrefix("video/") else {
+            return imetaTag
+        }
+
+        var updatedTag = imetaTag
+        if !updatedTag.contains(where: { $0.lowercased().hasPrefix("m ") }) {
+            updatedTag.append("m \(preparedMedia.mimeType)")
+        }
+        if !updatedTag.contains(where: { $0.lowercased().hasPrefix("size ") }) {
+            updatedTag.append("size \(preparedMedia.data.count)")
+        }
+        if !updatedTag.contains(where: { $0.lowercased().hasPrefix("flow-gif-loop ") }) {
+            updatedTag.append("flow-gif-loop 1")
+        }
+
+        if !updatedTag.contains(where: { $0.lowercased().hasPrefix("dim ") }),
+           let previewSize = preparedMedia.previewImage?.size,
+           previewSize.width > 0,
+           previewSize.height > 0 {
+            updatedTag.append("dim \(Int(previewSize.width.rounded()))x\(Int(previewSize.height.rounded()))")
+        }
+
+        return updatedTag
     }
 
     private func uploadCapturedMediaAttachment(
@@ -1456,8 +1491,7 @@ struct ComposeNoteSheet: View {
             selectedMentions: selectedMentions
         )
         let publishTags = mediaAttachments.map(\.imetaTag) + currentAdditionalTags + preparedMentions.additionalTags
-        let isPublishingPoll = pollDraft != nil
-        let didPublish = await viewModel.publish(
+        guard let preparedPublication = await viewModel.preparePublication(
             content: preparedMentions.content,
             currentAccountPubkey: currentAccountPubkey,
             currentNsec: currentNsec,
@@ -1465,9 +1499,9 @@ struct ComposeNoteSheet: View {
             additionalTags: publishTags,
             pollDraft: pollDraft,
             replyTargetEvent: currentReplyTargetEvent
-        )
-
-        guard didPublish else { return }
+        ) else {
+            return
+        }
 
         hasPublishedSuccessfully = true
         if let activeSavedDraftID {
@@ -1480,13 +1514,26 @@ struct ComposeNoteSheet: View {
         mentionSuggestions = []
         activeSavedDraftID = nil
         editorSelectedRange = NSRange(location: 0, length: 0)
-        onPublished?()
-        if isPublishingPoll {
-            toastCenter.show("Poll posted")
-        } else {
-            toastCenter.show(currentReplyTargetEvent == nil ? "Note posted" : "Reply posted")
-        }
+        onOptimisticPublished?(preparedPublication.item)
+        toastCenter.show(preparedPublication.isReply ? "Reply publishing" : preparedPublication.isPoll ? "Poll publishing" : "Note publishing", style: .info)
         dismiss()
+
+        Task {
+            let didFinish = await viewModel.finishPublication(preparedPublication)
+            await MainActor.run {
+                if didFinish {
+                    onPublished?()
+                    if preparedPublication.isPoll {
+                        toastCenter.show("Poll posted")
+                    } else {
+                        toastCenter.show(preparedPublication.isReply ? "Reply posted" : "Note posted")
+                    }
+                } else {
+                    let message = viewModel.feedbackMessage ?? "Couldn't publish right now."
+                    toastCenter.show(message, style: .error, duration: 2.8)
+                }
+            }
+        }
     }
 
     private func applyInitialContextIfNeeded() {

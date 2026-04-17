@@ -75,7 +75,8 @@ struct NoteMediaAssetContentView: View {
 }
 
 enum NoteImageLayoutGuide {
-    static let defaultSingleImageAspectRatio: CGFloat = 4.0 / 5.0
+    static let defaultSingleImageAspectRatio: CGFloat = 4.0 / 3.0
+    static let defaultVideoAspectRatio: CGFloat = 16.0 / 9.0
 
     private static let aspectRatioBuckets: [CGFloat] = [
         9.0 / 16.0,
@@ -99,6 +100,13 @@ enum NoteImageLayoutGuide {
         normalizedAspectRatio(exactHint ?? cachedExactRatio) ?? defaultSingleImageAspectRatio
     }
 
+    static func reservedVideoAspectRatio(
+        exactHint: CGFloat?,
+        cachedExactRatio: CGFloat?
+    ) -> CGFloat {
+        normalizedAspectRatio(exactHint ?? cachedExactRatio) ?? defaultVideoAspectRatio
+    }
+
     static func bucketedSingleImageAspectRatio(for exactRatio: CGFloat?) -> CGFloat {
         guard let normalized = normalizedAspectRatio(exactRatio) else {
             return defaultSingleImageAspectRatio
@@ -109,6 +117,37 @@ enum NoteImageLayoutGuide {
     }
 
     static func imageAspectRatioHints(from tags: [[String]]) -> [String: CGFloat] {
+        aspectRatioHints(from: tags, requiredMimePrefix: "image/")
+    }
+
+    static func mediaAspectRatioHints(from tags: [[String]]) -> [String: CGFloat] {
+        aspectRatioHints(from: tags, requiredMimePrefix: nil)
+    }
+
+    static func aspectRatioHint(for url: URL, in hints: [String: CGFloat]) -> CGFloat? {
+        for key in aspectRatioHintKeys(for: url) {
+            if let ratio = normalizedAspectRatio(hints[key]) {
+                return ratio
+            }
+        }
+        return nil
+    }
+
+    static func naturalHeight(
+        width: CGFloat,
+        aspectRatio: CGFloat?,
+        minHeight: CGFloat,
+        maxHeight: CGFloat
+    ) -> CGFloat {
+        let ratio = normalizedAspectRatio(aspectRatio) ?? defaultSingleImageAspectRatio
+        let naturalHeight = width / ratio
+        return min(max(naturalHeight, minHeight), maxHeight)
+    }
+
+    private static func aspectRatioHints(
+        from tags: [[String]],
+        requiredMimePrefix: String?
+    ) -> [String: CGFloat] {
         var hints: [String: CGFloat] = [:]
 
         for tag in tags {
@@ -129,7 +168,10 @@ enum NoteImageLayoutGuide {
             }
 
             guard let urlString, !urlString.isEmpty else { continue }
-            if let mimeType, !mimeType.isEmpty, !mimeType.hasPrefix("image/") {
+            if let requiredMimePrefix,
+               let mimeType,
+               !mimeType.isEmpty,
+               !mimeType.hasPrefix(requiredMimePrefix) {
                 continue
             }
             guard let pixelSize,
@@ -137,10 +179,41 @@ enum NoteImageLayoutGuide {
                 continue
             }
 
-            hints[urlString] = aspectRatio
+            for key in aspectRatioHintKeys(forURLString: urlString) {
+                hints[key] = aspectRatio
+            }
         }
 
         return hints
+    }
+
+    private static func aspectRatioHintKeys(for url: URL) -> [String] {
+        aspectRatioHintKeys(forURLString: url.absoluteString)
+    }
+
+    private static func aspectRatioHintKeys(forURLString urlString: String) -> [String] {
+        let trimmed = urlString.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return [] }
+
+        var keys: [String] = []
+        func append(_ key: String) {
+            guard !key.isEmpty, !keys.contains(key) else { return }
+            keys.append(key)
+        }
+
+        append(trimmed)
+        append(trimmed.lowercased())
+
+        if var components = URLComponents(string: trimmed) {
+            components.scheme = components.scheme?.lowercased()
+            components.host = components.host?.lowercased()
+            if let normalized = components.url?.absoluteString {
+                append(normalized)
+                append(normalized.lowercased())
+            }
+        }
+
+        return keys
     }
 
     private static func pixelSize(fromDimensionString value: String) -> CGSize? {

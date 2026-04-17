@@ -24,6 +24,13 @@ enum ThreadReplyPublishError: LocalizedError {
     }
 }
 
+struct PreparedThreadReplyPublication: Sendable {
+    let item: FeedItem
+    let targets: [URL]
+    let eventData: Data
+    let eventID: String
+}
+
 final class ThreadReplyPublishService {
     private let relayClient: any NostrRelayEventPublishing
 
@@ -39,6 +46,26 @@ final class ThreadReplyPublishService {
         writeRelayURLs: [URL],
         additionalTags: [[String]] = []
     ) async throws -> FeedItem {
+        let prepared = try await prepareReply(
+            content: content,
+            replyingTo: rootEvent,
+            currentAccountPubkey: currentAccountPubkey,
+            currentNsec: currentNsec,
+            writeRelayURLs: writeRelayURLs,
+            additionalTags: additionalTags
+        )
+        _ = try await publishPrepared(prepared)
+        return prepared.item
+    }
+
+    func prepareReply(
+        content: String,
+        replyingTo rootEvent: NostrEvent,
+        currentAccountPubkey: String?,
+        currentNsec: String?,
+        writeRelayURLs: [URL],
+        additionalTags: [[String]] = []
+    ) async throws -> PreparedThreadReplyPublication {
         let publishedContent = ThreadPublishedMediaContentBuilder.content(
             baseText: content,
             additionalTags: additionalTags
@@ -108,19 +135,6 @@ final class ThreadReplyPublishService {
             .build(signedBy: keypair)
 
         let eventData = try JSONEncoder().encode(event)
-        let publishOutcome = await relayClient.publishEvent(
-            to: targets,
-            eventData: eventData,
-            eventID: event.id,
-            successPolicy: .returnAfterFirstSuccess
-        )
-
-        if publishOutcome.successfulSourceCount == 0 {
-            if let firstFailureMessage = publishOutcome.firstFailureMessage {
-                throw SourcePublishTransportError(message: firstFailureMessage)
-            }
-            throw ThreadReplyPublishError.publishFailed
-        }
 
         let localEvent = NostrEvent(
             id: event.id,
@@ -132,8 +146,42 @@ final class ThreadReplyPublishService {
             sig: event.signature ?? ""
         )
 
+        _ = FlowNostrDB.shared.ingest(events: [localEvent])
         let resolvedProfile = await ProfileCache.shared.resolve(pubkeys: [localEvent.pubkey]).hits[localEvent.pubkey]
-        return FeedItem(event: localEvent, profile: resolvedProfile)
+        let replyTargetProfile = await ProfileCache.shared
+            .resolve(pubkeys: [rootEvent.pubkey.lowercased()])
+            .hits[rootEvent.pubkey.lowercased()]
+        let item = FeedItem(
+            event: localEvent,
+            profile: resolvedProfile,
+            replyTargetEvent: rootEvent,
+            replyTargetProfile: replyTargetProfile
+        )
+
+        return PreparedThreadReplyPublication(
+            item: item,
+            targets: targets,
+            eventData: eventData,
+            eventID: event.id
+        )
+    }
+
+    func publishPrepared(_ prepared: PreparedThreadReplyPublication) async throws -> Int {
+        let publishOutcome = await relayClient.publishEvent(
+            to: prepared.targets,
+            eventData: prepared.eventData,
+            eventID: prepared.eventID,
+            successPolicy: .returnAfterFirstSuccess
+        )
+
+        if publishOutcome.successfulSourceCount == 0 {
+            if let firstFailureMessage = publishOutcome.firstFailureMessage {
+                throw SourcePublishTransportError(message: firstFailureMessage)
+            }
+            throw ThreadReplyPublishError.publishFailed
+        }
+
+        return publishOutcome.successfulSourceCount
     }
 
     private func normalizeNsec(_ value: String?) -> String? {

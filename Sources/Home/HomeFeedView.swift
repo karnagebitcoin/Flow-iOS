@@ -18,6 +18,7 @@ struct HomeFeedView: View {
     @ObservedObject private var muteStore = MuteStore.shared
     @ObservedObject private var interestFeedStore = InterestFeedStore.shared
     @ObservedObject private var hashtagFavoritesStore = HashtagFavoritesStore.shared
+    @ObservedObject private var relayFavoritesStore = RelayFavoritesStore.shared
 
     @State private var isShowingAuthSheet = false
     @State private var authSheetInitialTab: AuthSheetTab = .signIn
@@ -29,6 +30,7 @@ struct HomeFeedView: View {
     @State private var selectedThreadItem: FeedItem?
     @State private var selectedHashtagRoute: HashtagRoute?
     @State private var selectedProfileRoute: ProfileRoute?
+    @State private var selectedRelayRoute: RelayRoute?
     @State private var topNavAvatarURL: URL?
     @State private var topNavAvatarImage: UIImage?
     @State private var shouldAutoFocusReplyInThread = false
@@ -36,449 +38,387 @@ struct HomeFeedView: View {
 
     var body: some View {
         let _ = muteStore.filterRevision
+        let _ = appSettings.spamFilterLabelSignature
+
+        AnyView(navigationRoot)
+            .modifier(sheetsModifier)
+            .modifier(lifecycleModifier)
+    }
+
+    private var sheetsModifier: HomeFeedSheets {
+        HomeFeedSheets(
+            isShowingAuthSheet: $isShowingAuthSheet,
+            isShowingFeedSourcePicker: $isShowingFeedSourcePicker,
+            isShowingFilterSheet: $isShowingFilterSheet,
+            isShowingSettings: $isShowingSettings,
+            onSettingsDismiss: {
+                settingsSheetState.reset()
+            },
+            authSheet: {
+                AnyView(authSheet)
+            },
+            feedSourcePickerSheet: {
+                AnyView(feedSourcePickerSheet)
+            },
+            filterSheet: {
+                AnyView(filterSheet)
+            },
+            settingsSheet: {
+                AnyView(settingsSheet)
+            }
+        )
+    }
+
+    private var navigationDestinationsModifier: HomeFeedNavigationDestinations {
+        HomeFeedNavigationDestinations(
+            selectedThreadItem: $selectedThreadItem,
+            selectedHashtagRoute: $selectedHashtagRoute,
+            selectedProfileRoute: $selectedProfileRoute,
+            selectedRelayRoute: $selectedRelayRoute,
+            primaryRelayURL: effectivePrimaryRelayURL,
+            readRelayURLs: effectiveReadRelayURLs,
+            writeRelayURLs: effectiveWriteRelayURLs,
+            shouldAutoFocusReplyInThread: shouldAutoFocusReplyInThread
+        )
+    }
+
+    private var lifecycleModifier: HomeFeedLifecycleHandlers {
+        HomeFeedLifecycleHandlers(
+            authPubkey: auth.currentAccount?.pubkey,
+            authPrivateKey: auth.currentNsec,
+            readRelays: relaySettings.readRelays,
+            writeRelays: relaySettings.writeRelays,
+            slowConnectionMode: appSettings.slowConnectionMode,
+            newsRelayURLs: appSettings.newsRelayURLs,
+            newsAuthorPubkeys: appSettings.newsAuthorPubkeys,
+            newsHashtags: appSettings.newsHashtags,
+            pollsFeedVisible: appSettings.pollsFeedVisible,
+            followedPubkeys: followStore.followedPubkeys,
+            interestHashtags: interestFeedStore.hashtags,
+            favoriteHashtags: hashtagFavoritesStore.favoriteHashtags,
+            favoriteRelayURLs: relayFavoritesStore.favoriteRelayURLs,
+            customFeeds: appSettings.customFeeds,
+            topNavAvatarLookupID: topNavAvatarLookupID,
+            onAuthPubkeyChange: handleAccountPubkeyChange,
+            onAuthPrivateKeyChange: handleAuthPrivateKeyChange,
+            onReadRelaysChange: handleReadRelaysChange,
+            onWriteRelaysChange: {
+                configureFollowAndMuteStores()
+            },
+            onSlowConnectionModeChange: handleSlowConnectionModeChange,
+            onNewsFeedSettingChange: refreshNewsFeedIfNeeded,
+            onPollsFeedVisibleChange: viewModel.updatePollsFeedVisibility,
+            onFollowedPubkeysChange: refreshFollowingOrPollsFeedIfNeeded,
+            onInterestHashtagsChange: viewModel.updateInterestHashtags,
+            onFavoriteHashtagsChange: viewModel.updateFavoriteHashtags,
+            onFavoriteRelaysChange: viewModel.updateFavoriteRelays,
+            onCustomFeedsChange: viewModel.updateCustomFeeds,
+            onRefreshTopNavAvatar: refreshTopNavAvatar,
+            onProfileMetadataUpdated: handleProfileMetadataUpdated
+        )
+    }
+
+    private func handleAccountPubkeyChange(_ pubkey: String?) {
+        appSettings.configure(accountPubkey: pubkey)
+        relaySettings.configure(
+            accountPubkey: pubkey,
+            nsec: auth.currentNsec
+        )
+        viewModel.updateReadRelayURLs(effectiveReadRelayURLs)
+        interestFeedStore.configure(accountPubkey: pubkey)
+        viewModel.updateInterestHashtags(interestFeedStore.hashtags)
+        hashtagFavoritesStore.configure(accountPubkey: pubkey)
+        viewModel.updateFavoriteHashtags(hashtagFavoritesStore.favoriteHashtags)
+        relayFavoritesStore.configure(accountPubkey: pubkey)
+        viewModel.updateFavoriteRelays(relayFavoritesStore.favoriteRelayURLs)
+        viewModel.updatePollsFeedVisibility(appSettings.pollsFeedVisible)
+        viewModel.updateCustomFeeds(appSettings.customFeeds)
+        configureFollowAndMuteStores(accountPubkey: pubkey, nsec: auth.currentNsec)
+        viewModel.updateCurrentUserPubkey(pubkey)
+    }
+
+    private func handleAuthPrivateKeyChange(_ nsec: String?) {
+        relaySettings.configure(
+            accountPubkey: auth.currentAccount?.pubkey,
+            nsec: nsec
+        )
+        configureFollowAndMuteStores(accountPubkey: auth.currentAccount?.pubkey, nsec: nsec)
+    }
+
+    private func handleReadRelaysChange() {
+        viewModel.updateReadRelayURLs(effectiveReadRelayURLs)
+        configureFollowAndMuteStores()
+    }
+
+    private func handleSlowConnectionModeChange() {
+        viewModel.updateReadRelayURLs(effectiveReadRelayURLs)
+        configureFollowAndMuteStores()
+        refreshFeedSilently()
+    }
+
+    private func configureFollowAndMuteStores(
+        accountPubkey: String? = nil,
+        nsec: String? = nil
+    ) {
+        let pubkey = accountPubkey ?? auth.currentAccount?.pubkey
+        let privateKey = nsec ?? auth.currentNsec
+        followStore.configure(
+            accountPubkey: pubkey,
+            nsec: privateKey,
+            readRelayURLs: effectiveReadRelayURLs,
+            writeRelayURLs: effectiveWriteRelayURLs
+        )
+        MuteStore.shared.configure(
+            accountPubkey: pubkey,
+            nsec: privateKey,
+            readRelayURLs: effectiveReadRelayURLs,
+            writeRelayURLs: effectiveWriteRelayURLs
+        )
+    }
+
+    private func refreshNewsFeedIfNeeded() {
+        guard viewModel.feedSource == .news else { return }
+        refreshFeedSilently()
+    }
+
+    private func refreshFollowingOrPollsFeedIfNeeded() {
+        guard viewModel.feedSource == .following || viewModel.feedSource == .polls else { return }
+        refreshFeedSilently()
+    }
+
+    private func refreshFeedSilently() {
+        Task {
+            await viewModel.refresh(silent: true)
+        }
+    }
+
+    private func handleProfileMetadataUpdated(_ notification: Notification) {
+        guard let updatedPubkey = (notification.userInfo?["pubkey"] as? String)?.lowercased(),
+              let currentPubkey = auth.currentAccount?.pubkey.lowercased(),
+              updatedPubkey == currentPubkey else {
+            return
+        }
+        Task {
+            await refreshTopNavAvatar()
+        }
+    }
+
+    private var navigationRoot: some View {
+        NavigationStack {
+            HomeFeedRootContent(
+                isShowingSideMenu: $isShowingSideMenu,
+                topNavigationBar: { AnyView(topNavigationBar) },
+                feedContent: { AnyView(feedContent) },
+                sideMenuOverlay: { AnyView(sideMenuOverlay) }
+            )
+            .modifier(navigationDestinationsModifier)
+        }
+    }
+
+    private var feedContent: some View {
         let visibleItems = viewModel.visibleItems
         let visibleReplyCounts = ReplyCountEstimator.counts(for: visibleItems)
 
-        NavigationStack {
-            ZStack(alignment: .leading) {
-                AppThemeBackgroundView()
-                    .ignoresSafeArea()
+        return ScrollViewReader { scrollProxy in
+            feedList(
+                scrollProxy: scrollProxy,
+                visibleItems: visibleItems,
+                visibleReplyCounts: visibleReplyCounts
+            )
+        }
+    }
 
-                VStack(spacing: 0) {
-                    topNavigationBar
-
-                    ScrollViewReader { scrollProxy in
-                        List {
-                            VStack(alignment: .leading, spacing: 8) {
-                                if viewModel.feedSource != .polls {
-                                    FlowCapsuleTabBar(
-                                        selection: $viewModel.mode,
-                                        items: FeedMode.allCases,
-                                        selectedBackground: topNavigationControlFill,
-                                        title: { $0.title }
-                                    )
-
-                                    if viewModel.mediaOnly {
-                                        Label("Media-only filter enabled", systemImage: "line.3.horizontal.decrease.circle.fill")
-                                            .font(.footnote)
-                                            .foregroundStyle(appSettings.themePalette.secondaryForeground)
-                                    }
-                                } else {
-                                    Label("Polls from people you follow", systemImage: "chart.bar.xaxis")
-                                        .font(.footnote.weight(.medium))
-                                        .foregroundStyle(appSettings.themePalette.secondaryForeground)
-                                }
-                            }
-                            .padding(.vertical, 0)
-                            .listRowInsets(
-                                EdgeInsets(
-                                    top: 0,
-                                    leading: Self.feedHorizontalInset,
-                                    bottom: 0,
-                                    trailing: Self.feedHorizontalInset
-                                )
-                            )
-                            .listRowSeparator(.hidden)
-                            .listRowBackground(Color.clear)
-                            .id(Self.feedTopAnchorID)
-                            .background(feedTopOffsetReader)
-
-                            if viewModel.isShowingLoadingPlaceholder {
-                                ForEach(0..<6, id: \.self) { _ in
-                                    loadingRow
-                                        .listRowInsets(
-                                            EdgeInsets(
-                                                top: 0,
-                                                leading: Self.feedHorizontalInset,
-                                                bottom: 0,
-                                                trailing: Self.feedHorizontalInset
-                                            )
-                                        )
-                                    .listRowSeparator(.hidden)
-                                    .listRowBackground(Color.clear)
-                                }
-                            } else if visibleItems.isEmpty {
-                                if viewModel.shouldShowFilteredOutState {
-                                    filteredOutState
-                                        .listRowInsets(
-                                            EdgeInsets(
-                                                top: 0,
-                                                leading: Self.feedHorizontalInset,
-                                                bottom: 0,
-                                                trailing: Self.feedHorizontalInset
-                                            )
-                                        )
-                                        .listRowSeparator(.hidden)
-                                        .listRowBackground(Color.clear)
-                                } else {
-                                    emptyState
-                                        .listRowInsets(
-                                            EdgeInsets(
-                                                top: 0,
-                                                leading: Self.feedHorizontalInset,
-                                                bottom: 0,
-                                                trailing: Self.feedHorizontalInset
-                                            )
-                                        )
-                                        .listRowSeparator(.hidden)
-                                        .listRowBackground(Color.clear)
-                                }
-                            } else {
-                                ForEach(visibleItems) { item in
-                                    FeedRowView(
-                                        item: item,
-                                        reactionCount: reactionStats.reactionCount(for: item.displayEventID),
-                                        isLikedByCurrentUser: reactionStats.isReactedByCurrentUser(
-                                            for: item.displayEventID,
-                                            currentPubkey: auth.currentAccount?.pubkey
-                                        ),
-                                        commentCount: visibleReplyCounts[item.displayEventID.lowercased()] ?? 0,
-                                        showReactions: appSettings.reactionsVisibleInFeeds,
-                                        avatarMenuActions: .init(
-                                            followLabel: followStore.isFollowing(item.displayAuthorPubkey) ? "Unfollow" : "Follow",
-                                            onFollowToggle: {
-                                                followStore.toggleFollow(item.displayAuthorPubkey)
-                                            },
-                                            onViewProfile: {
-                                                openProfile(pubkey: item.displayAuthorPubkey)
-                                            }
-                                        ),
-                                        onHashtagTap: { hashtag in
-                                            openHashtagFeed(hashtag: hashtag)
-                                        },
-                                        onProfileTap: { pubkey in
-                                            openProfile(pubkey: pubkey)
-                                        },
-                                        onOpenThread: {
-                                            shouldAutoFocusReplyInThread = false
-                                            selectedThreadItem = item.threadNavigationItem
-                                        },
-                                        onRepostActorTap: { pubkey in
-                                            openProfile(pubkey: pubkey)
-                                        },
-                                        onReferencedEventTap: { referencedItem in
-                                            shouldAutoFocusReplyInThread = false
-                                            selectedThreadItem = referencedItem.threadNavigationItem
-                                        },
-                                        onMuteConversation: { conversationID in
-                                            viewModel.muteConversation(conversationID)
-                                        }
-                                    )
-                                    .listRowInsets(
-                                        EdgeInsets(
-                                            top: 0,
-                                            leading: Self.feedHorizontalInset,
-                                            bottom: 0,
-                                            trailing: Self.feedHorizontalInset
-                                        )
-                                    )
-                                    .listRowSeparator(.visible)
-                                    .listRowSeparatorTint(appSettings.themePalette.chromeBorder)
-                                    .listRowBackground(Color.clear)
-                                    .onAppear {
-                                        if appSettings.reactionsVisibleInFeeds {
-                                            reactionStats.prefetch(events: [item.displayEvent], relayURLs: effectiveReadRelayURLs)
-                                        }
-                                        Task(priority: .utility) {
-                                            await viewModel.loadMoreIfNeeded(currentItem: item)
-                                        }
-                                    }
-                                }
-                            }
-
-                            if viewModel.isLoadingMore {
-                                HStack {
-                                    Spacer()
-                                    ProgressView()
-                                    Spacer()
-                                }
-                                .padding(.vertical, 8)
-                                .listRowInsets(
-                                    EdgeInsets(
-                                        top: 0,
-                                        leading: Self.feedHorizontalInset,
-                                        bottom: 0,
-                                        trailing: Self.feedHorizontalInset
-                                    )
-                                )
-                                .listRowSeparator(.hidden)
-                                .listRowBackground(Color.clear)
-                            }
-
-                            if !visibleItems.isEmpty || viewModel.isLoadingMore {
-                                Color.clear
-                                    .frame(height: Self.bottomScrollClearance)
-                                    .listRowInsets(EdgeInsets())
-                                    .listRowSeparator(.hidden)
-                                    .listRowBackground(Color.clear)
-                            }
-                        }
-                        .listStyle(.plain)
-                        .scrollContentBackground(.hidden)
-                        .background(Color.clear)
-                        .coordinateSpace(name: Self.feedScrollCoordinateSpace)
-                        .overlay(alignment: .top) {
-                            if viewModel.visibleBufferedNewItemsCount > 0, !isNearFeedTop, !isShowingSideMenu {
-                                newNotesPill {
-                                    withAnimation(.easeInOut(duration: 0.2)) {
-                                        viewModel.showBufferedNewItems()
-                                        scrollProxy.scrollTo(Self.feedTopAnchorID, anchor: .top)
-                                    }
-                                }
-                                .padding(.top, 8)
-                                .transition(.move(edge: .top).combined(with: .opacity))
-                            }
-                        }
-                        .onPreferenceChange(HomeFeedTopOffsetPreferenceKey.self) { newValue in
-                            let nearTop = newValue >= -Self.autoMergeTopThreshold
-                            guard isNearFeedTop != nearTop else { return }
-                            isNearFeedTop = nearTop
-                            if nearTop {
-                                autoShowBufferedItemsIfNeeded()
-                            }
-                        }
-                        .onChange(of: viewModel.visibleBufferedNewItemsCount) { _, _ in
-                            autoShowBufferedItemsIfNeeded()
-                        }
-                        .refreshable {
-                            if viewModel.visibleBufferedNewItemsCount > 0 {
-                                withAnimation(.easeInOut(duration: 0.2)) {
-                                    viewModel.showBufferedNewItems()
-                                    scrollProxy.scrollTo(Self.feedTopAnchorID, anchor: .top)
-                                }
-                            } else {
-                                await viewModel.refresh()
-                            }
-                        }
-                        .task {
-                            appSettings.configure(accountPubkey: auth.currentAccount?.pubkey)
-                            relaySettings.configure(
-                                accountPubkey: auth.currentAccount?.pubkey,
-                                nsec: auth.currentNsec
-                            )
-                            viewModel.updateReadRelayURLs(effectiveReadRelayURLs)
-                            interestFeedStore.configure(accountPubkey: auth.currentAccount?.pubkey)
-                            viewModel.updateInterestHashtags(interestFeedStore.hashtags)
-                            hashtagFavoritesStore.configure(accountPubkey: auth.currentAccount?.pubkey)
-                            viewModel.updateFavoriteHashtags(hashtagFavoritesStore.favoriteHashtags)
-                            viewModel.updatePollsFeedVisibility(appSettings.pollsFeedVisible)
-                            viewModel.updateCustomFeeds(appSettings.customFeeds)
-
-                            viewModel.updateCurrentUserPubkey(auth.currentAccount?.pubkey)
-                            followStore.configure(
-                                accountPubkey: auth.currentAccount?.pubkey,
-                                nsec: auth.currentNsec,
-                                readRelayURLs: effectiveReadRelayURLs,
-                                writeRelayURLs: effectiveWriteRelayURLs
-                            )
-                            MuteStore.shared.configure(
-                                accountPubkey: auth.currentAccount?.pubkey,
-                                nsec: auth.currentNsec,
-                                readRelayURLs: effectiveReadRelayURLs,
-                                writeRelayURLs: effectiveWriteRelayURLs
-                            )
-                            await viewModel.loadIfNeeded()
-                        }
-                    }
-                }
-                .disabled(isShowingSideMenu)
-
-                if isShowingSideMenu {
-                    sideMenuOverlay
-                        .transition(.opacity)
-                }
-            }
-            .animation(.easeInOut(duration: 0.2), value: isShowingSideMenu)
-            .toolbar(.hidden, for: .navigationBar)
-            .sheet(isPresented: $isShowingAuthSheet) {
-                AuthSheetView(
-                    initialTab: authSheetInitialTab,
-                    onSelectedTabChange: { authSheetInitialTab = $0 }
-                )
-                    .environmentObject(auth)
-                    .environmentObject(appSettings)
-                    .environmentObject(relaySettings)
-            }
-            .sheet(isPresented: $isShowingFeedSourcePicker) {
-                feedSourcePickerSheet
-            }
-            .sheet(isPresented: $isShowingFilterSheet) {
-                filterSheet
-            }
-            .sheet(isPresented: $isShowingSettings, onDismiss: {
-                settingsSheetState.reset()
-            }) {
-                SettingsView(sheetState: settingsSheetState)
-                    .environmentObject(relaySettings)
-            }
-            .navigationDestination(item: $selectedThreadItem) { item in
-                ThreadDetailView(
-                    initialItem: item,
-                    relayURL: effectivePrimaryRelayURL,
-                    readRelayURLs: effectiveReadRelayURLs,
-                    initiallyFocusReplyComposer: shouldAutoFocusReplyInThread
-                )
-            }
-            .navigationDestination(item: $selectedHashtagRoute) { route in
-                HashtagFeedView(
-                    hashtag: route.normalizedHashtag,
-                    relayURL: effectivePrimaryRelayURL,
-                    readRelayURLs: effectiveReadRelayURLs,
-                    seedItems: route.seedItems
-                )
-            }
-            .navigationDestination(item: $selectedProfileRoute) { route in
-                ProfileView(
-                    pubkey: route.pubkey,
-                    relayURL: effectivePrimaryRelayURL,
-                    readRelayURLs: effectiveReadRelayURLs,
-                    writeRelayURLs: effectiveWriteRelayURLs
-                )
-            }
-            .onChange(of: auth.currentAccount?.pubkey) { _, newValue in
-                appSettings.configure(accountPubkey: newValue)
-                relaySettings.configure(
-                    accountPubkey: newValue,
-                    nsec: auth.currentNsec
-                )
-                viewModel.updateReadRelayURLs(effectiveReadRelayURLs)
-                interestFeedStore.configure(accountPubkey: newValue)
-                viewModel.updateInterestHashtags(interestFeedStore.hashtags)
-                hashtagFavoritesStore.configure(accountPubkey: newValue)
-                viewModel.updateFavoriteHashtags(hashtagFavoritesStore.favoriteHashtags)
-                viewModel.updatePollsFeedVisibility(appSettings.pollsFeedVisible)
-                viewModel.updateCustomFeeds(appSettings.customFeeds)
-
-                followStore.configure(
-                    accountPubkey: newValue,
-                    nsec: auth.currentNsec,
-                    readRelayURLs: effectiveReadRelayURLs,
-                    writeRelayURLs: effectiveWriteRelayURLs
-                )
-                MuteStore.shared.configure(
-                    accountPubkey: newValue,
-                    nsec: auth.currentNsec,
-                    readRelayURLs: effectiveReadRelayURLs,
-                    writeRelayURLs: effectiveWriteRelayURLs
-                )
-                viewModel.updateCurrentUserPubkey(newValue)
-            }
-            .onChange(of: auth.currentNsec) { _, newValue in
-                relaySettings.configure(
-                    accountPubkey: auth.currentAccount?.pubkey,
-                    nsec: newValue
-                )
-
-                followStore.configure(
-                    accountPubkey: auth.currentAccount?.pubkey,
-                    nsec: newValue,
-                    readRelayURLs: effectiveReadRelayURLs,
-                    writeRelayURLs: effectiveWriteRelayURLs
-                )
-                MuteStore.shared.configure(
-                    accountPubkey: auth.currentAccount?.pubkey,
-                    nsec: newValue,
-                    readRelayURLs: effectiveReadRelayURLs,
-                    writeRelayURLs: effectiveWriteRelayURLs
-                )
-            }
-            .onChange(of: relaySettings.readRelays) { _, _ in
-                viewModel.updateReadRelayURLs(effectiveReadRelayURLs)
-                followStore.configure(
-                    accountPubkey: auth.currentAccount?.pubkey,
-                    nsec: auth.currentNsec,
-                    readRelayURLs: effectiveReadRelayURLs,
-                    writeRelayURLs: effectiveWriteRelayURLs
-                )
-                MuteStore.shared.configure(
-                    accountPubkey: auth.currentAccount?.pubkey,
-                    nsec: auth.currentNsec,
-                    readRelayURLs: effectiveReadRelayURLs,
-                    writeRelayURLs: effectiveWriteRelayURLs
-                )
-            }
-            .onChange(of: relaySettings.writeRelays) { _, _ in
-                followStore.configure(
-                    accountPubkey: auth.currentAccount?.pubkey,
-                    nsec: auth.currentNsec,
-                    readRelayURLs: effectiveReadRelayURLs,
-                    writeRelayURLs: effectiveWriteRelayURLs
-                )
-                MuteStore.shared.configure(
-                    accountPubkey: auth.currentAccount?.pubkey,
-                    nsec: auth.currentNsec,
-                    readRelayURLs: effectiveReadRelayURLs,
-                    writeRelayURLs: effectiveWriteRelayURLs
-                )
-            }
-            .onChange(of: appSettings.slowConnectionMode) { _, _ in
-                viewModel.updateReadRelayURLs(effectiveReadRelayURLs)
-                followStore.configure(
-                    accountPubkey: auth.currentAccount?.pubkey,
-                    nsec: auth.currentNsec,
-                    readRelayURLs: effectiveReadRelayURLs,
-                    writeRelayURLs: effectiveWriteRelayURLs
-                )
-                MuteStore.shared.configure(
-                    accountPubkey: auth.currentAccount?.pubkey,
-                    nsec: auth.currentNsec,
-                    readRelayURLs: effectiveReadRelayURLs,
-                    writeRelayURLs: effectiveWriteRelayURLs
-                )
-                Task {
-                    await viewModel.refresh(silent: true)
-                }
-            }
-            .onChange(of: appSettings.newsRelayURLs) { _, _ in
-                guard viewModel.feedSource == .news else { return }
-                Task {
-                    await viewModel.refresh(silent: true)
-                }
-            }
-            .onChange(of: appSettings.newsAuthorPubkeys) { _, _ in
-                guard viewModel.feedSource == .news else { return }
-                Task {
-                    await viewModel.refresh(silent: true)
-                }
-            }
-            .onChange(of: appSettings.newsHashtags) { _, _ in
-                guard viewModel.feedSource == .news else { return }
-                Task {
-                    await viewModel.refresh(silent: true)
-                }
-            }
-            .onChange(of: appSettings.pollsFeedVisible) { _, newValue in
-                viewModel.updatePollsFeedVisibility(newValue)
-            }
-            .onChange(of: followStore.followedPubkeys) { _, _ in
-                guard viewModel.feedSource == .following || viewModel.feedSource == .polls else { return }
-                Task {
-                    await viewModel.refresh(silent: true)
-                }
-            }
-            .onChange(of: interestFeedStore.hashtags) { _, newValue in
-                viewModel.updateInterestHashtags(newValue)
-            }
-            .onChange(of: hashtagFavoritesStore.favoriteHashtags) { _, newValue in
-                viewModel.updateFavoriteHashtags(newValue)
-            }
-            .onChange(of: appSettings.customFeeds) { _, newValue in
-                viewModel.updateCustomFeeds(newValue)
-            }
-            .task(id: topNavAvatarLookupID) {
-                await refreshTopNavAvatar()
-            }
-            .onReceive(NotificationCenter.default.publisher(for: .profileMetadataUpdated)) { notification in
-                guard let updatedPubkey = (notification.userInfo?["pubkey"] as? String)?.lowercased(),
-                      let currentPubkey = auth.currentAccount?.pubkey.lowercased(),
-                      updatedPubkey == currentPubkey else {
-                    return
-                }
-                Task {
-                    await refreshTopNavAvatar()
-                }
+    private func feedList(
+        scrollProxy: ScrollViewProxy,
+        visibleItems: [FeedItem],
+        visibleReplyCounts: [String: Int]
+    ) -> some View {
+        List {
+            feedModeHeaderRow
+            feedRows(visibleItems, visibleReplyCounts: visibleReplyCounts)
+            loadingMoreRow
+            bottomClearanceRow(isVisible: !visibleItems.isEmpty || viewModel.isLoadingMore)
+        }
+        .listStyle(.plain)
+        .scrollContentBackground(.hidden)
+        .background(Color.clear)
+        .coordinateSpace(name: Self.feedScrollCoordinateSpace)
+        .overlay(alignment: .top) {
+            newNotesOverlay(scrollProxy: scrollProxy)
+        }
+        .onPreferenceChange(HomeFeedTopOffsetPreferenceKey.self) { newValue in
+            let nearTop = newValue >= -Self.autoMergeTopThreshold
+            guard isNearFeedTop != nearTop else { return }
+            isNearFeedTop = nearTop
+            if nearTop {
+                autoShowBufferedItemsIfNeeded()
             }
         }
+        .onChange(of: viewModel.visibleBufferedNewItemsCount) { _, _ in
+            autoShowBufferedItemsIfNeeded()
+        }
+        .refreshable {
+            await refreshFeed(scrollProxy: scrollProxy)
+        }
+        .task {
+            await configureFeedDependenciesAndLoad()
+        }
+    }
+
+    private var feedModeHeaderRow: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            if viewModel.feedSource != .polls {
+                FlowCapsuleTabBar(
+                    selection: $viewModel.mode,
+                    items: FeedMode.allCases,
+                    selectedBackground: topNavigationControlFill,
+                    title: { $0.title }
+                )
+
+                if viewModel.mediaOnly {
+                    Label("Media-only filter enabled", systemImage: "line.3.horizontal.decrease.circle.fill")
+                        .font(.footnote)
+                        .foregroundStyle(appSettings.themePalette.secondaryForeground)
+                }
+            } else {
+                Label("Polls from people you follow", systemImage: "chart.bar.xaxis")
+                    .font(.footnote.weight(.medium))
+                    .foregroundStyle(appSettings.themePalette.secondaryForeground)
+            }
+        }
+        .padding(.vertical, 0)
+        .listRowInsets(feedListRowInsets)
+        .listRowSeparator(.hidden)
+        .listRowBackground(Color.clear)
+        .id(Self.feedTopAnchorID)
+        .background(feedTopOffsetReader)
+    }
+
+    @ViewBuilder
+    private func feedRows(
+        _ visibleItems: [FeedItem],
+        visibleReplyCounts: [String: Int]
+    ) -> some View {
+        if viewModel.isShowingLoadingPlaceholder {
+            ForEach(0..<6, id: \.self) { _ in
+                loadingRow
+                    .listRowInsets(feedListRowInsets)
+                    .listRowSeparator(.hidden)
+                    .listRowBackground(Color.clear)
+            }
+        } else if visibleItems.isEmpty {
+            emptyOrFilteredFeedRow
+        } else {
+            ForEach(visibleItems) { item in
+                feedRow(item, visibleReplyCounts: visibleReplyCounts)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var emptyOrFilteredFeedRow: some View {
+        if viewModel.shouldShowFilteredOutState {
+            filteredOutState
+                .listRowInsets(feedListRowInsets)
+                .listRowSeparator(.hidden)
+                .listRowBackground(Color.clear)
+        } else {
+            emptyState
+                .listRowInsets(feedListRowInsets)
+                .listRowSeparator(.hidden)
+                .listRowBackground(Color.clear)
+        }
+    }
+
+    @ViewBuilder
+    private var loadingMoreRow: some View {
+        if viewModel.isLoadingMore {
+            HStack {
+                Spacer()
+                ProgressView()
+                Spacer()
+            }
+            .padding(.vertical, 8)
+            .listRowInsets(feedListRowInsets)
+            .listRowSeparator(.hidden)
+            .listRowBackground(Color.clear)
+        }
+    }
+
+    @ViewBuilder
+    private func bottomClearanceRow(isVisible: Bool) -> some View {
+        if isVisible {
+            Color.clear
+                .frame(height: Self.bottomScrollClearance)
+                .listRowInsets(EdgeInsets())
+                .listRowSeparator(.hidden)
+                .listRowBackground(Color.clear)
+        }
+    }
+
+    @ViewBuilder
+    private func newNotesOverlay(scrollProxy: ScrollViewProxy) -> some View {
+        if viewModel.visibleBufferedNewItemsCount > 0, !isNearFeedTop, !isShowingSideMenu {
+            newNotesPill {
+                withAnimation(.easeInOut(duration: 0.2)) {
+                    viewModel.showBufferedNewItems()
+                    scrollProxy.scrollTo(Self.feedTopAnchorID, anchor: .top)
+                }
+            }
+            .padding(.top, 8)
+            .transition(.move(edge: .top).combined(with: .opacity))
+        }
+    }
+
+    private var feedListRowInsets: EdgeInsets {
+        EdgeInsets(
+            top: 0,
+            leading: Self.feedHorizontalInset,
+            bottom: 0,
+            trailing: Self.feedHorizontalInset
+        )
+    }
+
+    private func refreshFeed(scrollProxy: ScrollViewProxy) async {
+        if viewModel.visibleBufferedNewItemsCount > 0 {
+            withAnimation(.easeInOut(duration: 0.2)) {
+                viewModel.showBufferedNewItems()
+                scrollProxy.scrollTo(Self.feedTopAnchorID, anchor: .top)
+            }
+        } else {
+            await viewModel.refresh()
+        }
+    }
+
+    private func configureFeedDependenciesAndLoad() async {
+        appSettings.configure(accountPubkey: auth.currentAccount?.pubkey)
+        relaySettings.configure(
+            accountPubkey: auth.currentAccount?.pubkey,
+            nsec: auth.currentNsec
+        )
+        viewModel.updateReadRelayURLs(effectiveReadRelayURLs)
+        interestFeedStore.configure(accountPubkey: auth.currentAccount?.pubkey)
+        viewModel.updateInterestHashtags(interestFeedStore.hashtags)
+        hashtagFavoritesStore.configure(accountPubkey: auth.currentAccount?.pubkey)
+        viewModel.updateFavoriteHashtags(hashtagFavoritesStore.favoriteHashtags)
+        relayFavoritesStore.configure(accountPubkey: auth.currentAccount?.pubkey)
+        viewModel.updateFavoriteRelays(relayFavoritesStore.favoriteRelayURLs)
+        viewModel.updatePollsFeedVisibility(appSettings.pollsFeedVisible)
+        viewModel.updateCustomFeeds(appSettings.customFeeds)
+        viewModel.updateCurrentUserPubkey(auth.currentAccount?.pubkey)
+        followStore.configure(
+            accountPubkey: auth.currentAccount?.pubkey,
+            nsec: auth.currentNsec,
+            readRelayURLs: effectiveReadRelayURLs,
+            writeRelayURLs: effectiveWriteRelayURLs
+        )
+        MuteStore.shared.configure(
+            accountPubkey: auth.currentAccount?.pubkey,
+            nsec: auth.currentNsec,
+            readRelayURLs: effectiveReadRelayURLs,
+            writeRelayURLs: effectiveWriteRelayURLs
+        )
+        await viewModel.loadIfNeeded()
     }
 
     private var topNavigationBar: some View {
@@ -855,6 +795,73 @@ struct HomeFeedView: View {
         .redacted(reason: .placeholder)
     }
 
+    private func feedRow(_ item: FeedItem, visibleReplyCounts: [String: Int]) -> some View {
+        FeedRowView(
+            item: item,
+            reactionCount: reactionStats.reactionCount(for: item.displayEventID),
+            isLikedByCurrentUser: reactionStats.isReactedByCurrentUser(
+                for: item.displayEventID,
+                currentPubkey: auth.currentAccount?.pubkey
+            ),
+            commentCount: visibleReplyCounts[item.displayEventID.lowercased()] ?? 0,
+            showReactions: appSettings.reactionsVisibleInFeeds,
+            avatarMenuActions: .init(
+                followLabel: followStore.isFollowing(item.displayAuthorPubkey) ? "Unfollow" : "Follow",
+                onFollowToggle: {
+                    followStore.toggleFollow(item.displayAuthorPubkey)
+                },
+                onViewProfile: {
+                    openProfile(pubkey: item.displayAuthorPubkey)
+                }
+            ),
+            onHashtagTap: { hashtag in
+                openHashtagFeed(hashtag: hashtag)
+            },
+            onProfileTap: { pubkey in
+                openProfile(pubkey: pubkey)
+            },
+            onOpenThread: {
+                shouldAutoFocusReplyInThread = false
+                selectedThreadItem = item.threadNavigationItem
+            },
+            onRepostActorTap: { pubkey in
+                openProfile(pubkey: pubkey)
+            },
+            onReferencedEventTap: { referencedItem in
+                shouldAutoFocusReplyInThread = false
+                selectedThreadItem = referencedItem.threadNavigationItem
+            },
+            onRelayTap: { relayURL in
+                openRelayFeed(relayURL: relayURL)
+            },
+            onOptimisticPublished: { publishedItem in
+                viewModel.insertOptimisticPublishedItem(publishedItem)
+            },
+            onMuteConversation: { conversationID in
+                viewModel.muteConversation(conversationID)
+            }
+        )
+        .listRowInsets(
+            EdgeInsets(
+                top: 0,
+                leading: Self.feedHorizontalInset,
+                bottom: 0,
+                trailing: Self.feedHorizontalInset
+            )
+        )
+        .listRowSeparator(.visible)
+        .listRowSeparatorTint(appSettings.themePalette.chromeBorder)
+        .listRowBackground(Color.clear)
+        .onAppear {
+            if appSettings.reactionsVisibleInFeeds {
+                reactionStats.prefetch(events: [item.displayEvent], relayURLs: effectiveReadRelayURLs)
+            }
+            Task(priority: .utility) {
+                await viewModel.loadMoreIfNeeded(currentItem: item)
+            }
+        }
+    }
+
     private func openAuthSheet(tab: AuthSheetTab) {
         authSheetInitialTab = tab
         isShowingAuthSheet = true
@@ -862,6 +869,21 @@ struct HomeFeedView: View {
 
     private func closeSideMenu() {
         isShowingSideMenu = false
+    }
+
+    private var authSheet: some View {
+        AuthSheetView(
+            initialTab: authSheetInitialTab,
+            onSelectedTabChange: { authSheetInitialTab = $0 }
+        )
+        .environmentObject(auth)
+        .environmentObject(appSettings)
+        .environmentObject(relaySettings)
+    }
+
+    private var settingsSheet: some View {
+        SettingsView(sheetState: settingsSheetState)
+            .environmentObject(relaySettings)
     }
 
     private func openHashtagFeed(hashtag: String) {
@@ -876,6 +898,10 @@ struct HomeFeedView: View {
 
     private func openProfile(pubkey: String) {
         selectedProfileRoute = ProfileRoute(pubkey: pubkey)
+    }
+
+    private func openRelayFeed(relayURL: URL) {
+        selectedRelayRoute = RelayRoute(relayURL: relayURL)
     }
 
     private func feedSourceLabel(for source: HomePrimaryFeedSource) -> String {
@@ -896,6 +922,9 @@ struct HomeFeedView: View {
             return viewModel.customFeedDefinition(id: feedID)?.name ?? "Custom Feed"
         case .hashtag(let hashtag):
             return "#\(HomePrimaryFeedSource.normalizeHashtag(hashtag))"
+        case .relay(let relayURL):
+            guard let url = RelayURLSupport.normalizedURL(from: relayURL) else { return "Relay" }
+            return RelayURLSupport.displayName(for: url)
         }
     }
 
@@ -917,6 +946,8 @@ struct HomeFeedView: View {
             return viewModel.customFeedDefinition(id: feedID)?.iconSystemName ?? CustomFeedIconCatalog.defaultIcon
         case .hashtag:
             return "number"
+        case .relay:
+            return "server.rack"
         }
     }
 
@@ -1152,33 +1183,271 @@ struct HomeFeedView: View {
     }
 
     private func feedSourceOptionButton(_ source: HomePrimaryFeedSource) -> some View {
-        Button {
-            viewModel.selectFeedSource(source)
-            isShowingFeedSourcePicker = false
-        } label: {
-            HStack(alignment: .center, spacing: 12) {
-                Image(systemName: feedSourceIconName(for: source))
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(appSettings.primaryColor)
-                    .frame(width: 22, alignment: .center)
-
-                Text(feedSourceLabel(for: source))
-                    .font(appSettings.appFont(.body, weight: .medium))
-                    .foregroundStyle(appSettings.themePalette.foreground)
-
-                Spacer()
-
-                if viewModel.feedSource == source {
-                    Image(systemName: "checkmark")
-                        .font(.body.weight(.semibold))
+        HStack(alignment: .center, spacing: 10) {
+            Button {
+                viewModel.selectFeedSource(source)
+                isShowingFeedSourcePicker = false
+            } label: {
+                HStack(alignment: .center, spacing: 12) {
+                    Image(systemName: feedSourceIconName(for: source))
+                        .font(.subheadline.weight(.semibold))
                         .foregroundStyle(appSettings.primaryColor)
+                        .frame(width: 22, alignment: .center)
+
+                    Text(feedSourceLabel(for: source))
+                        .font(appSettings.appFont(.body, weight: .medium))
+                        .foregroundStyle(appSettings.themePalette.foreground)
+                        .lineLimit(1)
+
+                    Spacer()
+
+                    if viewModel.feedSource == source {
+                        Image(systemName: "checkmark")
+                            .font(.body.weight(.semibold))
+                            .foregroundStyle(appSettings.primaryColor)
+                    }
                 }
+                .contentShape(Rectangle())
             }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 14)
-            .contentShape(Rectangle())
+            .frame(maxWidth: .infinity)
+            .buttonStyle(.plain)
+
+            if isRemovableFeedSource(source) {
+                Button {
+                    removeFeedSourceFavorite(source)
+                } label: {
+                    Image(systemName: "bookmark.slash")
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(appSettings.themePalette.secondaryForeground)
+                        .frame(width: 34, height: 34)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(removeFeedSourceAccessibilityLabel(for: source))
+            }
         }
-        .buttonStyle(.plain)
+        .padding(.horizontal, 16)
+        .padding(.vertical, 14)
+    }
+
+    private func isRemovableFeedSource(_ source: HomePrimaryFeedSource) -> Bool {
+        switch source {
+        case .hashtag, .relay:
+            return true
+        default:
+            return false
+        }
+    }
+
+    private func removeFeedSourceFavorite(_ source: HomePrimaryFeedSource) {
+        switch source {
+        case .hashtag(let hashtag):
+            if hashtagFavoritesStore.isFavorite(hashtag) {
+                hashtagFavoritesStore.toggleFavorite(hashtag)
+            }
+        case .relay(let relayURL):
+            if relayFavoritesStore.isFavorite(relayURL) {
+                relayFavoritesStore.toggleFavorite(relayURL)
+            }
+        default:
+            break
+        }
+    }
+
+    private func removeFeedSourceAccessibilityLabel(for source: HomePrimaryFeedSource) -> String {
+        switch source {
+        case .hashtag(let hashtag):
+            return "Remove #\(HomePrimaryFeedSource.normalizeHashtag(hashtag)) from Feed Sources"
+        case .relay:
+            return "Remove \(feedSourceLabel(for: source)) from Feed Sources"
+        default:
+            return "Remove from Feed Sources"
+        }
+    }
+}
+
+private struct HomeFeedRootContent: View {
+    @Binding var isShowingSideMenu: Bool
+
+    let topNavigationBar: () -> AnyView
+    let feedContent: () -> AnyView
+    let sideMenuOverlay: () -> AnyView
+
+    var body: some View {
+        ZStack(alignment: .leading) {
+            AppThemeBackgroundView()
+                .ignoresSafeArea()
+
+            VStack(spacing: 0) {
+                topNavigationBar()
+                feedContent()
+            }
+            .disabled(isShowingSideMenu)
+
+            if isShowingSideMenu {
+                sideMenuOverlay()
+                    .transition(.opacity)
+            }
+        }
+        .animation(.easeInOut(duration: 0.2), value: isShowingSideMenu)
+        .toolbar(.hidden, for: .navigationBar)
+    }
+}
+
+private struct HomeFeedLifecycleHandlers: ViewModifier {
+    let authPubkey: String?
+    let authPrivateKey: String?
+    let readRelays: [String]
+    let writeRelays: [String]
+    let slowConnectionMode: Bool
+    let newsRelayURLs: [URL]
+    let newsAuthorPubkeys: [String]
+    let newsHashtags: [String]
+    let pollsFeedVisible: Bool
+    let followedPubkeys: Set<String>
+    let interestHashtags: [String]
+    let favoriteHashtags: [String]
+    let favoriteRelayURLs: [String]
+    let customFeeds: [CustomFeedDefinition]
+    let topNavAvatarLookupID: String
+
+    let onAuthPubkeyChange: (String?) -> Void
+    let onAuthPrivateKeyChange: (String?) -> Void
+    let onReadRelaysChange: () -> Void
+    let onWriteRelaysChange: () -> Void
+    let onSlowConnectionModeChange: () -> Void
+    let onNewsFeedSettingChange: () -> Void
+    let onPollsFeedVisibleChange: (Bool) -> Void
+    let onFollowedPubkeysChange: () -> Void
+    let onInterestHashtagsChange: ([String]) -> Void
+    let onFavoriteHashtagsChange: ([String]) -> Void
+    let onFavoriteRelaysChange: ([String]) -> Void
+    let onCustomFeedsChange: ([CustomFeedDefinition]) -> Void
+    let onRefreshTopNavAvatar: () async -> Void
+    let onProfileMetadataUpdated: (Notification) -> Void
+
+    func body(content: Content) -> some View {
+        content
+            .onChange(of: authPubkey) { _, newValue in
+                onAuthPubkeyChange(newValue)
+            }
+            .onChange(of: authPrivateKey) { _, newValue in
+                onAuthPrivateKeyChange(newValue)
+            }
+            .onChange(of: readRelays) { _, _ in
+                onReadRelaysChange()
+            }
+            .onChange(of: writeRelays) { _, _ in
+                onWriteRelaysChange()
+            }
+            .onChange(of: slowConnectionMode) { _, _ in
+                onSlowConnectionModeChange()
+            }
+            .onChange(of: newsRelayURLs) { _, _ in
+                onNewsFeedSettingChange()
+            }
+            .onChange(of: newsAuthorPubkeys) { _, _ in
+                onNewsFeedSettingChange()
+            }
+            .onChange(of: newsHashtags) { _, _ in
+                onNewsFeedSettingChange()
+            }
+            .onChange(of: pollsFeedVisible) { _, newValue in
+                onPollsFeedVisibleChange(newValue)
+            }
+            .onChange(of: followedPubkeys) { _, _ in
+                onFollowedPubkeysChange()
+            }
+            .onChange(of: interestHashtags) { _, newValue in
+                onInterestHashtagsChange(newValue)
+            }
+            .onChange(of: favoriteHashtags) { _, newValue in
+                onFavoriteHashtagsChange(newValue)
+            }
+            .onChange(of: favoriteRelayURLs) { _, newValue in
+                onFavoriteRelaysChange(newValue)
+            }
+            .onChange(of: customFeeds) { _, newValue in
+                onCustomFeedsChange(newValue)
+            }
+            .task(id: topNavAvatarLookupID) {
+                await onRefreshTopNavAvatar()
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .profileMetadataUpdated)) { notification in
+                onProfileMetadataUpdated(notification)
+            }
+    }
+}
+
+private struct HomeFeedNavigationDestinations: ViewModifier {
+    @Binding var selectedThreadItem: FeedItem?
+    @Binding var selectedHashtagRoute: HashtagRoute?
+    @Binding var selectedProfileRoute: ProfileRoute?
+    @Binding var selectedRelayRoute: RelayRoute?
+
+    let primaryRelayURL: URL
+    let readRelayURLs: [URL]
+    let writeRelayURLs: [URL]
+    let shouldAutoFocusReplyInThread: Bool
+
+    func body(content: Content) -> some View {
+        content
+            .navigationDestination(item: $selectedThreadItem) { item in
+                ThreadDetailView(
+                    initialItem: item,
+                    relayURL: primaryRelayURL,
+                    readRelayURLs: readRelayURLs,
+                    initiallyFocusReplyComposer: shouldAutoFocusReplyInThread
+                )
+            }
+            .navigationDestination(item: $selectedHashtagRoute) { route in
+                HashtagFeedView(
+                    hashtag: route.normalizedHashtag,
+                    relayURL: primaryRelayURL,
+                    readRelayURLs: readRelayURLs,
+                    seedItems: route.seedItems
+                )
+            }
+            .navigationDestination(item: $selectedProfileRoute) { route in
+                ProfileView(
+                    pubkey: route.pubkey,
+                    relayURL: primaryRelayURL,
+                    readRelayURLs: readRelayURLs,
+                    writeRelayURLs: writeRelayURLs
+                )
+            }
+            .navigationDestination(item: $selectedRelayRoute) { route in
+                RelayFeedView(relayURL: route.relayURL, title: route.displayName)
+            }
+    }
+}
+
+private struct HomeFeedSheets: ViewModifier {
+    @Binding var isShowingAuthSheet: Bool
+    @Binding var isShowingFeedSourcePicker: Bool
+    @Binding var isShowingFilterSheet: Bool
+    @Binding var isShowingSettings: Bool
+
+    let onSettingsDismiss: () -> Void
+    let authSheet: () -> AnyView
+    let feedSourcePickerSheet: () -> AnyView
+    let filterSheet: () -> AnyView
+    let settingsSheet: () -> AnyView
+
+    func body(content: Content) -> some View {
+        content
+            .sheet(isPresented: $isShowingAuthSheet) {
+                authSheet()
+            }
+            .sheet(isPresented: $isShowingFeedSourcePicker) {
+                feedSourcePickerSheet()
+            }
+            .sheet(isPresented: $isShowingFilterSheet) {
+                filterSheet()
+            }
+            .sheet(isPresented: $isShowingSettings, onDismiss: onSettingsDismiss) {
+                settingsSheet()
+            }
     }
 }
 

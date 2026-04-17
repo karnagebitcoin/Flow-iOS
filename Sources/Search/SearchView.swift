@@ -16,6 +16,7 @@ struct SearchView: View {
     @State private var selectedThreadItem: FeedItem?
     @State private var selectedHashtagRoute: HashtagRoute?
     @State private var selectedProfileRoute: ProfileRoute?
+    @State private var selectedRelayRoute: RelayRoute?
     @State private var shouldAutoFocusReplyInThread = false
     private let isActive: Bool
 
@@ -31,6 +32,7 @@ struct SearchView: View {
 
     var body: some View {
         let _ = muteStore.filterRevision
+        let _ = appSettings.spamFilterLabelSignature
         let visibleItems = viewModel.visibleItems
         let visibleProfiles = viewModel.displayedProfiles
         let visibleReplyCounts = ReplyCountEstimator.counts(for: visibleItems)
@@ -218,6 +220,9 @@ struct SearchView: View {
                         writeRelayURLs: effectiveWriteRelayURLs
                     )
                 }
+                .navigationDestination(item: $selectedRelayRoute) { route in
+                    RelayFeedView(relayURL: route.relayURL, title: route.displayName)
+                }
                 .onChange(of: auth.currentAccount?.pubkey) { _, _ in
                     appSettings.configure(accountPubkey: auth.currentAccount?.pubkey)
                     configureStores()
@@ -347,6 +352,9 @@ struct SearchView: View {
                 shouldAutoFocusReplyInThread = false
                 selectedThreadItem = referencedItem.threadNavigationItem
             },
+            onRelayTap: { relayURL in
+                openRelayFeed(relayURL: relayURL)
+            },
             onMuteConversation: { conversationID in
                 viewModel.muteConversation(conversationID)
             }
@@ -413,6 +421,10 @@ struct SearchView: View {
 
     private func openProfile(pubkey: String) {
         selectedProfileRoute = ProfileRoute(pubkey: pubkey)
+    }
+
+    private func openRelayFeed(relayURL: URL) {
+        selectedRelayRoute = RelayRoute(relayURL: relayURL)
     }
 
     private func isPinnedFeedSuggestion(_ suggestion: SearchViewModel.SuggestedContentSearch) -> Bool {

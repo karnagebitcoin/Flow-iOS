@@ -231,6 +231,7 @@ struct NoteImageGalleryView: View {
     let imageURLs: [URL]
     let layout: NoteContentMediaLayout
     let sourceEvent: NostrEvent
+    let mediaAspectRatioHints: [String: CGFloat]
     let reactionCount: Int
     let commentCount: Int
     @State private var selectedImage: SelectedImage?
@@ -239,10 +240,6 @@ struct NoteImageGalleryView: View {
     @State private var pendingRemixComposeDraft: NoteImageRemixComposeDraft?
     @State private var isShowingRemixEditor = false
     @State private var isPreparingRemixEditor = false
-
-    private var imageAspectRatioHints: [String: CGFloat] {
-        NoteImageLayoutGuide.imageAspectRatioHints(from: sourceEvent.tags)
-    }
 
     var body: some View {
         Group {
@@ -296,7 +293,15 @@ struct NoteImageGalleryView: View {
     }
 
     private var feedGalleryHeight: CGFloat {
-        imageURLs.count == 1 ? 360 : 340
+        let availableWidth = max(UIScreen.main.bounds.width - 92, 220)
+        let width = imageURLs.count == 1 ? availableWidth : feedTileWidth(availableWidth: availableWidth)
+        let ratio = imageURLs.first.flatMap { aspectRatioHint(for: $0) }
+        return NoteImageLayoutGuide.naturalHeight(
+            width: width,
+            aspectRatio: ratio,
+            minHeight: 170,
+            maxHeight: 340
+        )
     }
 
     private var feedGallerySpacing: CGFloat {
@@ -425,7 +430,8 @@ struct NoteImageGalleryView: View {
     }
 
     private func aspectRatioHint(for url: URL) -> CGFloat? {
-        imageAspectRatioHints[url.absoluteString]
+        NoteImageLayoutGuide.aspectRatioHint(for: url, in: mediaAspectRatioHints)
+            ?? FlowMediaAspectRatioCache.shared.ratio(for: url)
     }
 
     @MainActor
@@ -994,21 +1000,29 @@ struct NoteSingleImageCellView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .task(id: url) {
             let cachedExactRatio = FlowMediaAspectRatioCache.shared.ratio(for: url)
-            reservedAspectRatio = NoteImageLayoutGuide.reservedSingleImageAspectRatio(
-                exactHint: aspectRatioHint,
-                cachedExactRatio: cachedExactRatio
+            setReservedAspectRatio(
+                NoteImageLayoutGuide.reservedSingleImageAspectRatio(
+                    exactHint: aspectRatioHint,
+                    cachedExactRatio: cachedExactRatio
+                )
             )
 
             guard maxHeight == nil else { return }
             guard let resolvedExactRatio = await FlowImageCache.shared.aspectRatio(for: url) else { return }
-            let bucketedRatio = NoteImageLayoutGuide.bucketedSingleImageAspectRatio(for: resolvedExactRatio)
+            guard let normalizedRatio = NoteImageLayoutGuide.normalizedAspectRatio(resolvedExactRatio) else { return }
+            guard !Task.isCancelled else { return }
 
-            if aspectRatioHint == nil,
-               cachedExactRatio == nil,
-               abs(bucketedRatio - reservedAspectRatio) <= 0.35,
-               abs(bucketedRatio - reservedAspectRatio) > 0.01 {
-                reservedAspectRatio = bucketedRatio
-            }
+            setReservedAspectRatio(normalizedRatio)
+        }
+    }
+
+    @MainActor
+    private func setReservedAspectRatio(_ nextRatio: CGFloat) {
+        guard abs(nextRatio - reservedAspectRatio) > 0.01 else { return }
+        var transaction = Transaction()
+        transaction.disablesAnimations = true
+        withTransaction(transaction) {
+            reservedAspectRatio = nextRatio
         }
     }
 
@@ -1745,6 +1759,11 @@ private actor NoteVideoAspectRatioCache {
     private var inFlight: [URL: Task<CGFloat?, Never>] = [:]
 
     func ratio(for url: URL) async -> CGFloat? {
+        if let persistedRatio = FlowMediaAspectRatioCache.shared.ratio(for: url) {
+            cachedRatios[url] = persistedRatio
+            return persistedRatio
+        }
+
         if let cached = cachedRatios[url] {
             return cached
         }
@@ -1763,6 +1782,7 @@ private actor NoteVideoAspectRatioCache {
 
         if let ratio {
             cachedRatios[url] = ratio
+            FlowMediaAspectRatioCache.shared.insert(ratio, for: url)
         }
 
         return ratio
@@ -1787,6 +1807,131 @@ private actor NoteVideoAspectRatioCache {
         } catch {
             return nil
         }
+    }
+}
+
+actor NoteMediaGeometryPrefetcher {
+    static let shared = NoteMediaGeometryPrefetcher()
+
+    private let maxPrefetchedImages = 36
+    private let maxPrefetchedVideos = 12
+
+    func prefetch(events: [NostrEvent]) async {
+        let candidates = Self.mediaCandidates(in: events)
+
+        for hint in candidates.hints {
+            FlowMediaAspectRatioCache.shared.insert(hint.ratio, forURLString: hint.urlString)
+        }
+
+        await withTaskGroup(of: Void.self) { group in
+            for url in candidates.imageURLs.prefix(maxPrefetchedImages) {
+                group.addTask {
+                    _ = await FlowImageCache.shared.aspectRatio(for: url)
+                }
+            }
+
+            for url in candidates.videoURLs.prefix(maxPrefetchedVideos) {
+                group.addTask {
+                    _ = await NoteVideoAspectRatioCache.shared.ratio(for: url)
+                }
+            }
+
+            await group.waitForAll()
+        }
+    }
+
+    private static func mediaCandidates(
+        in events: [NostrEvent]
+    ) -> (imageURLs: [URL], videoURLs: [URL], hints: [(urlString: String, ratio: CGFloat)]) {
+        var imageURLs: [URL] = []
+        var videoURLs: [URL] = []
+        var hints: [(urlString: String, ratio: CGFloat)] = []
+        var seenImageURLs = Set<String>()
+        var seenVideoURLs = Set<String>()
+        var seenHintURLs = Set<String>()
+
+        for event in events {
+            for tag in event.tags where tag.first?.lowercased() == "imeta" {
+                var urlString: String?
+                var pixelSize: CGSize?
+
+                for value in tag.dropFirst() {
+                    if value.hasPrefix("url ") {
+                        urlString = String(value.dropFirst(4)).trimmingCharacters(in: .whitespacesAndNewlines)
+                    } else if value.hasPrefix("dim ") {
+                        pixelSize = Self.pixelSize(fromDimensionString: String(value.dropFirst(4)))
+                    }
+                }
+
+                guard let urlString,
+                      !urlString.isEmpty,
+                      let pixelSize,
+                      let ratio = NoteImageLayoutGuide.normalizedAspectRatio(pixelSize.width / max(pixelSize.height, 1)) else {
+                    continue
+                }
+
+                let key = urlString.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+                guard seenHintURLs.insert(key).inserted else { continue }
+                hints.append((urlString: urlString, ratio: ratio))
+            }
+
+            for token in NoteContentParser.tokenize(event: event) {
+                switch token.type {
+                case .image:
+                    appendURL(
+                        token.value,
+                        to: &imageURLs,
+                        seen: &seenImageURLs
+                    )
+                case .video:
+                    appendURL(
+                        token.value,
+                        to: &videoURLs,
+                        seen: &seenVideoURLs
+                    )
+                default:
+                    continue
+                }
+            }
+        }
+
+        return (imageURLs, videoURLs, hints)
+    }
+
+    private static func appendURL(
+        _ rawValue: String,
+        to urls: inout [URL],
+        seen: inout Set<String>
+    ) {
+        let trimmed = rawValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let url = URL(string: trimmed),
+              let scheme = url.scheme?.lowercased(),
+              scheme == "http" || scheme == "https" else {
+            return
+        }
+
+        let key = url.absoluteString.lowercased()
+        guard seen.insert(key).inserted else { return }
+        urls.append(url)
+    }
+
+    private static func pixelSize(fromDimensionString value: String) -> CGSize? {
+        let sanitized = value
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .replacingOccurrences(of: "×", with: "x")
+            .replacingOccurrences(of: "X", with: "x")
+        let components = sanitized.split(separator: "x", maxSplits: 1).map {
+            $0.trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        guard components.count == 2,
+              let width = Double(components[0]),
+              let height = Double(components[1]),
+              width > 0,
+              height > 0 else {
+            return nil
+        }
+
+        return CGSize(width: width, height: height)
     }
 }
 
@@ -1846,23 +1991,39 @@ private func generateNoteVideoThumbnail(for url: URL, maximumPixelSize: CGSize) 
 struct NoteVideoPlayerView: View {
     let url: URL
     let layout: NoteContentMediaLayout
-    @State private var videoAspectRatio: CGFloat = 16.0 / 9.0
+    let isGIFLike: Bool
+    let aspectRatioHint: CGFloat?
+    @State private var videoAspectRatio: CGFloat
     @State private var videoThumbnail: UIImage?
     @State private var isPlaying = false
 
     init(
         url: URL,
-        layout: NoteContentMediaLayout
+        layout: NoteContentMediaLayout,
+        isGIFLike: Bool = false,
+        aspectRatioHint: CGFloat? = nil
     ) {
         self.url = url
         self.layout = layout
+        self.isGIFLike = isGIFLike
+        let normalizedHint = NoteImageLayoutGuide.normalizedAspectRatio(aspectRatioHint)
+        self.aspectRatioHint = normalizedHint
+        _videoAspectRatio = State(
+            initialValue: NoteImageLayoutGuide.reservedVideoAspectRatio(
+                exactHint: normalizedHint,
+                cachedExactRatio: FlowMediaAspectRatioCache.shared.ratio(for: url)
+            )
+        )
     }
 
     var body: some View {
         ZStack {
             NoteNativeVideoPlayerController(
                 url: url,
-                autoplay: false,
+                autoplay: isGIFLike,
+                showsPlaybackControls: !isGIFLike,
+                isMuted: isGIFLike,
+                loops: isGIFLike,
                 onPlaybackStateChange: { nextIsPlaying in
                     isPlaying = nextIsPlaying
                 }
@@ -1876,7 +2037,9 @@ struct NoteVideoPlayerView: View {
                     .allowsHitTesting(false)
                     .transition(.opacity)
 
-                previewPlayAffordance
+                if !isGIFLike {
+                    previewPlayAffordance
+                }
             }
         }
         .frame(maxWidth: .infinity, maxHeight: maxVideoHeight, alignment: .leading)
@@ -1932,17 +2095,26 @@ struct NoteVideoPlayerView: View {
     }
 
     private func loadVideoAspectRatio() async {
-        if layout == .feed {
-            try? await Task.sleep(for: .milliseconds(180))
-            guard !Task.isCancelled else { return }
-        }
+        setVideoAspectRatio(
+            NoteImageLayoutGuide.reservedVideoAspectRatio(
+                exactHint: aspectRatioHint,
+                cachedExactRatio: FlowMediaAspectRatioCache.shared.ratio(for: url)
+            )
+        )
 
         guard let ratio = await NoteVideoAspectRatioCache.shared.ratio(for: url) else { return }
         guard !Task.isCancelled else { return }
 
-        await MainActor.run {
-            guard abs(videoAspectRatio - ratio) > 0.02 else { return }
-            videoAspectRatio = ratio
+        setVideoAspectRatio(ratio)
+    }
+
+    @MainActor
+    private func setVideoAspectRatio(_ nextRatio: CGFloat) {
+        guard abs(videoAspectRatio - nextRatio) > 0.02 else { return }
+        var transaction = Transaction()
+        transaction.disablesAnimations = true
+        withTransaction(transaction) {
+            videoAspectRatio = nextRatio
         }
     }
 
@@ -2199,54 +2371,71 @@ private final class NoteInlineAVPlayerViewController: AVPlayerViewController {
 struct NoteNativeVideoPlayerController: UIViewControllerRepresentable {
     let url: URL
     var autoplay: Bool = true
+    var showsPlaybackControls: Bool = true
+    var isMuted: Bool = false
+    var loops: Bool = false
     var onPlaybackStateChange: ((Bool) -> Void)? = nil
 
     final class Coordinator {
         let player = AVPlayer()
         private var currentURL: URL?
         private var shouldAutoplayForCurrentURL = true
+        private var isMutedForCurrentURL = false
+        private var loopsCurrentURL = false
+        private var playbackEndedObserver: NSObjectProtocol?
         private var playbackStatusObserver: NSKeyValueObservation?
         private var onPlaybackStateChange: ((Bool) -> Void)?
         private var lastKnownIsPlaying = false
 
         deinit {
+            removePlaybackEndedObserver()
             playbackStatusObserver?.invalidate()
         }
 
         func configure(
             url: URL,
             autoplay: Bool,
+            isMuted: Bool,
+            loops: Bool,
             controller: AVPlayerViewController,
             onPlaybackStateChange: ((Bool) -> Void)?
         ) {
             self.onPlaybackStateChange = onPlaybackStateChange
             observePlaybackStateIfNeeded()
+            isMutedForCurrentURL = isMuted
+            loopsCurrentURL = loops
+            player.isMuted = isMuted
+            player.volume = isMuted ? 0 : 1
 
             if currentURL != url || controller.player !== player {
                 currentURL = url
                 shouldAutoplayForCurrentURL = autoplay
                 controller.player = player
-                player.isMuted = false
-                player.volume = 1
                 player.automaticallyWaitsToMinimizeStalling = false
+                player.actionAtItemEnd = loops ? .none : .pause
                 let item = AVPlayerItem(url: url)
                 item.preferredForwardBufferDuration = 2
                 player.replaceCurrentItem(with: item)
+                observePlaybackEnded(for: item)
                 publishPlaybackState(false)
             } else {
                 shouldAutoplayForCurrentURL = shouldAutoplayForCurrentURL || autoplay
+                player.actionAtItemEnd = loops ? .none : .pause
             }
 
             guard controller.player === player else { return }
 
             if shouldAutoplayForCurrentURL {
-                NoteVideoPlaybackAudioSession.activateIfNeeded()
+                if !isMuted {
+                    NoteVideoPlaybackAudioSession.activateIfNeeded()
+                }
                 player.play()
                 shouldAutoplayForCurrentURL = false
             }
         }
 
         func stop() {
+            removePlaybackEndedObserver()
             playbackStatusObserver?.invalidate()
             playbackStatusObserver = nil
             player.pause()
@@ -2263,12 +2452,42 @@ struct NoteNativeVideoPlayerController: UIViewControllerRepresentable {
                 let isPlaying = player.timeControlStatus == .playing
                 DispatchQueue.main.async {
                     guard let self else { return }
-                    if isPlaying {
+                    if isPlaying, !self.isMutedForCurrentURL {
                         NoteVideoPlaybackAudioSession.activateIfNeeded()
                     }
                     self.publishPlaybackState(isPlaying)
                 }
             }
+        }
+
+        private func observePlaybackEnded(for item: AVPlayerItem) {
+            removePlaybackEndedObserver()
+            playbackEndedObserver = NotificationCenter.default.addObserver(
+                forName: .AVPlayerItemDidPlayToEndTime,
+                object: item,
+                queue: .main
+            ) { [weak self] _ in
+                guard let self else { return }
+
+                if self.loopsCurrentURL {
+                    self.player.seek(
+                        to: .zero,
+                        toleranceBefore: .zero,
+                        toleranceAfter: .zero
+                    ) { [weak self] finished in
+                        guard finished, let self else { return }
+                        self.player.play()
+                    }
+                } else {
+                    self.publishPlaybackState(false)
+                }
+            }
+        }
+
+        private func removePlaybackEndedObserver() {
+            guard let playbackEndedObserver else { return }
+            NotificationCenter.default.removeObserver(playbackEndedObserver)
+            self.playbackEndedObserver = nil
         }
 
         private func publishPlaybackState(_ isPlaying: Bool) {
@@ -2284,7 +2503,7 @@ struct NoteNativeVideoPlayerController: UIViewControllerRepresentable {
 
     func makeUIViewController(context: Context) -> AVPlayerViewController {
         let controller = NoteInlineAVPlayerViewController()
-        controller.showsPlaybackControls = true
+        controller.showsPlaybackControls = showsPlaybackControls
         controller.videoGravity = .resizeAspect
         controller.entersFullScreenWhenPlaybackBegins = false
         controller.exitsFullScreenWhenPlaybackEnds = false
@@ -2297,6 +2516,8 @@ struct NoteNativeVideoPlayerController: UIViewControllerRepresentable {
         context.coordinator.configure(
             url: url,
             autoplay: autoplay,
+            isMuted: isMuted,
+            loops: loops,
             controller: controller,
             onPlaybackStateChange: onPlaybackStateChange
         )
@@ -2304,6 +2525,7 @@ struct NoteNativeVideoPlayerController: UIViewControllerRepresentable {
     }
 
     func updateUIViewController(_ uiViewController: AVPlayerViewController, context: Context) {
+        uiViewController.showsPlaybackControls = showsPlaybackControls
         uiViewController.modalPresentationCapturesStatusBarAppearance = false
         uiViewController.view.backgroundColor = .clear
         uiViewController.view.isOpaque = false
@@ -2312,6 +2534,8 @@ struct NoteNativeVideoPlayerController: UIViewControllerRepresentable {
         context.coordinator.configure(
             url: url,
             autoplay: autoplay,
+            isMuted: isMuted,
+            loops: loops,
             controller: uiViewController,
             onPlaybackStateChange: onPlaybackStateChange
         )

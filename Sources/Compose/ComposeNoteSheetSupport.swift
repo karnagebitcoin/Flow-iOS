@@ -350,6 +350,35 @@ private let mentionStartContinuationCharacters = CharacterSet.alphanumerics.unio
 )
 private let mentionSearchTerminatorCharacters = CharacterSet(charactersIn: ",;:!?()[]{}<>/\\|`~\"")
 
+enum ComposePreparedPublication: Sendable {
+    case note(PreparedNotePublication)
+    case poll(PreparedNotePublication)
+    case reply(PreparedThreadReplyPublication)
+
+    var item: FeedItem {
+        switch self {
+        case .note(let prepared), .poll(let prepared):
+            return prepared.item
+        case .reply(let prepared):
+            return prepared.item
+        }
+    }
+
+    var isPoll: Bool {
+        if case .poll = self {
+            return true
+        }
+        return false
+    }
+
+    var isReply: Bool {
+        if case .reply = self {
+            return true
+        }
+        return false
+    }
+}
+
 @MainActor
 final class ComposeNoteViewModel: ObservableObject {
     @Published var text: String = ""
@@ -385,7 +414,31 @@ final class ComposeNoteViewModel: ObservableObject {
         pollDraft: ComposePollDraft? = nil,
         replyTargetEvent: NostrEvent? = nil
     ) async -> Bool {
-        guard !isPublishing else { return false }
+        guard let prepared = await preparePublication(
+            content: content,
+            currentAccountPubkey: currentAccountPubkey,
+            currentNsec: currentNsec,
+            writeRelayURLs: writeRelayURLs,
+            additionalTags: additionalTags,
+            pollDraft: pollDraft,
+            replyTargetEvent: replyTargetEvent
+        ) else {
+            return false
+        }
+
+        return await finishPublication(prepared)
+    }
+
+    func preparePublication(
+        content: String? = nil,
+        currentAccountPubkey: String?,
+        currentNsec: String?,
+        writeRelayURLs: [URL],
+        additionalTags: [[String]] = [],
+        pollDraft: ComposePollDraft? = nil,
+        replyTargetEvent: NostrEvent? = nil
+    ) async -> ComposePreparedPublication? {
+        guard !isPublishing else { return nil }
 
         isPublishing = true
         feedbackMessage = nil
@@ -399,7 +452,7 @@ final class ComposeNoteViewModel: ObservableObject {
 
         do {
             if let replyTargetEvent {
-                _ = try await replyPublishingService.publishReply(
+                let prepared = try await replyPublishingService.prepareReply(
                     content: publishContent,
                     replyingTo: replyTargetEvent,
                     currentAccountPubkey: currentAccountPubkey,
@@ -408,11 +461,11 @@ final class ComposeNoteViewModel: ObservableObject {
                     additionalTags: additionalTags
                 )
                 text = ""
-                feedbackMessage = "Reply posted."
+                feedbackMessage = "Reply publishing."
                 feedbackIsError = false
-                return true
+                return .reply(prepared)
             } else if let pollDraft {
-                _ = try await publishingService.publishPoll(
+                let prepared = try await publishingService.preparePoll(
                     content: publishContent,
                     poll: pollDraft,
                     currentNsec: currentNsec,
@@ -421,11 +474,11 @@ final class ComposeNoteViewModel: ObservableObject {
                 )
 
                 text = ""
-                feedbackMessage = "Poll posted."
+                feedbackMessage = "Poll publishing."
                 feedbackIsError = false
-                return true
+                return .poll(prepared)
             } else {
-                _ = try await publishingService.publishNote(
+                let prepared = try await publishingService.prepareNote(
                     content: publishContent,
                     currentNsec: currentNsec,
                     writeRelayURLs: writeRelayURLs,
@@ -433,10 +486,28 @@ final class ComposeNoteViewModel: ObservableObject {
                 )
 
                 text = ""
-                feedbackMessage = "Posted."
+                feedbackMessage = "Publishing."
                 feedbackIsError = false
-                return true
+                return .note(prepared)
             }
+        } catch {
+            feedbackMessage = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+            feedbackIsError = true
+            return nil
+        }
+    }
+
+    func finishPublication(_ prepared: ComposePreparedPublication) async -> Bool {
+        do {
+            switch prepared {
+            case .note(let prepared), .poll(let prepared):
+                _ = try await publishingService.publishPrepared(prepared)
+            case .reply(let prepared):
+                _ = try await replyPublishingService.publishPrepared(prepared)
+            }
+            feedbackMessage = prepared.isReply ? "Reply posted." : prepared.isPoll ? "Poll posted." : "Posted."
+            feedbackIsError = false
+            return true
         } catch {
             feedbackMessage = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
             feedbackIsError = true

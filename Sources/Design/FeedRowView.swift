@@ -130,7 +130,9 @@ struct FeedRowView: View {
     var onOpenThread: (() -> Void)? = nil
     var onRepostActorTap: ((String) -> Void)? = nil
     var onReferencedEventTap: ((FeedItem) -> Void)? = nil
+    var onRelayTap: ((URL) -> Void)? = nil
     var onReplyTap: (() -> Void)? = nil
+    var onOptimisticPublished: ((FeedItem) -> Void)? = nil
     var onMuteConversation: ((String) -> Void)? = nil
     var suppressReplyContextForDirectReplyTargetEventID: String? = nil
 
@@ -209,11 +211,17 @@ struct FeedRowView: View {
                 onMute: {
                     handleMuteAuthor()
                 },
+                spamMarkTitle: spamMarkActionTitle,
+                spamMarkIcon: spamMarkActionIcon,
+                canToggleSpamMark: canToggleAuthorSpamMark,
+                onToggleSpamMark: {
+                    handleToggleAuthorSpamMark()
+                },
                 onReport: {
                     presentReportFlow()
                 }
             )
-            .presentationDetents([.height(canTranslateNote ? 545 : 490), .medium])
+            .presentationDetents([.height(canTranslateNote ? 600 : 545), .medium])
             .presentationDragIndicator(.visible)
         }
         .sheet(isPresented: $isShowingReportSheet) {
@@ -231,7 +239,8 @@ struct FeedRowView: View {
                 quotedEvent: draft.quotedEvent,
                 quotedDisplayNameHint: draft.quotedDisplayNameHint,
                 quotedHandleHint: draft.quotedHandleHint,
-                quotedAvatarURLHint: draft.quotedAvatarURLHint
+                quotedAvatarURLHint: draft.quotedAvatarURLHint,
+                onOptimisticPublished: onOptimisticPublished
             )
         }
         .sheet(isPresented: $isShowingReplyComposer) {
@@ -242,7 +251,8 @@ struct FeedRowView: View {
                 replyTargetEvent: item.displayEvent,
                 replyTargetDisplayNameHint: item.displayName,
                 replyTargetHandleHint: item.handle,
-                replyTargetAvatarURLHint: item.avatarURL
+                replyTargetAvatarURLHint: item.avatarURL,
+                onOptimisticPublished: onOptimisticPublished
             )
         }
     }
@@ -346,7 +356,8 @@ struct FeedRowView: View {
                 articleAuthor: LongFormArticleAuthorSummary(item: item),
                 onHashtagTap: onHashtagTap,
                 onProfileTap: onProfileTap,
-                onReferencedEventTap: onReferencedEventTap
+                onReferencedEventTap: onReferencedEventTap,
+                onRelayTap: onRelayTap
             )
             .frame(maxWidth: .infinity, alignment: .leading)
             .contentShape(Rectangle())
@@ -477,6 +488,14 @@ struct FeedRowView: View {
                     avatarMenuActions.onViewProfile()
                 } label: {
                     Label("View Profile", systemImage: "person")
+                }
+
+                if canToggleAuthorSpamMark {
+                    Button {
+                        handleToggleAuthorSpamMark()
+                    } label: {
+                        Label(spamMarkActionTitle, systemImage: spamMarkActionIcon)
+                    }
                 }
             } label: {
                 avatarWithFollowBadge
@@ -709,6 +728,22 @@ struct FeedRowView: View {
         !copyableNoteText.isEmpty
     }
 
+    private var isAuthorMarkedSpam: Bool {
+        appSettings.isSpamFilterMarked(item.displayAuthorPubkey)
+    }
+
+    private var canToggleAuthorSpamMark: Bool {
+        !isAuthoredByCurrentAccount
+    }
+
+    private var spamMarkActionTitle: String {
+        isAuthorMarkedSpam ? "Remove Spam Mark" : "Mark as Spam"
+    }
+
+    private var spamMarkActionIcon: String {
+        isAuthorMarkedSpam ? "checkmark.shield" : "exclamationmark.shield"
+    }
+
     private var canTranslateNote: Bool {
         guard !noteTranslationText.isEmpty else { return false }
         #if canImport(Translation)
@@ -751,6 +786,17 @@ struct FeedRowView: View {
         }
     }
 
+    private func handleToggleAuthorSpamMark() {
+        guard canToggleAuthorSpamMark else { return }
+        if isAuthorMarkedSpam {
+            appSettings.removeSpamFilterMarkedPubkey(item.displayAuthorPubkey)
+            toastCenter.show("Removed spam mark", style: .info)
+        } else {
+            appSettings.addSpamFilterMarkedPubkey(item.displayAuthorPubkey)
+            toastCenter.show("Marked \(item.displayName) as spam")
+        }
+    }
+
     private func presentReportFlow() {
         Task { @MainActor in
             try? await Task.sleep(nanoseconds: 180_000_000)
@@ -768,7 +814,12 @@ struct FeedRowView: View {
             writeRelayURLs: effectiveWriteRelayURLs
         )
         await MainActor.run {
-            toastCenter.show("Report sent")
+            if type == .spam {
+                appSettings.addSpamFilterMarkedPubkey(item.displayAuthorPubkey)
+                toastCenter.show("Report sent and marked as spam")
+            } else {
+                toastCenter.show("Report sent")
+            }
         }
     }
 }
@@ -784,6 +835,10 @@ struct NoteOptionsBottomSheetView: View {
     let showsTranslateAction: Bool
     let onTranslate: (() -> Void)?
     let onMute: () -> Void
+    let spamMarkTitle: String
+    let spamMarkIcon: String
+    let canToggleSpamMark: Bool
+    let onToggleSpamMark: () -> Void
     let onReport: () -> Void
 
     var body: some View {
@@ -859,6 +914,17 @@ struct NoteOptionsBottomSheetView: View {
                     tint: .primary
                 ) {
                     onMute()
+                }
+
+                sheetDivider
+
+                optionRow(
+                    title: spamMarkTitle,
+                    icon: spamMarkIcon,
+                    isEnabled: canToggleSpamMark,
+                    tint: .orange
+                ) {
+                    onToggleSpamMark()
                 }
 
                 sheetDivider

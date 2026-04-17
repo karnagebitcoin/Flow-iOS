@@ -2,6 +2,7 @@ import NostrSDK
 import SwiftUI
 
 private enum MutedContentTab: String, CaseIterable, Identifiable {
+    case filters = "Filters"
     case words = "Words"
     case users = "Users"
 
@@ -10,10 +11,11 @@ private enum MutedContentTab: String, CaseIterable, Identifiable {
 
 struct SettingsMutedContentView: View {
     @EnvironmentObject private var auth: AuthManager
+    @EnvironmentObject private var appSettings: AppSettingsStore
     @EnvironmentObject private var relaySettings: RelaySettingsStore
     @ObservedObject private var muteStore = MuteStore.shared
 
-    @State private var selectedTab: MutedContentTab = .words
+    @State private var selectedTab: MutedContentTab = .filters
     @State private var mutedUserProfiles: [String: NostrProfile] = [:]
     @State private var isLoadingMutedUsers = false
 
@@ -27,7 +29,9 @@ struct SettingsMutedContentView: View {
                 )
             }
 
-            if selectedTab == .words {
+            if selectedTab == .filters {
+                filterSections
+            } else if selectedTab == .words {
                 mutedWordsSections
             } else {
                 mutedUsersSections
@@ -62,6 +66,84 @@ struct SettingsMutedContentView: View {
                 await loadMutedUserProfiles()
             }
         }
+    }
+
+    @ViewBuilder
+    private var filterSections: some View {
+        Section {
+            Toggle("Spam replies", isOn: spamReplyFilterBinding)
+
+            Text("Uses an on-device model to hide likely-bot replies in threads and Pulse from people you don't follow.")
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        } footer: {
+            Text("Model scoring stays on this device. Marked spam is shared across your local accounts.")
+        }
+
+        Section {
+            if appSettings.spamFilterMarkedPubkeys.isEmpty {
+                Text("No accounts marked as spam yet.")
+                    .foregroundStyle(.secondary)
+            } else {
+                ForEach(appSettings.spamFilterMarkedPubkeys, id: \.self) { pubkey in
+                    spamLabelRow(
+                        pubkey: pubkey,
+                        removeAccessibilityLabel: "Remove \(shortNostrIdentifier(pubkey)) from Marked spam",
+                        onRemove: {
+                            appSettings.removeSpamFilterMarkedPubkey(pubkey)
+                        }
+                    )
+                    .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+                        Button(role: .destructive) {
+                            appSettings.removeSpamFilterMarkedPubkey(pubkey)
+                        } label: {
+                            Label("Remove", systemImage: "minus.circle")
+                        }
+                    }
+                }
+            }
+        } header: {
+            Text("Marked Spam")
+        } footer: {
+            Text("Mark Spam from a note or profile to hide that author and personalize likely-spam scoring for every account on this device.")
+        }
+    }
+
+    private func spamLabelRow(
+        pubkey: String,
+        removeAccessibilityLabel: String,
+        onRemove: @escaping () -> Void
+    ) -> some View {
+        HStack(spacing: 12) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(shortNostrIdentifier(pubkey))
+                    .font(.body.weight(.medium))
+
+                Text(pubkey)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+            }
+
+            Spacer(minLength: 8)
+
+            Button(action: onRemove) {
+                Image(systemName: "minus.circle.fill")
+                    .font(.body.weight(.semibold))
+                    .foregroundStyle(.secondary)
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(removeAccessibilityLabel)
+        }
+    }
+
+    private var spamReplyFilterBinding: Binding<Bool> {
+        Binding(
+            get: { appSettings.spamReplyFilterEnabled },
+            set: { appSettings.spamReplyFilterEnabled = $0 }
+        )
     }
 
     @ViewBuilder

@@ -1,9 +1,29 @@
 import SwiftUI
 
+private enum RelaySettingsSourceTab: String, CaseIterable, Identifiable {
+    case receive = "Receive"
+    case publish = "Publish"
+    case messages = "Messages"
+
+    var id: String { rawValue }
+
+    var emptyMessage: String {
+        switch self {
+        case .receive:
+            return "No receive sources configured yet."
+        case .publish:
+            return "No publish sources configured yet."
+        case .messages:
+            return "No message sources configured yet."
+        }
+    }
+}
+
 private enum RelayAddScope: String, CaseIterable, Identifiable {
     case both = "Receive + Publish"
-    case read = "Receive Only"
-    case write = "Publish Only"
+    case read = "Receive"
+    case write = "Publish"
+    case inbox = "Messages"
 
     var id: String { rawValue }
 
@@ -15,6 +35,8 @@ private enum RelayAddScope: String, CaseIterable, Identifiable {
             return .read
         case .write:
             return .write
+        case .inbox:
+            return .inbox
         }
     }
 }
@@ -29,6 +51,7 @@ struct RelaySettingsView: View {
 
     @State private var relayInput = ""
     @State private var relayScope: RelayAddScope = .both
+    @State private var selectedSourceTab: RelaySettingsSourceTab = .receive
     @State private var validationMessage: String?
     @State private var isShowingAdvancedSources = false
     @State private var isShowingSourcesInfo = false
@@ -154,16 +177,22 @@ struct RelaySettingsView: View {
 
     private var sourceList: some View {
         VStack(alignment: .leading, spacing: 12) {
-            if dataSources.isEmpty {
-                Text("No sources configured yet.")
+            FlowCapsuleTabBar(
+                selection: $selectedSourceTab,
+                items: RelaySettingsSourceTab.allCases,
+                title: { $0.rawValue }
+            )
+
+            if selectedDataSources.isEmpty {
+                Text(selectedSourceTab.emptyMessage)
                     .font(.footnote)
                     .foregroundStyle(.secondary)
             } else {
-                ForEach(Array(dataSources.enumerated()), id: \.element.id) { index, source in
+                ForEach(Array(selectedDataSources.enumerated()), id: \.element.id) { index, source in
                     VStack(alignment: .leading, spacing: 10) {
                         HStack(alignment: .top, spacing: 10) {
                             VStack(alignment: .leading, spacing: 4) {
-                                Text("Source \(index + 1)")
+                                Text("\(selectedSourceTab.rawValue) Source \(index + 1)")
                                     .font(.caption.weight(.semibold))
                                     .foregroundStyle(.secondary)
 
@@ -192,6 +221,11 @@ struct RelaySettingsView: View {
                                         removePublishSource(source.url)
                                     }
                                 }
+                                if source.messages {
+                                    Button("Remove Message Source", role: .destructive) {
+                                        removeMessageSource(source.url)
+                                    }
+                                }
                             } label: {
                                 Image(systemName: "ellipsis.circle")
                                     .font(.title3)
@@ -207,9 +241,12 @@ struct RelaySettingsView: View {
                             if source.publishes {
                                 sourceCapabilityPill("Publish", systemImage: "arrow.up.circle")
                             }
+                            if source.messages {
+                                sourceCapabilityPill("Messages", systemImage: "envelope.circle")
+                            }
                         }
 
-                        if source.publishes {
+                        if selectedSourceTab == .publish && source.publishes {
                             sourcePublishHealth(for: source)
                         }
                     }
@@ -221,11 +258,19 @@ struct RelaySettingsView: View {
                     )
                     .overlay(
                         RoundedRectangle(cornerRadius: 16, style: .continuous)
-                            .stroke(appSettings.themeSeparator(defaultOpacity: 0.12), lineWidth: 1)
+                            .stroke(sourceCardBorderColor, lineWidth: sourceCardBorderWidth)
                     )
                 }
             }
         }
+    }
+
+    private var sourceCardBorderColor: Color {
+        appSettings.themeSeparator(defaultOpacity: colorScheme == .light ? 0.28 : 0.18)
+    }
+
+    private var sourceCardBorderWidth: CGFloat {
+        colorScheme == .light ? 1.35 : 1
     }
 
     private func sourceCapabilityPill(_ title: String, systemImage: String) -> some View {
@@ -384,9 +429,9 @@ struct RelaySettingsView: View {
 
     private var connectionDetailText: String {
         if dataSources.isEmpty {
-            return "Add a source to start receiving and publishing data."
+            return "Add a source to start receiving, publishing, and routing messages."
         }
-        return "Halo is currently using your configured data sources."
+        return "Halo is using your configured receive, publish, and message sources."
     }
 
     private var recommendationTaskKey: String {
@@ -401,7 +446,8 @@ struct RelaySettingsView: View {
     private var dataSources: [DataSourceItem] {
         let readSet = Set(relaySettings.readRelays)
         let writeSet = Set(relaySettings.writeRelays)
-        let ordered = orderedUniqueSources(from: relaySettings.readRelays + relaySettings.writeRelays)
+        let inboxSet = Set(relaySettings.inboxRelays)
+        let ordered = orderedUniqueSources(from: relaySettings.readRelays + relaySettings.writeRelays + relaySettings.inboxRelays)
 
         return ordered.enumerated().map { index, url in
             DataSourceItem(
@@ -409,8 +455,22 @@ struct RelaySettingsView: View {
                 url: url,
                 label: sourceLabel(for: url),
                 receives: readSet.contains(url),
-                publishes: writeSet.contains(url)
+                publishes: writeSet.contains(url),
+                messages: inboxSet.contains(url)
             )
+        }
+    }
+
+    private var selectedDataSources: [DataSourceItem] {
+        dataSources.filter { source in
+            switch selectedSourceTab {
+            case .receive:
+                return source.receives
+            case .publish:
+                return source.publishes
+            case .messages:
+                return source.messages
+            }
         }
     }
 
@@ -496,6 +556,15 @@ struct RelaySettingsView: View {
         }
     }
 
+    private func removeMessageSource(_ source: String) {
+        validationMessage = nil
+        do {
+            try relaySettings.removeInboxRelay(source)
+        } catch {
+            validationMessage = userFacingMessage(for: error)
+        }
+    }
+
     private func userFacingMessage(for error: Error) -> String {
         let base = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
         return userFacingMessage(for: base)
@@ -509,6 +578,7 @@ struct RelaySettingsView: View {
             .replacingOccurrences(of: "Relay", with: "Source")
             .replacingOccurrences(of: "read relays", with: "receive sources")
             .replacingOccurrences(of: "write relays", with: "publish sources")
+            .replacingOccurrences(of: "inbox relays", with: "message sources")
             .replacingOccurrences(of: "relays", with: "sources")
             .replacingOccurrences(of: "relay", with: "source")
     }
@@ -632,6 +702,7 @@ private extension RelaySettingsView {
         let label: String
         let receives: Bool
         let publishes: Bool
+        let messages: Bool
     }
 
     struct RecommendedDataSourceItem: Identifiable, Equatable {
