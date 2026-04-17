@@ -103,7 +103,7 @@ struct ProfileQRCodeSheet: View {
     private var avatarView: some View {
         Group {
             if let avatarURL {
-                CachedAsyncImage(url: avatarURL) { phase in
+                CachedAsyncImage(url: avatarURL, kind: .avatar) { phase in
                     switch phase {
                     case .success(let image):
                         image
@@ -297,7 +297,7 @@ struct ProfileQRCodeAvatarBadge: View {
     var body: some View {
         Group {
             if let avatarURL {
-                CachedAsyncImage(url: avatarURL) { phase in
+                CachedAsyncImage(url: avatarURL, kind: .avatar) { phase in
                     switch phase {
                     case .success(let image):
                         image
@@ -616,7 +616,7 @@ private struct ProfileQRCodeBlurredAvatarBackground: View {
             Color.black
 
             if let avatarURL {
-                CachedAsyncImage(url: avatarURL) { phase in
+                CachedAsyncImage(url: avatarURL, kind: .avatar) { phase in
                     switch phase {
                     case .success(let image):
                         image

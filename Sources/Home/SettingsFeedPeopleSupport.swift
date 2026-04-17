@@ -405,7 +405,7 @@ private struct NewsAuthorAvatarView: View {
     var body: some View {
         Group {
             if let url {
-                AsyncImage(url: url) { phase in
+                CachedAsyncImage(url: url, kind: .avatar) { phase in
                     switch phase {
                     case .success(let image):
                         image

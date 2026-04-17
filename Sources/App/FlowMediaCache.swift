@@ -70,6 +70,51 @@ struct FlowMediaFetchedResponse: Sendable {
     let data: Data
     let statusCode: Int?
     let contentType: String?
+    var exceededByteLimit = false
+}
+
+enum FlowImageCacheRequestKind: Hashable, Sendable {
+    case standard
+    case profileImage
+    case avatar
+    case profileImageFullscreen
+    case profileBanner
+    case feedThumbnail
+    case fullscreen
+
+    static let profileImageByteLimit = 2 * 1_024 * 1_024
+    static let feedImageByteLimit = 3 * 1_024 * 1_024
+    static let largeGIFAutoplayByteLimit = 2 * 1_024 * 1_024
+
+    var decodeMaxPixelSize: CGFloat {
+        switch self {
+        case .avatar, .profileImage:
+            return 256
+        case .profileImageFullscreen:
+            return 2_048
+        case .profileBanner:
+            return 1_600
+        case .feedThumbnail:
+            return 1_200
+        case .standard, .fullscreen:
+            return 2_048
+        }
+    }
+
+    func maxByteCount(enforcingNetworkLimit: Bool) -> Int? {
+        guard enforcingNetworkLimit else { return nil }
+
+        switch self {
+        case .standard:
+            return nil
+        case .profileImage, .avatar, .profileImageFullscreen:
+            return Self.profileImageByteLimit
+        case .profileBanner, .feedThumbnail:
+            return Self.feedImageByteLimit
+        case .fullscreen:
+            return nil
+        }
+    }
 }
 
 final class FlowMediaAspectRatioCache {
@@ -319,9 +364,24 @@ private actor FlowMediaFailureBackoff {
 
 actor FlowImageCache {
     static let shared = FlowImageCache()
-    typealias ImageDataFetcher = @Sendable (URLRequest) async -> FlowMediaFetchedResponse?
-    private static let liveImageDataFetcher: ImageDataFetcher = { request in
-        await fetchImageResponse(with: request)
+    typealias ImageDataFetcher = @Sendable (URLRequest, Int?) async -> FlowMediaFetchedResponse?
+    private static let maxSourceImagePixelCount: CGFloat = 48_000_000
+    private static let liveImageDataFetcher: ImageDataFetcher = { request, maxByteCount in
+        await fetchImageResponse(with: request, maxByteCount: maxByteCount)
+    }
+
+    private struct FetchKey: Hashable {
+        let url: URL
+        let maxByteCount: Int?
+    }
+
+    private struct ImagePixelSize {
+        var width: CGFloat
+        var height: CGFloat
+
+        var pixelCount: CGFloat {
+            width * height
+        }
     }
 
     private let fileManager: FileManager
@@ -329,13 +389,15 @@ actor FlowImageCache {
     private let urlCache: URLCache
     private let fetchImageData: ImageDataFetcher
     private let failureBackoff: FlowMediaFailureBackoff
-    private let memoryCache = NSCache<NSURL, UIImage>()
+    private let memoryCache = NSCache<NSString, UIImage>()
     private let dataCache = NSCache<NSURL, NSData>()
     private let encodedByteCounts = NSCache<NSURL, NSNumber>()
     private let maxDiskBytes: Int64 = 384 * 1_024 * 1_024
     private let maxDiskEntries = 12_000
     private let maxEntryAge: TimeInterval = 60 * 60 * 24 * 30
-    private var inFlight: [URL: Task<FlowMediaFetchedResponse?, Never>] = [:]
+    private let oversizedMediaBackoff: TimeInterval = 60 * 60
+    private var inFlight: [FetchKey: Task<FlowMediaFetchedResponse?, Never>] = [:]
+    private var oversizedMediaRetryAfter: [FetchKey: Date] = [:]
     private var diagnostics = FlowMediaCacheDiagnostics()
 
     init(
@@ -357,15 +419,48 @@ actor FlowImageCache {
     }
 
     func image(for url: URL) async -> UIImage? {
-        await image(for: url, tracking: .tracked)
+        await image(
+            for: url,
+            kind: .standard,
+            enforceNetworkByteLimit: true,
+            tracking: .tracked
+        )
     }
 
-    func aspectRatio(for url: URL) async -> CGFloat? {
+    func image(
+        for url: URL,
+        kind: FlowImageCacheRequestKind,
+        enforceNetworkByteLimit: Bool = true
+    ) async -> UIImage? {
+        await image(
+            for: url,
+            kind: kind,
+            enforceNetworkByteLimit: enforceNetworkByteLimit,
+            tracking: .tracked
+        )
+    }
+
+    func profileImage(for url: URL) async -> UIImage? {
+        await image(
+            for: url,
+            kind: .profileImage,
+            enforceNetworkByteLimit: true,
+            tracking: .tracked
+        )
+    }
+
+    func aspectRatio(for url: URL, enforceNetworkByteLimit: Bool = true) async -> CGFloat? {
         if let cachedRatio = FlowMediaAspectRatioCache.shared.ratio(for: url) {
             return cachedRatio
         }
 
-        guard let data = await data(for: url, tracking: .untracked, countsAsRequest: false),
+        guard let data = await data(
+            for: url,
+            kind: .feedThumbnail,
+            enforceNetworkByteLimit: enforceNetworkByteLimit,
+            tracking: .untracked,
+            countsAsRequest: false
+        ),
               let ratio = Self.imageAspectRatio(from: data) else {
             return nil
         }
@@ -375,7 +470,37 @@ actor FlowImageCache {
     }
 
     func data(for url: URL) async -> Data? {
-        await data(for: url, tracking: .tracked, countsAsRequest: true)
+        await data(
+            for: url,
+            kind: .standard,
+            enforceNetworkByteLimit: true,
+            tracking: .tracked,
+            countsAsRequest: true
+        )
+    }
+
+    func data(
+        for url: URL,
+        kind: FlowImageCacheRequestKind,
+        enforceNetworkByteLimit: Bool = true
+    ) async -> Data? {
+        await data(
+            for: url,
+            kind: kind,
+            enforceNetworkByteLimit: enforceNetworkByteLimit,
+            tracking: .tracked,
+            countsAsRequest: true
+        )
+    }
+
+    func profileImageData(for url: URL) async -> Data? {
+        await data(
+            for: url,
+            kind: .profileImage,
+            enforceNetworkByteLimit: true,
+            tracking: .tracked,
+            countsAsRequest: true
+        )
     }
 
     func diagnosticsSnapshot() -> FlowMediaCacheDiagnostics {
@@ -388,11 +513,14 @@ actor FlowImageCache {
 
     private func image(
         for url: URL,
+        kind: FlowImageCacheRequestKind,
+        enforceNetworkByteLimit: Bool,
         tracking: FlowMediaCacheDiagnosticsTracking
     ) async -> UIImage? {
         guard isCacheable(url) else { return nil }
 
-        let cacheKey = url as NSURL
+        let dataCacheKey = url as NSURL
+        let cacheKey = imageCacheKey(for: url, kind: kind)
         recordRequestIfNeeded(tracking)
         if let cached = memoryCache.object(forKey: cacheKey) {
             if FlowMediaAspectRatioCache.shared.ratio(for: url) == nil,
@@ -401,7 +529,7 @@ actor FlowImageCache {
             }
             recordCacheHit(
                 .imageMemory,
-                byteCount: encodedByteCount(for: cacheKey),
+                byteCount: encodedByteCount(for: dataCacheKey),
                 tracking: tracking
             )
             return cached
@@ -413,8 +541,18 @@ actor FlowImageCache {
             return thumbnail
         }
 
-        guard let data = await data(for: url, tracking: tracking, countsAsRequest: false),
-              let image = preparedImage(from: data, sourceURL: url) else {
+        guard let data = await data(
+            for: url,
+            kind: kind,
+            enforceNetworkByteLimit: enforceNetworkByteLimit,
+            tracking: tracking,
+            countsAsRequest: false
+        ),
+              let image = preparedImage(
+                from: data,
+                sourceURL: url,
+                maxPixelSize: kind.decodeMaxPixelSize
+              ) else {
             return nil
         }
 
@@ -427,6 +565,8 @@ actor FlowImageCache {
 
     private func data(
         for url: URL,
+        kind: FlowImageCacheRequestKind,
+        enforceNetworkByteLimit: Bool,
         tracking: FlowMediaCacheDiagnosticsTracking,
         countsAsRequest: Bool
     ) async -> Data? {
@@ -461,7 +601,8 @@ actor FlowImageCache {
                     data: cachedResponse.data,
                     response: cachedResponse.response
                 ),
-                for: url
+                for: url,
+                maxByteCount: nil
             ) {
                 recordCacheHit(.urlCache, byteCount: validatedCachedData.count, tracking: tracking)
                 return storeData(
@@ -477,22 +618,27 @@ actor FlowImageCache {
         guard await failureBackoff.canAttempt(url) else {
             return nil
         }
+        let maxByteCount = kind.maxByteCount(enforcingNetworkLimit: enforceNetworkByteLimit)
+        guard canAttemptSizeLimitedRequest(for: url, maxByteCount: maxByteCount) else {
+            return nil
+        }
 
-        if let existingTask = inFlight[url] {
+        let fetchKey = FetchKey(url: url, maxByteCount: maxByteCount)
+        if let existingTask = inFlight[fetchKey] {
             let response = await existingTask.value
-            let data = await validatedData(from: response, for: url)
+            let data = await validatedData(from: response, for: url, maxByteCount: maxByteCount)
             return storeData(data: data, for: url, cacheKey: cacheKey, persistToDisk: true)
         }
 
         let fetchImageData = self.fetchImageData
         let task = Task {
-            await fetchImageData(request)
+            await fetchImageData(request, maxByteCount)
         }
-        inFlight[url] = task
+        inFlight[fetchKey] = task
 
         let response = await task.value
-        inFlight[url] = nil
-        let data = await validatedData(from: response, for: url)
+        inFlight[fetchKey] = nil
+        let data = await validatedData(from: response, for: url, maxByteCount: maxByteCount)
         recordNetworkResult(data, tracking: tracking)
         return storeData(data: data, for: url, cacheKey: cacheKey, persistToDisk: true)
     }
@@ -504,7 +650,12 @@ actor FlowImageCache {
         await withTaskGroup(of: Void.self) { group in
             for url in deduplicated.prefix(36) {
                 group.addTask {
-                    _ = await self.image(for: url, tracking: .untracked)
+                    _ = await self.image(
+                        for: url,
+                        kind: .feedThumbnail,
+                        enforceNetworkByteLimit: true,
+                        tracking: .untracked
+                    )
                 }
             }
             await group.waitForAll()
@@ -687,7 +838,15 @@ actor FlowImageCache {
         return width * height * 4
     }
 
-    private func preparedImage(from data: Data, sourceURL: URL) -> UIImage? {
+    private func imageCacheKey(for url: URL, kind: FlowImageCacheRequestKind) -> NSString {
+        "\(url.absoluteString)#px:\(Int(kind.decodeMaxPixelSize.rounded()))" as NSString
+    }
+
+    private func preparedImage(
+        from data: Data,
+        sourceURL: URL,
+        maxPixelSize: CGFloat
+    ) -> UIImage? {
         guard Self.isLikelyRenderableImageData(data, contentType: nil) else {
             return nil
         }
@@ -697,13 +856,18 @@ actor FlowImageCache {
             return image.preparingForDisplay() ?? image
         }
 
+        if let pixelSize = Self.imagePixelSize(from: source),
+           pixelSize.pixelCount > Self.maxSourceImagePixelCount {
+            return nil
+        }
+
         let frameCount = CGImageSourceGetCount(source)
         let isGIF = sourceURL.pathExtension.lowercased() == "gif" || data.starts(with: [0x47, 0x49, 0x46])
         let thumbnailOptions: [CFString: Any] = [
             kCGImageSourceCreateThumbnailFromImageAlways: true,
             kCGImageSourceCreateThumbnailWithTransform: true,
             kCGImageSourceShouldCacheImmediately: false,
-            kCGImageSourceThumbnailMaxPixelSize: 2_048
+            kCGImageSourceThumbnailMaxPixelSize: max(Int(maxPixelSize.rounded()), 1)
         ]
 
         guard let cgImage = CGImageSourceCreateThumbnailAtIndex(
@@ -741,11 +905,17 @@ actor FlowImageCache {
 
     private func validatedData(
         from response: FlowMediaFetchedResponse?,
-        for url: URL
+        for url: URL,
+        maxByteCount: Int?
     ) async -> Data? {
         guard let response else {
             guard !Task.isCancelled else { return nil }
             await failureBackoff.recordTransportFailure(for: url)
+            return nil
+        }
+
+        if response.exceededByteLimit || !isAllowedByteCount(response.data.count, maxByteCount: maxByteCount) {
+            recordOversizedMedia(for: url, maxByteCount: maxByteCount)
             return nil
         }
 
@@ -826,7 +996,15 @@ actor FlowImageCache {
 
     private static func imageAspectRatio(from data: Data) -> CGFloat? {
         guard let source = CGImageSourceCreateWithData(data as CFData, nil),
-              let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any],
+              let pixelSize = imagePixelSize(from: source) else {
+            return nil
+        }
+
+        return clampedAspectRatio(width: pixelSize.width, height: pixelSize.height)
+    }
+
+    private static func imagePixelSize(from source: CGImageSource) -> ImagePixelSize? {
+        guard let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any],
               var width = (properties[kCGImagePropertyPixelWidth] as? NSNumber).map({ CGFloat(truncating: $0) }),
               var height = (properties[kCGImagePropertyPixelHeight] as? NSNumber).map({ CGFloat(truncating: $0) }) else {
             return nil
@@ -838,7 +1016,11 @@ actor FlowImageCache {
             swap(&width, &height)
         }
 
-        return clampedAspectRatio(width: width, height: height)
+        guard width.isFinite, height.isFinite, width > 0, height > 0 else {
+            return nil
+        }
+
+        return ImagePixelSize(width: width, height: height)
     }
 
     private static func aspectRatio(for image: UIImage) -> CGFloat? {
@@ -930,13 +1112,85 @@ actor FlowImageCache {
         encodedByteCounts.object(forKey: cacheKey)?.intValue ?? 0
     }
 
-    private static func fetchImageResponse(with request: URLRequest) async -> FlowMediaFetchedResponse? {
+    private func isAllowedByteCount(_ byteCount: Int, maxByteCount: Int?) -> Bool {
+        guard let maxByteCount else { return true }
+        return byteCount > 0 && byteCount <= maxByteCount
+    }
+
+    private func canAttemptSizeLimitedRequest(for url: URL, maxByteCount: Int?) -> Bool {
+        guard maxByteCount != nil else { return true }
+        let key = FetchKey(url: url, maxByteCount: maxByteCount)
+        guard let retryAfter = oversizedMediaRetryAfter[key] else { return true }
+        if Date() >= retryAfter {
+            oversizedMediaRetryAfter[key] = nil
+            return true
+        }
+        return false
+    }
+
+    private func recordOversizedMedia(for url: URL, maxByteCount: Int?) {
+        guard maxByteCount != nil else { return }
+        let key = FetchKey(url: url, maxByteCount: maxByteCount)
+        oversizedMediaRetryAfter[key] = Date().addingTimeInterval(oversizedMediaBackoff)
+    }
+
+    private static func fetchImageResponse(
+        with request: URLRequest,
+        maxByteCount: Int?
+    ) async -> FlowMediaFetchedResponse? {
         do {
-            let (data, response) = try await URLSession.shared.data(for: request)
+            guard let maxByteCount else {
+                let (data, response) = try await URLSession.shared.data(for: request)
+                return makeFetchedResponse(data: data, response: response)
+            }
+
+            let (bytes, response) = try await URLSession.shared.bytes(for: request)
+            let httpResponse = response as? HTTPURLResponse
+            if responseContentLength(response, httpResponse: httpResponse).map({ $0 > maxByteCount }) == true {
+                return makeFetchedResponse(data: Data(), response: response, exceededByteLimit: true)
+            }
+
+            var data = Data()
+            data.reserveCapacity(min(maxByteCount, 128 * 1_024))
+            for try await byte in bytes {
+                data.append(byte)
+                if data.count > maxByteCount {
+                    return makeFetchedResponse(data: Data(), response: response, exceededByteLimit: true)
+                }
+            }
+
             return makeFetchedResponse(data: data, response: response)
         } catch {
             return nil
         }
+    }
+
+    private static func makeFetchedResponse(
+        data: Data,
+        response: URLResponse?,
+        exceededByteLimit: Bool
+    ) -> FlowMediaFetchedResponse {
+        let httpResponse = response as? HTTPURLResponse
+        return FlowMediaFetchedResponse(
+            data: data,
+            statusCode: httpResponse?.statusCode,
+            contentType: httpResponse?.value(forHTTPHeaderField: "Content-Type"),
+            exceededByteLimit: exceededByteLimit
+        )
+    }
+
+    private static func responseContentLength(
+        _ response: URLResponse,
+        httpResponse: HTTPURLResponse?
+    ) -> Int? {
+        if let contentLength = httpResponse?.value(forHTTPHeaderField: "Content-Length"),
+           let parsed = Int(contentLength),
+           parsed > 0 {
+            return parsed
+        }
+
+        let expected = response.expectedContentLength
+        return expected > 0 ? Int(expected) : nil
     }
 }
 
@@ -960,44 +1214,71 @@ enum CachedAsyncImagePhase {
 struct CachedAsyncImage<Content: View>: View {
     let url: URL?
     let transaction: Transaction
+    let kind: FlowImageCacheRequestKind
+    let enforceNetworkByteLimit: Bool?
     private let content: (CachedAsyncImagePhase) -> Content
 
+    @EnvironmentObject private var appSettings: AppSettingsStore
     @State private var phase: CachedAsyncImagePhase = .empty
-    @State private var loadedURL: URL?
+    @State private var loadedRequest: LoadRequest?
+
+    private struct LoadRequest: Hashable {
+        let url: URL?
+        let kind: FlowImageCacheRequestKind
+        let enforceNetworkByteLimit: Bool
+    }
 
     init(
         url: URL?,
         transaction: Transaction = Transaction(),
+        kind: FlowImageCacheRequestKind = .standard,
+        enforceNetworkByteLimit: Bool? = nil,
         @ViewBuilder content: @escaping (CachedAsyncImagePhase) -> Content
     ) {
         self.url = url
         self.transaction = transaction
+        self.kind = kind
+        self.enforceNetworkByteLimit = enforceNetworkByteLimit
         self.content = content
     }
 
     var body: some View {
         content(phase)
-            .task(id: url) {
-                await load()
+            .task(id: loadRequest) {
+                await load(request: loadRequest)
             }
     }
 
+    private var loadRequest: LoadRequest {
+        LoadRequest(
+            url: url,
+            kind: kind,
+            enforceNetworkByteLimit: enforceNetworkByteLimit ?? appSettings.mediaFileSizeLimitsEffective
+        )
+    }
+
     @MainActor
-    private func load() async {
-        guard let url else {
-            loadedURL = nil
+    private func load(request: LoadRequest) async {
+        guard let url = request.url else {
+            loadedRequest = nil
             phase = .failure
             return
         }
 
-        if loadedURL == url, case .success = phase {
+        if loadedRequest == request, case .success = phase {
             return
         }
 
-        loadedURL = url
+        loadedRequest = request
         phase = .empty
 
-        if let image = await FlowImageCache.shared.image(for: url) {
+        let loadedImage = await FlowImageCache.shared.image(
+            for: url,
+            kind: request.kind,
+            enforceNetworkByteLimit: request.enforceNetworkByteLimit
+        )
+
+        if let image = loadedImage {
             withTransaction(transaction) {
                 phase = .success(Image(uiImage: image))
             }

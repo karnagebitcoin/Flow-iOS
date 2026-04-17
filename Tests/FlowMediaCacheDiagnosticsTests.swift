@@ -10,7 +10,7 @@ final class FlowMediaCacheDiagnosticsTests: XCTestCase {
         let cache = FlowImageCache(
             rootDirectoryURL: rootDirectoryURL,
             urlCache: urlCache,
-            fetchImageData: { _ in response }
+            fetchImageData: { _, _ in response }
         )
         let url = URL(string: "https://example.com/photo.png")!
 
@@ -40,14 +40,14 @@ final class FlowMediaCacheDiagnosticsTests: XCTestCase {
         let warmCache = FlowImageCache(
             rootDirectoryURL: rootDirectoryURL,
             urlCache: urlCache,
-            fetchImageData: { _ in response }
+            fetchImageData: { _, _ in response }
         )
         _ = await warmCache.data(for: url)
 
         let diskBackedCache = FlowImageCache(
             rootDirectoryURL: rootDirectoryURL,
             urlCache: urlCache,
-            fetchImageData: { _ in nil }
+            fetchImageData: { _, _ in nil }
         )
         let cachedData = await diskBackedCache.data(for: url)
         let snapshot = await diskBackedCache.diagnosticsSnapshot()
@@ -86,7 +86,7 @@ final class FlowMediaCacheDiagnosticsTests: XCTestCase {
         let cache = FlowImageCache(
             rootDirectoryURL: rootDirectoryURL,
             urlCache: urlCache,
-            fetchImageData: { _ in nil }
+            fetchImageData: { _, _ in nil }
         )
 
         let cachedData = await cache.data(for: url)
@@ -109,7 +109,7 @@ final class FlowMediaCacheDiagnosticsTests: XCTestCase {
         let cache = FlowImageCache(
             rootDirectoryURL: rootDirectoryURL,
             urlCache: urlCache,
-            fetchImageData: { _ in response }
+            fetchImageData: { _, _ in response }
         )
         let url = URL(string: "https://example.com/prefetch.png")!
 
@@ -121,7 +121,7 @@ final class FlowMediaCacheDiagnosticsTests: XCTestCase {
         XCTAssertEqual(snapshotAfterPrefetch, FlowMediaCacheDiagnostics())
         XCTAssertNotNil(image)
         XCTAssertEqual(snapshotAfterTrackedLoad.trackedRequestCount, 1)
-        XCTAssertEqual(snapshotAfterTrackedLoad.imageMemoryHitCount, 1)
+        XCTAssertEqual(snapshotAfterTrackedLoad.dataMemoryHitCount, 1)
         XCTAssertEqual(snapshotAfterTrackedLoad.cacheHitRate, 1.0, accuracy: 0.0001)
     }
 
@@ -133,7 +133,7 @@ final class FlowMediaCacheDiagnosticsTests: XCTestCase {
         let cache = FlowImageCache(
             rootDirectoryURL: rootDirectoryURL,
             urlCache: urlCache,
-            fetchImageData: { _ in response }
+            fetchImageData: { _, _ in response }
         )
         let url = URL(string: "https://example.com/animated.gif")!
 
@@ -153,7 +153,7 @@ final class FlowMediaCacheDiagnosticsTests: XCTestCase {
         let cache = FlowImageCache(
             rootDirectoryURL: rootDirectoryURL,
             urlCache: urlCache,
-            fetchImageData: { _ in response }
+            fetchImageData: { _, _ in response }
         )
         let url = URL(string: "https://example.com/reset.jpg")!
 
@@ -180,7 +180,7 @@ final class FlowMediaCacheDiagnosticsTests: XCTestCase {
         let cache = FlowImageCache(
             rootDirectoryURL: rootDirectoryURL,
             urlCache: urlCache,
-            fetchImageData: { _ in
+            fetchImageData: { _, _ in
                 await fetchCount.increment()
                 return response
             }
@@ -198,6 +198,137 @@ final class FlowMediaCacheDiagnosticsTests: XCTestCase {
         XCTAssertEqual(snapshot.networkFailureCount, 1)
         XCTAssertEqual(snapshot.networkFetchCount, 0)
         XCTAssertEqual(snapshot.cacheHitCount, 0)
+    }
+
+    func testProfileImageDataRejectsOversizedResponsesAndBacksOff() async {
+        let rootDirectoryURL = makeTemporaryDirectory()
+        let urlCache = makeURLCache()
+        let url = URL(string: "https://example.com/huge-avatar.png")!
+        let oversizedData = makeOversizedPNGData()
+        let fetchCount = LockedCounter()
+        let response = makeFetchedResponse(data: oversizedData)
+        let cache = FlowImageCache(
+            rootDirectoryURL: rootDirectoryURL,
+            urlCache: urlCache,
+            fetchImageData: { _, _ in
+                await fetchCount.increment()
+                return response
+            }
+        )
+
+        let firstLoad = await cache.profileImageData(for: url)
+        let secondLoad = await cache.profileImageData(for: url)
+        let snapshot = await cache.diagnosticsSnapshot()
+        let observedFetchCount = await fetchCount.value()
+
+        XCTAssertNil(firstLoad)
+        XCTAssertNil(secondLoad)
+        XCTAssertEqual(observedFetchCount, 1)
+        XCTAssertEqual(snapshot.trackedRequestCount, 2)
+        XCTAssertEqual(snapshot.networkFailureCount, 1)
+        XCTAssertEqual(snapshot.networkFetchCount, 0)
+    }
+
+    func testProfileImageLimitDoesNotBlockStandardImageDataLoads() async {
+        let rootDirectoryURL = makeTemporaryDirectory()
+        let urlCache = makeURLCache()
+        let url = URL(string: "https://example.com/large-note-image.png")!
+        let oversizedData = makeOversizedPNGData()
+        let response = makeFetchedResponse(data: oversizedData)
+        let cache = FlowImageCache(
+            rootDirectoryURL: rootDirectoryURL,
+            urlCache: urlCache,
+            fetchImageData: { _, _ in response }
+        )
+
+        let profileLoad = await cache.profileImageData(for: url)
+        let standardLoad = await cache.data(for: url)
+
+        XCTAssertNil(profileLoad)
+        XCTAssertEqual(standardLoad, oversizedData)
+    }
+
+    func testFeedThumbnailLimitRejectsOversizedResponsesAndBacksOff() async {
+        let rootDirectoryURL = makeTemporaryDirectory()
+        let urlCache = makeURLCache()
+        let url = URL(string: "https://example.com/huge-feed-image.png")!
+        let oversizedData = makeOversizedPNGData(extraBytes: 3 * 1_024 * 1_024)
+        let fetchCount = LockedCounter()
+        let response = makeFetchedResponse(data: oversizedData)
+        let cache = FlowImageCache(
+            rootDirectoryURL: rootDirectoryURL,
+            urlCache: urlCache,
+            fetchImageData: { _, _ in
+                await fetchCount.increment()
+                return response
+            }
+        )
+
+        let firstLoad = await cache.data(for: url, kind: .feedThumbnail)
+        let secondLoad = await cache.data(for: url, kind: .feedThumbnail)
+        let snapshot = await cache.diagnosticsSnapshot()
+        let observedFetchCount = await fetchCount.value()
+
+        XCTAssertNil(firstLoad)
+        XCTAssertNil(secondLoad)
+        XCTAssertEqual(observedFetchCount, 1)
+        XCTAssertEqual(snapshot.trackedRequestCount, 2)
+        XCTAssertEqual(snapshot.networkFailureCount, 1)
+        XCTAssertEqual(snapshot.networkFetchCount, 0)
+    }
+
+    func testFeedThumbnailLimitCanBeBypassedForExplicitLoad() async {
+        let rootDirectoryURL = makeTemporaryDirectory()
+        let urlCache = makeURLCache()
+        let url = URL(string: "https://example.com/tap-to-load-image.png")!
+        let oversizedData = makeOversizedPNGData(extraBytes: 3 * 1_024 * 1_024)
+        let fetchCount = LockedCounter()
+        let response = makeFetchedResponse(data: oversizedData)
+        let cache = FlowImageCache(
+            rootDirectoryURL: rootDirectoryURL,
+            urlCache: urlCache,
+            fetchImageData: { _, _ in
+                await fetchCount.increment()
+                return response
+            }
+        )
+
+        let cappedLoad = await cache.data(for: url, kind: .feedThumbnail)
+        let explicitLoad = await cache.data(
+            for: url,
+            kind: .feedThumbnail,
+            enforceNetworkByteLimit: false
+        )
+        let observedFetchCount = await fetchCount.value()
+
+        XCTAssertNil(cappedLoad)
+        XCTAssertEqual(explicitLoad, oversizedData)
+        XCTAssertEqual(observedFetchCount, 2)
+    }
+
+    func testProfileImageLimitAllowsAlreadyCachedOversizedData() async {
+        let rootDirectoryURL = makeTemporaryDirectory()
+        let urlCache = makeURLCache()
+        let url = URL(string: "https://example.com/cached-avatar.png")!
+        let oversizedData = makeOversizedPNGData()
+        let fetchCount = LockedCounter()
+        let response = makeFetchedResponse(data: oversizedData)
+        let cache = FlowImageCache(
+            rootDirectoryURL: rootDirectoryURL,
+            urlCache: urlCache,
+            fetchImageData: { _, _ in
+                await fetchCount.increment()
+                return response
+            }
+        )
+
+        let standardLoad = await cache.data(for: url)
+        let profileLoad = await cache.profileImageData(for: url)
+        let observedFetchCount = await fetchCount.value()
+
+        XCTAssertEqual(standardLoad, oversizedData)
+        XCTAssertEqual(profileLoad, oversizedData)
+        XCTAssertEqual(observedFetchCount, 1)
     }
 
     private func makeTemporaryDirectory() -> URL {
@@ -227,6 +358,12 @@ final class FlowMediaCacheDiagnosticsTests: XCTestCase {
         Data(
             base64Encoded: "R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw=="
         ) ?? Data([0x47, 0x49, 0x46])
+    }
+
+    private func makeOversizedPNGData(extraBytes: Int = 2 * 1_024 * 1_024) -> Data {
+        var data = makePNGData()
+        data.append(Data(repeating: 0, count: extraBytes))
+        return data
     }
 
     private func makeFetchedResponse(

@@ -202,7 +202,7 @@ private struct ProfileBannerArtwork: View {
         if appSettings.textOnlyMode {
             bannerFallback
         } else if let bannerURL {
-            CachedAsyncImage(url: bannerURL) { phase in
+            CachedAsyncImage(url: bannerURL, kind: .profileBanner) { phase in
                 switch phase {
                 case .success(let image):
                     image
@@ -281,7 +281,7 @@ private struct ProfileAvatarView: View {
                         )
                     }
                 } else {
-                    CachedAsyncImage(url: avatarURL) { phase in
+                    CachedAsyncImage(url: avatarURL, kind: .avatar) { phase in
                         switch phase {
                         case .success(let image):
                             image
@@ -477,7 +477,7 @@ private struct ProfileKnownFollowerAvatar: View {
             if appSettings.textOnlyMode {
                 fallback
             } else if let avatarURL = follower.avatarURL {
-                CachedAsyncImage(url: avatarURL) { phase in
+                CachedAsyncImage(url: avatarURL, kind: .avatar) { phase in
                     switch phase {
                     case .success(let image):
                         image

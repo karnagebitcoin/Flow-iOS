@@ -24,6 +24,43 @@ struct SettingsMediaView: View {
             }
 
             Section {
+                SettingsToggleRow(
+                    title: "Media Efficiency",
+                    isOn: Binding(
+                        get: { appSettings.mediaEfficiencyEnabled },
+                        set: { appSettings.mediaEfficiencyEnabled = $0 }
+                    ),
+                    footer: "Use less data and battery."
+                )
+
+                SettingsToggleRow(
+                    title: "File Size Limits",
+                    isOn: Binding(
+                        get: { appSettings.mediaFileSizeLimitsEnabled },
+                        set: { appSettings.mediaFileSizeLimitsEnabled = $0 }
+                    ),
+                    footer: "Ask before loading very large images."
+                )
+                .disabled(!appSettings.mediaEfficiencyEnabled)
+                .opacity(appSettings.mediaEfficiencyEnabled ? 1 : 0.55)
+
+                SettingsToggleRow(
+                    title: "Pause Large GIFs",
+                    isOn: Binding(
+                        get: { appSettings.largeGIFAutoplayLimitEnabled },
+                        set: { appSettings.largeGIFAutoplayLimitEnabled = $0 }
+                    ),
+                    footer: "Show large GIFs as still previews."
+                )
+                .disabled(!appSettings.mediaEfficiencyEnabled)
+                .opacity(appSettings.mediaEfficiencyEnabled ? 1 : 0.55)
+            } header: {
+                Text("Media Efficiency")
+            } footer: {
+                Text("You can turn these off anytime.")
+            }
+
+            Section {
                 LabeledContent("Stored Media") {
                     if isClearingMediaCache {
                         ProgressView()

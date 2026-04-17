@@ -323,7 +323,7 @@ private struct MutedUserRow: View {
     private var mutedUserAvatar: some View {
         Group {
             if let avatarURL {
-                CachedAsyncImage(url: avatarURL) { phase in
+                CachedAsyncImage(url: avatarURL, kind: .avatar) { phase in
                     switch phase {
                     case .success(let image):
                         image

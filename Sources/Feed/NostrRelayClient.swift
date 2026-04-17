@@ -463,29 +463,44 @@ final class NostrRelayClient: @unchecked Sendable {
         from socket: URLSessionWebSocketTask,
         timeout: TimeInterval
     ) async throws -> String? {
-        try await withThrowingTaskGroup(of: String?.self) { group in
+        let result = await withTaskGroup(of: Result<String?, Error>.self) { group in
             group.addTask {
-                let message = try await socket.receive()
-                switch message {
-                case .string(let text):
-                    return text
-                case .data(let data):
-                    return String(data: data, encoding: .utf8)
-                @unknown default:
-                    return nil
+                do {
+                    let message = try await socket.receive()
+                    switch message {
+                    case .string(let text):
+                        return .success(text)
+                    case .data(let data):
+                        return .success(String(data: data, encoding: .utf8))
+                    @unknown default:
+                        return .success(nil)
+                    }
+                } catch {
+                    return .failure(error)
                 }
             }
 
             group.addTask {
                 let nanoseconds = UInt64(max(timeout, 0) * 1_000_000_000)
-                try await Task.sleep(nanoseconds: nanoseconds)
-                return nil
+                do {
+                    try await Task.sleep(nanoseconds: nanoseconds)
+                } catch {
+                    return .success(nil)
+                }
+
+                guard !Task.isCancelled else {
+                    return .success(nil)
+                }
+
+                socket.cancel(with: .goingAway, reason: nil)
+                return .success(nil)
             }
 
-            let value = try await group.next() ?? nil
+            let result = await group.next() ?? .success(nil)
             group.cancelAll()
-            return value
+            return result
         }
+        return try result.get()
     }
 
     private func validatedWebSocketRelayURL(_ relayURL: URL) throws -> URL {

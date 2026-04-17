@@ -47,6 +47,36 @@ final class MediaUploadPreparationTests: XCTestCase {
         XCTAssertLessThan(prepared.data.count, originalData.count)
     }
 
+    func testConvertedGIFKeyboardMP4QualifiesForShortLoopingPlayback() async throws {
+        let originalData = try XCTUnwrap(makeAnimatedGIFData(
+            frameCount: 20,
+            size: CGSize(width: 360, height: 240)
+        ))
+
+        let prepared = try await MediaUploadPreparation.prepareGIFKeyboardUploadMedia(
+            data: originalData,
+            mimeType: "image/gif",
+            fileExtension: "gif"
+        )
+        let fileURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("short-loop-\(UUID().uuidString)")
+            .appendingPathExtension("mp4")
+        try prepared.data.write(to: fileURL)
+        defer { try? FileManager.default.removeItem(at: fileURL) }
+
+        let shouldLoop = await NoteShortMP4LoopPolicy.shared.shouldLoop(url: fileURL)
+
+        XCTAssertTrue(shouldLoop)
+    }
+
+    func testShortMP4LoopPolicyOnlyChecksMP4URLs() throws {
+        let mp4URL = try XCTUnwrap(URL(string: "https://example.com/media/clip.MP4?download=1"))
+        let movURL = try XCTUnwrap(URL(string: "https://example.com/media/clip.mov"))
+
+        XCTAssertTrue(NoteShortMP4LoopPolicy.isCandidateURL(mp4URL))
+        XCTAssertFalse(NoteShortMP4LoopPolicy.isCandidateURL(movURL))
+    }
+
     func testPrepareGIFKeyboardUploadMediaKeepsStaticGIFAsGIF() async throws {
         let staticGIFData = Data(
             base64Encoded: "R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw=="

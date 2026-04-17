@@ -540,7 +540,7 @@ struct NostrEventReferenceCardView: View {
             if appSettings.textOnlyMode {
                 fallbackAvatar(for: item)
             } else if let url = item.avatarURL {
-                CachedAsyncImage(url: url) { phase in
+                CachedAsyncImage(url: url, kind: .avatar) { phase in
                     switch phase {
                     case .success(let image):
                         image

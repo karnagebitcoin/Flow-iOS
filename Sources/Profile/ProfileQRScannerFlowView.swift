@@ -316,7 +316,7 @@ struct ProfileQRScannerFlowView: View {
     private func scannedAvatarView(for profile: ScannedProfilePreview) -> some View {
         Group {
             if let avatarURL = profile.avatarURL {
-                CachedAsyncImage(url: avatarURL) { phase in
+                CachedAsyncImage(url: avatarURL, kind: .avatar) { phase in
                     switch phase {
                     case .success(let image):
                         image

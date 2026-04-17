@@ -73,4 +73,20 @@ final class HomeFeedViewModelTests: XCTestCase {
         XCTAssertEqual(strategy.relayFetchMode, .firstNonEmptyRelay)
         XCTAssertEqual(strategy.fetchTimeout, 3)
     }
+
+    @MainActor
+    func testTrendingInitialLoadCanBackfillMultipleDayWindows() {
+        XCTAssertEqual(
+            HomeFeedViewModel.trendingWindowTraversalLimitForTesting(isInitialPage: true),
+            7
+        )
+    }
+
+    @MainActor
+    func testTrendingPaginationChecksOneDayWindowAtATime() {
+        XCTAssertEqual(
+            HomeFeedViewModel.trendingWindowTraversalLimitForTesting(isInitialPage: false),
+            1
+        )
+    }
 }

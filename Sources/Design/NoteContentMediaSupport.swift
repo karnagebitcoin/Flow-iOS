@@ -242,7 +242,12 @@ struct NoteZoomableFullscreenImageView: View {
     let onZoomStateChange: (Bool) -> Void
 
     var body: some View {
-        NoteRemoteMediaView(url: url) { asset in
+        NoteRemoteMediaView(
+            url: url,
+            kind: .fullscreen,
+            enforceNetworkByteLimit: false,
+            allowsLargeGIFAutoplay: true
+        ) { asset in
             switch asset {
             case .still:
                 NoteZoomableImageView(
@@ -279,13 +284,41 @@ struct NoteZoomableFullscreenImageView: View {
 
 struct NoteRemoteMediaView<Content: View, Placeholder: View, Failure: View>: View {
     let url: URL
+    let kind: FlowImageCacheRequestKind
+    let enforceNetworkByteLimit: Bool
+    let allowsLargeGIFAutoplay: Bool
     @ViewBuilder let content: (NoteMediaAsset) -> Content
     @ViewBuilder let placeholder: () -> Placeholder
     @ViewBuilder let failure: () -> Failure
 
     @State private var asset: NoteMediaAsset?
-    @State private var loadedURL: URL?
+    @State private var loadedRequest: LoadRequest?
     @State private var didFailLoading = false
+
+    private struct LoadRequest: Hashable {
+        let url: URL
+        let kind: FlowImageCacheRequestKind
+        let enforceNetworkByteLimit: Bool
+        let allowsLargeGIFAutoplay: Bool
+    }
+
+    init(
+        url: URL,
+        kind: FlowImageCacheRequestKind = .feedThumbnail,
+        enforceNetworkByteLimit: Bool = true,
+        allowsLargeGIFAutoplay: Bool = true,
+        @ViewBuilder content: @escaping (NoteMediaAsset) -> Content,
+        @ViewBuilder placeholder: @escaping () -> Placeholder,
+        @ViewBuilder failure: @escaping () -> Failure
+    ) {
+        self.url = url
+        self.kind = kind
+        self.enforceNetworkByteLimit = enforceNetworkByteLimit
+        self.allowsLargeGIFAutoplay = allowsLargeGIFAutoplay
+        self.content = content
+        self.placeholder = placeholder
+        self.failure = failure
+    }
 
     var body: some View {
         Group {
@@ -297,22 +330,36 @@ struct NoteRemoteMediaView<Content: View, Placeholder: View, Failure: View>: Vie
                 placeholder()
             }
         }
-        .task(id: url) {
-            await loadIfNeeded()
+        .task(id: loadRequest) {
+            await loadIfNeeded(request: loadRequest)
         }
     }
 
+    private var loadRequest: LoadRequest {
+        LoadRequest(
+            url: url,
+            kind: kind,
+            enforceNetworkByteLimit: enforceNetworkByteLimit,
+            allowsLargeGIFAutoplay: allowsLargeGIFAutoplay
+        )
+    }
+
     @MainActor
-    private func loadIfNeeded() async {
-        if loadedURL != url {
-            loadedURL = url
+    private func loadIfNeeded(request: LoadRequest) async {
+        if loadedRequest != request {
+            loadedRequest = request
             asset = nil
             didFailLoading = false
         }
 
         guard asset == nil, !didFailLoading else { return }
 
-        if let loadedAsset = await NoteMediaAssetLoader.shared.asset(for: url) {
+        if let loadedAsset = await NoteMediaAssetLoader.shared.asset(
+            for: request.url,
+            kind: request.kind,
+            enforceNetworkByteLimit: request.enforceNetworkByteLimit,
+            allowsLargeGIFAutoplay: request.allowsLargeGIFAutoplay
+        ) {
             asset = loadedAsset
             didFailLoading = false
         } else {
@@ -545,7 +592,7 @@ struct NoteGIFPayload {
         previewImage.size
     }
 
-    static func make(from data: Data, url: URL) -> NoteGIFPayload? {
+    static func make(from data: Data, url: URL, maxPixelSize: CGFloat = 2_048) -> NoteGIFPayload? {
         guard data.starts(with: [0x47, 0x49, 0x46]),
               let source = CGImageSourceCreateWithData(data as CFData, nil) else {
             return nil
@@ -558,7 +605,7 @@ struct NoteGIFPayload {
             kCGImageSourceCreateThumbnailFromImageAlways: true,
             kCGImageSourceCreateThumbnailWithTransform: true,
             kCGImageSourceShouldCacheImmediately: false,
-            kCGImageSourceThumbnailMaxPixelSize: 2_048
+            kCGImageSourceThumbnailMaxPixelSize: max(Int(maxPixelSize.rounded()), 1)
         ]
 
         guard let previewCGImage = CGImageSourceCreateThumbnailAtIndex(
@@ -786,14 +833,34 @@ private final class GIFPlayerImageView: UIImageView {
 private actor NoteMediaAssetLoader {
     static let shared = NoteMediaAssetLoader()
 
-    func asset(for url: URL) async -> NoteMediaAsset? {
+    func asset(
+        for url: URL,
+        kind: FlowImageCacheRequestKind = .feedThumbnail,
+        enforceNetworkByteLimit: Bool = true,
+        allowsLargeGIFAutoplay: Bool = true
+    ) async -> NoteMediaAsset? {
         if isLikelyGIF(url),
-           let data = await FlowImageCache.shared.data(for: url),
-           let payload = NoteGIFPayload.make(from: data, url: url) {
+           let data = await FlowImageCache.shared.data(
+               for: url,
+               kind: kind,
+               enforceNetworkByteLimit: enforceNetworkByteLimit
+           ),
+           let payload = NoteGIFPayload.make(
+               from: data,
+               url: url,
+               maxPixelSize: kind.decodeMaxPixelSize
+           ) {
+            guard allowsLargeGIFAutoplay || data.count <= FlowImageCacheRequestKind.largeGIFAutoplayByteLimit else {
+                return .still(payload.previewImage)
+            }
             return .gif(payload)
         }
 
-        guard let image = await FlowImageCache.shared.image(for: url) else {
+        guard let image = await FlowImageCache.shared.image(
+            for: url,
+            kind: kind,
+            enforceNetworkByteLimit: enforceNetworkByteLimit
+        ) else {
             return nil
         }
         return .still(image)

@@ -36,7 +36,10 @@ struct ProfileAvatarFullscreenViewer: View {
                     )
                     .padding(16)
                 } else {
-                    AsyncImage(url: url) { phase in
+                    CachedAsyncImage(
+                        url: url,
+                        kind: .profileImageFullscreen
+                    ) { phase in
                         switch phase {
                         case .success(let image):
                             image
@@ -56,7 +59,7 @@ struct ProfileAvatarFullscreenViewer: View {
                     }
                 }
             }
-            .flowRemoteImageSaveContextMenu(url: savableImageURL)
+            .flowRemoteImageSaveContextMenu(url: savableImageURL, kind: .profileImageFullscreen)
             .navigationTitle(title)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -199,9 +202,13 @@ enum FlowRemoteImageSave {
     }
 
     @MainActor
-    static func performSave(from url: URL, toastCenter: AppToastCenter) async {
+    static func performSave(
+        from url: URL,
+        toastCenter: AppToastCenter,
+        kind: FlowImageCacheRequestKind = .standard
+    ) async {
         do {
-            try await saveImage(from: url)
+            try await saveImage(from: url, kind: kind)
             toastCenter.show("Saved to Photos")
         } catch {
             toastCenter.show(
@@ -212,13 +219,22 @@ enum FlowRemoteImageSave {
         }
     }
 
-    static func saveImage(from url: URL) async throws {
+    static func saveImage(
+        from url: URL,
+        kind: FlowImageCacheRequestKind = .standard
+    ) async throws {
         let authorizationStatus = await ProfilePhotoLibrarySave.requestWriteAuthorizationIfNeeded()
         guard authorizationStatus == .authorized || authorizationStatus == .limited else {
             throw SaveError.accessDenied
         }
 
-        if let data = await FlowImageCache.shared.data(for: url) {
+        let cachedData = await FlowImageCache.shared.data(
+            for: url,
+            kind: kind,
+            enforceNetworkByteLimit: false
+        )
+
+        if let data = cachedData {
             do {
                 try await save(data: data, originalFilename: originalFilename(for: url))
                 return
@@ -227,7 +243,13 @@ enum FlowRemoteImageSave {
             }
         }
 
-        guard let image = await FlowImageCache.shared.image(for: url) else {
+        let loadedImage = await FlowImageCache.shared.image(
+            for: url,
+            kind: kind,
+            enforceNetworkByteLimit: false
+        )
+
+        guard let image = loadedImage else {
             throw SaveError.loadFailed
         }
 
@@ -261,6 +283,7 @@ enum FlowRemoteImageSave {
 
 private struct FlowRemoteImageSaveContextMenuModifier: ViewModifier {
     let url: URL?
+    let kind: FlowImageCacheRequestKind
 
     @EnvironmentObject private var toastCenter: AppToastCenter
     @State private var isSaving = false
@@ -288,12 +311,15 @@ private struct FlowRemoteImageSaveContextMenuModifier: ViewModifier {
         guard !isSaving else { return }
         isSaving = true
         defer { isSaving = false }
-        await FlowRemoteImageSave.performSave(from: url, toastCenter: toastCenter)
+        await FlowRemoteImageSave.performSave(from: url, toastCenter: toastCenter, kind: kind)
     }
 }
 
 extension View {
-    func flowRemoteImageSaveContextMenu(url: URL?) -> some View {
-        modifier(FlowRemoteImageSaveContextMenuModifier(url: url))
+    func flowRemoteImageSaveContextMenu(
+        url: URL?,
+        kind: FlowImageCacheRequestKind = .standard
+    ) -> some View {
+        modifier(FlowRemoteImageSaveContextMenuModifier(url: url, kind: kind))
     }
 }

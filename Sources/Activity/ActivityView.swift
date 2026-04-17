@@ -527,7 +527,7 @@ struct ActivityView: View {
         let previousURL = topNavAvatarURL
         topNavAvatarURL = url
 
-        if let image = await FlowImageCache.shared.image(for: url) {
+        if let image = await FlowImageCache.shared.profileImage(for: url) {
             guard topNavAvatarURL == url else { return }
             topNavAvatarImage = image
         } else if previousURL != url {
@@ -1036,7 +1036,7 @@ private struct ActivityAvatarView: View {
             if appSettings.textOnlyMode {
                 fallbackAvatar
             } else if let url {
-                CachedAsyncImage(url: url) { phase in
+                CachedAsyncImage(url: url, kind: .avatar) { phase in
                     switch phase {
                     case .success(let image):
                         image

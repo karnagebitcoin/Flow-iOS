@@ -427,6 +427,9 @@ final class AppSettingsStore: ObservableObject {
             case autoplayVideos
             case autoplayVideoSoundEnabled
             case blurMediaFromUnfollowedAuthors
+            case mediaEfficiencyEnabled
+            case mediaFileSizeLimitsEnabled
+            case largeGIFAutoplayLimitEnabled
             case fullWidthNoteRows
             case textOnlyMode
             case slowConnectionMode
@@ -458,6 +461,9 @@ final class AppSettingsStore: ObservableObject {
         var autoplayVideos: Bool = true
         var autoplayVideoSoundEnabled: Bool = false
         var blurMediaFromUnfollowedAuthors: Bool = true
+        var mediaEfficiencyEnabled: Bool = true
+        var mediaFileSizeLimitsEnabled: Bool = true
+        var largeGIFAutoplayLimitEnabled: Bool = true
         var fullWidthNoteRows: Bool = false
         var textOnlyMode: Bool = false
         var slowConnectionMode: Bool = false
@@ -496,6 +502,9 @@ final class AppSettingsStore: ObservableObject {
             autoplayVideos = try container.decodeIfPresent(Bool.self, forKey: .autoplayVideos) ?? true
             autoplayVideoSoundEnabled = try container.decodeIfPresent(Bool.self, forKey: .autoplayVideoSoundEnabled) ?? false
             blurMediaFromUnfollowedAuthors = try container.decodeIfPresent(Bool.self, forKey: .blurMediaFromUnfollowedAuthors) ?? true
+            mediaEfficiencyEnabled = try container.decodeIfPresent(Bool.self, forKey: .mediaEfficiencyEnabled) ?? true
+            mediaFileSizeLimitsEnabled = try container.decodeIfPresent(Bool.self, forKey: .mediaFileSizeLimitsEnabled) ?? true
+            largeGIFAutoplayLimitEnabled = try container.decodeIfPresent(Bool.self, forKey: .largeGIFAutoplayLimitEnabled) ?? true
             fullWidthNoteRows = try container.decodeIfPresent(Bool.self, forKey: .fullWidthNoteRows) ?? false
             textOnlyMode = try container.decodeIfPresent(Bool.self, forKey: .textOnlyMode) ?? false
             slowConnectionMode = try container.decodeIfPresent(Bool.self, forKey: .slowConnectionMode) ?? false
@@ -540,6 +549,9 @@ final class AppSettingsStore: ObservableObject {
             try container.encode(autoplayVideos, forKey: .autoplayVideos)
             try container.encode(autoplayVideoSoundEnabled, forKey: .autoplayVideoSoundEnabled)
             try container.encode(blurMediaFromUnfollowedAuthors, forKey: .blurMediaFromUnfollowedAuthors)
+            try container.encode(mediaEfficiencyEnabled, forKey: .mediaEfficiencyEnabled)
+            try container.encode(mediaFileSizeLimitsEnabled, forKey: .mediaFileSizeLimitsEnabled)
+            try container.encode(largeGIFAutoplayLimitEnabled, forKey: .largeGIFAutoplayLimitEnabled)
             try container.encode(fullWidthNoteRows, forKey: .fullWidthNoteRows)
             try container.encode(textOnlyMode, forKey: .textOnlyMode)
             try container.encode(slowConnectionMode, forKey: .slowConnectionMode)
@@ -821,6 +833,38 @@ final class AppSettingsStore: ObservableObject {
             persistedSettings.blurMediaFromUnfollowedAuthors = newValue
             persist()
         }
+    }
+
+    var mediaEfficiencyEnabled: Bool {
+        get { persistedSettings.mediaEfficiencyEnabled }
+        set {
+            persistedSettings.mediaEfficiencyEnabled = newValue
+            persist()
+        }
+    }
+
+    var mediaFileSizeLimitsEnabled: Bool {
+        get { persistedSettings.mediaFileSizeLimitsEnabled }
+        set {
+            persistedSettings.mediaFileSizeLimitsEnabled = newValue
+            persist()
+        }
+    }
+
+    var largeGIFAutoplayLimitEnabled: Bool {
+        get { persistedSettings.largeGIFAutoplayLimitEnabled }
+        set {
+            persistedSettings.largeGIFAutoplayLimitEnabled = newValue
+            persist()
+        }
+    }
+
+    var mediaFileSizeLimitsEffective: Bool {
+        mediaEfficiencyEnabled && mediaFileSizeLimitsEnabled
+    }
+
+    var largeGIFAutoplayLimitEffective: Bool {
+        mediaEfficiencyEnabled && largeGIFAutoplayLimitEnabled
     }
 
     var fullWidthNoteRows: Bool {

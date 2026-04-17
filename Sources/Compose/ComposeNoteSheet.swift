@@ -2611,7 +2611,7 @@ private struct ComposeAvatarCircleView: View {
     var body: some View {
         Group {
             if let avatarURL {
-                CachedAsyncImage(url: avatarURL) { phase in
+                CachedAsyncImage(url: avatarURL, kind: .avatar) { phase in
                     switch phase {
                     case .success(let image):
                         image

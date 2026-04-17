@@ -714,7 +714,10 @@ struct ProfileEditorSheet: View {
                     .scaledToFill()
             } else if let remoteURL = URL(string: remoteURLString.trimmingCharacters(in: .whitespacesAndNewlines)),
                       !remoteURLString.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                CachedAsyncImage(url: remoteURL) { phase in
+                CachedAsyncImage(
+                    url: remoteURL,
+                    kind: usesCircularPreview ? .avatar : .profileBanner
+                ) { phase in
                     switch phase {
                     case .success(let image):
                         image
@@ -898,7 +901,7 @@ private struct ProfileEditorPreviewCard: View {
                 .resizable()
                 .scaledToFill()
         } else if let bannerURL = URL(string: bannerString), !bannerString.isEmpty {
-            CachedAsyncImage(url: bannerURL) { phase in
+            CachedAsyncImage(url: bannerURL, kind: .profileBanner) { phase in
                 switch phase {
                 case .success(let image):
                     image
@@ -948,7 +951,7 @@ private struct ProfileEditorPreviewCard: View {
                     .resizable()
                     .scaledToFill()
             } else if let avatarURL = URL(string: avatarString), !avatarString.isEmpty {
-                CachedAsyncImage(url: avatarURL) { phase in
+                CachedAsyncImage(url: avatarURL, kind: .avatar) { phase in
                     switch phase {
                     case .success(let image):
                         image

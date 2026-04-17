@@ -80,7 +80,7 @@ final class HomeFeedViewModel: ObservableObject {
     private static let liveCatchUpOverlapSeconds = 90
     private static let liveCatchUpLimit = 200
     private static let trendingWindowDuration: Int = 24 * 60 * 60
-    private static let trendingBackfillWindowLimitPerPage = 7
+    private nonisolated static let trendingBackfillWindowLimitPerPage = 7
     private static let trendingRelayURL = URL(string: "wss://trending.relays.land")!
     private static let newsFallbackRelayURL = URL(string: "wss://news.utxo.one")!
     private static let customFeedSupplementalRelayURLs: [URL] = [
@@ -125,6 +125,10 @@ final class HomeFeedViewModel: ObservableObject {
 
     nonisolated static var defaultPageSizeForTesting: Int {
         HomeFeedPaginationDefaults.pageSize
+    }
+
+    nonisolated static func trendingWindowTraversalLimitForTesting(isInitialPage: Bool) -> Int {
+        trendingWindowTraversalLimit(isInitialPage: isInitialPage)
     }
 
     init(
@@ -1881,6 +1885,10 @@ final class HomeFeedViewModel: ObservableObject {
         )
     }
 
+    private nonisolated static func trendingWindowTraversalLimit(isInitialPage: Bool) -> Int {
+        isInitialPage ? trendingBackfillWindowLimitPerPage : 1
+    }
+
     private func fetchTrendingFeedPage(
         limit: Int,
         paginationState: TrendingPaginationState?,
@@ -1903,6 +1911,9 @@ final class HomeFeedViewModel: ObservableObject {
         var state: TrendingPaginationState? = initialState
         var collected: [FeedItem] = []
         var traversedWindows = 0
+        let windowTraversalLimit = Self.trendingWindowTraversalLimit(
+            isInitialPage: paginationState == nil
+        )
 
         while let currentState = state, collected.count < limit {
             let remaining = max(limit - collected.count, 1)
@@ -1939,9 +1950,12 @@ final class HomeFeedViewModel: ObservableObject {
             traversedWindows += 1
             state = previousWindow
 
-            if traversedWindows >= Self.trendingBackfillWindowLimitPerPage, collected.isEmpty {
+            if traversedWindows >= windowTraversalLimit {
                 return TrendingPageFetchResult(
-                    page: HomeFeedPageResult(items: [], hadMoreAvailable: true),
+                    page: HomeFeedPageResult(
+                        items: Array(collected.prefix(limit)),
+                        hadMoreAvailable: state != nil
+                    ),
                     nextState: state
                 )
             }

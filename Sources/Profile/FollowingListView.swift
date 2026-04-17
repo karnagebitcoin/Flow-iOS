@@ -284,7 +284,7 @@ private struct CompactProfileAvatar: View {
             if appSettings.textOnlyMode {
                 fallbackAvatar
             } else if let url {
-                CachedAsyncImage(url: url) { phase in
+                CachedAsyncImage(url: url, kind: .avatar) { phase in
                     switch phase {
                     case .success(let image):
                         image

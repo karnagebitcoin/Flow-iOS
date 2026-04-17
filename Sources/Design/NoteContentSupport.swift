@@ -882,6 +882,8 @@ struct NoteFeedImageTileView: View {
     let onRemix: @MainActor () -> Void
     let onSave: @MainActor () async -> Void
     let onAddToNote: @MainActor () -> Void
+    @State private var bypassFileSizeLimits = false
+    @State private var isShowingTapToLoadPrompt = false
 
     var body: some View {
         mediaBody
@@ -893,7 +895,7 @@ struct NoteFeedImageTileView: View {
                     url: url,
                     cornerRadius: cornerRadius,
                     isRemixDisabled: isRemixDisabled,
-                    onTap: onTap,
+                    onTap: handleTap,
                     onRemix: onRemix,
                     onSave: onSave,
                     onAddToNote: onAddToNote
@@ -902,27 +904,75 @@ struct NoteFeedImageTileView: View {
         .accessibilityLabel("Open image")
         .accessibilityAddTraits(.isButton)
         .frame(width: width, height: height)
+        .task(id: url) {
+            bypassFileSizeLimits = false
+            isShowingTapToLoadPrompt = false
+        }
     }
 
     @ViewBuilder
     private var mediaBody: some View {
-        NoteRemoteMediaView(url: url) { asset in
+        NoteRemoteMediaView(
+            url: url,
+            kind: .feedThumbnail,
+            enforceNetworkByteLimit: shouldEnforceFileSizeLimit,
+            allowsLargeGIFAutoplay: !appSettings.largeGIFAutoplayLimitEffective
+        ) { asset in
             NoteMediaAssetContentView(asset: asset, scaling: .fill)
                 .frame(width: width, height: height)
+                .onAppear {
+                    isShowingTapToLoadPrompt = false
+                }
         } placeholder: {
             ZStack {
                 appSettings.themePalette.secondaryBackground
                     .frame(width: width, height: height)
                 ProgressView()
             }
-        } failure: {
-            ZStack {
-                appSettings.themePalette.secondaryBackground
-                    .frame(width: width, height: height)
-                Image(systemName: "photo")
-                    .font(.title3)
-                    .foregroundStyle(appSettings.themePalette.secondaryForeground)
+            .onAppear {
+                isShowingTapToLoadPrompt = false
             }
+        } failure: {
+            feedImageFailurePlaceholder
+                .onAppear {
+                    isShowingTapToLoadPrompt = shouldOfferTapToLoad
+                }
+        }
+    }
+
+    private var shouldEnforceFileSizeLimit: Bool {
+        appSettings.mediaFileSizeLimitsEffective && !bypassFileSizeLimits
+    }
+
+    private var shouldOfferTapToLoad: Bool {
+        appSettings.mediaFileSizeLimitsEffective && !bypassFileSizeLimits
+    }
+
+    @MainActor
+    private func handleTap() {
+        if isShowingTapToLoadPrompt {
+            bypassFileSizeLimits = true
+            isShowingTapToLoadPrompt = false
+        } else {
+            onTap()
+        }
+    }
+
+    private var feedImageFailurePlaceholder: some View {
+        ZStack {
+            appSettings.themePalette.secondaryBackground
+                .frame(width: width, height: height)
+
+            VStack(spacing: 6) {
+                Image(systemName: shouldOfferTapToLoad ? "arrow.down.circle" : "photo")
+                    .font(.title3)
+                if shouldOfferTapToLoad {
+                    Text("Tap to load image")
+                        .font(appSettings.appFont(.caption1, weight: .semibold))
+                        .multilineTextAlignment(.center)
+                }
+            }
+            .foregroundStyle(appSettings.themePalette.secondaryForeground)
         }
     }
 }
@@ -939,6 +989,8 @@ struct NoteSingleImageCellView: View {
     let onAddToNote: @MainActor () -> Void
     @EnvironmentObject private var appSettings: AppSettingsStore
     @State private var reservedAspectRatio: CGFloat
+    @State private var bypassFileSizeLimits = false
+    @State private var isShowingTapToLoadPrompt = false
 
     init(
         url: URL,
@@ -988,7 +1040,7 @@ struct NoteSingleImageCellView: View {
                     url: url,
                     cornerRadius: cornerRadius,
                     isRemixDisabled: isRemixDisabled,
-                    onTap: onTap,
+                    onTap: handleTap,
                     onRemix: onRemix,
                     onSave: onSave,
                     onAddToNote: onAddToNote
@@ -999,6 +1051,8 @@ struct NoteSingleImageCellView: View {
         .aspectRatio(contextMenuAspectRatio, contentMode: .fit)
         .frame(maxWidth: .infinity, alignment: .leading)
         .task(id: url) {
+            bypassFileSizeLimits = false
+            isShowingTapToLoadPrompt = false
             let cachedExactRatio = FlowMediaAspectRatioCache.shared.ratio(for: url)
             setReservedAspectRatio(
                 NoteImageLayoutGuide.reservedSingleImageAspectRatio(
@@ -1008,11 +1062,24 @@ struct NoteSingleImageCellView: View {
             )
 
             guard maxHeight == nil else { return }
-            guard let resolvedExactRatio = await FlowImageCache.shared.aspectRatio(for: url) else { return }
+            guard let resolvedExactRatio = await FlowImageCache.shared.aspectRatio(
+                for: url,
+                enforceNetworkByteLimit: appSettings.mediaFileSizeLimitsEffective
+            ) else { return }
             guard let normalizedRatio = NoteImageLayoutGuide.normalizedAspectRatio(resolvedExactRatio) else { return }
             guard !Task.isCancelled else { return }
 
             setReservedAspectRatio(normalizedRatio)
+        }
+    }
+
+    @MainActor
+    private func handleTap() {
+        if isShowingTapToLoadPrompt {
+            bypassFileSizeLimits = true
+            isShowingTapToLoadPrompt = false
+        } else {
+            onTap()
         }
     }
 
@@ -1056,13 +1123,27 @@ struct NoteSingleImageCellView: View {
 
     private var stableSingleImageBody: some View {
         ZStack {
-            NoteRemoteMediaView(url: url) { asset in
+            NoteRemoteMediaView(
+                url: url,
+                kind: .feedThumbnail,
+                enforceNetworkByteLimit: shouldEnforceFileSizeLimit,
+                allowsLargeGIFAutoplay: !appSettings.largeGIFAutoplayLimitEffective
+            ) { asset in
                 mediaContent(asset: asset)
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+                    .onAppear {
+                        isShowingTapToLoadPrompt = false
+                    }
             } placeholder: {
                 loadingPlaceholder
+                    .onAppear {
+                        isShowingTapToLoadPrompt = false
+                    }
             } failure: {
                 failurePlaceholder
+                    .onAppear {
+                        isShowingTapToLoadPrompt = shouldOfferTapToLoad
+                    }
             }
         }
         .aspectRatio(reservedAspectRatio, contentMode: .fit)
@@ -1071,12 +1152,26 @@ struct NoteSingleImageCellView: View {
     }
 
     private var fixedHeightImageBody: some View {
-        NoteRemoteMediaView(url: url) { asset in
+        NoteRemoteMediaView(
+            url: url,
+            kind: .feedThumbnail,
+            enforceNetworkByteLimit: shouldEnforceFileSizeLimit,
+            allowsLargeGIFAutoplay: !appSettings.largeGIFAutoplayLimitEffective
+        ) { asset in
             mediaContent(asset: asset)
+                .onAppear {
+                    isShowingTapToLoadPrompt = false
+                }
         } placeholder: {
             loadingPlaceholder
+                .onAppear {
+                    isShowingTapToLoadPrompt = false
+                }
         } failure: {
             failurePlaceholder
+                .onAppear {
+                    isShowingTapToLoadPrompt = shouldOfferTapToLoad
+                }
         }
     }
 
@@ -1102,12 +1197,28 @@ struct NoteSingleImageCellView: View {
         ZStack {
             mediaBackgroundColor
 
-            Image(systemName: "photo")
-                .font(.title3)
-                .foregroundStyle(appSettings.themePalette.secondaryForeground)
+            VStack(spacing: 6) {
+                Image(systemName: shouldOfferTapToLoad ? "arrow.down.circle" : "photo")
+                    .font(.title3)
+
+                if shouldOfferTapToLoad {
+                    Text("Tap to load image")
+                        .font(appSettings.appFont(.caption1, weight: .semibold))
+                        .multilineTextAlignment(.center)
+                }
+            }
+            .foregroundStyle(appSettings.themePalette.secondaryForeground)
         }
         .frame(maxWidth: .infinity, maxHeight: maxHeight == nil ? .infinity : placeholderHeight, alignment: .center)
         .frame(minHeight: maxHeight == nil ? 0 : 180, maxHeight: maxHeight == nil ? .infinity : placeholderHeight, alignment: .center)
+    }
+
+    private var shouldEnforceFileSizeLimit: Bool {
+        appSettings.mediaFileSizeLimitsEffective && !bypassFileSizeLimits
+    }
+
+    private var shouldOfferTapToLoad: Bool {
+        appSettings.mediaFileSizeLimitsEffective && !bypassFileSizeLimits
     }
 }
 
@@ -1810,6 +1921,57 @@ private actor NoteVideoAspectRatioCache {
     }
 }
 
+actor NoteShortMP4LoopPolicy {
+    static let shared = NoteShortMP4LoopPolicy()
+    static let maximumLoopingDurationSeconds: TimeInterval = 15
+
+    private var cachedDecisions: [URL: Bool] = [:]
+    private var inFlight: [URL: Task<Bool, Never>] = [:]
+
+    static func isCandidateURL(_ url: URL) -> Bool {
+        url.pathExtension
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased() == "mp4"
+    }
+
+    func shouldLoop(url: URL) async -> Bool {
+        guard Self.isCandidateURL(url) else { return false }
+
+        if let cached = cachedDecisions[url] {
+            return cached
+        }
+
+        if let existingTask = inFlight[url] {
+            return await existingTask.value
+        }
+
+        let task = Task(priority: .utility) {
+            await Self.loadShouldLoop(url: url)
+        }
+        inFlight[url] = task
+
+        let shouldLoop = await task.value
+        inFlight[url] = nil
+        cachedDecisions[url] = shouldLoop
+
+        return shouldLoop
+    }
+
+    private static func loadShouldLoop(url: URL) async -> Bool {
+        let asset = AVURLAsset(url: url)
+
+        do {
+            let duration = try await asset.load(.duration)
+            let seconds = CMTimeGetSeconds(duration)
+            return seconds.isFinite &&
+                seconds > 0 &&
+                seconds <= maximumLoopingDurationSeconds
+        } catch {
+            return false
+        }
+    }
+}
+
 actor NoteMediaGeometryPrefetcher {
     static let shared = NoteMediaGeometryPrefetcher()
 
@@ -1996,6 +2158,7 @@ struct NoteVideoPlayerView: View {
     @State private var videoAspectRatio: CGFloat
     @State private var videoThumbnail: UIImage?
     @State private var isPlaying = false
+    @State private var shortMP4LoopURL: URL?
 
     init(
         url: URL,
@@ -2017,13 +2180,15 @@ struct NoteVideoPlayerView: View {
     }
 
     var body: some View {
+        let rendersAsGIFLikeVideo = isGIFLike || shortMP4LoopURL == url
+
         ZStack {
             NoteNativeVideoPlayerController(
                 url: url,
-                autoplay: isGIFLike,
-                showsPlaybackControls: !isGIFLike,
-                isMuted: isGIFLike,
-                loops: isGIFLike,
+                autoplay: rendersAsGIFLikeVideo,
+                showsPlaybackControls: !rendersAsGIFLikeVideo,
+                isMuted: rendersAsGIFLikeVideo,
+                loops: rendersAsGIFLikeVideo,
                 onPlaybackStateChange: { nextIsPlaying in
                     isPlaying = nextIsPlaying
                 }
@@ -2037,7 +2202,7 @@ struct NoteVideoPlayerView: View {
                     .allowsHitTesting(false)
                     .transition(.opacity)
 
-                if !isGIFLike {
+                if !rendersAsGIFLikeVideo {
                     previewPlayAffordance
                 }
             }
@@ -2053,10 +2218,13 @@ struct NoteVideoPlayerView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .task(id: url, priority: .utility) {
             await MainActor.run {
+                shortMP4LoopURL = nil
                 videoThumbnail = NoteVideoThumbnailCache.shared.image(for: url)
             }
-            await loadVideoAspectRatio()
-            await loadVideoThumbnailIfNeeded()
+            async let shortMP4LoopPolicy: Void = loadShortMP4LoopPolicy()
+            async let aspectRatioLoad: Void = loadVideoAspectRatio()
+            async let thumbnailLoad: Void = loadVideoThumbnailIfNeeded()
+            _ = await (shortMP4LoopPolicy, aspectRatioLoad, thumbnailLoad)
         }
     }
 
@@ -2145,6 +2313,17 @@ struct NoteVideoPlayerView: View {
 
         guard let generatedThumbnail else { return }
         NoteVideoThumbnailCache.shared.insert(generatedThumbnail, for: url)
+    }
+
+    private func loadShortMP4LoopPolicy() async {
+        guard !isGIFLike else { return }
+
+        let shouldLoop = await NoteShortMP4LoopPolicy.shared.shouldLoop(url: url)
+        guard !Task.isCancelled else { return }
+
+        await MainActor.run {
+            shortMP4LoopURL = shouldLoop ? url : nil
+        }
     }
 }
 

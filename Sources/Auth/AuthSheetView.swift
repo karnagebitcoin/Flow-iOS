@@ -786,7 +786,7 @@ struct AuthSheetView: View {
     private func accountAvatar(for account: AuthAccount) -> some View {
         let fallbackName = accountDisplayName(for: account)
         if let avatarURL = avatarURL(for: account) {
-            CachedAsyncImage(url: avatarURL) { phase in
+            CachedAsyncImage(url: avatarURL, kind: .avatar) { phase in
                 switch phase {
                 case .success(let image):
                     image
