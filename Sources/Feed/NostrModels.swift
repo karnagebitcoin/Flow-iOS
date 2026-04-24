@@ -730,7 +730,7 @@ enum ReplyCountEstimator {
         return counts
     }
 
-    private static func repliedEventID(
+    static func repliedEventID(
         for event: NostrEvent,
         validEventIDs: Set<String>
     ) -> String? {

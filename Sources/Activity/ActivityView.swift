@@ -286,6 +286,11 @@ struct ActivityView: View {
                 appSettings.themePalette.chromeBackground.opacity(0.78)
                 appSettings.primaryGradient.opacity(0.14)
             }
+        } else if appSettings.activeHolographicGradientOption != nil {
+            ZStack {
+                appSettings.themePalette.chromeBackground
+                appSettings.primaryGradient.opacity(appSettings.activeTheme.usesDarkGradientTreatment ? 0.10 : 0.08)
+            }
         } else if appSettings.activeTheme == .gamer {
             appSettings.themePalette.background
         } else if appSettings.activeTheme == .dracula {
@@ -327,10 +332,10 @@ struct ActivityView: View {
     private var topNavAccountFallback: some View {
         ZStack {
             Circle()
-                .fill(topNavigationControlFill)
+                .fill(appSettings.avatarFallbackGradient(forAccountPubkey: auth.currentAccount?.pubkey))
             Image(systemName: "person.fill")
                 .font(.system(size: 14, weight: .semibold))
-                .foregroundStyle(appSettings.themePalette.mutedForeground)
+                .foregroundStyle(appSettings.avatarFallbackForeground(forAccountPubkey: auth.currentAccount?.pubkey))
         }
     }
 

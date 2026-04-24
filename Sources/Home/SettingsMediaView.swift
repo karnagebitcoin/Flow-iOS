@@ -223,11 +223,17 @@ private struct SettingsMediaDiagnosticsView: View {
                 )
                 diagnosticMetricRow(
                     title: "Open Mapsize",
-                    value: byteDescription(flowDBDiagnostics.openMapsizeBytes)
+                    value: mapSizeDescription(flowDBDiagnostics.openMapsizeBytes)
                 )
                 diagnosticMetricRow(
                     title: "Last Attempted Mapsize",
-                    value: byteDescription(flowDBDiagnostics.lastAttemptedMapsizeBytes)
+                    value: mapSizeDescription(flowDBDiagnostics.lastAttemptedMapsizeBytes)
+                )
+                diagnosticMetricRow(
+                    title: "Failed Open Attempts",
+                    value: flowDBDiagnostics.failedOpenAttempts.isEmpty
+                        ? "None"
+                        : flowDBDiagnostics.failedOpenAttempts.count.formatted()
                 )
                 diagnosticMetricRow(
                     title: "Ingest Calls",
@@ -287,6 +293,9 @@ private struct SettingsMediaDiagnosticsView: View {
                 VStack(alignment: .leading, spacing: 4) {
                     Text("Persisted values reflect what is already committed into the local nostrdb store. Session ingested values reflect what the current app run has pushed through the ingester, even if writer threads have not finished compacting everything yet.")
                     Text("Path: \(flowDBDiagnostics.databasePath)")
+                    if !flowDBDiagnostics.failedOpenAttempts.isEmpty {
+                        Text("Failed open attempts: \(failedOpenAttemptsDescription)")
+                    }
                     if let error = flowDBDiagnostics.lastOpenError, !error.isEmpty {
                         Text("Last open error: \(error)")
                     }
@@ -330,6 +339,26 @@ private struct SettingsMediaDiagnosticsView: View {
     private func byteDescription(_ byteCount: Int64) -> String {
         guard byteCount > 0 else { return "0 bytes" }
         return ByteCountFormatter.string(fromByteCount: byteCount, countStyle: .file)
+    }
+
+    private func mapSizeDescription(_ byteCount: Int64) -> String {
+        guard byteCount > 0 else { return "0 bytes" }
+
+        let gib = Int64(1024 * 1024 * 1024)
+        let mib = Int64(1024 * 1024)
+        if byteCount.isMultiple(of: gib) {
+            return "\(byteCount / gib) GiB"
+        }
+        if byteCount.isMultiple(of: mib) {
+            return "\(byteCount / mib) MiB"
+        }
+        return ByteCountFormatter.string(fromByteCount: byteCount, countStyle: .binary)
+    }
+
+    private var failedOpenAttemptsDescription: String {
+        flowDBDiagnostics.failedOpenAttempts
+            .map { "\(mapSizeDescription($0.mapsizeBytes)): \($0.errorMessage)" }
+            .joined(separator: "; ")
     }
 
     private func refreshDiagnostics() async {

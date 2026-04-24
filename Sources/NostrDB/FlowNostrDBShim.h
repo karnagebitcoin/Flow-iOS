@@ -9,6 +9,7 @@
 #define FLOW_NDB_FLAG_NO_STATS (1 << 4)
 
 void *flow_ndb_open(const char *dbdir, int ingest_threads, size_t mapsize, int writer_scratch_buffer_size, int flags);
+const char *flow_ndb_last_open_error(void);
 void flow_ndb_close(void *handle);
 
 int flow_ndb_ingest_note_json(void *handle, const char *json, int len);

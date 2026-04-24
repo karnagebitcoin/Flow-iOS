@@ -49,6 +49,7 @@ struct ReplyContextPreviewPresentation: Equatable, Sendable {
 
 struct ReplyContextPreviewRow: View {
     @EnvironmentObject private var appSettings: AppSettingsStore
+    @EnvironmentObject private var auth: AuthManager
 
     let presentation: ReplyContextPreviewPresentation
     let foregroundStyle: Color
@@ -68,7 +69,13 @@ struct ReplyContextPreviewRow: View {
             AvatarView(
                 url: presentation.parentItem.avatarURL,
                 fallback: presentation.parentItem.displayName,
-                size: 18
+                size: 18,
+                fallbackGradient: parentItemUsesCurrentAccountFallback
+                    ? appSettings.avatarFallbackGradient(forAccountPubkey: auth.currentAccount?.pubkey)
+                    : nil,
+                fallbackForeground: parentItemUsesCurrentAccountFallback
+                    ? appSettings.avatarFallbackForeground(forAccountPubkey: auth.currentAccount?.pubkey)
+                    : nil
             )
 
             if let snippet = presentation.snippet {
@@ -102,6 +109,72 @@ struct ReplyContextPreviewRow: View {
             content
         }
     }
+
+    private var parentItemUsesCurrentAccountFallback: Bool {
+        guard let rawCurrentPubkey = auth.currentAccount?.pubkey else {
+            return false
+        }
+        let currentPubkey = rawCurrentPubkey
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+        guard !currentPubkey.isEmpty else { return false }
+
+        let parentPubkey = presentation.parentItem.displayAuthorPubkey
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+        return parentPubkey == currentPubkey
+    }
+}
+
+private struct FeedRowCardChromeModifier: ViewModifier {
+    let feedCardStyle: AppThemeFeedCardStyle?
+
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        if let feedCardStyle {
+            content
+                .padding(.horizontal, 14)
+                .padding(.vertical, 10)
+                .background {
+                    RoundedRectangle(cornerRadius: 20, style: .continuous)
+                        .fill(
+                            LinearGradient(
+                                colors: [
+                                    feedCardStyle.backgroundTop,
+                                    feedCardStyle.backgroundBottom
+                                ],
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
+                            )
+                        )
+                }
+                .overlay {
+                    ZStack {
+                        RoundedRectangle(cornerRadius: 20, style: .continuous)
+                            .stroke(feedCardStyle.border, lineWidth: 0.9)
+
+                        RoundedRectangle(cornerRadius: 20, style: .continuous)
+                            .inset(by: 1)
+                            .stroke(
+                                LinearGradient(
+                                    colors: [
+                                        feedCardStyle.highlight,
+                                        feedCardStyle.highlight.opacity(0.08)
+                                    ],
+                                    startPoint: .topLeading,
+                                    endPoint: .bottomTrailing
+                                ),
+                                lineWidth: 0.8
+                            )
+                    }
+                }
+                .shadow(color: feedCardStyle.shadow, radius: 14, x: 0, y: 8)
+                .shadow(color: feedCardStyle.highlight.opacity(0.08), radius: 3, x: 0, y: 1)
+                .padding(.vertical, 4)
+        } else {
+            content
+        }
+    }
 }
 
 struct FeedRowView: View {
@@ -122,6 +195,7 @@ struct FeedRowView: View {
     var reactionCount: Int = 0
     var isLikedByCurrentUser: Bool = false
     var commentCount: Int = 0
+    var repostCount: Int = 0
     var showReactions: Bool = true
     var onAvatarTap: (() -> Void)? = nil
     var avatarMenuActions: AvatarMenuActions? = nil
@@ -165,6 +239,7 @@ struct FeedRowView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.top, 8)
         .padding(.bottom, 7)
+        .modifier(FeedRowCardChromeModifier(feedCardStyle: appSettings.themePalette.feedCardStyle))
         .noteTranslationPresentation(
             isPresented: $isShowingTranslation,
             text: noteTranslationText
@@ -261,6 +336,14 @@ struct FeedRowView: View {
         reactionSnapshot?.reactionCount ?? reactionCount
     }
 
+    private var visibleReplyCount: Int {
+        max(commentCount, reactionSnapshot?.replyCount ?? 0)
+    }
+
+    private var visibleRepostCount: Int {
+        max(repostCount, reactionSnapshot?.repostCount ?? 0)
+    }
+
     private var resolvedIsLikedByCurrentUser: Bool {
         reactionSnapshot?.isReactedByCurrentUser(currentPubkey: auth.currentAccount?.pubkey) ?? isLikedByCurrentUser
     }
@@ -313,12 +396,15 @@ struct FeedRowView: View {
                 Text(item.displayName)
                     .font(appSettings.appFont(.headline, weight: .semibold))
                     .lineLimit(1)
+                    .layoutPriority(2)
 
                 Text(item.handle)
                     .font(appSettings.appFont(.subheadline))
                     .foregroundStyle(mutedChromeColor)
                     .lineLimit(1)
+                    .layoutPriority(-1)
             }
+            .layoutPriority(1)
             .contentShape(Rectangle())
             .onTapGesture {
                 handleAuthorTap()
@@ -337,6 +423,7 @@ struct FeedRowView: View {
                 .font(appSettings.appFont(.caption1))
                 .foregroundStyle(mutedChromeColor)
                 .lineLimit(1)
+                .fixedSize(horizontal: true, vertical: false)
                 .contentShape(Rectangle())
                 .onTapGesture {
                     onOpenThread?()
@@ -351,7 +438,7 @@ struct FeedRowView: View {
             NoteContentView(
                 event: item.displayEvent,
                 reactionCount: showReactions ? visibleReactionCount : 0,
-                commentCount: showReactions ? commentCount : 0,
+                commentCount: showReactions ? visibleReplyCount : 0,
                 trustedMediaSharerPubkey: item.isRepost ? item.actorPubkey : nil,
                 articleAuthor: LongFormArticleAuthorSummary(item: item),
                 onHashtagTap: onHashtagTap,
@@ -386,8 +473,8 @@ struct FeedRowView: View {
             } label: {
                 HStack(spacing: 4) {
                     Image(systemName: "bubble.right")
-                    if commentCount > 0 {
-                        Text("\(commentCount)")
+                    if visibleReplyCount > 0 {
+                        Text("\(visibleReplyCount)")
                             .font(appSettings.appFont(.footnote))
                     }
                 }
@@ -400,8 +487,14 @@ struct FeedRowView: View {
             Button {
                 isShowingReshareSheet = true
             } label: {
-                Image(systemName: "arrow.2.squarepath")
-                    .frame(minWidth: 34, minHeight: 28, alignment: .leading)
+                HStack(spacing: 4) {
+                    Image(systemName: "arrow.2.squarepath")
+                    if visibleRepostCount > 0 {
+                        Text("\(visibleRepostCount)")
+                            .font(appSettings.appFont(.footnote))
+                    }
+                }
+                .frame(minWidth: 34, minHeight: 28, alignment: .leading)
             }
             .buttonStyle(.plain)
             .foregroundStyle(mutedChromeColor)
@@ -450,6 +543,7 @@ struct FeedRowView: View {
                 .font(appSettings.appFont(.caption1))
                 .foregroundStyle(mutedChromeColor)
                 .lineLimit(1)
+                .layoutPriority(-2)
                 .contentShape(Rectangle())
                 .onTapGesture {
                     onOpenThread?()
@@ -466,13 +560,18 @@ struct FeedRowView: View {
     }
 
     private var isAuthoredByCurrentAccount: Bool {
-        guard let currentPubkey = auth.currentAccount?.pubkey
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-            .lowercased(),
-              !currentPubkey.isEmpty else {
+        guard let rawCurrentPubkey = auth.currentAccount?.pubkey else {
             return false
         }
-        return currentPubkey == item.displayAuthorPubkey.lowercased()
+        let currentPubkey = rawCurrentPubkey
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+        guard !currentPubkey.isEmpty else { return false }
+
+        let authorPubkey = item.displayAuthorPubkey
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+        return currentPubkey == authorPubkey
     }
 
     @ViewBuilder
@@ -516,22 +615,52 @@ struct FeedRowView: View {
     }
 
     private var avatarWithFollowBadge: some View {
-        AvatarView(url: item.avatarURL, fallback: item.displayName)
+        AvatarView(
+            url: item.avatarURL,
+            fallback: item.displayName,
+            fallbackGradient: isAuthoredByCurrentAccount
+                ? appSettings.avatarFallbackGradient(forAccountPubkey: auth.currentAccount?.pubkey)
+                : nil,
+            fallbackForeground: isAuthoredByCurrentAccount
+                ? appSettings.avatarFallbackForeground(forAccountPubkey: auth.currentAccount?.pubkey)
+                : nil
+        )
             .overlay(alignment: .bottomTrailing) {
                 if let followBadgeIconName {
-                    ZStack {
-                        Circle()
-                            .fill(appSettings.themePalette.background)
-                            .frame(width: 18, height: 18)
-
-                        Image(systemName: followBadgeIconName)
-                            .font(.system(size: 16, weight: .bold))
-                            .foregroundStyle(Color.accentColor)
-                    }
+                    followBadge(iconName: followBadgeIconName)
                     .offset(x: 3, y: 3)
                     .accessibilityHidden(true)
                 }
             }
+    }
+
+    @ViewBuilder
+    private func followBadge(iconName: String) -> some View {
+        if appSettings.usesPrimaryGradientForProminentButtons {
+            ZStack {
+                Circle()
+                    .fill(appSettings.themePalette.background)
+                    .frame(width: 18, height: 18)
+
+                Circle()
+                    .fill(appSettings.primaryGradient)
+                    .frame(width: 16, height: 16)
+
+                Image(systemName: iconName.contains("checkmark") ? "checkmark" : "plus")
+                    .font(.system(size: 8.5, weight: .black))
+                    .foregroundStyle(appSettings.buttonTextColor)
+            }
+        } else {
+            ZStack {
+                Circle()
+                    .fill(appSettings.themePalette.background)
+                    .frame(width: 18, height: 18)
+
+                Image(systemName: iconName)
+                    .font(.system(size: 16, weight: .bold))
+                    .foregroundStyle(Color.accentColor)
+            }
+        }
     }
 
     private var repostBanner: some View {
@@ -1020,6 +1149,8 @@ struct AvatarView: View {
     let url: URL?
     let fallback: String
     var size: CGFloat = 44
+    var fallbackGradient: LinearGradient?
+    var fallbackForeground: Color?
 
     var body: some View {
         Group {
@@ -1049,10 +1180,14 @@ struct AvatarView: View {
 
     private var fallbackAvatar: some View {
         ZStack {
-            Circle().fill(appSettings.themePalette.secondaryFill)
+            if let fallbackGradient {
+                Circle().fill(fallbackGradient)
+            } else {
+                Circle().fill(appSettings.themePalette.secondaryFill)
+            }
             Text(String(fallback.prefix(1)).uppercased())
                 .font(size >= 32 ? .headline : .caption.weight(.semibold))
-                .foregroundStyle(appSettings.themePalette.mutedForeground)
+                .foregroundStyle(fallbackForeground ?? appSettings.themePalette.mutedForeground)
         }
     }
 }

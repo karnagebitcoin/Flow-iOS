@@ -833,9 +833,9 @@ struct ComposeFloatingActionButton: View {
         Button(action: action) {
             Image(systemName: "plus")
                 .font(.system(size: 18, weight: .semibold))
-                .foregroundStyle(.white)
+                .foregroundStyle(appSettings.buttonTextColor)
                 .frame(width: 56, height: 56)
-                .background(appSettings.primaryColor, in: Circle())
+                .background(appSettings.primaryGradient, in: Circle())
                 .shadow(color: .black.opacity(0.18), radius: 10, x: 0, y: 5)
                 .overlay {
                     Circle()
@@ -931,17 +931,10 @@ struct ComposeMultilineTextView: UIViewRepresentable {
         textView.delegate = context.coordinator
         textView.backgroundColor = .clear
         textView.font = appSettings.appUIFont(.body)
-        textView.typingAttributes[.font] = appSettings.appUIFont(.body)
         textView.adjustsFontForContentSizeCategory = false
         textView.textColor = UIColor(appSettings.themePalette.foreground)
         textView.tintColor = UIColor(appSettings.themePalette.foreground)
-        textView.autocorrectionType = .yes
-        textView.spellCheckingType = .yes
-        textView.smartQuotesType = .yes
-        textView.smartDashesType = .yes
-        textView.smartInsertDeleteType = .yes
-        textView.keyboardType = .default
-        textView.returnKeyType = .default
+        Self.configureNaturalLanguageInputTraits(for: textView)
         textView.textContainerInset = UIEdgeInsets(top: 8, left: 4, bottom: 8, right: 4)
         textView.textContainer.lineFragmentPadding = 0
         textView.isScrollEnabled = true
@@ -952,32 +945,23 @@ struct ComposeMultilineTextView: UIViewRepresentable {
 
     func updateUIView(_ uiView: UITextView, context: Context) {
         let preferredFont = appSettings.appUIFont(.body)
+        let preferredTextColor = UIColor(appSettings.themePalette.foreground)
         let fontChanged = uiView.font != preferredFont
         if fontChanged {
             uiView.font = preferredFont
         }
 
-        if (uiView.text != text || context.coordinator.lastRenderedMentions != mentions || fontChanged),
-           uiView.markedTextRange == nil {
+        let textColorChanged = uiView.textColor != preferredTextColor
+        if textColorChanged {
+            uiView.textColor = preferredTextColor
+            uiView.tintColor = preferredTextColor
+        }
+        Self.configureNaturalLanguageInputTraits(for: uiView)
+
+        if uiView.text != text, uiView.markedTextRange == nil {
             context.coordinator.isApplyingProgrammaticUpdate = true
-            uiView.attributedText = Self.attributedText(
-                for: text,
-                mentions: mentions,
-                font: preferredFont,
-                textColor: UIColor(appSettings.themePalette.foreground),
-                mentionColor: mentionColor
-            )
-            uiView.typingAttributes = Self.typingAttributes(
-                font: preferredFont,
-                textColor: UIColor(appSettings.themePalette.foreground)
-            )
-            context.coordinator.lastRenderedMentions = mentions
+            uiView.text = text
             context.coordinator.isApplyingProgrammaticUpdate = false
-        } else {
-            uiView.typingAttributes = Self.typingAttributes(
-                font: preferredFont,
-                textColor: UIColor(appSettings.themePalette.foreground)
-            )
         }
 
         let clampedRange = Self.clampedRange(selectedRange, maxLength: uiView.text.utf16.count)
@@ -997,40 +981,40 @@ struct ComposeMultilineTextView: UIViewRepresentable {
         }
     }
 
-    private static func attributedText(
-        for text: String,
-        mentions: [ComposeSelectedMention],
-        font: UIFont,
-        textColor: UIColor,
-        mentionColor: UIColor
-    ) -> NSAttributedString {
-        let attributed = NSMutableAttributedString(
-            string: text,
-            attributes: [
-                .font: font,
-                .foregroundColor: textColor
-            ]
-        )
-
-        for mention in mentions {
-            guard mention.range.location >= 0,
-                  mention.range.location + mention.range.length <= attributed.length else {
-                continue
-            }
-            attributed.addAttribute(.foregroundColor, value: mentionColor, range: mention.range)
+    private static func configureNaturalLanguageInputTraits(for textView: UITextView) {
+        if textView.autocapitalizationType != .sentences {
+            textView.autocapitalizationType = .sentences
+        }
+        if textView.autocorrectionType != .yes {
+            textView.autocorrectionType = .yes
+        }
+        if textView.spellCheckingType != .yes {
+            textView.spellCheckingType = .yes
+        }
+        if textView.smartQuotesType != .yes {
+            textView.smartQuotesType = .yes
+        }
+        if textView.smartDashesType != .yes {
+            textView.smartDashesType = .yes
+        }
+        if textView.smartInsertDeleteType != .yes {
+            textView.smartInsertDeleteType = .yes
+        }
+        if textView.keyboardType != .default {
+            textView.keyboardType = .default
+        }
+        if textView.returnKeyType != .default {
+            textView.returnKeyType = .default
+        }
+        if textView.textContentType != nil {
+            textView.textContentType = nil
         }
 
-        return attributed
-    }
-
-    private static func typingAttributes(
-        font: UIFont,
-        textColor: UIColor
-    ) -> [NSAttributedString.Key: Any] {
-        [
-            .font: font,
-            .foregroundColor: textColor
-        ]
+        if #available(iOS 17.0, *) {
+            if textView.inlinePredictionType != .yes {
+                textView.inlinePredictionType = .yes
+            }
+        }
     }
 
     private static func clampedRange(_ range: NSRange, maxLength: Int) -> NSRange {
@@ -1048,7 +1032,6 @@ struct ComposeMultilineTextView: UIViewRepresentable {
         @Binding private var mentionAnchorY: CGFloat
         private let onMentionQueryChange: (ComposeMentionQuery?) -> Void
         var isApplyingProgrammaticUpdate = false
-        var lastRenderedMentions: [ComposeSelectedMention] = []
         private var lastReportedMentionQuery: ComposeMentionQuery?
 
         init(
@@ -1087,7 +1070,6 @@ struct ComposeMultilineTextView: UIViewRepresentable {
             guard !isApplyingProgrammaticUpdate else { return }
             text = textView.text
             selectedRange = textView.selectedRange
-            lastRenderedMentions = mentions
             updateMentionQuery(for: textView)
         }
 

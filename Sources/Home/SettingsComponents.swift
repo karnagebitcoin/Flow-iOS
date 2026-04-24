@@ -218,6 +218,7 @@ struct ThemedSettingsForm<Content: View>: View {
                 .listRowSeparatorTint(surfaceStyle.cardBorder)
                 .listSectionSeparatorTint(surfaceStyle.cardBorder)
         }
+        .contentMargins(.top, 0, for: .scrollContent)
         .scrollContentBackground(.hidden)
         .background(surfaceStyle.formBackground)
         .tint(appSettings.primaryColor)
@@ -246,21 +247,26 @@ struct ThemedSettingsTitleHeader<Trailing: View>: View {
     }
 
     var body: some View {
-        HStack(alignment: .center, spacing: 16) {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: 0) {
+                Spacer(minLength: 0)
+                trailing
+            }
+            .frame(minHeight: 32)
+            .padding(.bottom, 10)
+
             Text(title)
-                .font(appSettings.appFont(.largeTitle, weight: .bold))
+                .font(.largeTitle.weight(.bold))
                 .foregroundStyle(appSettings.themePalette.foreground)
                 .lineLimit(2)
-                .minimumScaleFactor(0.8)
+                .minimumScaleFactor(0.82)
+                .frame(minHeight: 48, alignment: .bottomLeading)
                 .accessibilityAddTraits(.isHeader)
-
-            Spacer(minLength: 12)
-
-            trailing
         }
-        .padding(.horizontal, 16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, 20)
         .padding(.top, 20)
-        .padding(.bottom, 12)
+        .padding(.bottom, 16)
         .background(appSettings.themePalette.sheetBackground)
     }
 }

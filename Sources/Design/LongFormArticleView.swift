@@ -338,11 +338,11 @@ struct LongFormArticleReaderView: View {
                     onFollowToggle()
                 }
                 .font(appSettings.appFont(.footnote, weight: .semibold))
-                .foregroundStyle(isFollowingAuthor ? appSettings.themePalette.secondaryForeground : Color.white)
+                .foregroundStyle(isFollowingAuthor ? appSettings.themePalette.secondaryForeground : appSettings.buttonTextColor)
                 .padding(.horizontal, 12)
                 .padding(.vertical, 7)
                 .background(
-                    isFollowingAuthor ? appSettings.themePalette.tertiaryFill : appSettings.primaryColor,
+                    isFollowingAuthor ? AnyShapeStyle(appSettings.themePalette.tertiaryFill) : AnyShapeStyle(appSettings.primaryGradient),
                     in: Capsule()
                 )
                 .overlay {

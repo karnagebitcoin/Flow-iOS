@@ -8,6 +8,7 @@ struct FlowNostrDBDiagnostics: Equatable, Sendable {
     var lastOpenError: String?
     var openMapsizeBytes: Int64 = 0
     var lastAttemptedMapsizeBytes: Int64 = 0
+    var failedOpenAttempts: [FlowNostrDBOpenAttemptFailure] = []
     var persistedEventCount: Int = 0
     var persistedProfileCount: Int = 0
     var sessionIngestedEventCount: Int = 0
@@ -23,6 +24,11 @@ struct FlowNostrDBDiagnostics: Equatable, Sendable {
     var diskUsageBytes: Int64 = 0
 }
 
+struct FlowNostrDBOpenAttemptFailure: Equatable, Sendable {
+    let mapsizeBytes: Int64
+    let errorMessage: String
+}
+
 struct FlowNostrDBProfileSearchResult: Equatable, Sendable {
     let pubkey: String
     let profile: NostrProfile
@@ -33,13 +39,14 @@ final class FlowNostrDB: @unchecked Sendable {
     static let shared = FlowNostrDB()
 
     typealias OpenDatabase = @Sendable (_ path: String, _ ingestThreads: Int32, _ mapsize: size_t, _ writerScratchBufferSize: Int32, _ flags: Int32) -> UnsafeMutableRawPointer?
+    typealias LastOpenError = @Sendable () -> String?
 
     private struct ReplaceableKey: Hashable {
         let authorPubkey: String
         let kind: Int
     }
 
-    private let queue = DispatchQueue(label: "com.21media.flow.nostrdb")
+    private let queue = DispatchQueue(label: "com.21media.haloapp.nostrdb")
     private let decoder = JSONDecoder()
     private let encoder = JSONEncoder()
     private let fileManager: FileManager
@@ -51,6 +58,7 @@ final class FlowNostrDB: @unchecked Sendable {
     private let writerScratchBufferSize: Int32
     private let flags: Int32
     private let openDatabase: OpenDatabase
+    private let lastOpenError: LastOpenError
     private let eventOverlayLimit = 4_000
     private let replaceableOverlayLimit = 2_000
     private let sessionEventTrackingLimit = 8_000
@@ -76,6 +84,7 @@ final class FlowNostrDB: @unchecked Sendable {
     private var followListLookupCount = 0
     private var queryCount = 0
     private var lastOpenErrorMessage: String?
+    private var failedOpenAttempts: [FlowNostrDBOpenAttemptFailure] = []
 
     init(
         fileManager: FileManager = .default,
@@ -92,6 +101,13 @@ final class FlowNostrDB: @unchecked Sendable {
                     flags
                 )
             }
+        },
+        lastOpenError: @escaping LastOpenError = {
+            guard let rawError = flow_ndb_last_open_error(),
+                  rawError.pointee != 0 else {
+                return nil
+            }
+            return String(cString: rawError)
         }
     ) {
         self.fileManager = fileManager
@@ -106,6 +122,7 @@ final class FlowNostrDB: @unchecked Sendable {
         self.writerScratchBufferSize = 2 * 1024 * 1024
         self.flags = Int32(FLOW_NDB_FLAG_NO_NOTE_BLOCKS | FLOW_NDB_FLAG_NO_STATS)
         self.openDatabase = openDatabase
+        self.lastOpenError = lastOpenError
     }
 
     deinit {
@@ -337,6 +354,7 @@ final class FlowNostrDB: @unchecked Sendable {
                 lastOpenError: lastOpenErrorMessage,
                 openMapsizeBytes: Int64(openMapsize),
                 lastAttemptedMapsizeBytes: Int64(lastAttemptedMapsize),
+                failedOpenAttempts: failedOpenAttempts,
                 persistedEventCount: persistedEventCount,
                 persistedProfileCount: persistedProfileCount,
                 sessionIngestedEventCount: sessionIngestedEventCount,
@@ -390,6 +408,7 @@ final class FlowNostrDB: @unchecked Sendable {
         let path = databaseDirectoryURL.path
         var attemptedMapsizes: [size_t] = []
         var candidateMapsize = initialMapsize
+        failedOpenAttempts.removeAll(keepingCapacity: true)
 
         while candidateMapsize >= minimumMapsize {
             lastAttemptedMapsize = candidateMapsize
@@ -408,6 +427,12 @@ final class FlowNostrDB: @unchecked Sendable {
                 return true
             }
 
+            failedOpenAttempts.append(
+                FlowNostrDBOpenAttemptFailure(
+                    mapsizeBytes: Int64(candidateMapsize),
+                    errorMessage: currentOpenErrorMessage()
+                )
+            )
             candidateMapsize /= 2
         }
 
@@ -415,12 +440,29 @@ final class FlowNostrDB: @unchecked Sendable {
         let attemptedDescription = attemptedMapsizes
             .map { Self.mapsizeDescription(bytes: Int64($0)) }
             .joined(separator: ", ")
-        lastOpenErrorMessage = "Failed to open nostrdb at \(path) after trying mapsizes: \(attemptedDescription)"
+        let failureDetails = failedOpenAttempts
+            .map { "\(Self.mapsizeDescription(bytes: $0.mapsizeBytes)): \($0.errorMessage)" }
+            .joined(separator: "; ")
+        lastOpenErrorMessage = [
+            "Failed to open nostrdb at \(path) after trying mapsizes: \(attemptedDescription)",
+            failureDetails.isEmpty ? nil : failureDetails
+        ]
+        .compactMap { $0 }
+        .joined(separator: ". ")
         return false
     }
 
     private static func mapsizeDescription(bytes: Int64) -> String {
         ByteCountFormatter.string(fromByteCount: bytes, countStyle: .binary)
+    }
+
+    private func currentOpenErrorMessage() -> String {
+        let message = lastOpenError()?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let message, !message.isEmpty else {
+            return "flow_ndb_open returned nil"
+        }
+        return message
     }
 
     private static func resolveDatabaseDirectoryURL(fileManager: FileManager) -> URL {
@@ -580,6 +622,7 @@ final class FlowNostrDB: @unchecked Sendable {
         openMapsize = 0
         lastAttemptedMapsize = 0
         lastOpenErrorMessage = nil
+        failedOpenAttempts.removeAll(keepingCapacity: false)
         recentEventsByID.removeAll(keepingCapacity: false)
         recentEventOrder.removeAll(keepingCapacity: false)
         recentReplaceableEventsByKey.removeAll(keepingCapacity: false)

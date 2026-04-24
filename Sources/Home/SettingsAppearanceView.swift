@@ -15,7 +15,6 @@ struct SettingsAppearanceView: View {
         ThemedSettingsForm {
             Section("Appearance") {
                 Button {
-                    guard appSettings.canCustomizePrimaryColor else { return }
                     onOpenPrimaryColorPicker()
                 } label: {
                     HStack(spacing: 12) {
@@ -38,14 +37,6 @@ struct SettingsAppearanceView: View {
                     }
                 }
                 .buttonStyle(.plain)
-                .disabled(!appSettings.canCustomizePrimaryColor)
-                .opacity(appSettings.canCustomizePrimaryColor ? 1 : 0.55)
-
-                if !appSettings.canCustomizePrimaryColor {
-                    Text("This theme includes its own accent color.")
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
-                }
 
                 VStack(alignment: .leading, spacing: 10) {
                     Text("Theme")
@@ -68,20 +59,20 @@ struct SettingsAppearanceView: View {
             }
 
             Section("Customize") {
-                premiumCustomizationRow(
-                    title: "Themes",
-                    subtitle: premiumThemeSummary,
+                SettingsNavigationRow(
+                    title: "Button Style",
+                    subtitle: buttonGradientSummary,
                     systemImage: "sparkles"
                 ) {
-                    SettingsFlowPlusThemesView()
+                    SettingsButtonGradientView()
                 }
 
-                premiumCustomizationRow(
+                SettingsNavigationRow(
                     title: "Typography",
-                    subtitle: premiumTypographySummary,
+                    subtitle: appSettings.activeFontOption.title,
                     systemImage: "textformat"
                 ) {
-                    SettingsFlowPlusTypographyView()
+                    SettingsTypographyView()
                 }
             }
 
@@ -128,30 +119,11 @@ struct SettingsAppearanceView: View {
         .navigationBarTitleDisplayMode(.inline)
     }
 
-    private var hasFlowPlusCustomizationAccess: Bool {
-        appSettings.hasFlowPlusCustomizationAccess
-    }
-
-    private var premiumThemeSummary: String {
-        guard hasFlowPlusCustomizationAccess else {
-            return "Try it free for 7 days"
+    private var buttonGradientSummary: String {
+        if appSettings.generatedButtonGradient != nil {
+            return "Generated"
         }
-
-        if appSettings.activeTheme.requiresFlowPlus {
-            return appSettings.activeTheme.title
-        }
-        return "Choose a premium theme"
-    }
-
-    private var premiumTypographySummary: String {
-        guard hasFlowPlusCustomizationAccess else {
-            return "Try it free for 7 days"
-        }
-
-        if appSettings.activeFontOption.requiresFlowPlus {
-            return appSettings.activeFontOption.title
-        }
-        return "Choose a premium font"
+        return appSettings.buttonGradientOption?.title ?? "Solid"
     }
 
     private var notePreviewCard: some View {
@@ -226,71 +198,6 @@ struct SettingsAppearanceView: View {
                     .foregroundStyle(.secondary)
             }
             .frame(width: size, height: size)
-    }
-
-    @ViewBuilder
-    private func premiumCustomizationRow<Destination: View>(
-        title: String,
-        subtitle: String,
-        systemImage: String,
-        @ViewBuilder destination: () -> Destination
-    ) -> some View {
-        let row = premiumCustomizationRowContent(
-            title: title,
-            subtitle: subtitle,
-            systemImage: systemImage,
-            isUnlocked: hasFlowPlusCustomizationAccess
-        )
-
-        if hasFlowPlusCustomizationAccess {
-            NavigationLink {
-                destination()
-            } label: {
-                row
-            }
-        } else {
-            NavigationLink {
-                SettingsFlowPlusView()
-            } label: {
-                row
-            }
-        }
-    }
-
-    private func premiumCustomizationRowContent(
-        title: String,
-        subtitle: String,
-        systemImage: String,
-        isUnlocked: Bool
-    ) -> some View {
-        HStack(spacing: 12) {
-            Image(systemName: systemImage)
-                .font(.title3.weight(.semibold))
-                .foregroundStyle(appSettings.primaryColor)
-                .frame(width: 28, height: 28)
-
-            VStack(alignment: .leading, spacing: 2) {
-                Text(title)
-                    .font(appSettings.appFont(.body, weight: .regular))
-                    .foregroundStyle(.primary)
-
-                Text(subtitle)
-                    .font(appSettings.appFont(.footnote))
-                    .foregroundStyle(appSettings.themePalette.mutedForeground)
-            }
-
-            Spacer(minLength: 8)
-
-            if isUnlocked {
-                Image(systemName: "chevron.right")
-                    .font(.footnote.weight(.semibold))
-                    .foregroundStyle(.tertiary)
-            } else {
-                Image(systemName: "lock.fill")
-                    .font(.footnote.weight(.semibold))
-                    .foregroundStyle(appSettings.themePalette.mutedForeground)
-            }
-        }
     }
 
     private func themeOptionCard(for option: AppThemeOption) -> some View {
@@ -399,6 +306,26 @@ struct SettingsAppearanceView: View {
                 startPoint: .topLeading,
                 endPoint: .bottomTrailing
             )
+        case .holographicLight:
+            return AppThemeOption.holographicLight.fixedPrimaryGradient ?? LinearGradient(
+                colors: [
+                    Color(red: 0.380, green: 0.906, blue: 1.0),
+                    Color(red: 0.690, green: 0.604, blue: 1.0),
+                    Color(red: 1.0, green: 0.560, blue: 0.780)
+                ],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
+        case .holographicDark:
+            return AppThemeOption.holographicDark.fixedPrimaryGradient ?? LinearGradient(
+                colors: [
+                    Color(red: 0.380, green: 0.906, blue: 1.0),
+                    Color(red: 0.690, green: 0.604, blue: 1.0),
+                    Color(red: 1.0, green: 0.560, blue: 0.780)
+                ],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
         case .dark:
             return LinearGradient(
                 colors: [
@@ -427,6 +354,10 @@ struct SettingsAppearanceView: View {
             return Color(red: 0.973, green: 0.973, blue: 0.949).opacity(0.92)
         case .gamer:
             return Color.white.opacity(0.92)
+        case .holographicLight:
+            return Color(red: 0.055, green: 0.075, blue: 0.125).opacity(0.86)
+        case .holographicDark:
+            return Color(red: 0.940, green: 0.970, blue: 1.0).opacity(0.94)
         case .black, .dark:
             return .white.opacity(0.85)
         }

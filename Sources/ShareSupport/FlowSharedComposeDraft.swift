@@ -85,7 +85,7 @@ enum FlowSharedComposeDraftStoreError: LocalizedError {
 }
 
 enum FlowSharedComposeDraftStore {
-    static let appGroupIdentifier = "group.com.21media.flow"
+    static let appGroupIdentifier = "group.com.21media.haloapp"
     private static let urlScheme = "flow"
     private static let shareHost = "share"
     private static let newNotePath = "/new-note"

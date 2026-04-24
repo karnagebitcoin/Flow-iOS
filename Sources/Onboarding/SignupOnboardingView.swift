@@ -10,54 +10,139 @@ struct SignupOnboardingView: View {
 
     private enum Step: Int, CaseIterable {
         case name
-        case image
         case about
+        case image
         case interests
         case notifications
     }
 
     private enum PrimaryColorOption: String, CaseIterable, Identifiable {
-        case sandstone
-        case indigo
-        case sage
-        case orchid
-        case rose
-        case sky
+        case coral
+        case azure
+        case emerald
+        case violet
+        case fuchsia
+        case teal
 
         var id: String { rawValue }
 
         var title: String {
             switch self {
-            case .sandstone:
-                return "Sandstone"
-            case .indigo:
-                return "Indigo"
-            case .sage:
-                return "Sage"
-            case .orchid:
-                return "Orchid"
-            case .rose:
-                return "Rose"
-            case .sky:
-                return "Sky"
+            case .coral:
+                return "Coral"
+            case .azure:
+                return "Azure"
+            case .emerald:
+                return "Emerald"
+            case .violet:
+                return "Violet"
+            case .fuchsia:
+                return "Fuchsia"
+            case .teal:
+                return "Teal"
             }
         }
 
         var color: Color {
             switch self {
-            case .sandstone:
-                return Color(red: 0.843, green: 0.663, blue: 0.463)
-            case .indigo:
-                return Color(red: 0.349, green: 0.239, blue: 0.596)
-            case .sage:
-                return Color(red: 0.498, green: 0.682, blue: 0.541)
-            case .orchid:
-                return Color(red: 0.827, green: 0.561, blue: 0.953)
-            case .rose:
-                return Color(red: 0.953, green: 0.561, blue: 0.627)
-            case .sky:
-                return Color(red: 0.204, green: 0.631, blue: 0.863)
+            case .coral:
+                return Color(red: 1.00, green: 0.32, blue: 0.42)
+            case .azure:
+                return Color(red: 0.16, green: 0.52, blue: 0.95)
+            case .emerald:
+                return Color(red: 0.12, green: 0.67, blue: 0.44)
+            case .violet:
+                return Color(red: 0.58, green: 0.36, blue: 0.96)
+            case .fuchsia:
+                return Color(red: 0.92, green: 0.25, blue: 0.58)
+            case .teal:
+                return Color(red: 0.12, green: 0.66, blue: 0.67)
             }
+        }
+    }
+
+    private enum OnboardingButtonStyleOption: Hashable, Identifiable {
+        case solid(PrimaryColorOption)
+        case holographic(HolographicGradientOption)
+
+        static let defaultOption: Self = .holographic(.softHolographicSheen)
+
+        static var allOptions: [Self] {
+            PrimaryColorOption.allCases.map(Self.solid) +
+                HolographicGradientOption.allCases.map(Self.holographic)
+        }
+
+        var id: String {
+            switch self {
+            case .solid(let option):
+                return "solid-\(option.rawValue)"
+            case .holographic(let option):
+                return "holographic-\(option.rawValue)"
+            }
+        }
+
+        var title: String {
+            switch self {
+            case .solid(let option):
+                return option.title
+            case .holographic(let option):
+                return option.title
+            }
+        }
+
+        var primaryColor: Color {
+            switch self {
+            case .solid(let option):
+                return option.color
+            case .holographic(let option):
+                return option.defaultLinkColor
+            }
+        }
+
+        var buttonTextColor: Color {
+            switch self {
+            case .solid:
+                return .white
+            case .holographic:
+                return .black
+            }
+        }
+
+        var buttonGradient: LinearGradient {
+            switch self {
+            case .solid(let option):
+                return LinearGradient(
+                    colors: [option.color, option.color],
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing
+                )
+            case .holographic(let option):
+                return option.buttonGradient
+            }
+        }
+
+        var bannerGradient: LinearGradient {
+            switch self {
+            case .solid(let option):
+                return LinearGradient(
+                    colors: [
+                        option.color.opacity(0.92),
+                        option.color.opacity(0.54),
+                        Color(.systemBackground)
+                    ],
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing
+                )
+            case .holographic(let option):
+                return option.uiGradient
+            }
+        }
+
+        var isHolographic: Bool {
+            if case .holographic = self {
+                return true
+            }
+            return false
         }
     }
 
@@ -75,7 +160,7 @@ struct SignupOnboardingView: View {
     @State private var displayName = ""
     @State private var handle = ""
     @State private var about = ""
-    @State private var selectedPrimaryColorOption: PrimaryColorOption = .sandstone
+    @State private var selectedButtonStyleOption: OnboardingButtonStyleOption = .defaultOption
     @State private var hasEditedHandle = false
     @State private var selectedTopics = Set<InterestTopic>()
     @State private var signupPrivateKeyBackupEnabled = true
@@ -85,8 +170,14 @@ struct SignupOnboardingView: View {
     @State private var selectedAvatarPreviewImage: UIImage?
     @State private var selectedAvatarMIMEType = "image/jpeg"
     @State private var selectedAvatarFileExtension = "jpg"
+    @State private var selectedBannerItem: PhotosPickerItem?
+    @State private var selectedBannerData: Data?
+    @State private var selectedBannerPreviewImage: UIImage?
+    @State private var selectedBannerMIMEType = "image/jpeg"
+    @State private var selectedBannerFileExtension = "jpg"
     @State private var isPreparingAccount = false
     @State private var isLoadingAvatar = false
+    @State private var isLoadingBanner = false
     @State private var isFinishing = false
     @State private var errorMessage: String?
     @State private var animateFinishingButton = false
@@ -121,6 +212,12 @@ struct SignupOnboardingView: View {
             guard let newValue else { return }
             Task {
                 await loadAvatar(from: newValue)
+            }
+        }
+        .onChange(of: selectedBannerItem) { _, newValue in
+            guard let newValue else { return }
+            Task {
+                await loadBanner(from: newValue)
             }
         }
         .onChange(of: displayName) { _, newValue in
@@ -197,65 +294,78 @@ struct SignupOnboardingView: View {
                     }
                 }
             }
-
-            onboardingFieldCard {
-                VStack(alignment: .leading, spacing: 14) {
-                    VStack(alignment: .leading, spacing: 4) {
-                        fieldLabel("Primary Color")
-                        Text("Choose a color for Halo. You can change it later in Settings.")
-                            .font(.footnote)
-                            .foregroundStyle(.secondary)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
-
-                    HStack(spacing: 10) {
-                        ForEach(PrimaryColorOption.allCases) { option in
-                            primaryColorChip(for: option)
-                        }
-                    }
-                    .frame(maxWidth: .infinity)
-                }
-            }
         }
     }
 
     private var imageStep: some View {
-        let avatarPreviewImage = selectedAvatarPreviewImage
-        let avatarDisplayName = displayName
-        let avatarAccentColor = onboardingSecondaryAccent
         let avatarIsLoading = isLoadingAvatar
+        let bannerIsLoading = isLoadingBanner
+        let uploadButtonTextColor = selectedButtonStyleOption.buttonTextColor
+        let uploadButtonGradient = selectedButtonStyleOption.buttonGradient
 
-        return VStack {
-            Spacer(minLength: 24)
+        return VStack(alignment: .leading, spacing: 18) {
+            stepIntro(
+                title: "Make it feel like you.",
+                subtitle: "Pick a banner style or upload your own image. You can change all of this later."
+            )
 
-            VStack(spacing: 26) {
-                stepIntro(
-                    title: "Welcome, \(welcomeName).",
-                    subtitle: "Add a profile photo now, or skip and do it later."
-                )
+            OnboardingProfilePreviewCard(
+                displayName: welcomeName,
+                handle: normalizedHandle,
+                about: about,
+                avatarPreviewImage: selectedAvatarPreviewImage,
+                bannerPreviewImage: selectedBannerPreviewImage,
+                styleOption: selectedButtonStyleOption
+            )
 
-                VStack(spacing: 12) {
-                    PhotosPicker(selection: $selectedAvatarItem, matching: .images) {
-                        SignupAvatarPickerLabel(
-                            previewImage: avatarPreviewImage,
-                            displayName: avatarDisplayName,
-                            accentColor: avatarAccentColor,
-                            isLoadingAvatar: avatarIsLoading
-                        )
+            onboardingFieldCard {
+                VStack(alignment: .leading, spacing: 14) {
+                    VStack(alignment: .leading, spacing: 4) {
+                        fieldLabel("Banner & Buttons")
+                        Text(selectedButtonStyleOption.title)
+                            .font(.footnote.weight(.medium))
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
                     }
-                    .buttonStyle(.plain)
-                    .disabled(isFinishing)
 
-                    Text("Upload profile image")
-                        .font(.footnote.weight(.medium))
-                        .foregroundStyle(.secondary)
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 10) {
+                            ForEach(OnboardingButtonStyleOption.allOptions) { option in
+                                buttonStyleChip(for: option)
+                            }
+                        }
+                        .padding(.vertical, 2)
+                    }
+                    .scrollClipDisabled()
+
+                    HStack(spacing: 10) {
+                        PhotosPicker(selection: $selectedAvatarItem, matching: .images) {
+                            OnboardingImageUploadButton(
+                                title: "Profile photo",
+                                systemImage: "person.crop.circle",
+                                isLoading: avatarIsLoading,
+                                foregroundColor: uploadButtonTextColor,
+                                backgroundGradient: uploadButtonGradient
+                            )
+                        }
+                        .buttonStyle(.plain)
+                        .disabled(isFinishing || isLoadingAvatar || isLoadingBanner)
+
+                        PhotosPicker(selection: $selectedBannerItem, matching: .images) {
+                            OnboardingImageUploadButton(
+                                title: "Banner image",
+                                systemImage: "photo.on.rectangle.angled",
+                                isLoading: bannerIsLoading,
+                                foregroundColor: uploadButtonTextColor,
+                                backgroundGradient: uploadButtonGradient
+                            )
+                        }
+                        .buttonStyle(.plain)
+                        .disabled(isFinishing || isLoadingAvatar || isLoadingBanner)
+                    }
                 }
             }
-            .frame(maxWidth: .infinity)
-
-            Spacer(minLength: 40)
         }
-        .frame(maxWidth: .infinity, minHeight: 460)
     }
 
     private var aboutStep: some View {
@@ -417,12 +527,12 @@ struct SignupOnboardingView: View {
                             switch step {
                             case .name:
                                 break
-                            case .image:
-                                step = .name
                             case .about:
-                                step = .image
-                            case .interests:
+                                step = .name
+                            case .image:
                                 step = .about
+                            case .interests:
+                                step = .image
                             case .notifications:
                                 step = .interests
                             }
@@ -507,7 +617,7 @@ struct SignupOnboardingView: View {
             .padding(.vertical, 7)
             .background(
                 Capsule(style: .continuous)
-                    .fill(isSelected ? onboardingChipSelectedFill : onboardingChipFill)
+                    .fill(isSelected ? onboardingChipSelectedFill : AnyShapeStyle(onboardingChipFill))
             )
             .overlay(
                 Capsule(style: .continuous)
@@ -520,33 +630,37 @@ struct SignupOnboardingView: View {
         .buttonStyle(.plain)
     }
 
-    private func primaryColorChip(for option: PrimaryColorOption) -> some View {
-        let isSelected = selectedPrimaryColorOption == option
+    private func buttonStyleChip(for option: OnboardingButtonStyleOption) -> some View {
+        let isSelected = selectedButtonStyleOption == option
 
         return Button {
-            selectedPrimaryColorOption = option
+            selectedButtonStyleOption = option
         } label: {
             Circle()
-                .fill(option.color)
-                .frame(width: 44, height: 44)
+                .fill(option.buttonGradient)
+                .frame(width: 42, height: 42)
                 .overlay {
                     Circle()
                         .stroke(
-                            isSelected ? Color.white.opacity(0.95) : Color.white.opacity(0.22),
+                            isSelected ? Color.white.opacity(0.95) : Color.white.opacity(0.24),
                             lineWidth: isSelected ? 2.5 : 1
                         )
+                }
+                .overlay {
+                    Circle()
+                        .stroke(Color.black.opacity(isSelected ? 0.18 : 0.08), lineWidth: 0.8)
                 }
                 .overlay(alignment: .bottomTrailing) {
                     if isSelected {
                         Image(systemName: "checkmark.circle.fill")
                             .font(.footnote.weight(.bold))
-                            .foregroundStyle(Color.white, option.color.opacity(0.95))
+                            .foregroundStyle(option.buttonTextColor, option.primaryColor.opacity(0.95))
                             .background(Circle().fill(Color.white))
                             .offset(x: 2, y: 2)
                     }
                 }
                 .shadow(
-                    color: option.color.opacity(isSelected ? 0.24 : 0.14),
+                    color: option.primaryColor.opacity(isSelected ? 0.24 : 0.12),
                     radius: isSelected ? 10 : 6,
                     y: 4
                 )
@@ -582,7 +696,7 @@ struct SignupOnboardingView: View {
     }
 
     private var primaryActionDisabled: Bool {
-        if isPreparingAccount || isLoadingAvatar || isFinishing || pendingAccount == nil {
+        if isPreparingAccount || isLoadingAvatar || isLoadingBanner || isFinishing || pendingAccount == nil {
             return true
         }
 
@@ -600,8 +714,10 @@ struct SignupOnboardingView: View {
         }
     }
 
-    private var primaryButtonBackground: Color {
-        primaryActionDisabled ? Color(.tertiarySystemFill) : onboardingPrimaryButtonFill
+    private var primaryButtonBackground: AnyShapeStyle {
+        primaryActionDisabled
+            ? AnyShapeStyle(Color(.tertiarySystemFill))
+            : AnyShapeStyle(onboardingPrimaryButtonFill)
     }
 
     private var primaryButtonForeground: Color {
@@ -644,12 +760,12 @@ struct SignupOnboardingView: View {
         Color(red: 0.06, green: 0.10, blue: 0.18)
     }
 
-    private var onboardingPrimaryButtonFill: Color {
-        colorScheme == .dark ? Color.white.opacity(0.96) : onboardingInk
+    private var onboardingPrimaryButtonFill: LinearGradient {
+        selectedButtonStyleOption.buttonGradient
     }
 
     private var onboardingPrimaryButtonForeground: Color {
-        colorScheme == .dark ? onboardingInk : .white
+        selectedButtonStyleOption.buttonTextColor
     }
 
     private var onboardingSecondaryAccent: Color {
@@ -668,16 +784,16 @@ struct SignupOnboardingView: View {
         colorScheme == .dark ? Color(.secondarySystemBackground) : Color(.systemGray6)
     }
 
-    private var onboardingChipSelectedFill: Color {
-        colorScheme == .dark ? Color.white.opacity(0.96) : Color(.systemGray4)
+    private var onboardingChipSelectedFill: AnyShapeStyle {
+        AnyShapeStyle(selectedButtonStyleOption.buttonGradient)
     }
 
     private var onboardingChipSelectedForeground: Color {
-        onboardingInk
+        selectedButtonStyleOption.buttonTextColor
     }
 
     private var onboardingChipSelectedStroke: Color {
-        colorScheme == .dark ? Color.white.opacity(0.32) : Color(.systemGray3)
+        selectedButtonStyleOption.primaryColor.opacity(colorScheme == .dark ? 0.54 : 0.38)
     }
 
     private var normalizedDisplayName: String {
@@ -741,15 +857,15 @@ struct SignupOnboardingView: View {
                 return
             }
             withAnimation(.easeInOut(duration: 0.18)) {
-                step = .image
-            }
-
-        case .image:
-            withAnimation(.easeInOut(duration: 0.18)) {
                 step = .about
             }
 
         case .about:
+            withAnimation(.easeInOut(duration: 0.18)) {
+                step = .image
+            }
+
+        case .image:
             withAnimation(.easeInOut(duration: 0.18)) {
                 step = .interests
             }
@@ -770,9 +886,9 @@ struct SignupOnboardingView: View {
         errorMessage = nil
         withAnimation(.easeInOut(duration: 0.18)) {
             switch step {
-            case .image:
-                step = .about
             case .about:
+                step = .image
+            case .image:
                 step = .interests
             case .notifications:
                 break
@@ -823,6 +939,28 @@ struct SignupOnboardingView: View {
     }
 
     @MainActor
+    private func loadBanner(from item: PhotosPickerItem) async {
+        guard !isLoadingBanner else { return }
+        isLoadingBanner = true
+        errorMessage = nil
+
+        defer {
+            isLoadingBanner = false
+            selectedBannerItem = nil
+        }
+
+        do {
+            let preparedMedia = try await MediaUploadPreparation.prepareProfileBannerUpload(from: item)
+            selectedBannerData = preparedMedia.data
+            selectedBannerPreviewImage = preparedMedia.previewImage ?? UIImage(data: preparedMedia.data)
+            selectedBannerMIMEType = preparedMedia.mimeType
+            selectedBannerFileExtension = preparedMedia.fileExtension
+        } catch {
+            errorMessage = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+        }
+    }
+
+    @MainActor
     private func finishSignup() async {
         guard !isFinishing, let pendingAccount else { return }
         isFinishing = true
@@ -837,7 +975,7 @@ struct SignupOnboardingView: View {
 
             appSettings.configure(accountPubkey: account.pubkey)
             appSettings.theme = .system
-            appSettings.primaryColor = selectedPrimaryColorOption.color
+            applySelectedButtonStyle()
             if signupNotificationsEnabled {
                 appSettings.notificationsEnabled = true
             }
@@ -852,6 +990,13 @@ struct SignupOnboardingView: View {
                 avatarURL = nil
             }
 
+            let bannerURL: String?
+            do {
+                bannerURL = try await uploadBannerIfNeeded(using: pendingAccount)
+            } catch {
+                bannerURL = nil
+            }
+
             let interestTopics = InterestTopic.allCases.filter { selectedTopics.contains($0) }
             let interestHashtags = InterestTopic.combinedHashtags(for: interestTopics)
 
@@ -860,7 +1005,8 @@ struct SignupOnboardingView: View {
                 displayName: normalizedDisplayName,
                 handle: normalizedHandle,
                 about: about.trimmingCharacters(in: .whitespacesAndNewlines),
-                avatarURLString: avatarURL
+                avatarURLString: avatarURL,
+                bannerURLString: bannerURL
             )
 
             InterestFeedStore.shared.configure(accountPubkey: pendingAccount.pubkey)
@@ -896,12 +1042,38 @@ struct SignupOnboardingView: View {
         return url.absoluteString
     }
 
+    private func uploadBannerIfNeeded(using account: GeneratedNostrAccount) async throws -> String? {
+        guard let selectedBannerData, !selectedBannerData.isEmpty else { return nil }
+
+        let filename = "banner-\(Int(Date().timeIntervalSince1970)).\(selectedBannerFileExtension)"
+        let url = try await ProfileMediaUploadService.shared.uploadProfileImage(
+            data: selectedBannerData,
+            mimeType: selectedBannerMIMEType,
+            filename: filename,
+            nsec: account.nsec
+        )
+        return url.absoluteString
+    }
+
+    private func applySelectedButtonStyle() {
+        appSettings.primaryColor = selectedButtonStyleOption.primaryColor
+        appSettings.buttonTextColor = selectedButtonStyleOption.buttonTextColor
+
+        switch selectedButtonStyleOption {
+        case .solid:
+            appSettings.clearButtonGradient()
+        case .holographic(let option):
+            appSettings.buttonGradientOption = option
+        }
+    }
+
     private func publishProfileMetadata(
         account: GeneratedNostrAccount,
         displayName: String,
         handle: String,
         about: String,
-        avatarURLString: String?
+        avatarURLString: String?,
+        bannerURLString: String?
     ) async throws {
         guard let keypair = Keypair(nsec: account.nsec.lowercased()) else {
             throw AuthManagerError.invalidNsecOrHex
@@ -909,6 +1081,7 @@ struct SignupOnboardingView: View {
 
         let fields = EditableProfileFields(
             avatarURLString: avatarURLString ?? "",
+            bannerURLString: bannerURLString ?? "",
             displayName: displayName,
             handle: handle,
             about: about,
@@ -972,6 +1145,210 @@ struct SignupOnboardingView: View {
             object: nil,
             userInfo: ["pubkey": account.pubkey.lowercased()]
         )
+    }
+
+    private struct OnboardingImageUploadButton: View {
+        let title: String
+        let systemImage: String
+        let isLoading: Bool
+        let foregroundColor: Color
+        let backgroundGradient: LinearGradient
+
+        var body: some View {
+            HStack(spacing: 8) {
+                if isLoading {
+                    ProgressView()
+                        .controlSize(.small)
+                        .tint(foregroundColor)
+                } else {
+                    Image(systemName: systemImage)
+                        .font(.subheadline.weight(.semibold))
+                }
+
+                Text(title)
+                    .font(.footnote.weight(.semibold))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.82)
+            }
+            .frame(maxWidth: .infinity, minHeight: 42)
+            .foregroundStyle(foregroundColor)
+            .background(backgroundGradient, in: Capsule(style: .continuous))
+            .overlay {
+                Capsule(style: .continuous)
+                    .stroke(Color.black.opacity(0.10), lineWidth: 0.8)
+            }
+        }
+    }
+
+    private struct OnboardingProfilePreviewCard: View {
+        let displayName: String
+        let handle: String
+        let about: String
+        let avatarPreviewImage: UIImage?
+        let bannerPreviewImage: UIImage?
+        let styleOption: OnboardingButtonStyleOption
+
+        private static let bannerHeight: CGFloat = 132
+        private static let avatarSize: CGFloat = 82
+
+        var body: some View {
+            VStack(alignment: .leading, spacing: 0) {
+                previewBanner
+
+                VStack(alignment: .leading, spacing: 12) {
+                    HStack(alignment: .bottom, spacing: 12) {
+                        previewAvatar
+
+                        Spacer(minLength: 0)
+
+                        HStack(spacing: 8) {
+                            previewIconCapsule(systemImage: "qrcode")
+                            previewIconCapsule(systemImage: "ellipsis")
+                            previewFollowCapsule
+                        }
+                    }
+                    .frame(maxWidth: .infinity)
+
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(resolvedDisplayName)
+                            .font(.system(size: 24, weight: .heavy, design: .default))
+                            .foregroundStyle(.primary)
+                            .lineLimit(2)
+
+                        Text(resolvedHandle)
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                    }
+
+                    Text(resolvedAbout)
+                        .font(.body)
+                        .foregroundStyle(about.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? .secondary : .primary)
+                        .lineLimit(2)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .padding(.horizontal, 16)
+                .padding(.top, -(Self.avatarSize / 2))
+                .padding(.bottom, 16)
+            }
+            .frame(maxWidth: .infinity)
+            .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 28, style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: 28, style: .continuous)
+                    .stroke(Color(.separator).opacity(0.18), lineWidth: 0.8)
+            }
+            .clipShape(RoundedRectangle(cornerRadius: 28, style: .continuous))
+            .shadow(color: Color.black.opacity(0.08), radius: 18, y: 8)
+        }
+
+        private var resolvedDisplayName: String {
+            let trimmed = displayName.trimmingCharacters(in: .whitespacesAndNewlines)
+            return trimmed.isEmpty ? "Your Name" : trimmed
+        }
+
+        private var resolvedHandle: String {
+            let trimmed = handle.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !trimmed.isEmpty {
+                return "@\(trimmed)"
+            }
+
+            return "@halo"
+        }
+
+        private var resolvedAbout: String {
+            let trimmed = about.trimmingCharacters(in: .whitespacesAndNewlines)
+            return trimmed.isEmpty ? "Your bio preview will appear here." : trimmed
+        }
+
+        private var previewBanner: some View {
+            ZStack {
+                previewBannerContent
+
+                LinearGradient(
+                    colors: [
+                        Color.black.opacity(0.08),
+                        .clear,
+                        Color(.secondarySystemBackground).opacity(0.34)
+                    ],
+                    startPoint: .top,
+                    endPoint: .bottom
+                )
+            }
+            .frame(maxWidth: .infinity)
+            .frame(height: Self.bannerHeight)
+            .clipped()
+        }
+
+        @ViewBuilder
+        private var previewBannerContent: some View {
+            if let bannerPreviewImage {
+                Image(uiImage: bannerPreviewImage)
+                    .resizable()
+                    .scaledToFill()
+            } else {
+                ZStack {
+                    Rectangle()
+                        .fill(styleOption.bannerGradient)
+
+                    Circle()
+                        .fill(Color.white.opacity(styleOption.isHolographic ? 0.36 : 0.22))
+                        .frame(width: 126, height: 126)
+                        .blur(radius: 20)
+                        .offset(x: 116, y: -38)
+
+                    Circle()
+                        .fill(styleOption.primaryColor.opacity(0.24))
+                        .frame(width: 154, height: 154)
+                        .blur(radius: 24)
+                        .offset(x: -118, y: 48)
+                }
+            }
+        }
+
+        private var previewAvatar: some View {
+            Group {
+                if let avatarPreviewImage {
+                    Image(uiImage: avatarPreviewImage)
+                        .resizable()
+                        .scaledToFill()
+                } else {
+                    ZStack {
+                        Circle()
+                            .fill(styleOption.buttonGradient)
+
+                        Text(String(resolvedDisplayName.prefix(1)).uppercased())
+                            .font(.system(size: 30, weight: .bold, design: .rounded))
+                            .foregroundStyle(styleOption.buttonTextColor)
+                    }
+                }
+            }
+            .frame(width: Self.avatarSize, height: Self.avatarSize)
+            .background(Circle().fill(Color(.systemBackground)))
+            .clipShape(Circle())
+            .overlay {
+                Circle().stroke(Color(.secondarySystemBackground), lineWidth: 4)
+            }
+            .overlay {
+                Circle().stroke(Color(.separator).opacity(0.22), lineWidth: 0.8)
+            }
+            .shadow(color: Color.black.opacity(0.12), radius: 12, y: 7)
+        }
+
+        private func previewIconCapsule(systemImage: String) -> some View {
+            Image(systemName: systemImage)
+                .font(.system(size: 14, weight: .semibold))
+                .foregroundStyle(.primary)
+                .frame(width: 38, height: 36)
+                .background(Color(.tertiarySystemFill), in: Capsule(style: .continuous))
+        }
+
+        private var previewFollowCapsule: some View {
+            Text("Follow")
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(styleOption.buttonTextColor)
+                .padding(.horizontal, 14)
+                .frame(height: 36)
+                .background(styleOption.buttonGradient, in: Capsule(style: .continuous))
+        }
     }
 
     private func suggestedHandle(from value: String) -> String {
@@ -1044,66 +1421,5 @@ private actor OnboardingProfilePublishCoordinator {
             throwing: firstError ?? RelayClientError.publishRejected("Couldn’t publish your profile yet.")
         )
         continuation = nil
-    }
-}
-
-private struct SignupAvatarPickerLabel: View {
-    let previewImage: UIImage?
-    let displayName: String
-    let accentColor: Color
-    let isLoadingAvatar: Bool
-
-    var body: some View {
-        ZStack(alignment: .bottomTrailing) {
-            avatarPreview
-
-            ZStack {
-                Circle()
-                    .fill(accentColor)
-                    .frame(width: 34, height: 34)
-
-                if isLoadingAvatar {
-                    ProgressView()
-                        .controlSize(.small)
-                        .tint(.white)
-                } else {
-                    Image(systemName: "arrow.up.circle.fill")
-                        .font(.system(size: 16, weight: .semibold))
-                        .foregroundStyle(.white)
-                }
-            }
-            .shadow(color: .black.opacity(0.16), radius: 10, y: 4)
-        }
-    }
-
-    private var avatarPreview: some View {
-        Group {
-            if let previewImage {
-                Image(uiImage: previewImage)
-                    .resizable()
-                    .scaledToFill()
-            } else {
-                ZStack {
-                    Circle()
-                        .fill(accentColor.opacity(0.14))
-
-                    if let initial = displayName.trimmingCharacters(in: .whitespacesAndNewlines).first {
-                        Text(String(initial).uppercased())
-                            .font(.system(size: 42, weight: .bold, design: .rounded))
-                            .foregroundStyle(accentColor)
-                    } else {
-                        Image(systemName: "person.fill")
-                            .font(.system(size: 34, weight: .semibold))
-                            .foregroundStyle(accentColor)
-                    }
-                }
-            }
-        }
-        .frame(width: 116, height: 116)
-        .clipShape(Circle())
-        .overlay {
-            Circle()
-                .stroke(Color(.separator).opacity(0.25), lineWidth: 1)
-        }
     }
 }

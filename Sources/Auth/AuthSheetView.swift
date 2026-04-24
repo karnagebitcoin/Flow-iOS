@@ -793,23 +793,23 @@ struct AuthSheetView: View {
                         .resizable()
                         .scaledToFill()
                 default:
-                    accountAvatarFallback(name: fallbackName)
+                    accountAvatarFallback(name: fallbackName, account: account)
                 }
             }
             .frame(width: 42, height: 42)
             .clipShape(Circle())
         } else {
-            accountAvatarFallback(name: fallbackName)
+            accountAvatarFallback(name: fallbackName, account: account)
         }
     }
 
-    private func accountAvatarFallback(name: String) -> some View {
+    private func accountAvatarFallback(name: String, account: AuthAccount) -> some View {
         ZStack {
             Circle()
-                .fill(appSettings.themePalette.secondaryBackground)
+                .fill(appSettings.avatarFallbackGradient(forAccountPubkey: account.pubkey))
             Text(String(name.prefix(1)).uppercased())
                 .font(.subheadline.weight(.semibold))
-                .foregroundStyle(appSettings.themePalette.mutedForeground)
+                .foregroundStyle(appSettings.avatarFallbackForeground(forAccountPubkey: account.pubkey))
         }
         .frame(width: 42, height: 42)
     }

@@ -23,6 +23,14 @@ extension SearchViewModel {
             return value
         }
 
+        var normalizedPeopleOnlyProfileQuery: String {
+            var value = normalizedProfileQuery
+            while value.hasPrefix("#") {
+                value.removeFirst()
+            }
+            return value
+        }
+
         var normalizedHashtag: String? {
             let value = trimmed.lowercased()
             guard value.hasPrefix("#") else { return nil }

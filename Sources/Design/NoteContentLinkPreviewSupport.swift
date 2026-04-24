@@ -252,13 +252,13 @@ private struct YouTubeEmbedWebView: UIViewRepresentable {
     }
 
     private static var refererBaseURL: URL? {
-        let bundleIdentifier = Bundle.main.bundleIdentifier ?? "com.21media.flow"
+        let bundleIdentifier = Bundle.main.bundleIdentifier ?? "com.21media.haloapp"
         let safeIdentifier = bundleIdentifier
             .lowercased()
             .filter { character in
                 character.isLetter || character.isNumber || character == "." || character == "-"
             }
-        return URL(string: "https://\(safeIdentifier.isEmpty ? "com.21media.flow" : safeIdentifier)")
+        return URL(string: "https://\(safeIdentifier.isEmpty ? "com.21media.haloapp" : safeIdentifier)")
     }
 }
 

@@ -262,11 +262,11 @@ struct HaloLinkThreadView: View {
                     ZStack {
                         if isSending {
                             ProgressView()
-                                .tint(Color.white)
+                                .tint(appSettings.buttonTextColor)
                         } else {
                             Image(systemName: "arrow.up")
                                 .font(.system(size: 16, weight: .bold))
-                                .foregroundStyle(Color.white)
+                                .foregroundStyle(appSettings.buttonTextColor)
                         }
                     }
                     .frame(width: 38, height: 38)

@@ -18,7 +18,6 @@
 		09567A15BABAB8FA8BE15F47 /* welcome_onboarding_unicorn.json in Resources */ = {isa = PBXBuildFile; fileRef = AD38ADD0555295271C55F01F /* welcome_onboarding_unicorn.json */; };
 		09ACD29A39ACB01B3B0379CA /* PollModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = A34E396AA961290CFC2A1B4F /* PollModels.swift */; };
 		0A3981CFDB4B11AD524F5048 /* SpaceGrotesk.ttf in Resources */ = {isa = PBXBuildFile; fileRef = 0799BCF380BFFF7B4339FE90 /* SpaceGrotesk.ttf */; };
-		0B1B3CE64991DA949BFD425B /* FlowPlusPaywallView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8467D457DCF59811885D322C /* FlowPlusPaywallView.swift */; };
 		0C42082E0DFCC5C582AE9588 /* NoteContentLinkResolverTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 274D76AB1562C07241785593 /* NoteContentLinkResolverTests.swift */; };
 		0C8214656677648979E643C1 /* NoteReportPublishServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8EB3D526182A01F061DF4B07 /* NoteReportPublishServiceTests.swift */; };
 		0E23BAC793C3C26E9546124E /* AuthModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = EFEC568C11975A59AEBD528D /* AuthModels.swift */; };
@@ -69,11 +68,12 @@
 		428E63D458E51F56026A14B8 /* NostrModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = C54BBAD0B3A458A308239CEB /* NostrModels.swift */; };
 		43D95BC744D11FCFF9254856 /* HashtagFeedView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F02524C65217A89086409981 /* HashtagFeedView.swift */; };
 		45014213AF9757F51F46A68F /* Nacelle-Bold.otf in Resources */ = {isa = PBXBuildFile; fileRef = 89FC9F78F91139C80A90BADD /* Nacelle-Bold.otf */; };
-		471D2A71946F997761A9907A /* SettingsFlowPlusView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E06B001C9CF614F66BD2C92B /* SettingsFlowPlusView.swift */; };
+		471D2A71946F997761A9907A /* SettingsCustomizationViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = E06B001C9CF614F66BD2C92B /* SettingsCustomizationViews.swift */; };
 		47CE76B972995AF553AE736A /* SearchViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 668778178F4FBD32B9CAB751 /* SearchViewModel.swift */; };
 		49A33778F8CC7699D01EA0C8 /* InterestFeedStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 21DF8275F493101456489799 /* InterestFeedStore.swift */; };
 		4BC2FFFAC8379D8E310409DF /* HaloLinkThreadView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 80377C2D08C763557460F183 /* HaloLinkThreadView.swift */; };
 		4C5B1231F1007DD4B5F0A634 /* ImageRemixEditorProcessing.swift in Sources */ = {isa = PBXBuildFile; fileRef = 419BE95AAE93709A1913E5F5 /* ImageRemixEditorProcessing.swift */; };
+		4DE483109FBEF1EBF7839014 /* AppIconRotator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 72B16F2A4EB630E35E4187D6 /* AppIconRotator.swift */; };
 		4E68B42AA7722487D13569A6 /* HomeFeedModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = EF4CE20A439FB46B16EB9DA7 /* HomeFeedModels.swift */; };
 		51C692A0B2D75FC091A58283 /* KlipyGIFServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3BBC297781EB6C719EE31929 /* KlipyGIFServiceTests.swift */; };
 		52C61C33CE36A6629F3F83C3 /* NostrRelayClientTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D6D17F2EC311D3203D8950E1 /* NostrRelayClientTests.swift */; };
@@ -175,6 +175,7 @@
 		D8801A8154FE6B9B00D29793 /* AppTypography.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7CF25F42AF5E640A0958D88A /* AppTypography.swift */; };
 		D98B0DA60345F2C5664DA521 /* nostr_bech32.c in Sources */ = {isa = PBXBuildFile; fileRef = 627CF27D95376BB59328988A /* nostr_bech32.c */; };
 		DB8A3EE54A1AE0AC7FE565FE /* amount.c in Sources */ = {isa = PBXBuildFile; fileRef = D382CA88F2FB1877F74BD28E /* amount.c */; };
+		DBD2F9505024B99D1CA0131C /* AppIconRotatorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = FE5C1D90B3B680AC5BD80C0A /* AppIconRotatorTests.swift */; };
 		DC138907E4A8BE6E1DA26845 /* ImageRemixEditorModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = BD4A3A69CDBE8348D50E5A7D /* ImageRemixEditorModels.swift */; };
 		DC1A4FA02CA1493DFCB3871B /* sha256.c in Sources */ = {isa = PBXBuildFile; fileRef = F5E3D05EDE5E628D6BD6A2FB /* sha256.c */; };
 		DC2CED795AF182257A442232 /* MuteStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = D3152920AED2041FDC71354A /* MuteStore.swift */; };
@@ -187,7 +188,6 @@
 		DF564A10D83D14512B25E8FE /* NostrFeedServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 58C5041AD8041427E01D7B42 /* NostrFeedServiceTests.swift */; };
 		E0980B0548BFD98289F8E0FB /* PollVotePublishService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4CA581A5CD530A9751921793 /* PollVotePublishService.swift */; };
 		E1A61F25CF734B78D490029C /* NSpamClassifier.swift in Sources */ = {isa = PBXBuildFile; fileRef = DEB3EA876FF96121BBE6F7EC /* NSpamClassifier.swift */; };
-		E34D46EFD13A408C49C3A703 /* FlowPremiumStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 94E4428036681D2C32127F98 /* FlowPremiumStore.swift */; };
 		E3806E3A54B945E2841840CF /* NoteReactionStatsService.swift in Sources */ = {isa = PBXBuildFile; fileRef = DC4B8630B0EC755F3A8BF84E /* NoteReactionStatsService.swift */; };
 		E3CB4D576B5D27EA0202781E /* HashtagRoute.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2C03099522A39619940DA10A /* HashtagRoute.swift */; };
 		E3D1F26341B4825C6652FE2C /* AppThemeBackgroundView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D50AC42A15DAA0E8634194B6 /* AppThemeBackgroundView.swift */; };
@@ -346,6 +346,7 @@
 		6EA07E7BA1105A303737FC2A /* FollowingListView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FollowingListView.swift; sourceTree = "<group>"; };
 		71C6CD017B6EEEE4E003688E /* Nacelle-Regular.otf */ = {isa = PBXFileReference; lastKnownFileType = file; path = "Nacelle-Regular.otf"; sourceTree = "<group>"; };
 		7215D735EE8084586736A003 /* hash_u5.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = hash_u5.c; sourceTree = "<group>"; };
+		72B16F2A4EB630E35E4187D6 /* AppIconRotator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppIconRotator.swift; sourceTree = "<group>"; };
 		73207CDE546C3885AE73A5F9 /* Flow-Bridging-Header.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = "Flow-Bridging-Header.h"; sourceTree = "<group>"; };
 		73524C099B08853D1740EFED /* ComposeSpeechTranscriber.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ComposeSpeechTranscriber.swift; sourceTree = "<group>"; };
 		73A09E5C5DEB394F9F612B36 /* ThreadReplyPublishService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ThreadReplyPublishService.swift; sourceTree = "<group>"; };
@@ -368,7 +369,6 @@
 		8264623494917B38C1140FFF /* ComposeKlipyGIFPickerSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ComposeKlipyGIFPickerSheet.swift; sourceTree = "<group>"; };
 		83D09F5E927339516641BC1C /* content_parser.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = content_parser.c; sourceTree = "<group>"; };
 		845975B17AAA4A48E4DEA9A4 /* AuthSheetView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AuthSheetView.swift; sourceTree = "<group>"; };
-		8467D457DCF59811885D322C /* FlowPlusPaywallView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FlowPlusPaywallView.swift; sourceTree = "<group>"; };
 		85EAD6ECBAD9C4846932EE1C /* NoteContentParser.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NoteContentParser.swift; sourceTree = "<group>"; };
 		87F4B84828ED1C578A57652F /* HomeFeedViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HomeFeedViewModel.swift; sourceTree = "<group>"; };
 		88E10288F9317E8E9959E77E /* FeedRowView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FeedRowView.swift; sourceTree = "<group>"; };
@@ -381,8 +381,6 @@
 		925F46E0FC75C191103D09E9 /* AppHaptics.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppHaptics.swift; sourceTree = "<group>"; };
 		92745AAE627B22A05C5801E1 /* ProfileEventService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProfileEventService.swift; sourceTree = "<group>"; };
 		93F2DE09E60173B3EF41F370 /* RelayMessageParser.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RelayMessageParser.swift; sourceTree = "<group>"; };
-		946FDA8DACD7D0BE1301214A /* FlowPlus.storekit */ = {isa = PBXFileReference; lastKnownFileType = text; path = FlowPlus.storekit; sourceTree = "<group>"; };
-		94E4428036681D2C32127F98 /* FlowPremiumStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FlowPremiumStore.swift; sourceTree = "<group>"; };
 		96D4B5BA28A24BEE53F56796 /* HomeFeedFilterStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HomeFeedFilterStore.swift; sourceTree = "<group>"; };
 		98FAC17906D393F287394FBD /* AuthStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AuthStore.swift; sourceTree = "<group>"; };
 		9906B019376E45D30E7BB2EF /* SignupOnboardingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SignupOnboardingView.swift; sourceTree = "<group>"; };
@@ -442,7 +440,7 @@
 		DC4B8630B0EC755F3A8BF84E /* NoteReactionStatsService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NoteReactionStatsService.swift; sourceTree = "<group>"; };
 		DE18DF9ADAB74562AC5448C7 /* utf8.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = utf8.c; sourceTree = "<group>"; };
 		DEB3EA876FF96121BBE6F7EC /* NSpamClassifier.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NSpamClassifier.swift; sourceTree = "<group>"; };
-		E06B001C9CF614F66BD2C92B /* SettingsFlowPlusView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsFlowPlusView.swift; sourceTree = "<group>"; };
+		E06B001C9CF614F66BD2C92B /* SettingsCustomizationViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsCustomizationViews.swift; sourceTree = "<group>"; };
 		E1F6836BDC0C280FB41674C1 /* SettingsSheetStateTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsSheetStateTests.swift; sourceTree = "<group>"; };
 		E304D4E8ED48016DD1E5DFEA /* DMSans.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = DMSans.ttf; sourceTree = "<group>"; };
 		E3D6E2FE9C608FF26B59D358 /* AppFontOption.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppFontOption.swift; sourceTree = "<group>"; };
@@ -469,6 +467,7 @@
 		FB8E0B2EBA2BA6A0BA1C44D8 /* ImageRemixEditorControls.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImageRemixEditorControls.swift; sourceTree = "<group>"; };
 		FDD34AFC463D6093EDDBD992 /* SearchViewComponents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SearchViewComponents.swift; sourceTree = "<group>"; };
 		FE1CA57053B9FBB868AB0B71 /* ComposeNotePublishServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ComposeNotePublishServiceTests.swift; sourceTree = "<group>"; };
+		FE5C1D90B3B680AC5BD80C0A /* AppIconRotatorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppIconRotatorTests.swift; sourceTree = "<group>"; };
 		FF3A46097B1D78C6E75A1E21 /* ComposeNoteSheetModeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ComposeNoteSheetModeTests.swift; sourceTree = "<group>"; };
 		FFE5B88D630B5518425AD6DA /* list.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = list.c; sourceTree = "<group>"; };
 /* End PBXFileReference section */
@@ -553,6 +552,7 @@
 			children = (
 				E3D6E2FE9C608FF26B59D358 /* AppFontOption.swift */,
 				925F46E0FC75C191103D09E9 /* AppHaptics.swift */,
+				72B16F2A4EB630E35E4187D6 /* AppIconRotator.swift */,
 				D3535F42ABCFA81A554B26FE /* AppSettingsStore.swift */,
 				D50AC42A15DAA0E8634194B6 /* AppThemeBackgroundView.swift */,
 				373455F6CDF99124C3D9A51F /* AppThemePalette.swift */,
@@ -561,7 +561,6 @@
 				BFE1331CC7D26B2FEB4A9096 /* Flow.entitlements */,
 				6018FB948D5F4B745EA4EFCE /* FlowApp.swift */,
 				4B67EBE0499A7E029AD05A18 /* FlowMediaCache.swift */,
-				94E4428036681D2C32127F98 /* FlowPremiumStore.swift */,
 				AED0817A296804831BD0F16D /* KlipyGIFService.swift */,
 				5AE5072564E400712902A306 /* LiveReactsOverlay.swift */,
 				4DE8EBF20CE78C8EC67DDEF4 /* MainTabShellView.swift */,
@@ -629,6 +628,7 @@
 			isa = PBXGroup;
 			children = (
 				AFF76C308688241A3E60CE4D /* AppThemeOptionTests.swift */,
+				FE5C1D90B3B680AC5BD80C0A /* AppIconRotatorTests.swift */,
 				9C29217F6EE35F0342114248 /* AuthManagerTests.swift */,
 				FE1CA57053B9FBB868AB0B71 /* ComposeNotePublishServiceTests.swift */,
 				FF3A46097B1D78C6E75A1E21 /* ComposeNoteSheetModeTests.swift */,
@@ -651,14 +651,6 @@
 				E1F6836BDC0C280FB41674C1 /* SettingsSheetStateTests.swift */,
 			);
 			path = Tests;
-			sourceTree = "<group>";
-		};
-		7C785F1B711FFF73E12997B8 /* StoreKit */ = {
-			isa = PBXGroup;
-			children = (
-				946FDA8DACD7D0BE1301214A /* FlowPlus.storekit */,
-			);
-			path = StoreKit;
 			sourceTree = "<group>";
 		};
 		800F7B466333857557EB2D17 /* ShareExtension */ = {
@@ -774,7 +766,6 @@
 		B3AFA4CA1416B223E236ED9F /* Home */ = {
 			isa = PBXGroup;
 			children = (
-				8467D457DCF59811885D322C /* FlowPlusPaywallView.swift */,
 				EF4CE20A439FB46B16EB9DA7 /* HomeFeedModels.swift */,
 				D0E539613B4947ABF1C8C766 /* HomeFeedTrustGraph.swift */,
 				3BF58C9E17E69DC8787A73BC /* HomeFeedView.swift */,
@@ -787,7 +778,7 @@
 				5D22A974B5C2FC1D46ED7DDC /* SettingsCustomFeedsView.swift */,
 				DBBF1C94E1CCDDCF2109ABF7 /* SettingsFeedPeopleSupport.swift */,
 				4E1013C51262B3CCECCD3F2C /* SettingsFeedsView.swift */,
-				E06B001C9CF614F66BD2C92B /* SettingsFlowPlusView.swift */,
+				E06B001C9CF614F66BD2C92B /* SettingsCustomizationViews.swift */,
 				9E39C12A3FC20BE2CCCAF879 /* SettingsGeneralView.swift */,
 				67F2F5076A590F9C3206D189 /* SettingsInterestsFeedView.swift */,
 				F5C969F08ACC15FE7DC675C3 /* SettingsMediaView.swift */,
@@ -857,7 +848,6 @@
 				800F7B466333857557EB2D17 /* ShareExtension */,
 				C274BB0896F60F0842C35B35 /* Sources */,
 				C08F6627052C384248024D59 /* src */,
-				7C785F1B711FFF73E12997B8 /* StoreKit */,
 				6DE6489C90F78047C579C068 /* Tests */,
 				12E09804F282BABC47EBF4CF /* Products */,
 			);
@@ -1164,6 +1154,7 @@
 				13035ACC9DB792CC0923C3E1 /* ActivityViewModel.swift in Sources */,
 				331005DE6E26309362E77DBF /* AppFontOption.swift in Sources */,
 				0407D100155DCC5BB9C49A4E /* AppHaptics.swift in Sources */,
+				4DE483109FBEF1EBF7839014 /* AppIconRotator.swift in Sources */,
 				7C06FF22A41B51DEC6AB475F /* AppSettingsStore.swift in Sources */,
 				E3D1F26341B4825C6652FE2C /* AppThemeBackgroundView.swift in Sources */,
 				697EDCC189A914F33FE7F205 /* AppThemePalette.swift in Sources */,
@@ -1194,8 +1185,6 @@
 				863D8F5E77A252D216D3BAF9 /* FlowMediaCache.swift in Sources */,
 				B24F4D1F60A87873BF65DEAE /* FlowNostrDB.swift in Sources */,
 				6C6A9BF584E1E533D1392A4C /* FlowNostrDBShim.c in Sources */,
-				0B1B3CE64991DA949BFD425B /* FlowPlusPaywallView.swift in Sources */,
-				E34D46EFD13A408C49C3A703 /* FlowPremiumStore.swift in Sources */,
 				8EDED286A4DEBE2CB6B23BC0 /* FlowSharedComposeDraft.swift in Sources */,
 				D2194AE6438D861CC9AFEB79 /* FollowStore.swift in Sources */,
 				E99FCED8B4AC807A09CFDFFD /* FollowingListRoute.swift in Sources */,
@@ -1280,7 +1269,7 @@
 				1E98E7D696A1316E33D08107 /* SettingsCustomFeedsView.swift in Sources */,
 				2294A09E33CE5EA9823107A8 /* SettingsFeedPeopleSupport.swift in Sources */,
 				0292A13AA7AF6B7B8FD3C2D7 /* SettingsFeedsView.swift in Sources */,
-				471D2A71946F997761A9907A /* SettingsFlowPlusView.swift in Sources */,
+				471D2A71946F997761A9907A /* SettingsCustomizationViews.swift in Sources */,
 				547ECEF2C99BFB0185F325D5 /* SettingsGeneralView.swift in Sources */,
 				14EC075C2F21A12F40EDD6BF /* SettingsInterestsFeedView.swift in Sources */,
 				34CC6F578DBB638FCD7A1D78 /* SettingsMediaView.swift in Sources */,
@@ -1330,6 +1319,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				E48CFDD7123D3D29314DBA5E /* AppThemeOptionTests.swift in Sources */,
+				DBD2F9505024B99D1CA0131C /* AppIconRotatorTests.swift in Sources */,
 				711BCE1CD02B6E003FC62C51 /* AuthManagerTests.swift in Sources */,
 				C7F69B0BD5793A7B7E83E9A6 /* ComposeNotePublishServiceTests.swift in Sources */,
 				FDEE4E11D51BA0548AB96A5A /* ComposeNoteSheetModeTests.swift in Sources */,
@@ -1438,6 +1428,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				BUNDLE_LOADER = "$(TEST_HOST)";
+				DEVELOPMENT_TEAM = 9LZ5TSWPZ9;
 				GENERATE_INFOPLIST_FILE = YES;
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -1455,12 +1446,14 @@
 		3891A116B2A789B1EF826D8B /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				ASSETCATALOG_COMPILER_ALTERNATE_APPICON_NAMES = "AppIcon-Weekly-01 AppIcon-Weekly-02 AppIcon-Weekly-03 AppIcon-Weekly-04 AppIcon-Weekly-05 AppIcon-Weekly-06 AppIcon-Weekly-07 AppIcon-Weekly-08 AppIcon-Weekly-09 AppIcon-Weekly-10 AppIcon-Weekly-11 AppIcon-Weekly-12 AppIcon-Weekly-13";
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_ENTITLEMENTS = Sources/App/Flow.entitlements;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 9LZ5TSWPZ9;
 				GCC_C_LANGUAGE_STANDARD = gnu11;
 				GCC_PREPROCESSOR_DEFINITIONS = (
 					"$(inherited)",
@@ -1484,7 +1477,7 @@
 					"@executable_path/Frameworks",
 				);
 				MARKETING_VERSION = 0.1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = com.21media.flow;
+				PRODUCT_BUNDLE_IDENTIFIER = com.21media.haloapp;
 				PRODUCT_NAME = Flow;
 				SDKROOT = iphoneos;
 				SWIFT_OBJC_BRIDGING_HEADER = "Sources/NostrDB/Flow-Bridging-Header.h";
@@ -1558,6 +1551,7 @@
 				CODE_SIGN_ENTITLEMENTS = Sources/ShareExtension/ShareExtension.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 9LZ5TSWPZ9;
 				INFOPLIST_FILE = Sources/ShareExtension/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = Halo;
 				IPHONEOS_DEPLOYMENT_TARGET = 26.0;
@@ -1567,7 +1561,7 @@
 					"@executable_path/../../Frameworks",
 				);
 				MARKETING_VERSION = 0.1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = com.21media.flow.ShareExtension;
+				PRODUCT_BUNDLE_IDENTIFIER = com.21media.haloapp.ShareExtension;
 				PRODUCT_NAME = FlowShareExtension;
 				SDKROOT = iphoneos;
 				SWIFT_VERSION = 5.0;
@@ -1579,6 +1573,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				BUNDLE_LOADER = "$(TEST_HOST)";
+				DEVELOPMENT_TEAM = 9LZ5TSWPZ9;
 				GENERATE_INFOPLIST_FILE = YES;
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -1600,6 +1595,7 @@
 				CODE_SIGN_ENTITLEMENTS = Sources/ShareExtension/ShareExtension.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 9LZ5TSWPZ9;
 				INFOPLIST_FILE = Sources/ShareExtension/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = Halo;
 				IPHONEOS_DEPLOYMENT_TARGET = 26.0;
@@ -1609,7 +1605,7 @@
 					"@executable_path/../../Frameworks",
 				);
 				MARKETING_VERSION = 0.1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = com.21media.flow.ShareExtension;
+				PRODUCT_BUNDLE_IDENTIFIER = com.21media.haloapp.ShareExtension;
 				PRODUCT_NAME = FlowShareExtension;
 				SDKROOT = iphoneos;
 				SWIFT_VERSION = 5.0;
@@ -1620,12 +1616,14 @@
 		CBFA6DECCA0D9979D5698794 /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				ASSETCATALOG_COMPILER_ALTERNATE_APPICON_NAMES = "AppIcon-Weekly-01 AppIcon-Weekly-02 AppIcon-Weekly-03 AppIcon-Weekly-04 AppIcon-Weekly-05 AppIcon-Weekly-06 AppIcon-Weekly-07 AppIcon-Weekly-08 AppIcon-Weekly-09 AppIcon-Weekly-10 AppIcon-Weekly-11 AppIcon-Weekly-12 AppIcon-Weekly-13";
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_ENTITLEMENTS = Sources/App/Flow.entitlements;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 9LZ5TSWPZ9;
 				GCC_C_LANGUAGE_STANDARD = gnu11;
 				GCC_PREPROCESSOR_DEFINITIONS = (
 					"$(inherited)",
@@ -1649,7 +1647,7 @@
 					"@executable_path/Frameworks",
 				);
 				MARKETING_VERSION = 0.1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = com.21media.flow;
+				PRODUCT_BUNDLE_IDENTIFIER = com.21media.haloapp;
 				PRODUCT_NAME = Flow;
 				SDKROOT = iphoneos;
 				SWIFT_OBJC_BRIDGING_HEADER = "Sources/NostrDB/Flow-Bridging-Header.h";

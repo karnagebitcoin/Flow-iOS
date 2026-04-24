@@ -3,7 +3,6 @@ import SwiftUI
 struct SettingsView: View {
     @Environment(\.dismiss) private var dismiss
     @EnvironmentObject private var appSettings: AppSettingsStore
-    @EnvironmentObject private var premiumStore: FlowPremiumStore
     @EnvironmentObject private var breakReminderCoordinator: BreakReminderCoordinator
     @EnvironmentObject private var relaySettings: RelaySettingsStore
 
@@ -73,17 +72,8 @@ struct SettingsView: View {
                                 value: .connection
                             )
                         }
-
-                        ThemedSettingsSection {
-                            SettingsValueNavigationRow(
-                                title: "Halo Plus",
-                                subtitle: flowPlusSummaryText,
-                                systemImage: "sparkles",
-                                value: .flowPlus
-                            )
-                        }
                     }
-                    .padding(.top, -10)
+                    .padding(.top, -4)
                 }
                 .navigationTitle("Settings")
                 .navigationBarTitleDisplayMode(.inline)
@@ -121,22 +111,6 @@ struct SettingsView: View {
         return "Connected to \(count) \(count == 1 ? "source" : "sources")"
     }
 
-    private var flowPlusSummaryText: String {
-        if premiumStore.isFlowPlusActive {
-            return "Themes and typography unlocked"
-        }
-
-        if let previewTheme = appSettings.previewTheme, previewTheme.requiresFlowPlus {
-            return "Previewing \(previewTheme.title)"
-        }
-
-        if appSettings.hasFlowPlusCustomizationAccess {
-            return "Temporary testing unlock active"
-        }
-
-        return "Themes, typography, and extras"
-    }
-
     private var navigationPathBinding: Binding<[SettingsDestination]> {
         Binding(
             get: { sheetState.navigationPath },
@@ -162,8 +136,6 @@ struct SettingsView: View {
                     sheetState.isShowingPrimaryColorPicker = true
                 }
             )
-        case .flowPlus:
-            SettingsFlowPlusView()
         case .feeds:
             SettingsFeedsView()
         case .notifications:
@@ -194,7 +166,6 @@ final class SettingsSheetState: ObservableObject {
 enum SettingsDestination: Hashable {
     case general
     case appearance
-    case flowPlus
     case feeds
     case notifications
     case media

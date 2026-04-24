@@ -2023,13 +2023,13 @@ private struct ComposePublishToolbarButton: View {
                 if isPublishing {
                     ProgressView()
                         .controlSize(.small)
-                        .tint(.white)
+                        .tint(appSettings.buttonTextColor)
                 } else {
                     Text(title)
                 }
             }
             .font(.subheadline.weight(.semibold))
-            .foregroundStyle(.white)
+            .foregroundStyle(appSettings.buttonTextColor)
             .padding(.horizontal, 16)
             .padding(.vertical, 8)
             .background(appSettings.primaryGradient, in: Capsule())
@@ -2052,7 +2052,8 @@ private struct ComposeToolbarAvatarView: View {
             avatarURL: avatarURL,
             fallbackText: fallbackSymbol,
             size: 34,
-            fallbackFont: .subheadline.weight(.semibold)
+            fallbackFont: .subheadline.weight(.semibold),
+            usesPrimaryFallback: true
         )
         .overlay {
             Circle()
@@ -2607,6 +2608,7 @@ private struct ComposeAvatarCircleView: View {
     let fallbackText: String
     let size: CGFloat
     let fallbackFont: Font
+    var usesPrimaryFallback = false
 
     var body: some View {
         Group {
@@ -2631,15 +2633,19 @@ private struct ComposeAvatarCircleView: View {
 
     private var placeholder: some View {
         ZStack {
-            Circle().fill(appSettings.themePalette.secondaryFill)
+            if usesPrimaryFallback {
+                Circle().fill(appSettings.primaryGradient)
+            } else {
+                Circle().fill(appSettings.themePalette.secondaryFill)
+            }
             if let firstCharacter = fallbackText.trimmingCharacters(in: .whitespacesAndNewlines).first {
                 Text(String(firstCharacter).uppercased())
                     .font(fallbackFont)
-                    .foregroundStyle(appSettings.themePalette.secondaryForeground)
+                    .foregroundStyle(usesPrimaryFallback ? appSettings.buttonTextColor : appSettings.themePalette.secondaryForeground)
             } else {
                 Image(systemName: "person.fill")
                     .font(fallbackFont)
-                    .foregroundStyle(appSettings.themePalette.secondaryForeground)
+                    .foregroundStyle(usesPrimaryFallback ? appSettings.buttonTextColor : appSettings.themePalette.secondaryForeground)
             }
         }
     }
@@ -2779,6 +2785,14 @@ private struct VideoPreviewPlayer: View {
     var body: some View {
         VideoPlayer(player: player)
             .background(Color.black)
+            .onAppear {
+                let audioSession = AVAudioSession.sharedInstance()
+                try? audioSession.setCategory(
+                    .playback,
+                    mode: .moviePlayback,
+                    options: [.mixWithOthers]
+                )
+            }
             .onDisappear {
                 player.pause()
             }

@@ -197,9 +197,9 @@ struct ImageRemixEditorView: View {
             } label: {
                 Image(systemName: "paperplane.fill")
                     .font(.system(size: 17, weight: .semibold))
-                    .foregroundStyle(.white)
+                    .foregroundStyle(appSettings.buttonTextColor)
                     .frame(width: 42, height: 42)
-                    .background(appSettings.primaryColor, in: Circle())
+                    .background(appSettings.primaryGradient, in: Circle())
             }
             .buttonStyle(.plain)
             .disabled(isBusy)
@@ -264,9 +264,13 @@ struct ImageRemixEditorView: View {
         HStack(spacing: 12) {
             Image(systemName: systemImage)
                 .font(.system(size: 15, weight: .semibold))
-                .foregroundStyle(.white)
+                .foregroundStyle(appSettings.buttonTextColor)
                 .frame(width: 34, height: 34)
-                .background(appSettings.primaryColor.opacity(0.88), in: Circle())
+                .background {
+                    Circle()
+                        .fill(appSettings.primaryGradient)
+                        .opacity(0.88)
+                }
 
             VStack(alignment: .leading, spacing: 2) {
                 Text(title)

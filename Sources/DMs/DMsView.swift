@@ -42,6 +42,8 @@ struct DMsView: View {
                 openThread(route)
             }
             .environmentObject(appSettings)
+            .environmentObject(auth)
+            .environmentObject(relaySettings)
         }
         .onAppear {
             notifyRootVisibilityChanged()
@@ -115,15 +117,21 @@ struct DMsView: View {
 
             Spacer(minLength: 12)
 
-            Button("Mark all as read") {
+            Button {
                 store.markAllAsRead()
+            } label: {
+                Image(systemName: "envelope.open")
+                    .font(.system(size: 17, weight: .semibold))
+                    .foregroundStyle(
+                        store.unreadMessageCount > 0
+                            ? appSettings.themeIconAccentColor
+                            : appSettings.themePalette.tertiaryForeground
+                    )
+                    .frame(width: 40, height: 40)
+                    .contentShape(Rectangle())
             }
-            .font(appSettings.appFont(.subheadline, weight: .medium))
-            .foregroundStyle(
-                store.unreadMessageCount > 0
-                    ? appSettings.themePalette.secondaryForeground
-                    : appSettings.themePalette.tertiaryForeground
-            )
+            .buttonStyle(.plain)
+            .accessibilityLabel("Mark all as read")
             .disabled(store.unreadMessageCount == 0)
 
             Button {
@@ -131,7 +139,7 @@ struct DMsView: View {
             } label: {
                 Label("New", systemImage: "plus")
                     .font(appSettings.appFont(.headline, weight: .semibold))
-                    .foregroundStyle(Color.white)
+                    .foregroundStyle(appSettings.buttonTextColor)
                     .padding(.horizontal, 18)
                     .padding(.vertical, 12)
                     .background(Capsule(style: .continuous).fill(appSettings.primaryGradient))
@@ -456,17 +464,37 @@ private struct HaloLinkInfoState: View {
 
 private struct HaloLinkNewConversationSheet: View {
     @Environment(\.dismiss) private var dismiss
+    @EnvironmentObject private var auth: AuthManager
     @EnvironmentObject private var appSettings: AppSettingsStore
+    @EnvironmentObject private var relaySettings: RelaySettingsStore
+    @ObservedObject private var followStore = FollowStore.shared
 
     @ObservedObject var store: HaloLinkStore
     let onOpenThread: (HaloLinkThreadRoute) -> Void
 
-    @State private var query = ""
+    @StateObject private var searchViewModel: SearchViewModel
     @State private var selectedRecipientPubkeys: [String] = []
-    @State private var searchResults: [ProfileSearchResult] = []
-    @State private var isSearching = false
+
+    @State private var selectedProfilesByPubkey: [String: SearchViewModel.ProfileMatch] = [:]
+
+    init(store: HaloLinkStore, onOpenThread: @escaping (HaloLinkThreadRoute) -> Void) {
+        let initialRelayURL = URL(
+            string: RelaySettingsStore.defaultReadRelayURLs.first ?? "wss://relay.damus.io/"
+        )!
+        _searchViewModel = StateObject(
+            wrappedValue: SearchViewModel(
+                relayURL: initialRelayURL,
+                trendingNotesLoader: { _, _, _, _, _ in [] },
+                supportsContentSearch: false
+            )
+        )
+        self.store = store
+        self.onOpenThread = onOpenThread
+    }
 
     var body: some View {
+        let visibleProfiles = displayedProfiles
+
         NavigationStack {
             List {
                 if !selectedRecipientPubkeys.isEmpty {
@@ -478,7 +506,7 @@ private struct HaloLinkNewConversationSheet: View {
                                         selectedRecipientPubkeys.removeAll { $0 == pubkey }
                                     } label: {
                                         HStack(spacing: 6) {
-                                            Text(store.displayName(for: pubkey))
+                                            Text(displayName(for: pubkey))
                                             Image(systemName: "xmark.circle.fill")
                                         }
                                         .font(appSettings.appFont(.subheadline, weight: .medium))
@@ -499,66 +527,59 @@ private struct HaloLinkNewConversationSheet: View {
                     }
                 }
 
-                Section {
-                    HStack(spacing: 10) {
-                        Image(systemName: "magnifyingglass")
-                            .foregroundStyle(appSettings.themePalette.secondaryForeground)
-
-                        TextField("Search people", text: $query)
-                            .textInputAutocapitalization(.never)
-                            .autocorrectionDisabled()
-
-                        if isSearching {
-                            ProgressView()
-                                .controlSize(.small)
+                if searchViewModel.isLoading && visibleProfiles.isEmpty {
+                    ForEach(0..<6, id: \.self) { _ in
+                        SearchLoadingRow()
+                            .searchListRow(horizontalInset: 16, verticalInset: 0)
+                    }
+                } else if visibleProfiles.isEmpty {
+                    SearchEmptyStateSection(
+                        errorMessage: searchViewModel.errorMessage,
+                        isSearching: searchViewModel.isSearching,
+                        searchText: searchViewModel.searchText
+                    ) {
+                        Task {
+                            await searchViewModel.refresh()
                         }
                     }
-                }
-
-                Section {
-                    ForEach(searchResults) { result in
-                        Button {
-                            toggleSelection(for: result.pubkey)
-                        } label: {
-                            HStack(spacing: 12) {
-                                AvatarView(
-                                    url: result.profile?.resolvedAvatarURL,
-                                    fallback: result.profile?.displayName ?? shortNostrIdentifier(result.pubkey),
-                                    size: 38
-                                )
-
-                                VStack(alignment: .leading, spacing: 2) {
-                                    Text(store.displayName(for: result.pubkey))
-                                        .font(appSettings.appFont(.body, weight: .semibold))
-                                        .foregroundStyle(appSettings.themePalette.foreground)
-                                        .lineLimit(1)
-
-                                    Text(store.handle(for: result.pubkey))
-                                        .font(appSettings.appFont(.caption1))
-                                        .foregroundStyle(appSettings.themePalette.secondaryForeground)
-                                        .lineLimit(1)
-                                }
-
-                                Spacer(minLength: 8)
-
-                                if selectedRecipientPubkeys.contains(result.pubkey.lowercased()) {
-                                    Image(systemName: "checkmark.circle.fill")
-                                        .foregroundStyle(appSettings.primaryColor)
-                                }
+                    .searchListRow(horizontalInset: 16, verticalInset: 18)
+                } else {
+                    Section {
+                        ForEach(visibleProfiles) { profile in
+                            HaloLinkRecipientSearchRow(
+                                profile: profile,
+                                isSelected: selectedRecipientPubkeys.contains(profile.pubkey.lowercased())
+                            ) {
+                                toggleSelection(for: profile)
                             }
+                            .searchListRow(
+                                horizontalInset: 16,
+                                separatorVisibility: .visible,
+                                separatorTint: appSettings.themePalette.chromeBorder
+                            )
                         }
-                        .buttonStyle(.plain)
-                    }
-                } header: {
-                    if query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                        Text("Recent Profiles")
-                    } else {
-                        Text("Results")
+                    } header: {
+                        SearchSectionHeader(title: searchViewModel.isSearching ? "People" : "Suggestions")
                     }
                 }
             }
+            .listStyle(.plain)
             .scrollContentBackground(.hidden)
             .background(appSettings.themePalette.groupedBackground)
+            .safeAreaInset(edge: .top, spacing: 0) {
+                SearchBarSection(
+                    searchText: $searchViewModel.searchText,
+                    placeholder: "Search people"
+                ) {
+                    Task {
+                        await searchViewModel.refresh()
+                    }
+                }
+            }
+            .refreshable {
+                configureSearch()
+                await searchViewModel.refresh()
+            }
             .navigationTitle("New Message")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -581,10 +602,34 @@ private struct HaloLinkNewConversationSheet: View {
         .presentationDetents([.large])
         .presentationDragIndicator(.visible)
         .task {
-            await loadResults()
+            configureSearch()
+            await searchViewModel.loadIfNeeded()
         }
-        .task(id: query) {
-            await loadResults()
+        .onChange(of: searchViewModel.searchText) { _, newValue in
+            searchViewModel.handleSearchTextChanged()
+            if newValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                Task {
+                    await searchViewModel.loadIfNeeded()
+                }
+            }
+        }
+        .onChange(of: auth.currentAccount?.pubkey) { _, _ in
+            configureSearch()
+            Task {
+                await searchViewModel.loadIfNeeded()
+            }
+        }
+        .onChange(of: auth.currentNsec) { _, _ in
+            configureSearch()
+        }
+        .onChange(of: followStore.followedPubkeys) { _, _ in
+            configureSearch(invalidatePopularProfiles: false)
+        }
+        .onChange(of: relaySettings.readRelays) { _, _ in
+            configureSearch()
+            Task {
+                await searchViewModel.loadIfNeeded()
+            }
         }
     }
 
@@ -592,22 +637,86 @@ private struct HaloLinkNewConversationSheet: View {
         store.conversation(for: selectedRecipientPubkeys) == nil ? "Start" : "Open"
     }
 
-    private func toggleSelection(for pubkey: String) {
-        let normalizedPubkey = pubkey.lowercased()
-        if selectedRecipientPubkeys.contains(normalizedPubkey) {
-            selectedRecipientPubkeys.removeAll { $0 == normalizedPubkey }
-        } else {
-            selectedRecipientPubkeys.append(normalizedPubkey)
+    private var displayedProfiles: [SearchViewModel.ProfileMatch] {
+        searchViewModel.displayedProfiles.filter { profile in
+            let normalizedPubkey = profile.pubkey.lowercased()
+            guard !normalizedPubkey.isEmpty else { return false }
+            guard normalizedPubkey != auth.currentAccount?.pubkey.lowercased() else { return false }
+            return true
         }
     }
 
-    private func loadResults() async {
-        isSearching = true
-        if !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            try? await Task.sleep(nanoseconds: 250_000_000)
+    private var effectiveReadRelayURLs: [URL] {
+        appSettings.effectiveReadRelayURLs(from: relaySettings.readRelayURLs)
+    }
+
+    private func configureSearch(invalidatePopularProfiles: Bool = true) {
+        searchViewModel.updateSearchContext(
+            currentAccountPubkey: auth.currentAccount?.pubkey,
+            currentNsec: auth.currentNsec,
+            followedPubkeys: Array(followStore.followedPubkeys),
+            invalidatePopularProfiles: invalidatePopularProfiles
+        )
+        searchViewModel.updateReadRelayURLs(effectiveReadRelayURLs)
+    }
+
+    private func toggleSelection(for profile: SearchViewModel.ProfileMatch) {
+        let normalizedPubkey = profile.pubkey.lowercased()
+        if selectedRecipientPubkeys.contains(normalizedPubkey) {
+            selectedRecipientPubkeys.removeAll { $0 == normalizedPubkey }
+            selectedProfilesByPubkey.removeValue(forKey: normalizedPubkey)
+        } else {
+            selectedRecipientPubkeys.append(normalizedPubkey)
+            selectedProfilesByPubkey[normalizedPubkey] = profile
         }
-        guard !Task.isCancelled else { return }
-        searchResults = await store.searchProfiles(query: query)
-        isSearching = false
+    }
+
+    private func displayName(for pubkey: String) -> String {
+        if let profile = selectedProfilesByPubkey[pubkey]?.displayName {
+            return profile
+        }
+        return store.displayName(for: pubkey)
+    }
+}
+
+private struct HaloLinkRecipientSearchRow: View {
+    @EnvironmentObject private var appSettings: AppSettingsStore
+
+    let profile: SearchViewModel.ProfileMatch
+    let isSelected: Bool
+    let onToggle: () -> Void
+
+    var body: some View {
+        Button(action: onToggle) {
+            HStack(alignment: .center, spacing: 12) {
+                AvatarView(url: profile.avatarURL, fallback: profile.displayName, size: 38)
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(profile.displayName)
+                        .font(appSettings.appFont(.body, weight: .semibold))
+                        .foregroundStyle(appSettings.themePalette.foreground)
+                        .lineLimit(1)
+
+                    Text(profile.handle)
+                        .font(appSettings.appFont(.caption1))
+                        .foregroundStyle(appSettings.themePalette.secondaryForeground)
+                        .lineLimit(1)
+                }
+
+                Spacer(minLength: 8)
+
+                Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
+                    .font(.system(size: 22, weight: .semibold))
+                    .foregroundStyle(
+                        isSelected
+                            ? appSettings.themeIconAccentColor
+                            : appSettings.themePalette.tertiaryForeground
+                    )
+                    .frame(width: 34, height: 34)
+                    .contentShape(Rectangle())
+            }
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(isSelected ? "Remove \(profile.displayName)" : "Add \(profile.displayName)")
     }
 }

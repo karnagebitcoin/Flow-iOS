@@ -1,10 +1,10 @@
 import SwiftUI
+import UIKit
 
 struct HomeFeedView: View {
     private static let feedTopAnchorID = "home-feed-top-anchor"
     private static let feedScrollCoordinateSpace = "home-feed-scroll"
     private static let feedHorizontalInset: CGFloat = 14
-    private static let bottomScrollClearance: CGFloat = 110
     private static let autoMergeTopThreshold: CGFloat = 56
 
     @Environment(\.colorScheme) private var colorScheme
@@ -237,7 +237,6 @@ struct HomeFeedView: View {
             feedModeHeaderRow
             feedRows(visibleItems, visibleReplyCounts: visibleReplyCounts)
             loadingMoreRow
-            bottomClearanceRow(isVisible: !visibleItems.isEmpty || viewModel.isLoadingMore)
         }
         .listStyle(.plain)
         .scrollContentBackground(.hidden)
@@ -342,17 +341,6 @@ struct HomeFeedView: View {
             .listRowInsets(feedListRowInsets)
             .listRowSeparator(.hidden)
             .listRowBackground(Color.clear)
-        }
-    }
-
-    @ViewBuilder
-    private func bottomClearanceRow(isVisible: Bool) -> some View {
-        if isVisible {
-            Color.clear
-                .frame(height: Self.bottomScrollClearance)
-                .listRowInsets(EdgeInsets())
-                .listRowSeparator(.hidden)
-                .listRowBackground(Color.clear)
         }
     }
 
@@ -804,6 +792,7 @@ struct HomeFeedView: View {
                 currentPubkey: auth.currentAccount?.pubkey
             ),
             commentCount: visibleReplyCounts[item.displayEventID.lowercased()] ?? 0,
+            repostCount: reactionStats.repostCount(for: item.displayEventID),
             showReactions: appSettings.reactionsVisibleInFeeds,
             avatarMenuActions: .init(
                 followLabel: followStore.isFollowing(item.displayAuthorPubkey) ? "Unfollow" : "Follow",
@@ -849,7 +838,7 @@ struct HomeFeedView: View {
                 trailing: Self.feedHorizontalInset
             )
         )
-        .listRowSeparator(.visible)
+        .listRowSeparator(appSettings.themePalette.feedCardStyle == nil ? .visible : .hidden)
         .listRowSeparatorTint(appSettings.themePalette.chromeBorder)
         .listRowBackground(Color.clear)
         .onAppear {
@@ -989,10 +978,10 @@ struct HomeFeedView: View {
     private var topNavAccountFallback: some View {
         ZStack {
             Circle()
-                .fill(topNavigationControlFill)
+                .fill(appSettings.avatarFallbackGradient(forAccountPubkey: auth.currentAccount?.pubkey))
             Image(systemName: "person.fill")
                 .font(.system(size: 14, weight: .semibold))
-                .foregroundStyle(appSettings.themePalette.mutedForeground)
+                .foregroundStyle(appSettings.avatarFallbackForeground(forAccountPubkey: auth.currentAccount?.pubkey))
         }
     }
 
@@ -1275,7 +1264,7 @@ private struct HomeFeedRootContent: View {
 
     var body: some View {
         ZStack(alignment: .leading) {
-            AppThemeBackgroundView()
+            AppThemeBackgroundView(holographicSpotlight: .feed)
                 .ignoresSafeArea()
 
             VStack(spacing: 0) {

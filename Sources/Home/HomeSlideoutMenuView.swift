@@ -153,7 +153,13 @@ struct HomeSlideoutMenuView: View {
     }
 
     private func accountHeaderAvatar(fallbackName: String) -> some View {
-        AvatarView(url: accountHeaderAvatarURL, fallback: fallbackName, size: 60)
+        AvatarView(
+            url: accountHeaderAvatarURL,
+            fallback: fallbackName,
+            size: 60,
+            fallbackGradient: appSettings.avatarFallbackGradient(forAccountPubkey: auth.currentAccount?.pubkey),
+            fallbackForeground: appSettings.avatarFallbackForeground(forAccountPubkey: auth.currentAccount?.pubkey)
+        )
     }
 
     private func accountHeaderFallbackAvatar(fallbackName: String) -> some View {
@@ -175,22 +181,26 @@ struct HomeSlideoutMenuView: View {
     private func menuButton(
         title: String,
         icon: String,
-        tint: Color = .primary,
+        tint: Color? = nil,
         action: @escaping () -> Void
     ) -> some View {
-        Button {
+        let iconTint = tint ?? appSettings.themeIconAccentColor
+        let textTint = tint ?? appSettings.themePalette.foreground
+
+        return Button {
             action()
         } label: {
             HStack(spacing: 12) {
                 Image(systemName: icon)
                     .font(.system(size: 18, weight: .medium))
+                    .foregroundStyle(iconTint)
                     .frame(width: 22)
 
                 Text(title)
                     .font(appSettings.appFont(.body))
+                    .foregroundStyle(textTint)
                     .lineLimit(1)
             }
-            .foregroundStyle(tint)
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.horizontal, 16)
             .padding(.vertical, 13)

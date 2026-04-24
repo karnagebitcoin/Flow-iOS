@@ -13,6 +13,14 @@ struct NoteReactionEventSnapshot: Equatable, Sendable {
         }
     }
 
+    var replyCount: Int {
+        stats.replyIDs.count
+    }
+
+    var repostCount: Int {
+        stats.repostIDs.count
+    }
+
     func currentUserReaction(currentPubkey: String?) -> NoteReaction? {
         guard let normalizedCurrentPubkey = Self.normalizePubkey(currentPubkey) else { return nil }
         return stats.reactions.first(where: { reaction in
@@ -58,6 +66,14 @@ final class NoteReactionStatsService: ObservableObject {
     private let optimisticReactionPrefix = "optimistic-reaction-"
     private let statsFreshnessInterval: TimeInterval = 45
     private let fetchRetryCooldownInterval: TimeInterval = 15
+    private let engagementFetchKinds = [
+        FeedKindFilters.shortTextNote,
+        FeedKindFilters.repost,
+        7,
+        16,
+        FeedKindFilters.comment,
+        FeedKindFilters.voiceComment
+    ]
 
     private var hydratedEventIDs = Set<String>()
     private var pendingRequests: [String: PendingRequest] = [:]
@@ -113,6 +129,14 @@ final class NoteReactionStatsService: ObservableObject {
 
     func reactionCount(for eventID: String) -> Int {
         snapshot(for: eventID).reactionCount
+    }
+
+    func replyCount(for eventID: String) -> Int {
+        snapshot(for: eventID).replyCount
+    }
+
+    func repostCount(for eventID: String) -> Int {
+        snapshot(for: eventID).repostCount
     }
 
     func currentUserReaction(for eventID: String, currentPubkey: String?) -> NoteReaction? {
@@ -289,20 +313,20 @@ final class NoteReactionStatsService: ObservableObject {
         batch.forEach { pendingRequests.removeValue(forKey: pendingKey(eventID: $0.eventID, relayURL: $0.relayURL)) }
 
         let requestsByRelay = Dictionary(grouping: batch, by: { $0.relayURL.absoluteString.lowercased() })
-        struct RelayReactionFetchPlan {
+        struct RelayEngagementFetchPlan {
             let relayURL: URL
             let eventIDs: [String]
             let since: Int?
-            let reactionLimit: Int
+            let engagementLimit: Int
         }
 
-        struct RelayReactionFetchResult {
+        struct RelayEngagementFetchResult {
             let relayURL: URL
             let eventIDs: [String]
             let events: [NostrEvent]?
         }
 
-        var plans: [RelayReactionFetchPlan] = []
+        var plans: [RelayEngagementFetchPlan] = []
         plans.reserveCapacity(requestsByRelay.count)
 
         for (_, relayRequests) in requestsByRelay {
@@ -311,13 +335,13 @@ final class NoteReactionStatsService: ObservableObject {
             guard !eventIDs.isEmpty else { continue }
 
             let since = eventIDs.compactMap { statsByEventID[$0]?.updatedAt }.min()
-            let reactionLimit = min(1_200, max(160, eventIDs.count * 24))
+            let engagementLimit = min(2_400, max(240, eventIDs.count * 48))
             plans.append(
-                RelayReactionFetchPlan(
+                RelayEngagementFetchPlan(
                     relayURL: relayURL,
                     eventIDs: eventIDs,
                     since: since,
-                    reactionLimit: reactionLimit
+                    engagementLimit: engagementLimit
                 )
             )
         }
@@ -328,29 +352,30 @@ final class NoteReactionStatsService: ObservableObject {
             }
         }
 
-        let fetchResults = await withTaskGroup(of: RelayReactionFetchResult.self, returning: [RelayReactionFetchResult].self) { group in
+        let engagementFetchKinds = self.engagementFetchKinds
+        let fetchResults = await withTaskGroup(of: RelayEngagementFetchResult.self, returning: [RelayEngagementFetchResult].self) { group in
             for plan in plans {
-                group.addTask { [relayClient] in
+                group.addTask { [relayClient, engagementFetchKinds] in
                     let filter = NostrFilter(
-                        kinds: [7],
-                        limit: plan.reactionLimit,
+                        kinds: engagementFetchKinds,
+                        limit: plan.engagementLimit,
                         since: plan.since,
                         tagFilters: ["e": plan.eventIDs]
                     )
 
                     do {
-                        let reactionEvents = try await relayClient.fetchEvents(
+                        let engagementEvents = try await relayClient.fetchEvents(
                             relayURL: plan.relayURL,
                             filter: filter,
                             timeout: 12
                         )
-                        return RelayReactionFetchResult(
+                        return RelayEngagementFetchResult(
                             relayURL: plan.relayURL,
                             eventIDs: plan.eventIDs,
-                            events: reactionEvents
+                            events: engagementEvents
                         )
                     } catch {
-                        return RelayReactionFetchResult(
+                        return RelayEngagementFetchResult(
                             relayURL: plan.relayURL,
                             eventIDs: plan.eventIDs,
                             events: nil
@@ -359,7 +384,7 @@ final class NoteReactionStatsService: ObservableObject {
                 }
             }
 
-            var results: [RelayReactionFetchResult] = []
+            var results: [RelayEngagementFetchResult] = []
             for await result in group {
                 results.append(result)
             }
@@ -371,9 +396,9 @@ final class NoteReactionStatsService: ObservableObject {
         var persistedEventIDs = Set<String>()
 
         for result in fetchResults {
-            guard let reactionEvents = result.events else { continue }
+            guard let engagementEvents = result.events else { continue }
 
-            let touchedIDs = mergeReactionEvents(reactionEvents, trackedEventIDs: Set(result.eventIDs))
+            let touchedIDs = mergeEngagementEvents(engagementEvents, trackedEventIDs: Set(result.eventIDs))
             for eventID in result.eventIDs {
                 successfulFetchCountByEventID[eventID, default: 0] += 1
             }
@@ -385,9 +410,9 @@ final class NoteReactionStatsService: ObservableObject {
         let now = Int(Date().timeIntervalSince1970)
         for (eventID, successfulFetchCount) in successfulFetchCountByEventID {
             let plannedFetchCount = plannedFetchCountByEventID[eventID] ?? successfulFetchCount
-            let hasFreshReactionEvent = touchedEventIDs.contains(eventID)
+            let hasFreshEngagementEvent = touchedEventIDs.contains(eventID)
             let hasCorroboratedEmptyResult = successfulFetchCount >= min(plannedFetchCount, 2)
-            guard hasFreshReactionEvent || hasCorroboratedEmptyResult else { continue }
+            guard hasFreshEngagementEvent || hasCorroboratedEmptyResult else { continue }
 
             var stats = statsByEventID[eventID] ?? NoteReactionStats()
             stats.updatedAt = now
@@ -402,6 +427,16 @@ final class NoteReactionStatsService: ObservableObject {
         if !pendingRequests.isEmpty {
             scheduleBatchFetch()
         }
+    }
+
+    private func mergeEngagementEvents(
+        _ events: [NostrEvent],
+        trackedEventIDs: Set<String>
+    ) -> Set<String> {
+        var touched = mergeReactionEvents(events, trackedEventIDs: trackedEventIDs)
+        touched.formUnion(mergeReplyEvents(events, trackedEventIDs: trackedEventIDs))
+        touched.formUnion(mergeRepostEvents(events, trackedEventIDs: trackedEventIDs))
+        return touched
     }
 
     private func mergeReactionEvents(
@@ -435,6 +470,52 @@ final class NoteReactionStatsService: ObservableObject {
                 in: &stats
             )
 
+            setStats(stats, for: targetEventID)
+            touched.insert(targetEventID)
+        }
+
+        return touched
+    }
+
+    private func mergeReplyEvents(
+        _ events: [NostrEvent],
+        trackedEventIDs: Set<String>
+    ) -> Set<String> {
+        var touched = Set<String>()
+
+        for event in events where event.isReplyNote {
+            guard let targetEventID = ReplyCountEstimator.repliedEventID(
+                for: event,
+                validEventIDs: trackedEventIDs
+            ) else { continue }
+            let replyID = normalizedEventID(event.id)
+            guard !replyID.isEmpty else { continue }
+
+            var stats = statsByEventID[targetEventID] ?? NoteReactionStats()
+            guard stats.replyIDs.insert(replyID).inserted else { continue }
+            setStats(stats, for: targetEventID)
+            touched.insert(targetEventID)
+        }
+
+        return touched
+    }
+
+    private func mergeRepostEvents(
+        _ events: [NostrEvent],
+        trackedEventIDs: Set<String>
+    ) -> Set<String> {
+        var touched = Set<String>()
+
+        for event in events where event.isRepost {
+            guard let repostTargetEventID = event.repostTargetEventID else { continue }
+            let targetEventID = normalizedEventID(repostTargetEventID)
+            guard !targetEventID.isEmpty else { continue }
+            guard trackedEventIDs.contains(targetEventID) else { continue }
+            let repostID = normalizedEventID(event.id)
+            guard !repostID.isEmpty else { continue }
+
+            var stats = statsByEventID[targetEventID] ?? NoteReactionStats()
+            guard stats.repostIDs.insert(repostID).inserted else { continue }
             setStats(stats, for: targetEventID)
             touched.insert(targetEventID)
         }

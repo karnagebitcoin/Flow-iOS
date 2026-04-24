@@ -5,10 +5,11 @@ import UIKit
 
 final class AppThemeOptionTests: XCTestCase {
     @MainActor
-    func testSakuraRequiresFlowPlusAndUsesLightMode() {
-        XCTAssertTrue(AppThemeOption.sakura.requiresFlowPlus)
+    func testSakuraThemeIsFreeAndUsesLightMode() {
+        XCTAssertTrue(AppThemeOption.sakura.isEnabled)
         XCTAssertEqual(AppThemeOption.sakura.preferredColorScheme, .light)
-        XCTAssertNotNil(AppThemeOption.sakura.fixedPrimaryGradient)
+        XCTAssertNil(AppThemeOption.sakura.fixedPrimaryColor)
+        XCTAssertNil(AppThemeOption.sakura.fixedPrimaryGradient)
         XCTAssertEqual(AppThemeOption.sakura.qrShareBackgroundResourceName, "sakura-share-bg.json")
         assertColor(
             AppThemeOption.sakura.palette.mutedForeground,
@@ -40,15 +41,12 @@ final class AppThemeOptionTests: XCTestCase {
     }
 
     @MainActor
-    func testDraculaRequiresFlowPlusAndUsesDarkMode() {
-        XCTAssertTrue(AppThemeOption.dracula.requiresFlowPlus)
+    func testDraculaThemeIsFreeAndUsesDarkMode() {
+        XCTAssertTrue(AppThemeOption.dracula.isEnabled)
         XCTAssertEqual(AppThemeOption.dracula.preferredColorScheme, .dark)
-        XCTAssertNotNil(AppThemeOption.dracula.fixedPrimaryGradient)
+        XCTAssertNil(AppThemeOption.dracula.fixedPrimaryColor)
+        XCTAssertNil(AppThemeOption.dracula.fixedPrimaryGradient)
         XCTAssertNil(AppThemeOption.dracula.qrShareBackgroundResourceName)
-        assertColor(
-            try! XCTUnwrap(AppThemeOption.dracula.fixedPrimaryColor),
-            matches: UIColor(red: 0.773, green: 0.565, blue: 1.0, alpha: 1)
-        )
         assertColor(
             AppThemeOption.dracula.palette.background,
             matches: UIColor(red: 44.0 / 255.0, green: 45.0 / 255.0, blue: 60.0 / 255.0, alpha: 1)
@@ -99,15 +97,12 @@ final class AppThemeOptionTests: XCTestCase {
     }
 
     @MainActor
-    func testGamerRequiresFlowPlusAndUsesDarkMode() {
-        XCTAssertTrue(AppThemeOption.gamer.requiresFlowPlus)
+    func testGamerThemeIsFreeAndUsesDarkMode() {
+        XCTAssertTrue(AppThemeOption.gamer.isEnabled)
         XCTAssertEqual(AppThemeOption.gamer.preferredColorScheme, .dark)
-        XCTAssertNotNil(AppThemeOption.gamer.fixedPrimaryGradient)
+        XCTAssertNil(AppThemeOption.gamer.fixedPrimaryColor)
+        XCTAssertNil(AppThemeOption.gamer.fixedPrimaryGradient)
         XCTAssertNil(AppThemeOption.gamer.qrShareBackgroundResourceName)
-        assertColor(
-            try! XCTUnwrap(AppThemeOption.gamer.fixedPrimaryColor),
-            matches: UIColor(red: 0.553, green: 0.408, blue: 1.0, alpha: 1)
-        )
         assertColor(
             AppThemeOption.gamer.palette.background,
             matches: UIColor(red: 0.035, green: 0.063, blue: 0.106, alpha: 1)
@@ -134,15 +129,255 @@ final class AppThemeOptionTests: XCTestCase {
     }
 
     @MainActor
-    func testLightAndDarkBaseThemesAreEnabled() {
-        XCTAssertTrue(AppThemeOption.light.isEnabled)
-        XCTAssertTrue(AppThemeOption.dark.isEnabled)
-        XCTAssertEqual(AppThemeOption.appearanceOptions, [.system, .light, .dark, .black])
-        XCTAssertFalse(AppThemeOption.appearanceOptions.contains(.white))
+    func testSkyThemeIsFreeAndUsesMinimalLightPalette() {
+        XCTAssertTrue(AppThemeOption.holographicLight.isEnabled)
+        XCTAssertEqual(AppThemeOption.holographicLight.preferredColorScheme, .light)
+        XCTAssertEqual(AppThemeOption.holographicLight.title, "Sky")
+        XCTAssertNil(AppThemeOption.holographicLight.fixedPrimaryColor)
+        XCTAssertNil(AppThemeOption.holographicLight.fixedPrimaryGradient)
+        XCTAssertNil(AppThemeOption.holographicLight.qrShareBackgroundResourceName)
+        assertColor(
+            AppThemeOption.holographicLight.palette.background,
+            matches: UIColor(red: 0.992, green: 0.996, blue: 1.0, alpha: 1)
+        )
+        assertColor(
+            AppThemeOption.holographicLight.palette.chromeBackground,
+            matches: UIColor(red: 0.988, green: 0.994, blue: 1.0, alpha: 1)
+        )
+        assertColor(
+            AppThemeOption.holographicLight.palette.secondaryBackground,
+            matches: UIColor(red: 0.957, green: 0.982, blue: 1.0, alpha: 1)
+        )
+        assertColor(
+            AppThemeOption.holographicLight.palette.linkPreviewBorder,
+            matches: UIColor(red: 0.640, green: 0.875, blue: 1.0, alpha: 0.36)
+        )
+        XCTAssertNotNil(AppThemeOption.holographicLight.palette.capsuleTabStyle)
+        XCTAssertNotNil(AppThemeOption.holographicLight.palette.profileActionStyle)
+        XCTAssertNotNil(AppThemeOption.holographicLight.palette.pollStyle)
+        XCTAssertNil(AppThemeOption.holographicLight.palette.feedCardStyle)
+        assertColor(
+            AppThemeOption.holographicLight.palette.profileActionStyle!.primaryForeground,
+            matches: UIColor(red: 0.235, green: 0.612, blue: 1.0, alpha: 1)
+        )
     }
 
     @MainActor
-    func testPremiumThemePreviewOverridesActiveThemeWithoutUnlocking() {
+    func testLegacyHolographicDarkIsDisabledAndNormalizesToDark() {
+        XCTAssertFalse(AppThemeOption.holographicDark.isEnabled)
+        XCTAssertEqual(AppThemeOption.holographicDark.normalizedSelection, .dark)
+        XCTAssertEqual(AppThemeOption.holographicDark.preferredColorScheme, .dark)
+        XCTAssertEqual(AppThemeOption.holographicDark.title, "Dark")
+        XCTAssertNil(AppThemeOption.holographicDark.fixedPrimaryColor)
+        XCTAssertNil(AppThemeOption.holographicDark.fixedPrimaryGradient)
+        XCTAssertNil(AppThemeOption.holographicDark.qrShareBackgroundResourceName)
+    }
+
+    @MainActor
+    func testThemeIconAccentMatchesReactionChromeForVisibleThemes() {
+        let defaults = UserDefaults(suiteName: #function)!
+        defaults.removePersistentDomain(forName: #function)
+        let authStore = AuthStore(defaults: defaults)
+        let settings = AppSettingsStore(defaults: defaults, authStore: authStore)
+
+        for theme in AppThemeOption.appearanceOptions {
+            settings.beginThemePreview(theme)
+
+            assertColor(
+                settings.themeIconAccentColor,
+                matches: UIColor(settings.themePalette.mutedForeground),
+                file: #filePath,
+                line: #line
+            )
+        }
+    }
+
+    @MainActor
+    func testButtonGradientOptionControlsProminentButtonsAcrossThemes() {
+        let defaults = UserDefaults(suiteName: #function)!
+        defaults.removePersistentDomain(forName: #function)
+        let authStore = AuthStore(defaults: defaults)
+        let settings = AppSettingsStore(defaults: defaults, authStore: authStore)
+
+        XCTAssertFalse(settings.usesPrimaryGradientForProminentButtons)
+        XCTAssertNil(settings.activeButtonGradientOption)
+
+        settings.theme = .dark
+        settings.buttonGradientOption = .softHolographicSheen
+        XCTAssertTrue(settings.usesPrimaryGradientForProminentButtons)
+        XCTAssertEqual(settings.activeButtonGradientOption, .softHolographicSheen)
+        XCTAssertNil(settings.activeHolographicGradientOption)
+
+        settings.theme = .sakura
+        XCTAssertTrue(settings.usesPrimaryGradientForProminentButtons)
+        XCTAssertEqual(settings.activeButtonGradientOption, .softHolographicSheen)
+        XCTAssertNil(settings.activeHolographicGradientOption)
+
+        settings.theme = .holographicLight
+        XCTAssertEqual(settings.activeHolographicGradientOption, .softHolographicSheen)
+
+        settings.buttonGradientOption = nil
+        XCTAssertFalse(settings.usesPrimaryGradientForProminentButtons)
+        XCTAssertEqual(settings.activeHolographicGradientOption, .softHolographicSheen)
+    }
+
+    @MainActor
+    func testButtonGradientSelectionPersistsAcrossStoreReload() {
+        let defaults = UserDefaults(suiteName: #function)!
+        defaults.removePersistentDomain(forName: #function)
+        let authStore = AuthStore(defaults: defaults)
+        let pubkey = String(repeating: "b", count: 64)
+        let settings = AppSettingsStore(defaults: defaults, authStore: authStore)
+
+        settings.configure(accountPubkey: pubkey)
+        settings.theme = .gamer
+        settings.primaryColor = .red
+        settings.buttonGradientOption = .radialHolographicGlow
+
+        let reloaded = AppSettingsStore(defaults: defaults, authStore: authStore)
+        reloaded.configure(accountPubkey: pubkey)
+
+        XCTAssertEqual(reloaded.theme, .gamer)
+        XCTAssertEqual(reloaded.buttonGradientOption, .radialHolographicGlow)
+        XCTAssertNil(reloaded.generatedButtonGradient)
+        XCTAssertEqual(reloaded.activeButtonGradientOption, .radialHolographicGlow)
+    }
+
+    @MainActor
+    func testGeneratedButtonGradientPersistsAndOverridesPresetGradient() {
+        let defaults = UserDefaults(suiteName: #function)!
+        defaults.removePersistentDomain(forName: #function)
+        let authStore = AuthStore(defaults: defaults)
+        let pubkey = String(repeating: "e", count: 64)
+        let generated = GeneratedButtonGradient(colors: [
+            Color(red: 0.10, green: 0.20, blue: 0.90),
+            Color(red: 0.90, green: 0.15, blue: 0.50),
+            Color(red: 0.20, green: 0.85, blue: 0.70)
+        ])
+        let settings = AppSettingsStore(defaults: defaults, authStore: authStore)
+
+        settings.configure(accountPubkey: pubkey)
+        settings.buttonGradientOption = .softHolographicSheen
+        settings.applyGeneratedButtonGradient(generated)
+
+        let reloaded = AppSettingsStore(defaults: defaults, authStore: authStore)
+        reloaded.configure(accountPubkey: pubkey)
+
+        XCTAssertNil(reloaded.buttonGradientOption)
+        XCTAssertEqual(reloaded.generatedButtonGradient, generated)
+        XCTAssertTrue(reloaded.usesPrimaryGradientForProminentButtons)
+        XCTAssertNil(reloaded.activeButtonGradientOption)
+        XCTAssertEqual(reloaded.activeGeneratedButtonGradient, generated)
+    }
+
+    @MainActor
+    func testGeneratedButtonGradientFactoryUsesTwoOrThreeColors() {
+        for _ in 0..<20 {
+            let gradient = GeneratedButtonGradient.random()
+            XCTAssertTrue((2...3).contains(gradient.gradientColors.count))
+        }
+    }
+
+    @MainActor
+    func testButtonTextColorPersistsAcrossStoreReload() {
+        let defaults = UserDefaults(suiteName: #function)!
+        defaults.removePersistentDomain(forName: #function)
+        let authStore = AuthStore(defaults: defaults)
+        let pubkey = String(repeating: "f", count: 64)
+        let settings = AppSettingsStore(defaults: defaults, authStore: authStore)
+
+        settings.configure(accountPubkey: pubkey)
+        settings.buttonTextColor = Color(red: 0.05, green: 0.10, blue: 0.15)
+
+        let reloaded = AppSettingsStore(defaults: defaults, authStore: authStore)
+        reloaded.configure(accountPubkey: pubkey)
+
+        assertColor(
+            reloaded.buttonTextColor,
+            matches: UIColor(red: 0.05, green: 0.10, blue: 0.15, alpha: 1)
+        )
+    }
+
+    @MainActor
+    func testLegacyHolographicGradientSettingsMigrateToSingleButtonGradient() {
+        let defaults = UserDefaults(suiteName: #function)!
+        defaults.removePersistentDomain(forName: #function)
+        let authStore = AuthStore(defaults: defaults)
+        let pubkey = String(repeating: "c", count: 64)
+        let settings = AppSettingsStore(defaults: defaults, authStore: authStore)
+
+        settings.configure(accountPubkey: pubkey)
+        settings.theme = .holographicLight
+        settings.holographicLightGradientOption = .strongRainbowFoil
+
+        XCTAssertEqual(settings.activeHolographicGradientOption, .strongRainbowFoil)
+
+        let reloaded = AppSettingsStore(defaults: defaults, authStore: authStore)
+        reloaded.configure(accountPubkey: pubkey)
+
+        XCTAssertEqual(reloaded.buttonGradientOption, .strongRainbowFoil)
+        XCTAssertEqual(reloaded.holographicDarkGradientOption, .strongRainbowFoil)
+    }
+
+    @MainActor
+    func testHolographicSpotlightOnlyAppearsOnSkyScreens() {
+        XCTAssertTrue(AppThemeBackgroundSpotlight.feed.isVisible(for: .holographicLight))
+        XCTAssertTrue(AppThemeBackgroundSpotlight.profile.isVisible(for: .holographicLight))
+        XCTAssertFalse(AppThemeBackgroundSpotlight.feed.isVisible(for: .holographicDark))
+        XCTAssertFalse(AppThemeBackgroundSpotlight.none.isVisible(for: .holographicDark))
+        XCTAssertFalse(AppThemeBackgroundSpotlight.feed.isVisible(for: .sakura))
+        XCTAssertFalse(AppThemeBackgroundSpotlight.profile.isVisible(for: .gamer))
+    }
+
+    func testHolographicSpotlightLayoutStaysBottomAnchored() {
+        let size = CGSize(width: 390, height: 844)
+        let feedLayout = AppThemeBackgroundSpotlightLayout(placement: .feed, size: size)
+        let profileLayout = AppThemeBackgroundSpotlightLayout(placement: .profile, size: size)
+
+        XCTAssertGreaterThan(feedLayout.primaryOffset.height, 0)
+        XCTAssertGreaterThan(feedLayout.secondaryOffset.height, 0)
+        XCTAssertGreaterThan(profileLayout.primaryOffset.height, 0)
+        XCTAssertGreaterThan(profileLayout.secondaryOffset.height, 0)
+    }
+
+    func testHolographicSpotlightFadesBeforeFrameEdges() {
+        let layout = AppThemeBackgroundSpotlightLayout(
+            placement: .feed,
+            size: CGSize(width: 390, height: 844)
+        )
+
+        XCTAssertLessThan(layout.primaryRadius, min(layout.primarySize.width, layout.primarySize.height) / 2)
+        XCTAssertLessThan(layout.secondaryRadius, min(layout.secondarySize.width, layout.secondarySize.height) / 2)
+    }
+
+    func testDarkGradientTreatmentUsesMagentaPurpleAccentColors() {
+        let colors = AppThemeBackgroundSpotlightColors(theme: .dark)
+
+        assertColor(
+            colors.primaryStart,
+            matches: UIColor(red: 0x8B / 255.0, green: 0x7D / 255.0, blue: 0xFF / 255.0, alpha: 1)
+        )
+        assertColor(
+            colors.secondaryEnd,
+            matches: UIColor(red: 0x8B / 255.0, green: 0x7D / 255.0, blue: 0xFF / 255.0, alpha: 1)
+        )
+    }
+
+    @MainActor
+    func testAppearanceThemesExposeCurrentFreeThemeList() {
+        XCTAssertTrue(AppThemeOption.light.isEnabled)
+        XCTAssertTrue(AppThemeOption.dark.isEnabled)
+        XCTAssertTrue(AppThemeOption.black.isEnabled)
+        XCTAssertEqual(
+            AppThemeOption.appearanceOptions,
+            [.light, .dark, .black, .system, .sakura, .dracula, .gamer, .holographicLight]
+        )
+        XCTAssertFalse(AppThemeOption.appearanceOptions.contains(.white))
+        XCTAssertFalse(AppThemeOption.appearanceOptions.contains(.holographicDark))
+    }
+
+    @MainActor
+    func testThemePreviewOverridesActiveTheme() {
         let defaults = UserDefaults(suiteName: #function)!
         defaults.removePersistentDomain(forName: #function)
         let authStore = AuthStore(defaults: defaults)
@@ -154,24 +389,6 @@ final class AppThemeOptionTests: XCTestCase {
         XCTAssertEqual(settings.activeTheme, .sakura)
         XCTAssertEqual(settings.preferredColorScheme, .light)
         XCTAssertEqual(settings.previewTheme, .sakura)
-    }
-
-    @MainActor
-    func testFlowPlusPreviewUnlocksPremiumCustomizationForCurrentSession() {
-        let defaults = UserDefaults(suiteName: #function)!
-        defaults.removePersistentDomain(forName: #function)
-        let authStore = AuthStore(defaults: defaults)
-        let settings = AppSettingsStore(defaults: defaults, authStore: authStore)
-
-        XCTAssertFalse(settings.hasFlowPlusCustomizationAccess)
-        XCTAssertTrue(settings.canBeginFlowPlusPreview())
-        XCTAssertTrue(settings.beginFlowPlusPreview())
-
-        XCTAssertTrue(settings.isFlowPlusPreviewUnlocked)
-        XCTAssertTrue(settings.hasUsedFlowPlusPreviewThisSession)
-        XCTAssertTrue(settings.hasFlowPlusCustomizationAccess)
-        XCTAssertEqual(settings.activeTheme, .system)
-        XCTAssertNil(settings.previewTheme)
     }
 
     @MainActor
@@ -189,82 +406,56 @@ final class AppThemeOptionTests: XCTestCase {
     }
 
     @MainActor
-    func testUnlockingFlowPlusKeepsPreviewedPremiumThemeSelected() {
+    func testBlackThemeSelectionStaysBlack() {
         let defaults = UserDefaults(suiteName: #function)!
         defaults.removePersistentDomain(forName: #function)
         let authStore = AuthStore(defaults: defaults)
         let settings = AppSettingsStore(defaults: defaults, authStore: authStore)
 
-        settings.beginThemePreview(.sakura)
-        settings.updateFlowPlusAccess(true)
+        settings.theme = .black
 
-        XCTAssertNil(settings.previewTheme)
-        XCTAssertEqual(settings.theme, .sakura)
-        XCTAssertEqual(settings.activeTheme, .sakura)
+        XCTAssertEqual(settings.theme, .black)
+        XCTAssertEqual(settings.activeTheme, .black)
+        XCTAssertEqual(settings.preferredColorScheme, .dark)
     }
 
     @MainActor
-    func testUnlockingFlowPlusClearsSessionPreviewGate() {
+    func testLegacyHolographicDarkSelectionNormalizesToDark() {
         let defaults = UserDefaults(suiteName: #function)!
         defaults.removePersistentDomain(forName: #function)
         let authStore = AuthStore(defaults: defaults)
         let settings = AppSettingsStore(defaults: defaults, authStore: authStore)
 
-        XCTAssertTrue(settings.beginFlowPlusPreview())
-        settings.updateFlowPlusAccess(true)
+        settings.theme = .holographicDark
 
-        XCTAssertFalse(settings.isFlowPlusPreviewUnlocked)
-        XCTAssertTrue(settings.hasFlowPlusCustomizationAccess)
+        XCTAssertEqual(settings.theme, .dark)
+        XCTAssertEqual(settings.activeTheme, .dark)
+        XCTAssertEqual(settings.preferredColorScheme, .dark)
     }
 
     @MainActor
-    func testPremiumThemePreviewIsLimitedToOncePerSession() {
+    func testVisibleThemesPersistWithoutUnlock() {
         let defaults = UserDefaults(suiteName: #function)!
         defaults.removePersistentDomain(forName: #function)
         let authStore = AuthStore(defaults: defaults)
         let settings = AppSettingsStore(defaults: defaults, authStore: authStore)
 
-        XCTAssertTrue(settings.canBeginThemePreview(.sakura))
-        XCTAssertTrue(settings.beginThemePreview(.sakura))
-
-        settings.endThemePreview()
-
-        XCTAssertFalse(settings.canBeginThemePreview(.sakura))
-        XCTAssertFalse(settings.beginThemePreview(.sakura))
-        XCTAssertNil(settings.previewTheme)
+        for theme in AppThemeOption.appearanceOptions {
+            settings.theme = theme
+            XCTAssertEqual(settings.theme, theme.normalizedSelection)
+            XCTAssertEqual(settings.activeTheme, theme.normalizedSelection)
+        }
     }
 
     @MainActor
-    func testFlowPlusSessionPreviewCanSwitchBetweenPremiumThemes() {
-        let defaults = UserDefaults(suiteName: #function)!
-        defaults.removePersistentDomain(forName: #function)
-        let authStore = AuthStore(defaults: defaults)
-        let settings = AppSettingsStore(defaults: defaults, authStore: authStore)
-
-        XCTAssertTrue(settings.beginFlowPlusPreview())
-        XCTAssertTrue(settings.beginThemePreview(.sakura))
-        XCTAssertEqual(settings.activeTheme, .sakura)
-
-        XCTAssertTrue(settings.canBeginThemePreview(.dracula))
-        XCTAssertTrue(settings.beginThemePreview(.dracula))
-        XCTAssertEqual(settings.previewTheme, .dracula)
-        XCTAssertEqual(settings.activeTheme, .dracula)
-
-        XCTAssertTrue(settings.canBeginThemePreview(.gamer))
-        XCTAssertTrue(settings.beginThemePreview(.gamer))
-        XCTAssertEqual(settings.previewTheme, .gamer)
-        XCTAssertEqual(settings.activeTheme, .gamer)
+    func testAllFontsAreEnabled() {
+        for option in AppFontOption.allCases {
+            XCTAssertTrue(option.isEnabled)
+        }
     }
 
     @MainActor
-    func testPremiumFontsRequireFlowPlusExceptSystem() {
-        XCTAssertFalse(AppFontOption.system.requiresFlowPlus)
-        XCTAssertTrue(AppFontOption.mono.requiresFlowPlus)
-        XCTAssertTrue(AppFontOption.ebGaramond.requiresFlowPlus)
-    }
-
-    @MainActor
-    func testPremiumFontPreviewOverridesActiveFontWithoutUnlocking() {
+    func testFontPreviewOverridesActiveFont() {
         let defaults = UserDefaults(suiteName: #function)!
         defaults.removePersistentDomain(forName: #function)
         let authStore = AuthStore(defaults: defaults)
@@ -279,62 +470,25 @@ final class AppThemeOptionTests: XCTestCase {
     }
 
     @MainActor
-    func testUnlockingFlowPlusKeepsPreviewedPremiumFontSelected() {
+    func testFontSelectionPersistsWithoutUnlock() {
         let defaults = UserDefaults(suiteName: #function)!
         defaults.removePersistentDomain(forName: #function)
         let authStore = AuthStore(defaults: defaults)
+        let pubkey = String(repeating: "d", count: 64)
         let settings = AppSettingsStore(defaults: defaults, authStore: authStore)
 
-        settings.beginFontPreview(.ebGaramond)
-        settings.updateFlowPlusAccess(true)
+        settings.configure(accountPubkey: pubkey)
+        settings.fontOption = .ebGaramond
 
-        XCTAssertNil(settings.previewFontOption)
-        XCTAssertEqual(settings.fontOption, .ebGaramond)
-        XCTAssertEqual(settings.activeFontOption, .ebGaramond)
+        let reloaded = AppSettingsStore(defaults: defaults, authStore: authStore)
+        reloaded.configure(accountPubkey: pubkey)
+
+        XCTAssertEqual(reloaded.fontOption, .ebGaramond)
+        XCTAssertEqual(reloaded.activeFontOption, .ebGaramond)
     }
 
     @MainActor
-    func testFlowPlusUsesSingleMonthlyProductID() {
-        XCTAssertEqual(
-            FlowPremiumStore.FlowPlusProduct.allCases.map(\.rawValue),
-            ["com.21media.flow.flowplus.monthly"]
-        )
-    }
-
-    @MainActor
-    func testFlowPlusPurchaseButtonDefaultsToFreeTrialCopy() {
-        let defaults = UserDefaults(suiteName: #function)!
-        defaults.removePersistentDomain(forName: #function)
-        let authStore = AuthStore(defaults: defaults)
-        let settings = AppSettingsStore(defaults: defaults, authStore: authStore)
-        let premiumStore = FlowPremiumStore(appSettings: settings)
-
-        XCTAssertEqual(premiumStore.flowPlusPurchaseButtonTitle, "Try it free for 7 days")
-    }
-
-    func testFlowPlusStoreKitConfigIncludesSevenDayFreeTrial() {
-        let repoRoot = URL(fileURLWithPath: #filePath)
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
-        let storeKitURL = repoRoot.appendingPathComponent("StoreKit/FlowPlus.storekit")
-        let data = try! Data(contentsOf: storeKitURL)
-        let jsonObject = try! XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
-        let subscriptionGroups = try! XCTUnwrap(jsonObject["subscriptionGroups"] as? [[String: Any]])
-        let firstGroup = try! XCTUnwrap(subscriptionGroups.first)
-        XCTAssertEqual(firstGroup["name"] as? String, "Halo Plus")
-
-        let subscriptions = try! XCTUnwrap(firstGroup["subscriptions"] as? [[String: Any]])
-        let monthlyProduct = try! XCTUnwrap(subscriptions.first)
-        let introductoryOffer = try! XCTUnwrap(monthlyProduct["introductoryOffer"] as? [String: Any])
-
-        XCTAssertEqual(introductoryOffer["paymentMode"] as? String, "freeTrial")
-        XCTAssertEqual(introductoryOffer["subscriptionPeriod"] as? String, "P1W")
-        XCTAssertEqual(introductoryOffer["numberOfPeriods"] as? Int, 1)
-        XCTAssertEqual(introductoryOffer["type"] as? String, "introductory")
-    }
-
-    @MainActor
-    func testBundledPremiumFontsExistInMainBundle() {
+    func testBundledCustomFontsExistInMainBundle() {
         let bundledFonts = [
             "DMSans.ttf",
             "EBGaramond.ttf",
@@ -520,7 +674,7 @@ final class AppThemeOptionTests: XCTestCase {
     }
 
     @MainActor
-    func testPremiumThemesResolveCustomQRCodePresentationBackgrounds() {
+    func testAdditionalThemesResolveCustomQRCodePresentationBackgrounds() {
         XCTAssertEqual(
             ProfileQRCodePresentationBackground.resourceName(for: .sakura),
             "sakura-share-bg.json"
@@ -533,10 +687,18 @@ final class AppThemeOptionTests: XCTestCase {
             ProfileQRCodePresentationBackground.resourceName(for: .gamer),
             ProfileQRCodePresentationBackground.defaultResourceName
         )
+        XCTAssertEqual(
+            ProfileQRCodePresentationBackground.resourceName(for: .holographicLight),
+            ProfileQRCodePresentationBackground.defaultResourceName
+        )
+        XCTAssertEqual(
+            ProfileQRCodePresentationBackground.resourceName(for: .holographicDark),
+            ProfileQRCodePresentationBackground.defaultResourceName
+        )
     }
 
     @MainActor
-    func testBundledPremiumThemeAssetsExistInMainBundle() {
+    func testBundledThemeAssetsExistInMainBundle() {
         XCTAssertNotNil(
             Bundle.main.url(forResource: "sakura-share-bg", withExtension: "json"),
             "Missing bundled Sakura QR share background"
@@ -558,6 +720,106 @@ final class AppThemeOptionTests: XCTestCase {
         reloaded.configure(accountPubkey: pubkey)
 
         XCTAssertTrue(reloaded.fullWidthNoteRows)
+    }
+
+    @MainActor
+    func testFloatingComposeButtonPreferencePersistsAcrossStoreReload() {
+        let defaults = UserDefaults(suiteName: #function)!
+        defaults.removePersistentDomain(forName: #function)
+        let authStore = AuthStore(defaults: defaults)
+        let pubkey = String(repeating: "a", count: 64)
+
+        let settings = AppSettingsStore(defaults: defaults, authStore: authStore)
+        settings.configure(accountPubkey: pubkey)
+        settings.floatingComposeButtonEnabled = true
+
+        let reloaded = AppSettingsStore(defaults: defaults, authStore: authStore)
+        reloaded.configure(accountPubkey: pubkey)
+
+        XCTAssertTrue(reloaded.floatingComposeButtonEnabled)
+    }
+
+    func testFloatingComposePaddingClearsVisibleBottomBar() {
+        let padding = FloatingComposeButtonLayout.bottomPadding(
+            safeAreaBottom: 34,
+            bottomTabBarHeight: 65,
+            isBottomTabBarVisible: true
+        )
+
+        XCTAssertEqual(padding, 101)
+    }
+
+    func testFloatingComposePaddingSitsCloserWhenBottomBarIsHidden() {
+        let hiddenPadding = FloatingComposeButtonLayout.bottomPadding(
+            safeAreaBottom: 34,
+            bottomTabBarHeight: 65,
+            isBottomTabBarVisible: false
+        )
+        let visiblePadding = FloatingComposeButtonLayout.bottomPadding(
+            safeAreaBottom: 34,
+            bottomTabBarHeight: 65,
+            isBottomTabBarVisible: true
+        )
+
+        XCTAssertEqual(hiddenPadding, 32)
+        XCTAssertLessThan(hiddenPadding, visiblePadding)
+    }
+
+    func testBottomTabBarStaysVisibleOnHomeRoot() {
+        XCTAssertTrue(
+            ScrollChromeLayout.isBottomTabBarVisible(
+                isHomeSideMenuPresented: false,
+                selectedTabIsDirectMessages: false,
+                isDirectMessagesRootVisible: true
+            )
+        )
+    }
+
+    func testBottomTabBarStillHidesBehindHomeSideMenu() {
+        XCTAssertFalse(
+            ScrollChromeLayout.isBottomTabBarVisible(
+                isHomeSideMenuPresented: true,
+                selectedTabIsDirectMessages: false,
+                isDirectMessagesRootVisible: true
+            )
+        )
+    }
+
+    func testBottomTabBarStillHidesOnNestedDirectMessagesScreen() {
+        XCTAssertFalse(
+            ScrollChromeLayout.isBottomTabBarVisible(
+                isHomeSideMenuPresented: false,
+                selectedTabIsDirectMessages: true,
+                isDirectMessagesRootVisible: false
+            )
+        )
+    }
+
+    func testHomeBottomBarUsesSafeAreaInsetInsteadOfOverlay() {
+        XCTAssertFalse(
+            ScrollChromeLayout.usesOverlayBottomTabBar(
+                selectedTabIsHome: true,
+                isHomeSideMenuPresented: false
+            )
+        )
+    }
+
+    func testVisibleBottomBarReservesInsetSpace() {
+        XCTAssertTrue(
+            ScrollChromeLayout.reservesBottomTabBarInsetSpace(
+                isBottomTabBarVisible: true,
+                usesOverlayBottomTabBar: false
+            )
+        )
+    }
+
+    func testHiddenBottomBarDoesNotReserveInsetSpace() {
+        XCTAssertFalse(
+            ScrollChromeLayout.reservesBottomTabBarInsetSpace(
+                isBottomTabBarVisible: false,
+                usesOverlayBottomTabBar: false
+            )
+        )
     }
 
     @MainActor

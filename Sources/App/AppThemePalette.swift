@@ -40,6 +40,14 @@ struct AppThemePollStyle {
     let refreshButtonForeground: Color
 }
 
+struct AppThemeFeedCardStyle {
+    let backgroundTop: Color
+    let backgroundBottom: Color
+    let border: Color
+    let highlight: Color
+    let shadow: Color
+}
+
 struct AppThemePalette {
     private static let sakuraPinkTint = Color(red: 0.992, green: 0.647, blue: 0.835) // #FDA5D5
     private static let sakuraPrimary = Color(red: 1.0, green: 0.404, blue: 0.941)
@@ -72,6 +80,25 @@ struct AppThemePalette {
     private static let gamerGreen = Color(red: 0.561, green: 1.0, blue: 0.369) // #8FFF5E
     private static let gamerPink = Color(red: 1.0, green: 0.412, blue: 0.741) // #FF69BD
     private static let gamerOrange = Color(red: 1.0, green: 0.694, blue: 0.333) // #FFB155
+    private static let holographicLightBackground = Color(red: 0.992, green: 0.996, blue: 1.0)
+    private static let holographicLightChrome = Color(red: 0.988, green: 0.994, blue: 1.0)
+    private static let holographicLightSurface = Color(red: 0.957, green: 0.982, blue: 1.0)
+    private static let holographicLightRaised = Color(red: 0.976, green: 0.966, blue: 1.0)
+    private static let holographicLightBorder = Color(red: 0.640, green: 0.875, blue: 1.0).opacity(0.36)
+    private static let holographicLightForeground = Color(red: 0.055, green: 0.075, blue: 0.125)
+    private static let holographicLightMuted = Color(red: 0.365, green: 0.418, blue: 0.540)
+    private static let holographicDarkBackground = Color(red: 0.035, green: 0.043, blue: 0.075)
+    private static let holographicDarkChrome = Color(red: 0.055, green: 0.067, blue: 0.118)
+    private static let holographicDarkSurface = Color(red: 0.080, green: 0.098, blue: 0.164)
+    private static let holographicDarkRaised = Color(red: 0.110, green: 0.129, blue: 0.214)
+    private static let holographicDarkBorder = Color(red: 0.690, green: 0.604, blue: 1.0).opacity(0.12)
+    private static let holographicDarkForeground = Color(red: 0.940, green: 0.970, blue: 1.0)
+    private static let holographicDarkMuted = Color(red: 0.640, green: 0.735, blue: 0.890)
+    private static let holographicBlue = Color(red: 0.235, green: 0.612, blue: 1.0)
+    private static let holographicCyan = Color(red: 0.380, green: 0.906, blue: 1.0)
+    private static let holographicLavender = Color(red: 0.690, green: 0.604, blue: 1.0)
+    private static let holographicPink = Color(red: 1.0, green: 0.560, blue: 0.780)
+    private static let holographicMint = Color(red: 0.580, green: 1.0, blue: 0.780)
     private static let blackSheet = Color(red: 0.082, green: 0.082, blue: 0.082) // #151515
     private static let blackSheetCard = Color(red: 0.137, green: 0.137, blue: 0.137) // #232323
     private static let blackSheetCardBorder = Color(red: 0.235, green: 0.235, blue: 0.235) // #3C3C3C
@@ -191,6 +218,23 @@ struct AppThemePalette {
         )
     }
 
+    private static func adaptiveFeedCardStyle(
+        light: AppThemeFeedCardStyle?,
+        dark: AppThemeFeedCardStyle?
+    ) -> AppThemeFeedCardStyle? {
+        guard let light, let dark else {
+            return light ?? dark
+        }
+
+        return AppThemeFeedCardStyle(
+            backgroundTop: adaptiveColor(light: light.backgroundTop, dark: dark.backgroundTop),
+            backgroundBottom: adaptiveColor(light: light.backgroundBottom, dark: dark.backgroundBottom),
+            border: adaptiveColor(light: light.border, dark: dark.border),
+            highlight: adaptiveColor(light: light.highlight, dark: dark.highlight),
+            shadow: adaptiveColor(light: light.shadow, dark: dark.shadow)
+        )
+    }
+
     private static func adaptivePalette(light: AppThemePalette, dark: AppThemePalette) -> AppThemePalette {
         AppThemePalette(
             background: adaptiveColor(light: light.background, dark: dark.background),
@@ -230,7 +274,8 @@ struct AppThemePalette {
             articlePreviewBorder: adaptiveColor(light: light.articlePreviewBorder, dark: dark.articlePreviewBorder),
             capsuleTabStyle: adaptiveCapsuleTabStyle(light: light.capsuleTabStyle, dark: dark.capsuleTabStyle),
             profileActionStyle: adaptiveProfileActionStyle(light: light.profileActionStyle, dark: dark.profileActionStyle),
-            pollStyle: adaptivePollStyle(light: light.pollStyle, dark: dark.pollStyle)
+            pollStyle: adaptivePollStyle(light: light.pollStyle, dark: dark.pollStyle),
+            feedCardStyle: adaptiveFeedCardStyle(light: light.feedCardStyle, dark: dark.feedCardStyle)
         )
     }
 
@@ -272,6 +317,117 @@ struct AppThemePalette {
     let capsuleTabStyle: AppThemeCapsuleTabStyle?
     let profileActionStyle: AppThemeProfileActionStyle?
     let pollStyle: AppThemePollStyle?
+    var feedCardStyle: AppThemeFeedCardStyle? = nil
+
+    func applying(
+        holographicGradient option: HolographicGradientOption,
+        for theme: AppThemeOption
+    ) -> AppThemePalette {
+        let accents = option.accentPalette(for: theme)
+        let border = option.borderColor(for: theme)
+        let selectedBackground = accents.primary.opacity(theme.usesDarkGradientTreatment ? 0.18 : 0.14)
+        let supportingBackground = accents.secondary.opacity(theme.usesDarkGradientTreatment ? 0.16 : 0.14)
+        let tertiaryFill = accents.tertiary.opacity(theme.usesDarkGradientTreatment ? 0.18 : 0.14)
+        let primaryForeground = theme.usesDarkGradientTreatment ? foreground : .white
+
+        let capsuleTabStyle = capsuleTabStyle.map { style in
+            AppThemeCapsuleTabStyle(
+                background: style.background,
+                border: border,
+                foreground: style.foreground,
+                selectedBackground: selectedBackground,
+                selectedBorder: border,
+                selectedForeground: style.selectedForeground
+            )
+        }
+
+        let profileActionStyle = profileActionStyle.map { style in
+            AppThemeProfileActionStyle(
+                background: style.background,
+                border: border,
+                foreground: style.foreground,
+                primaryBackground: selectedBackground,
+                primaryBorder: border,
+                primaryForeground: primaryForeground,
+                bannerBackground: style.bannerBackground,
+                bannerBorder: border,
+                bannerForeground: style.bannerForeground
+            )
+        }
+
+        let pollStyle = pollStyle.map { style in
+            AppThemePollStyle(
+                cardBackground: style.cardBackground,
+                cardBorder: border,
+                metadataForeground: style.metadataForeground,
+                optionBackground: style.optionBackground,
+                optionResultBackground: style.optionResultBackground,
+                optionBorder: border,
+                optionSelectedBackground: selectedBackground,
+                optionSelectedBorder: border,
+                optionWinningBackground: supportingBackground,
+                optionWinningBorder: border,
+                imagePlaceholderBackground: style.imagePlaceholderBackground,
+                imagePlaceholderForeground: style.imagePlaceholderForeground,
+                neutralBadgeBackground: style.neutralBadgeBackground,
+                neutralBadgeForeground: style.neutralBadgeForeground,
+                refreshButtonBackground: selectedBackground,
+                refreshButtonForeground: theme.usesDarkGradientTreatment ? accents.secondary : accents.primary
+            )
+        }
+
+        let feedCardStyle = feedCardStyle.map { style in
+            AppThemeFeedCardStyle(
+                backgroundTop: style.backgroundTop,
+                backgroundBottom: style.backgroundBottom,
+                border: border,
+                highlight: accents.primary.opacity(theme.usesDarkGradientTreatment ? 0.28 : 0.34),
+                shadow: accents.shadow.opacity(theme.usesDarkGradientTreatment ? 0.14 : 0.12)
+            )
+        }
+
+        return AppThemePalette(
+            background: background,
+            chromeBackground: chromeBackground,
+            chromeBorder: border,
+            mutedForeground: mutedForeground,
+            foreground: foreground,
+            secondaryForeground: secondaryForeground,
+            tertiaryForeground: tertiaryForeground,
+            inverseForeground: inverseForeground,
+            placeholderForeground: placeholderForeground,
+            iconForeground: iconForeground,
+            iconMutedForeground: iconMutedForeground,
+            secondaryBackground: secondaryBackground,
+            quoteBackground: quoteBackground,
+            groupedBackground: groupedBackground,
+            secondaryGroupedBackground: secondaryGroupedBackground,
+            navigationBackground: navigationBackground,
+            navigationControlBackground: navigationControlBackground,
+            sheetBackground: sheetBackground,
+            sheetCardBackground: sheetCardBackground,
+            sheetCardBorder: border,
+            sheetInsetBackground: sheetInsetBackground,
+            modalBackground: modalBackground,
+            elevatedBackground: elevatedBackground,
+            overlayBackground: overlayBackground,
+            secondaryFill: selectedBackground,
+            tertiaryFill: tertiaryFill,
+            separator: border,
+            successForeground: successForeground,
+            warningForeground: warningForeground,
+            errorForeground: errorForeground,
+            linkPreviewBackground: linkPreviewBackground,
+            linkPreviewBorder: border,
+            articlePreviewBackgroundTop: articlePreviewBackgroundTop,
+            articlePreviewBackgroundBottom: articlePreviewBackgroundBottom,
+            articlePreviewBorder: border,
+            capsuleTabStyle: capsuleTabStyle,
+            profileActionStyle: profileActionStyle,
+            pollStyle: pollStyle,
+            feedCardStyle: feedCardStyle
+        )
+    }
 
     static let black = AppThemePalette(
         background: .black,
@@ -465,6 +621,157 @@ struct AppThemePalette {
     )
 
     static let system = adaptivePalette(light: Self.white, dark: Self.dark)
+
+    static let holographicLight = AppThemePalette(
+        background: Self.holographicLightBackground,
+        chromeBackground: Self.holographicLightChrome,
+        chromeBorder: Self.holographicLightBorder,
+        mutedForeground: Self.holographicLightMuted,
+        foreground: Self.holographicLightForeground,
+        secondaryForeground: Self.holographicLightMuted,
+        tertiaryForeground: Self.holographicLightMuted.opacity(0.68),
+        inverseForeground: .white,
+        placeholderForeground: Self.holographicLightMuted.opacity(0.48),
+        iconForeground: Self.holographicLightForeground,
+        iconMutedForeground: Self.holographicLightMuted,
+        secondaryBackground: Self.holographicLightSurface,
+        quoteBackground: .white,
+        groupedBackground: Self.holographicLightBackground,
+        secondaryGroupedBackground: Self.holographicLightSurface,
+        navigationBackground: Self.holographicLightChrome,
+        navigationControlBackground: Self.holographicLightSurface,
+        sheetBackground: Self.holographicLightBackground,
+        sheetCardBackground: .white,
+        sheetCardBorder: Self.holographicLightBorder,
+        sheetInsetBackground: Self.holographicLightSurface,
+        modalBackground: .white,
+        elevatedBackground: Self.holographicLightRaised,
+        overlayBackground: Color.black.opacity(0.16),
+        secondaryFill: Self.holographicCyan.opacity(0.12),
+        tertiaryFill: Self.holographicLavender.opacity(0.12),
+        separator: Self.holographicLightBorder,
+        successForeground: .green,
+        warningForeground: .orange,
+        errorForeground: Self.holographicPink,
+        linkPreviewBackground: .white,
+        linkPreviewBorder: Self.holographicLightBorder,
+        articlePreviewBackgroundTop: .white,
+        articlePreviewBackgroundBottom: Self.holographicLightBackground,
+        articlePreviewBorder: Self.holographicLightBorder,
+        capsuleTabStyle: AppThemeCapsuleTabStyle(
+            background: .white,
+            border: Self.holographicLightBorder,
+            foreground: Self.holographicLightMuted,
+            selectedBackground: Self.holographicCyan.opacity(0.14),
+            selectedBorder: Self.holographicLavender.opacity(0.46),
+            selectedForeground: Self.holographicBlue
+        ),
+        profileActionStyle: AppThemeProfileActionStyle(
+            background: .white,
+            border: Self.holographicLightBorder,
+            foreground: Self.holographicLightForeground,
+            primaryBackground: Self.holographicBlue.opacity(0.14),
+            primaryBorder: Self.holographicLavender.opacity(0.46),
+            primaryForeground: Self.holographicBlue,
+            bannerBackground: Color.white.opacity(0.94),
+            bannerBorder: Self.holographicLightBorder,
+            bannerForeground: Self.holographicLightMuted
+        ),
+        pollStyle: AppThemePollStyle(
+            cardBackground: .white,
+            cardBorder: Self.holographicLightBorder,
+            metadataForeground: Self.holographicLightMuted,
+            optionBackground: Self.holographicLightSurface,
+            optionResultBackground: Self.holographicLightRaised,
+            optionBorder: Self.holographicLightBorder,
+            optionSelectedBackground: Self.holographicCyan.opacity(0.14),
+            optionSelectedBorder: Self.holographicLavender.opacity(0.46),
+            optionWinningBackground: Self.holographicMint.opacity(0.16),
+            optionWinningBorder: Self.holographicMint.opacity(0.52),
+            imagePlaceholderBackground: Self.holographicLightRaised,
+            imagePlaceholderForeground: Self.holographicLightMuted,
+            neutralBadgeBackground: Self.holographicLightSurface,
+            neutralBadgeForeground: Self.holographicLightMuted,
+            refreshButtonBackground: Self.holographicCyan.opacity(0.12),
+            refreshButtonForeground: Self.holographicBlue
+        ),
+        feedCardStyle: nil
+    )
+
+    static let holographicDark = AppThemePalette(
+        background: Self.holographicDarkBackground,
+        chromeBackground: Self.holographicDarkChrome,
+        chromeBorder: Self.holographicDarkBorder,
+        mutedForeground: Self.holographicDarkMuted,
+        foreground: Self.holographicDarkForeground,
+        secondaryForeground: Self.holographicDarkMuted,
+        tertiaryForeground: Self.holographicDarkMuted.opacity(0.72),
+        inverseForeground: Self.holographicDarkBackground,
+        placeholderForeground: Self.holographicDarkMuted.opacity(0.58),
+        iconForeground: Self.holographicDarkForeground,
+        iconMutedForeground: Self.holographicDarkMuted,
+        secondaryBackground: Self.holographicDarkSurface,
+        quoteBackground: Self.holographicDarkSurface,
+        groupedBackground: Self.holographicDarkBackground,
+        secondaryGroupedBackground: Self.holographicDarkChrome,
+        navigationBackground: Self.holographicDarkBackground,
+        navigationControlBackground: Self.holographicDarkSurface,
+        sheetBackground: Self.holographicDarkBackground,
+        sheetCardBackground: Self.holographicDarkSurface,
+        sheetCardBorder: Self.holographicDarkBorder,
+        sheetInsetBackground: Self.holographicDarkChrome,
+        modalBackground: Self.holographicDarkSurface,
+        elevatedBackground: Self.holographicDarkRaised,
+        overlayBackground: Color.black.opacity(0.86),
+        secondaryFill: Self.holographicLavender.opacity(0.16),
+        tertiaryFill: Self.holographicPink.opacity(0.14),
+        separator: Self.holographicDarkBorder,
+        successForeground: Self.holographicPink,
+        warningForeground: .orange,
+        errorForeground: Self.holographicPink,
+        linkPreviewBackground: Self.holographicDarkSurface,
+        linkPreviewBorder: Self.holographicDarkBorder,
+        articlePreviewBackgroundTop: Self.holographicDarkSurface,
+        articlePreviewBackgroundBottom: Self.holographicDarkChrome,
+        articlePreviewBorder: Self.holographicDarkBorder,
+        capsuleTabStyle: AppThemeCapsuleTabStyle(
+            background: Self.holographicDarkChrome,
+            border: Self.holographicDarkBorder,
+            foreground: Self.holographicDarkMuted,
+            selectedBackground: Self.holographicLavender.opacity(0.15),
+            selectedBorder: Self.holographicPink.opacity(0.34),
+            selectedForeground: Self.holographicDarkForeground
+        ),
+        profileActionStyle: AppThemeProfileActionStyle(
+            background: Self.holographicDarkChrome,
+            border: Self.holographicDarkBorder,
+            foreground: Self.holographicDarkForeground.opacity(0.86),
+            primaryBackground: Self.holographicLavender.opacity(0.15),
+            primaryBorder: Self.holographicPink.opacity(0.34),
+            primaryForeground: Self.holographicDarkForeground,
+            bannerBackground: Self.holographicDarkSurface.opacity(0.94),
+            bannerBorder: Self.holographicDarkBorder,
+            bannerForeground: Self.holographicDarkForeground
+        ),
+        pollStyle: AppThemePollStyle(
+            cardBackground: Self.holographicDarkSurface,
+            cardBorder: Self.holographicDarkBorder,
+            metadataForeground: Self.holographicDarkMuted,
+            optionBackground: Self.holographicDarkChrome,
+            optionResultBackground: Self.holographicDarkRaised.opacity(0.76),
+            optionBorder: Self.holographicDarkBorder,
+            optionSelectedBackground: Self.holographicLavender.opacity(0.15),
+            optionSelectedBorder: Self.holographicPink.opacity(0.34),
+            optionWinningBackground: Self.holographicPink.opacity(0.12),
+            optionWinningBorder: Self.holographicPink.opacity(0.34),
+            imagePlaceholderBackground: Self.holographicDarkChrome,
+            imagePlaceholderForeground: Self.holographicDarkMuted,
+            neutralBadgeBackground: Self.holographicDarkRaised.opacity(0.86),
+            neutralBadgeForeground: Self.holographicDarkForeground.opacity(0.84),
+            refreshButtonBackground: Self.holographicLavender.opacity(0.14),
+            refreshButtonForeground: Self.holographicPink
+        )
+    )
 
     static let sakura = AppThemePalette(
         background: Color(red: 1.0, green: 0.994, blue: 0.997),

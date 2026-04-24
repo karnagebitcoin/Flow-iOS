@@ -35,6 +35,7 @@ final class SearchViewModel: ObservableObject {
 
     private let service: NostrFeedService
     private let trendingNotesLoader: TrendingNotesLoader
+    private let supportsContentSearch: Bool
     private let vertexSearchService = VertexProfileSearchService.shared
     private let pageSize: Int
     private let assetPrefetchItemCount = 18
@@ -81,7 +82,8 @@ final class SearchViewModel: ObservableObject {
         readRelayURLs: [URL]? = nil,
         pageSize: Int = 100,
         service: NostrFeedService = NostrFeedService(),
-        trendingNotesLoader: @escaping TrendingNotesLoader = SearchViewModel.defaultTrendingNotesLoader
+        trendingNotesLoader: @escaping TrendingNotesLoader = SearchViewModel.defaultTrendingNotesLoader,
+        supportsContentSearch: Bool = true
     ) {
         let normalizedReadRelayURLs = Self.normalizedRelayURLs(readRelayURLs ?? [relayURL])
         let initialReadRelayURLs = normalizedReadRelayURLs.isEmpty ? [relayURL] : normalizedReadRelayURLs
@@ -91,6 +93,7 @@ final class SearchViewModel: ObservableObject {
         self.pageSize = pageSize
         self.service = service
         self.trendingNotesLoader = trendingNotesLoader
+        self.supportsContentSearch = supportsContentSearch
     }
 
     deinit {
@@ -136,7 +139,8 @@ final class SearchViewModel: ObservableObject {
     }
 
     var suggestedContentSearch: SuggestedContentSearch? {
-        searchQuery.suggestedContentSearch
+        guard supportsContentSearch else { return nil }
+        return searchQuery.suggestedContentSearch
     }
 
     var hasAnySearchResults: Bool {
@@ -190,7 +194,7 @@ final class SearchViewModel: ObservableObject {
         profileMatches = []
         errorMessage = nil
 
-        if query.eventReference != nil {
+        if supportsContentSearch, query.eventReference != nil {
             searchTask = Task { [weak self] in
                 try? await Task.sleep(nanoseconds: 220_000_000)
                 guard !Task.isCancelled else { return }
@@ -350,14 +354,14 @@ final class SearchViewModel: ObservableObject {
             return
         }
 
-        if query.normalizedHashtag != nil {
+        if supportsContentSearch, query.normalizedHashtag != nil {
             profileMatches = []
             errorMessage = nil
             isLoading = false
             return
         }
 
-        if query.eventReference != nil {
+        if supportsContentSearch, query.eventReference != nil {
             profileMatches = []
             errorMessage = nil
             isLoading = false
@@ -371,7 +375,9 @@ final class SearchViewModel: ObservableObject {
         profileMatches = []
 
         let profileRelayURLs = profileSearchRelayTargets()
-        let normalizedProfileQuery = query.normalizedProfileQuery
+        let normalizedProfileQuery = supportsContentSearch
+            ? query.normalizedProfileQuery
+            : query.normalizedPeopleOnlyProfileQuery
         let exactPubkey = query.resolvedProfilePubkey
 
         async let followedProfileMatchesResult = buildFollowedSuggestions(

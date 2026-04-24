@@ -155,10 +155,14 @@ enum NoteContentParser {
                 guard let url = match.url else { continue }
                 let scheme = url.scheme?.lowercased() ?? ""
                 guard scheme == "http" || scheme == "https" else { continue }
+                let raw = nsContent.substring(with: match.range)
+                let sanitized = trimTrailingPunctuation(raw)
+                let adjustedLength = (sanitized as NSString).length
+                guard adjustedLength > 0 else { continue }
                 candidates.append(
                     Candidate(
-                        range: match.range,
-                        value: nsContent.substring(with: match.range),
+                        range: NSRange(location: match.range.location, length: adjustedLength),
+                        value: sanitized,
                         type: .httpURL
                     )
                 )
@@ -414,16 +418,30 @@ enum NoteContentParser {
 
     static func lastWebsiteURL(in tokens: [NoteContentToken]) -> URL? {
         for token in tokens.reversed() where token.type == .url {
-            if let url = URL(string: token.value) {
+            if let url = webURL(from: token.value) {
                 return url
             }
         }
         return nil
     }
 
+    static func webURL(from rawValue: String) -> URL? {
+        let trimmed = rawValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        let sanitized = trimTrailingPunctuation(trimmed)
+        guard !sanitized.isEmpty else { return nil }
+
+        if let url = URL(string: sanitized),
+           let scheme = url.scheme?.lowercased(),
+           scheme == "http" || scheme == "https" {
+            return url
+        }
+
+        return URL(string: "https://\(sanitized)")
+    }
+
     static func youtubeVideoEmbed(from urlString: String) -> YouTubeVideoEmbed? {
         let trimmed = urlString.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard let url = URL(string: trimmed),
+        guard let url = webURL(from: trimmed),
               let scheme = url.scheme?.lowercased(),
               scheme == "http" || scheme == "https",
               let components = URLComponents(url: url, resolvingAgainstBaseURL: false),
@@ -465,7 +483,7 @@ enum NoteContentParser {
         var ordered: [URL] = []
 
         for token in tokens where token.type == .image {
-            guard let url = URL(string: token.value),
+            guard let url = webURL(from: token.value),
                   let scheme = url.scheme?.lowercased(),
                   scheme == "http" || scheme == "https" else {
                 continue
@@ -1112,7 +1130,7 @@ enum NoteContentParser {
             if normalizedMIMEType.hasPrefix("audio/") { return .audio }
         }
 
-        guard let url = URL(string: urlString) else { return nil }
+        guard let url = webURL(from: urlString) else { return nil }
         let ext = url.pathExtension.lowercased()
         if imageExtensions.contains(ext) { return .image }
         if videoExtensions.contains(ext) { return .video }

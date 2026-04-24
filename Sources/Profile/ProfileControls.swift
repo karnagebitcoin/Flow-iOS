@@ -12,8 +12,9 @@ struct ProfileActionIconButton: View {
     var body: some View {
         let style = appSettings.themePalette.profileActionStyle
         let disabledOpacity = isDisabled ? 0.48 : 1.0
+        let usesHolographicPrimaryGradient = isPrimary && appSettings.usesPrimaryGradientForProminentButtons
         let foreground = isPrimary
-            ? (style?.primaryForeground ?? Color.white)
+            ? appSettings.buttonTextColor
             : (style?.foreground ?? (isDisabled ? appSettings.themePalette.mutedForeground : appSettings.themePalette.foreground))
         let background = isPrimary
             ? (style?.primaryBackground ?? Color.accentColor)
@@ -27,10 +28,15 @@ struct ProfileActionIconButton: View {
                 .padding(.vertical, 10)
                 .padding(.horizontal, 12)
                 .foregroundStyle(foreground.opacity(disabledOpacity))
-                .background(
-                    Capsule()
-                        .fill(background.opacity(isDisabled && style != nil ? 0.72 : 1))
-                )
+                .background {
+                    if usesHolographicPrimaryGradient {
+                        Capsule()
+                            .fill(appSettings.primaryGradient)
+                    } else {
+                        Capsule()
+                            .fill(background.opacity(isDisabled && style != nil ? 0.72 : 1))
+                    }
+                }
                 .overlay {
                     if let borderColor {
                         Capsule()
@@ -40,6 +46,14 @@ struct ProfileActionIconButton: View {
                             .stroke(appSettings.themePalette.separator.opacity(0.7), lineWidth: 0.8)
                     }
                 }
+                .shadow(
+                    color: usesHolographicPrimaryGradient
+                        ? (appSettings.activeButtonGradientOption?.accentPalette(for: appSettings.activeTheme).shadow.opacity(0.18) ?? .clear)
+                        : .clear,
+                    radius: usesHolographicPrimaryGradient ? 10 : 0,
+                    x: 0,
+                    y: usesHolographicPrimaryGradient ? 6 : 0
+                )
         }
         .buttonStyle(.plain)
         .disabled(isDisabled)
@@ -82,7 +96,7 @@ struct ProfileMenuOptionLabel: View {
                 .foregroundStyle(.primary)
         } icon: {
             Image(systemName: systemImage)
-                .foregroundStyle(appSettings.primaryColor)
+                .foregroundStyle(appSettings.themeIconAccentColor)
         }
     }
 }

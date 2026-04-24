@@ -481,6 +481,7 @@ struct ndb_query_results {
 
 // CONFIG
 void ndb_default_config(struct ndb_config *);
+const char *ndb_last_error(void);
 void ndb_config_set_ingest_threads(struct ndb_config *config, int threads);
 void ndb_config_set_flags(struct ndb_config *config, int flags);
 void ndb_config_set_mapsize(struct ndb_config *config, size_t mapsize);

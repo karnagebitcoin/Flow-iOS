@@ -12,8 +12,12 @@ import UIKit
 enum FlowLayoutGuardrails {
     private static let softBreakSeparators = CharacterSet(charactersIn: "/._-?&=#:%+")
 
-    static func softWrapped(_ value: String, maxNonBreakingRunLength: Int = 24) -> String {
-        guard value.count > 36 else { return value }
+    static func softWrapped(
+        _ value: String,
+        maxNonBreakingRunLength: Int = 24,
+        minimumLength: Int = 36
+    ) -> String {
+        guard value.count > minimumLength else { return value }
 
         let softBreak = "\u{200B}"
         var wrapped = ""
@@ -51,6 +55,27 @@ enum FlowLayoutGuardrails {
         guard let value, value.isFinite, value > 0 else { return nil }
         return Swift.min(Swift.max(value, minRatio), maxRatio)
     }
+
+    static func aspectFitMediaSize(
+        availableWidth: CGFloat?,
+        aspectRatio: CGFloat?,
+        maxHeight: CGFloat,
+        fallbackWidth: CGFloat = UIScreen.main.bounds.width
+    ) -> CGSize {
+        let width = availableWidth.flatMap { value -> CGFloat? in
+            guard value.isFinite, value > 0 else { return nil }
+            return value
+        } ?? fallbackWidth
+        let ratio = clampedAspectRatio(aspectRatio) ?? 16.0 / 9.0
+        let boundedMaxHeight = maxHeight.isFinite && maxHeight > 0 ? maxHeight : width / ratio
+        let heightForFullWidth = width / ratio
+
+        if heightForFullWidth <= boundedMaxHeight {
+            return CGSize(width: width, height: heightForFullWidth)
+        }
+
+        return CGSize(width: boundedMaxHeight * ratio, height: boundedMaxHeight)
+    }
 }
 
 enum NoteContentMediaLayout {
@@ -79,7 +104,7 @@ enum NoteContentLinkResolver {
     ) -> URL? {
         switch token.type {
         case .url:
-            return URL(string: token.value)
+            return NoteContentParser.webURL(from: token.value)
         case .nostrMention:
             let normalized = NoteContentView.normalizeMentionIdentifier(token.value)
             if allowsInAppProfileRouting,
@@ -595,7 +620,7 @@ struct NoteContentView: View {
                     let currentToken = tokens[index]
 
                     if currentToken.type == .image,
-                       let url = URL(string: currentToken.value) {
+                       let url = NoteContentParser.webURL(from: currentToken.value) {
                         imageURLs.append(url)
                         index += 1
                         continue
@@ -617,17 +642,17 @@ struct NoteContentView: View {
                 continue
             case .video:
                 flushInlineBuffer(trimTrailingWhitespace: true)
-                if let url = URL(string: token.value) {
+                if let url = NoteContentParser.webURL(from: token.value) {
                     parts.append(.video(url))
                 }
             case .youtubeVideo:
                 flushInlineBuffer(trimTrailingWhitespace: true)
-                if let url = URL(string: token.value) {
+                if let url = NoteContentParser.webURL(from: token.value) {
                     parts.append(.youtubeVideo(url))
                 }
             case .audio:
                 flushInlineBuffer(trimTrailingWhitespace: true)
-                if let url = URL(string: token.value) {
+                if let url = NoteContentParser.webURL(from: token.value) {
                     parts.append(.audio(url))
                 }
             case .nostrEvent:

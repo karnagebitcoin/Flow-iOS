@@ -205,6 +205,7 @@ struct SearchBarSection: View {
     @EnvironmentObject private var appSettings: AppSettingsStore
 
     @Binding var searchText: String
+    var placeholder = "Search notes, profiles, and hashtags"
     let onSubmit: () -> Void
 
     var body: some View {
@@ -213,7 +214,7 @@ struct SearchBarSection: View {
                 Image(systemName: "magnifyingglass")
                     .foregroundStyle(appSettings.themePalette.mutedForeground)
 
-                TextField("Search notes, profiles, and hashtags", text: $searchText)
+                TextField(placeholder, text: $searchText)
                     .font(appSettings.appFont(.body))
                     .textInputAutocapitalization(.never)
                     .autocorrectionDisabled()
@@ -252,6 +253,11 @@ struct SearchBarSection: View {
             ZStack {
                 appSettings.themePalette.chromeBackground.opacity(0.78)
                 appSettings.primaryGradient.opacity(0.14)
+            }
+        } else if appSettings.activeHolographicGradientOption != nil {
+            ZStack {
+                appSettings.themePalette.chromeBackground
+                appSettings.primaryGradient.opacity(appSettings.activeTheme.usesDarkGradientTreatment ? 0.10 : 0.08)
             }
         } else if appSettings.activeTheme == .gamer {
             appSettings.themePalette.background
@@ -411,7 +417,7 @@ struct SearchProfileResultRow: View {
                 } label: {
                     Text(isFollowing ? "Following" : "Follow")
                         .font(.caption.weight(.semibold))
-                        .foregroundStyle(isFollowing ? appSettings.themePalette.mutedForeground : Color.white)
+                        .foregroundStyle(isFollowing ? appSettings.themePalette.mutedForeground : appSettings.buttonTextColor)
                         .padding(.horizontal, 12)
                         .padding(.vertical, 7)
                         .background(
@@ -450,18 +456,18 @@ struct SearchActionCard: View {
                 HStack(spacing: 12) {
                     Image(systemName: actionIcon)
                         .font(.headline)
-                        .foregroundStyle(isActive ? Color.white : appSettings.primaryColor)
+                        .foregroundStyle(isActive ? appSettings.buttonTextColor : appSettings.primaryColor)
 
                     Text(suggestion.title)
                         .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(isActive ? Color.white : appSettings.themePalette.foreground)
+                        .foregroundStyle(isActive ? appSettings.buttonTextColor : appSettings.themePalette.foreground)
                         .lineLimit(1)
 
                     Spacer(minLength: 0)
 
                     Image(systemName: "arrow.right")
                         .font(.caption.weight(.bold))
-                        .foregroundStyle(isActive ? Color.white.opacity(0.9) : appSettings.themePalette.secondaryForeground)
+                        .foregroundStyle(isActive ? appSettings.buttonTextColor.opacity(0.9) : appSettings.themePalette.secondaryForeground)
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
@@ -473,7 +479,7 @@ struct SearchActionCard: View {
                         .font(.headline.weight(.semibold))
                         .foregroundStyle(
                             isActive
-                                ? Color.white
+                                ? appSettings.buttonTextColor
                                 : (isPinned ? appSettings.primaryColor : appSettings.themePalette.secondaryForeground)
                         )
                         .frame(width: 34, height: 34)
@@ -481,7 +487,7 @@ struct SearchActionCard: View {
                             Capsule(style: .continuous)
                                 .fill(
                                     isActive
-                                        ? Color.white.opacity(0.16)
+                                        ? appSettings.buttonTextColor.opacity(0.16)
                                         : appSettings.themePalette.tertiaryFill
                                 )
                         )

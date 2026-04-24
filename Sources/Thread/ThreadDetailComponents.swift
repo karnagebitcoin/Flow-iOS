@@ -1,13 +1,28 @@
 import SwiftUI
 import UIKit
 
+struct ThreadDetailSeparator: View {
+    @EnvironmentObject private var appSettings: AppSettingsStore
+
+    var leadingPadding: CGFloat = 0
+
+    var body: some View {
+        Rectangle()
+            .fill(appSettings.themePalette.chromeBorder)
+            .frame(height: 0.7)
+            .padding(.leading, leadingPadding)
+    }
+}
+
 struct ThreadDetailRootNoteCard: View {
         @EnvironmentObject private var appSettings: AppSettingsStore
+        @EnvironmentObject private var auth: AuthManager
 
         let item: FeedItem
         let isHiddenByNSFW: Bool
         let reactionCount: Int
         let commentCount: Int
+        let repostCount: Int
         let showReactions: Bool
         let isFollowingAuthor: Bool
         let rootFollowStatusIconName: String?
@@ -54,7 +69,16 @@ struct ThreadDetailRootNoteCard: View {
                             Label("View Profile", systemImage: "person")
                         }
                     } label: {
-                        AvatarView(url: item.avatarURL, fallback: item.displayName)
+                        AvatarView(
+                            url: item.avatarURL,
+                            fallback: item.displayName,
+                            fallbackGradient: isAuthoredByCurrentAccount
+                                ? appSettings.avatarFallbackGradient(forAccountPubkey: auth.currentAccount?.pubkey)
+                                : nil,
+                            fallbackForeground: isAuthoredByCurrentAccount
+                                ? appSettings.avatarFallbackForeground(forAccountPubkey: auth.currentAccount?.pubkey)
+                                : nil
+                        )
                             .overlay(alignment: .bottomTrailing) {
                                 if let rootFollowStatusIconName {
                                     ZStack {
@@ -134,6 +158,7 @@ struct ThreadDetailRootNoteCard: View {
                 if showReactions {
                     ThreadDetailInteractionRow(
                         replyCount: commentCount,
+                        repostCount: repostCount,
                         reactionCount: reactionCount,
                         isLikedByCurrentUser: isLikedByCurrentUser,
                         isBonusReactionByCurrentUser: isBonusReactionByCurrentUser,
@@ -148,12 +173,28 @@ struct ThreadDetailRootNoteCard: View {
             .padding(.horizontal, 16)
             .padding(.vertical, 12)
         }
+
+        private var isAuthoredByCurrentAccount: Bool {
+            guard let rawCurrentPubkey = auth.currentAccount?.pubkey else {
+                return false
+            }
+            let currentPubkey = rawCurrentPubkey
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+                .lowercased()
+            guard !currentPubkey.isEmpty else { return false }
+
+            let authorPubkey = item.displayAuthorPubkey
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+                .lowercased()
+            return authorPubkey == currentPubkey
+        }
     }
 
 struct ThreadDetailInteractionRow: View {
         @EnvironmentObject private var appSettings: AppSettingsStore
 
         let replyCount: Int?
+        let repostCount: Int
         let reactionCount: Int
         let isLikedByCurrentUser: Bool
         let isBonusReactionByCurrentUser: Bool
@@ -180,8 +221,14 @@ struct ThreadDetailInteractionRow: View {
                 .accessibilityLabel("Reply")
 
                 Button(action: onRepostTap) {
-                    Image(systemName: "arrow.2.squarepath")
-                        .frame(minWidth: 34, minHeight: 30, alignment: .leading)
+                    HStack(spacing: 4) {
+                        Image(systemName: "arrow.2.squarepath")
+                        if repostCount > 0 {
+                            Text("\(repostCount)")
+                                .font(.footnote)
+                        }
+                    }
+                    .frame(minWidth: 34, minHeight: 30, alignment: .leading)
                 }
                 .buttonStyle(.plain)
                 .foregroundStyle(appSettings.themePalette.iconMutedForeground)
@@ -378,6 +425,7 @@ struct ThreadDetailRepliesSection: View {
                     currentPubkey: currentUserPubkey
                 ),
                 commentCount: replyCountsByTarget[reply.displayEventID.lowercased()] ?? 0,
+                repostCount: reactionStats.repostCount(for: reply.displayEventID),
                 showReactions: showReactions,
                 avatarMenuActions: .init(
                     followLabel: isFollowingAuthor(reply.displayAuthorPubkey) ? "Unfollow" : "Follow",
@@ -411,9 +459,9 @@ struct ThreadDetailRepliesSection: View {
                 }
             }
             .overlay(alignment: .bottom) {
-                Divider()
-                    .overlay(appSettings.themePalette.chromeBorder)
-                    .padding(.leading, 56)
+                if appSettings.themePalette.feedCardStyle == nil {
+                    ThreadDetailSeparator(leadingPadding: 56)
+                }
             }
         }
     }
@@ -481,6 +529,7 @@ struct ThreadDetailSpamRepliesGroup: View {
                                 currentPubkey: currentUserPubkey
                             ),
                             commentCount: replyCountsByTarget[reply.displayEventID.lowercased()] ?? 0,
+                            repostCount: reactionStats.repostCount(for: reply.displayEventID),
                             showReactions: showReactions,
                             avatarMenuActions: .init(
                                 followLabel: isFollowingAuthor(reply.displayAuthorPubkey) ? "Unfollow" : "Follow",
@@ -526,9 +575,9 @@ struct ThreadDetailSpamRepliesGroup: View {
                         .padding(.horizontal, 16)
                         .padding(.bottom, 8)
 
-                        Divider()
-                            .overlay(appSettings.themePalette.chromeBorder)
-                            .padding(.leading, 72)
+                        if appSettings.themePalette.feedCardStyle == nil {
+                            ThreadDetailSeparator(leadingPadding: 72)
+                        }
                     }
                 }
             }
@@ -574,9 +623,7 @@ struct ThreadDetailReactionsSection: View {
                             .padding(.horizontal, 16)
                             .padding(.vertical, 10)
 
-                        Divider()
-                            .overlay(appSettings.themePalette.chromeBorder)
-                            .padding(.leading, 56)
+                        ThreadDetailSeparator(leadingPadding: 56)
                     }
                 }
             }
@@ -622,10 +669,10 @@ struct ThreadDetailArticleBody: View {
 
                         if showReactions {
                             VStack(alignment: .leading, spacing: 18) {
-                                Divider()
-                                    .overlay(appSettings.themePalette.chromeBorder)
+                                ThreadDetailSeparator()
                                 ThreadDetailInteractionRow(
                                     replyCount: nil,
+                                    repostCount: 0,
                                     reactionCount: reactionCount,
                                     isLikedByCurrentUser: isLikedByCurrentUser,
                                     isBonusReactionByCurrentUser: isBonusReactionByCurrentUser,

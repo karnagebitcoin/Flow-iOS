@@ -275,15 +275,17 @@ struct ProfileEditorSheet: View {
         .background(appSettings.themePalette.sheetBackground)
     }
 
-    private var saveButtonBackground: Color {
-        isBusy ? appSettings.themePalette.tertiaryFill : appSettings.primaryColor
+    private var saveButtonBackground: AnyShapeStyle {
+        isBusy
+            ? AnyShapeStyle(appSettings.themePalette.tertiaryFill)
+            : AnyShapeStyle(appSettings.primaryGradient)
     }
 
     private var saveButtonForeground: Color {
         if isBusy {
             return appSettings.themePalette.secondaryForeground
         }
-        return colorScheme == .dark ? .black : .white
+        return appSettings.buttonTextColor
     }
 
     private var saveButtonBorder: Color {
@@ -918,18 +920,13 @@ private struct ProfileEditorPreviewCard: View {
 
     private var previewBannerFallback: some View {
         ZStack {
-            LinearGradient(
-                colors: [
-                    appSettings.themePalette.secondaryBackground,
-                    appSettings.primaryColor.opacity(0.20),
-                    appSettings.themePalette.background
-                ],
-                startPoint: .topLeading,
-                endPoint: .bottomTrailing
-            )
+            Rectangle()
+                .fill(appSettings.primaryGradient)
+                .opacity(appSettings.usesPrimaryGradientForProminentButtons ? 0.92 : 0.34)
+                .background(appSettings.themePalette.secondaryBackground)
 
             Circle()
-                .fill(Color.white.opacity(0.40))
+                .fill(Color.white.opacity(appSettings.usesPrimaryGradientForProminentButtons ? 0.36 : 0.40))
                 .frame(width: 148, height: 148)
                 .blur(radius: 18)
                 .offset(x: 122, y: -46)
@@ -980,20 +977,11 @@ private struct ProfileEditorPreviewCard: View {
     private var previewAvatarFallback: some View {
         ZStack {
             Circle()
-                .fill(
-                    LinearGradient(
-                        colors: [
-                            appSettings.primaryColor.opacity(0.9),
-                            appSettings.themePalette.tertiaryFill
-                        ],
-                        startPoint: .topLeading,
-                        endPoint: .bottomTrailing
-                    )
-                )
+                .fill(appSettings.primaryGradient)
 
             Text(String(resolvedDisplayName.prefix(1)).uppercased())
                 .font(.system(size: 34, weight: .bold, design: .rounded))
-                .foregroundStyle(.white)
+                .foregroundStyle(appSettings.buttonTextColor)
         }
     }
 
@@ -1019,12 +1007,12 @@ private struct ProfileEditorPreviewCard: View {
     private func previewPrimaryActionCapsule(text: String) -> some View {
         Text(text)
             .font(appSettings.appFont(.subheadline, weight: .semibold))
-            .foregroundStyle(colorScheme == .dark ? .black : .white)
+            .foregroundStyle(appSettings.buttonTextColor)
             .padding(.horizontal, 16)
             .frame(height: 40)
             .background(
                 Capsule(style: .continuous)
-                    .fill(appSettings.primaryColor)
+                    .fill(appSettings.primaryGradient)
             )
     }
 

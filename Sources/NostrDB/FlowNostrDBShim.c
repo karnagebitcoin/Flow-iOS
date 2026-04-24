@@ -13,6 +13,39 @@
 #define FLOW_NDB_JSON_MAX_CAPACITY (4 * 1024 * 1024)
 #define FLOW_NDB_QUERY_RESULT_CAPACITY 2048
 #define FLOW_NDB_PROFILE_SEARCH_KEY_SIZE 24
+#define FLOW_NDB_OPEN_ERROR_CAPACITY 512
+
+static char flow_ndb_last_open_error_buffer[FLOW_NDB_OPEN_ERROR_CAPACITY];
+
+static void flow_ndb_clear_last_open_error(void)
+{
+	flow_ndb_last_open_error_buffer[0] = '\0';
+}
+
+static void flow_ndb_set_last_open_error(const char *message)
+{
+	if (message == NULL || message[0] == '\0') {
+		snprintf(
+			flow_ndb_last_open_error_buffer,
+			FLOW_NDB_OPEN_ERROR_CAPACITY,
+			"%s",
+			"flow_ndb_open failed"
+		);
+		return;
+	}
+
+	snprintf(
+		flow_ndb_last_open_error_buffer,
+		FLOW_NDB_OPEN_ERROR_CAPACITY,
+		"%s",
+		message
+	);
+}
+
+const char *flow_ndb_last_open_error(void)
+{
+	return flow_ndb_last_open_error_buffer;
+}
 
 static int flow_ndb_grow_buffer(char **buffer, int *capacity, int required)
 {
@@ -433,8 +466,12 @@ void *flow_ndb_open(const char *dbdir, int ingest_threads, size_t mapsize, int w
 {
 	struct ndb *ndb = NULL;
 	struct ndb_config config;
+	const char *last_error;
+
+	flow_ndb_clear_last_open_error();
 
 	if (dbdir == NULL) {
+		flow_ndb_set_last_open_error("dbdir was NULL");
 		return NULL;
 	}
 
@@ -451,6 +488,8 @@ void *flow_ndb_open(const char *dbdir, int ingest_threads, size_t mapsize, int w
 	ndb_config_set_flags(&config, flags);
 
 	if (!ndb_init(&ndb, dbdir, &config)) {
+		last_error = ndb_last_error();
+		flow_ndb_set_last_open_error(last_error);
 		return NULL;
 	}
 

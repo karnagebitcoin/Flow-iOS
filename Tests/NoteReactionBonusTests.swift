@@ -75,6 +75,50 @@ final class NoteReactionBonusTests: XCTestCase {
         )
     }
 
+    @MainActor
+    func testPrefetchMergesReplyAndRepostCountsWithReactions() async throws {
+        let targetEventID = String(repeating: "1", count: 64)
+        let targetPubkey = String(repeating: "2", count: 64)
+        let relayURL = try XCTUnwrap(URL(string: "wss://relay.example.com"))
+        let targetEvent = makeReactionTargetEvent(
+            id: targetEventID,
+            pubkey: targetPubkey
+        )
+        let replyEvent = makeReplyEvent(
+            id: String(repeating: "3", count: 64),
+            pubkey: String(repeating: "4", count: 64),
+            targetEventID: targetEventID,
+            targetPubkey: targetPubkey
+        )
+        let repostEvent = makeRepostEvent(
+            id: String(repeating: "5", count: 64),
+            pubkey: String(repeating: "6", count: 64),
+            targetEventID: targetEventID,
+            targetPubkey: targetPubkey
+        )
+        let reactionEvent = makeReactionEvent(
+            id: String(repeating: "7", count: 64),
+            pubkey: String(repeating: "8", count: 64),
+            targetEventID: targetEventID,
+            targetPubkey: targetPubkey,
+            bonusCount: 0
+        )
+        let relayClient = SpyReactionRelayClient(events: [replyEvent, repostEvent, reactionEvent])
+        let service = NoteReactionStatsService(
+            relayClient: relayClient,
+            store: NoteReactionStatsStore(fileManager: ReactionTestFileManager(rootURL: temporaryRootURL()))
+        )
+
+        service.prefetch(events: [targetEvent], relayURLs: [relayURL])
+        try await Task.sleep(nanoseconds: 160_000_000)
+
+        XCTAssertEqual(service.reactionCount(for: targetEventID), 1)
+        XCTAssertEqual(service.replyCount(for: targetEventID), 1)
+        XCTAssertEqual(service.repostCount(for: targetEventID), 1)
+        let capturedFilters = await relayClient.capturedFilters()
+        XCTAssertEqual(capturedFilters.first?.kinds?.sorted(), [1, 6, 7, 16, 1111, 1244])
+    }
+
     private func temporaryRootURL() -> URL {
         let url = FileManager.default.temporaryDirectory
             .appendingPathComponent("NoteReactionBonusTests-\(UUID().uuidString)", isDirectory: true)
@@ -105,12 +149,24 @@ private struct ReactionRelayPublishCapture: Sendable {
 }
 
 private actor SpyReactionRelayClient: NostrRelayEventFetching {
+    private let events: [Flow.NostrEvent]
+    private var filters: [NostrFilter] = []
+
+    init(events: [Flow.NostrEvent] = []) {
+        self.events = events
+    }
+
     func fetchEvents(
         relayURL: URL,
         filter: NostrFilter,
         timeout: TimeInterval
     ) async throws -> [Flow.NostrEvent] {
-        []
+        filters.append(filter)
+        return events
+    }
+
+    func capturedFilters() -> [NostrFilter] {
+        filters
     }
 }
 
@@ -127,15 +183,58 @@ private final class ReactionTestFileManager: FileManager, @unchecked Sendable {
     }
 }
 
-private func makeReactionTargetEvent() -> Flow.NostrEvent {
+private func makeReactionTargetEvent(
+    id: String = String(repeating: "1", count: 64),
+    pubkey: String = String(repeating: "2", count: 64)
+) -> Flow.NostrEvent {
     Flow.NostrEvent(
-        id: String(repeating: "1", count: 64),
-        pubkey: String(repeating: "2", count: 64),
+        id: id,
+        pubkey: pubkey,
         createdAt: 1_700_000_000,
         kind: 1,
         tags: [],
         content: "Target note",
         sig: String(repeating: "3", count: 128)
+    )
+}
+
+private func makeReplyEvent(
+    id: String,
+    pubkey: String,
+    targetEventID: String,
+    targetPubkey: String
+) -> Flow.NostrEvent {
+    Flow.NostrEvent(
+        id: id,
+        pubkey: pubkey,
+        createdAt: 1_700_000_010,
+        kind: 1,
+        tags: [
+            ["e", targetEventID, "", "reply"],
+            ["p", targetPubkey]
+        ],
+        content: "Replying",
+        sig: String(repeating: "5", count: 128)
+    )
+}
+
+private func makeRepostEvent(
+    id: String,
+    pubkey: String,
+    targetEventID: String,
+    targetPubkey: String
+) -> Flow.NostrEvent {
+    Flow.NostrEvent(
+        id: id,
+        pubkey: pubkey,
+        createdAt: 1_700_000_020,
+        kind: 6,
+        tags: [
+            ["e", targetEventID],
+            ["p", targetPubkey]
+        ],
+        content: "",
+        sig: String(repeating: "6", count: 128)
     )
 }
 

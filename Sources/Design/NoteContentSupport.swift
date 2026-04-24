@@ -112,7 +112,7 @@ struct NoteMediaPlaceholderView: View {
     private func placeholderContent(isActionable: Bool) -> some View {
         HStack(spacing: 10) {
             Image(systemName: systemImage)
-                .foregroundStyle(isActionable ? appSettings.primaryColor : appSettings.themePalette.iconMutedForeground)
+                .foregroundStyle(isActionable ? appSettings.themeIconAccentColor : appSettings.themePalette.iconMutedForeground)
             Text(text)
                 .font(.footnote.weight(isActionable ? .semibold : .regular))
                 .foregroundStyle(isActionable ? appSettings.primaryColor : appSettings.themePalette.secondaryForeground)
@@ -121,7 +121,7 @@ struct NoteMediaPlaceholderView: View {
             if isActionable {
                 Image(systemName: "chevron.right")
                     .font(.caption.weight(.semibold))
-                    .foregroundStyle(appSettings.primaryColor)
+                    .foregroundStyle(appSettings.themeIconAccentColor)
             }
         }
         .padding(.horizontal, 12)
@@ -873,6 +873,7 @@ private extension UIViewController {
 
 struct NoteFeedImageTileView: View {
     @EnvironmentObject private var appSettings: AppSettingsStore
+    @ObservedObject private var networkPath = FlowNetworkPathMonitor.shared
     let url: URL
     let cornerRadius: CGFloat
     let width: CGFloat
@@ -904,7 +905,7 @@ struct NoteFeedImageTileView: View {
         .accessibilityLabel("Open image")
         .accessibilityAddTraits(.isButton)
         .frame(width: width, height: height)
-        .task(id: url) {
+        .task(id: feedImageLimitResetKey) {
             bypassFileSizeLimits = false
             isShowingTapToLoadPrompt = false
         }
@@ -941,11 +942,15 @@ struct NoteFeedImageTileView: View {
     }
 
     private var shouldEnforceFileSizeLimit: Bool {
-        appSettings.mediaFileSizeLimitsEffective && !bypassFileSizeLimits
+        appSettings.mediaFileSizeLimitsEffective && !networkPath.isUsingWiFi && !bypassFileSizeLimits
     }
 
     private var shouldOfferTapToLoad: Bool {
-        appSettings.mediaFileSizeLimitsEffective && !bypassFileSizeLimits
+        shouldEnforceFileSizeLimit
+    }
+
+    private var feedImageLimitResetKey: String {
+        "\(url.absoluteString)|wifi:\(networkPath.isUsingWiFi)"
     }
 
     @MainActor
@@ -988,6 +993,7 @@ struct NoteSingleImageCellView: View {
     let onSave: @MainActor () async -> Void
     let onAddToNote: @MainActor () -> Void
     @EnvironmentObject private var appSettings: AppSettingsStore
+    @ObservedObject private var networkPath = FlowNetworkPathMonitor.shared
     @State private var reservedAspectRatio: CGFloat
     @State private var bypassFileSizeLimits = false
     @State private var isShowingTapToLoadPrompt = false
@@ -1050,7 +1056,7 @@ struct NoteSingleImageCellView: View {
         .accessibilityAddTraits(.isButton)
         .aspectRatio(contextMenuAspectRatio, contentMode: .fit)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .task(id: url) {
+        .task(id: feedImageLimitResetKey) {
             bypassFileSizeLimits = false
             isShowingTapToLoadPrompt = false
             let cachedExactRatio = FlowMediaAspectRatioCache.shared.ratio(for: url)
@@ -1064,7 +1070,7 @@ struct NoteSingleImageCellView: View {
             guard maxHeight == nil else { return }
             guard let resolvedExactRatio = await FlowImageCache.shared.aspectRatio(
                 for: url,
-                enforceNetworkByteLimit: appSettings.mediaFileSizeLimitsEffective
+                enforceNetworkByteLimit: shouldEnforceFileSizeLimit
             ) else { return }
             guard let normalizedRatio = NoteImageLayoutGuide.normalizedAspectRatio(resolvedExactRatio) else { return }
             guard !Task.isCancelled else { return }
@@ -1214,11 +1220,15 @@ struct NoteSingleImageCellView: View {
     }
 
     private var shouldEnforceFileSizeLimit: Bool {
-        appSettings.mediaFileSizeLimitsEffective && !bypassFileSizeLimits
+        appSettings.mediaFileSizeLimitsEffective && !networkPath.isUsingWiFi && !bypassFileSizeLimits
     }
 
     private var shouldOfferTapToLoad: Bool {
-        appSettings.mediaFileSizeLimitsEffective && !bypassFileSizeLimits
+        shouldEnforceFileSizeLimit
+    }
+
+    private var feedImageLimitResetKey: String {
+        "\(url.absoluteString)|wifi:\(networkPath.isUsingWiFi)"
     }
 }
 
@@ -1350,8 +1360,8 @@ struct NoteImageFullscreenViewer: View {
             } label: {
                 HStack(spacing: 4) {
                     Image(systemName: "bubble.right")
-                    if commentCount > 0 {
-                        Text("\(commentCount)")
+                    if visibleReplyCount > 0 {
+                        Text("\(visibleReplyCount)")
                             .font(.footnote)
                     }
                 }
@@ -1368,9 +1378,15 @@ struct NoteImageFullscreenViewer: View {
                     isShowingInlineResharePanel = true
                 }
             } label: {
-                Image(systemName: "arrow.2.squarepath")
-                    .foregroundStyle(chromeForegroundColor)
-                    .frame(minWidth: 36, minHeight: 28, alignment: .leading)
+                HStack(spacing: 4) {
+                    Image(systemName: "arrow.2.squarepath")
+                    if visibleRepostCount > 0 {
+                        Text("\(visibleRepostCount)")
+                            .font(.footnote)
+                    }
+                }
+                .foregroundStyle(chromeForegroundColor)
+                .frame(minWidth: 36, minHeight: 28, alignment: .leading)
             }
             .buttonStyle(.plain)
             .accessibilityLabel("Re-share")
@@ -1426,6 +1442,14 @@ struct NoteImageFullscreenViewer: View {
 
     private var visibleReactionCount: Int {
         reactionStats.reactionCount(for: sourceEvent.id)
+    }
+
+    private var visibleReplyCount: Int {
+        max(commentCount, reactionStats.replyCount(for: sourceEvent.id))
+    }
+
+    private var visibleRepostCount: Int {
+        reactionStats.repostCount(for: sourceEvent.id)
     }
 
     private var isLikedByCurrentUser: Bool {
@@ -2182,33 +2206,36 @@ struct NoteVideoPlayerView: View {
     var body: some View {
         let rendersAsGIFLikeVideo = isGIFLike || shortMP4LoopURL == url
 
-        ZStack {
-            NoteNativeVideoPlayerController(
-                url: url,
-                autoplay: rendersAsGIFLikeVideo,
-                showsPlaybackControls: !rendersAsGIFLikeVideo,
-                isMuted: rendersAsGIFLikeVideo,
-                loops: rendersAsGIFLikeVideo,
-                onPlaybackStateChange: { nextIsPlaying in
-                    isPlaying = nextIsPlaying
-                }
-            )
-            .clipShape(
-                RoundedRectangle(cornerRadius: mediaCornerRadius, style: .continuous)
-            )
+        NoteAspectRatioMediaLayout(
+            aspectRatio: videoAspectRatio,
+            maxHeight: maxVideoHeight
+        ) {
+            ZStack {
+                Color.black.opacity(0.08)
 
-            if !isPlaying {
-                thumbnailLayer
-                    .allowsHitTesting(false)
-                    .transition(.opacity)
+                NoteNativeVideoPlayerController(
+                    url: url,
+                    autoplay: rendersAsGIFLikeVideo,
+                    showsPlaybackControls: !rendersAsGIFLikeVideo,
+                    isMuted: rendersAsGIFLikeVideo,
+                    loops: rendersAsGIFLikeVideo,
+                    onPlaybackStateChange: { nextIsPlaying in
+                        isPlaying = nextIsPlaying
+                    }
+                )
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
 
-                if !rendersAsGIFLikeVideo {
-                    previewPlayAffordance
+                if !isPlaying {
+                    thumbnailLayer
+                        .allowsHitTesting(false)
+                        .transition(.opacity)
+
+                    if !rendersAsGIFLikeVideo {
+                        previewPlayAffordance
+                    }
                 }
             }
         }
-        .frame(maxWidth: .infinity, maxHeight: maxVideoHeight, alignment: .leading)
-        .aspectRatio(videoAspectRatio, contentMode: .fit)
         .clipShape(
             RoundedRectangle(cornerRadius: mediaCornerRadius, style: .continuous)
         )
@@ -2234,6 +2261,8 @@ struct NoteVideoPlayerView: View {
             Image(uiImage: videoThumbnail)
                 .resizable()
                 .scaledToFill()
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .clipped()
         }
     }
 
@@ -2327,10 +2356,57 @@ struct NoteVideoPlayerView: View {
     }
 }
 
+private struct NoteAspectRatioMediaLayout: Layout {
+    let aspectRatio: CGFloat
+    let maxHeight: CGFloat
+
+    func sizeThatFits(
+        proposal: ProposedViewSize,
+        subviews: Subviews,
+        cache: inout ()
+    ) -> CGSize {
+        FlowLayoutGuardrails.aspectFitMediaSize(
+            availableWidth: proposal.width,
+            aspectRatio: aspectRatio,
+            maxHeight: maxHeight
+        )
+    }
+
+    func placeSubviews(
+        in bounds: CGRect,
+        proposal: ProposedViewSize,
+        subviews: Subviews,
+        cache: inout ()
+    ) {
+        let size = FlowLayoutGuardrails.aspectFitMediaSize(
+            availableWidth: bounds.width,
+            aspectRatio: aspectRatio,
+            maxHeight: maxHeight
+        )
+        let origin = CGPoint(x: bounds.minX, y: bounds.minY)
+
+        for subview in subviews {
+            subview.place(
+                at: origin,
+                proposal: ProposedViewSize(width: size.width, height: size.height)
+            )
+        }
+    }
+}
+
 private enum NoteVideoPlaybackAudioSession {
+    static func configureForMediaPlayback() {
+        let audioSession = AVAudioSession.sharedInstance()
+        try? audioSession.setCategory(
+            .playback,
+            mode: .moviePlayback,
+            options: [.mixWithOthers]
+        )
+    }
+
     static func activateIfNeeded() {
         let audioSession = AVAudioSession.sharedInstance()
-        try? audioSession.setCategory(.playback, mode: .moviePlayback, options: [])
+        configureForMediaPlayback()
         try? audioSession.setActive(true, options: [])
     }
 }
@@ -2491,6 +2567,7 @@ struct NoteAudioPlayerView: View {
             Link(destination: url) {
                 Image(systemName: "arrow.up.right.square")
                     .font(.body)
+                    .foregroundStyle(appSettings.themeIconAccentColor)
             }
             .buttonStyle(.plain)
             .accessibilityLabel("Open audio in browser")
@@ -2531,6 +2608,7 @@ struct NoteAudioPlayerView: View {
             player.pause()
             isPlaying = false
         } else {
+            NoteVideoPlaybackAudioSession.activateIfNeeded()
             player.play()
             isPlaying = true
         }
@@ -2605,6 +2683,7 @@ struct NoteNativeVideoPlayerController: UIViewControllerRepresentable {
             guard controller.player === player else { return }
 
             if shouldAutoplayForCurrentURL {
+                NoteVideoPlaybackAudioSession.configureForMediaPlayback()
                 if !isMuted {
                     NoteVideoPlaybackAudioSession.activateIfNeeded()
                 }
@@ -2655,6 +2734,7 @@ struct NoteNativeVideoPlayerController: UIViewControllerRepresentable {
                         toleranceAfter: .zero
                     ) { [weak self] finished in
                         guard finished, let self else { return }
+                        NoteVideoPlaybackAudioSession.configureForMediaPlayback()
                         self.player.play()
                     }
                 } else {

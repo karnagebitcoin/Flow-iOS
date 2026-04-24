@@ -41,6 +41,15 @@ struct SettingsGeneralView: View {
                 }
 
                 SettingsToggleRow(
+                    title: "Floating Compose Button",
+                    isOn: Binding(
+                        get: { appSettings.floatingComposeButtonEnabled },
+                        set: { appSettings.floatingComposeButtonEnabled = $0 }
+                    ),
+                    footer: "Show compose in the corner."
+                )
+
+                SettingsToggleRow(
                     title: "Hide NSFW Content",
                     isOn: Binding(
                         get: { appSettings.hideNSFWContent },

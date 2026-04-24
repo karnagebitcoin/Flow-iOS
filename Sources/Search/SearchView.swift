@@ -325,6 +325,7 @@ struct SearchView: View {
                 currentPubkey: auth.currentAccount?.pubkey
             ),
             commentCount: visibleReplyCounts[item.displayEventID.lowercased()] ?? 0,
+            repostCount: reactionStats.repostCount(for: item.displayEventID),
             showReactions: appSettings.reactionsVisibleInFeeds,
             avatarMenuActions: .init(
                 followLabel: followStore.isFollowing(item.displayAuthorPubkey) ? "Unfollow" : "Follow",
@@ -367,7 +368,7 @@ struct SearchView: View {
                 trailing: Self.feedHorizontalInset
             )
         )
-        .listRowSeparator(.visible)
+        .listRowSeparator(appSettings.themePalette.feedCardStyle == nil ? .visible : .hidden)
         .listRowSeparatorTint(appSettings.themePalette.chromeBorder)
         .listRowBackground(Color.clear)
         .onAppear {

@@ -57,10 +57,55 @@ extension NoteReaction: Codable {
     }
 }
 
-struct NoteReactionStats: Codable, Hashable, Sendable {
+struct NoteReactionStats: Hashable, Sendable {
     var reactionIDs: Set<String> = []
+    var replyIDs: Set<String> = []
+    var repostIDs: Set<String> = []
     var reactions: [NoteReaction] = []
     var updatedAt: Int?
+}
+
+extension NoteReactionStats: Codable {
+    private enum CodingKeys: String, CodingKey {
+        case reactionIDs
+        case replyIDs
+        case repostIDs
+        case reactions
+        case updatedAt
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let decodedReactions = try container.decodeIfPresent([NoteReaction].self, forKey: .reactions) ?? []
+        reactions = decodedReactions
+        reactionIDs = Self.normalizedIDSet(
+            try container.decodeIfPresent(Set<String>.self, forKey: .reactionIDs)
+            ?? Set(decodedReactions.map(\.id))
+        )
+        replyIDs = Self.normalizedIDSet(
+            try container.decodeIfPresent(Set<String>.self, forKey: .replyIDs) ?? []
+        )
+        repostIDs = Self.normalizedIDSet(
+            try container.decodeIfPresent(Set<String>.self, forKey: .repostIDs) ?? []
+        )
+        updatedAt = try container.decodeIfPresent(Int.self, forKey: .updatedAt)
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(reactionIDs, forKey: .reactionIDs)
+        try container.encode(replyIDs, forKey: .replyIDs)
+        try container.encode(repostIDs, forKey: .repostIDs)
+        try container.encode(reactions, forKey: .reactions)
+        try container.encodeIfPresent(updatedAt, forKey: .updatedAt)
+    }
+
+    private static func normalizedIDSet(_ ids: Set<String>) -> Set<String> {
+        Set(ids.compactMap { id in
+            let normalized = id.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+            return normalized.isEmpty ? nil : normalized
+        })
+    }
 }
 
 actor NoteReactionStatsStore {

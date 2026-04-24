@@ -1,9 +1,22 @@
 import SwiftUI
 
 private let profileHeaderBannerHeight: CGFloat = 220
+private let profileHeaderBannerFadeHeight: CGFloat = 108
 private let profileHeaderAvatarSize: CGFloat = 104
 private let profileHeaderContentHorizontalPadding: CGFloat = 16
 private let profileHeaderSkeletonInfoRowWidths: [CGFloat] = [184, 152, 228]
+
+enum ProfileHeaderLayoutGuardrails {
+    static func boundedWidth(
+        proposedWidth: CGFloat?,
+        fallbackWidth: CGFloat = UIScreen.main.bounds.width
+    ) -> CGFloat {
+        if let proposedWidth, proposedWidth.isFinite, proposedWidth > 0 {
+            return proposedWidth
+        }
+        return fallbackWidth
+    }
+}
 
 struct ProfileHeaderContent {
     let displayName: String
@@ -71,7 +84,7 @@ struct ProfileHeaderSection<BackButton: View, MenuButton: View, ActionRow: View>
     }
 
     var body: some View {
-        Group {
+        ProfileHeaderWidthBoundaryLayout {
             if isLoading {
                 ProfileHeaderSkeleton(
                     backButton: backButton,
@@ -81,6 +94,7 @@ struct ProfileHeaderSection<BackButton: View, MenuButton: View, ActionRow: View>
                 loadedContent
             }
         }
+        .clipped()
     }
 
     private var loadedContent: some View {
@@ -94,14 +108,12 @@ struct ProfileHeaderSection<BackButton: View, MenuButton: View, ActionRow: View>
                 }
 
             VStack(alignment: .leading, spacing: 14) {
-                HStack(alignment: .bottom, spacing: 16) {
+                ProfileHeaderAvatarActionsLayout {
                     ProfileAvatarView(
                         displayName: content.displayName,
                         avatarURL: content.avatarURL,
                         onTap: onAvatarTap
                     )
-
-                    Spacer(minLength: 0)
 
                     actionRow
                 }
@@ -140,16 +152,47 @@ struct ProfileHeaderSection<BackButton: View, MenuButton: View, ActionRow: View>
                         .fixedSize(horizontal: false, vertical: true)
                 }
             }
-            .frame(width: profileContentWidth, alignment: .leading)
+            .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.horizontal, profileHeaderContentHorizontalPadding)
             .padding(.top, -(profileHeaderAvatarSize / 2))
+            .padding(.bottom, 18)
         }
-        .frame(width: UIScreen.main.bounds.width, alignment: .leading)
+        .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.bottom, 8)
     }
+}
 
-    private var profileContentWidth: CGFloat {
-        max(UIScreen.main.bounds.width - (profileHeaderContentHorizontalPadding * 2), 0)
+private struct ProfileHeaderWidthBoundaryLayout: Layout {
+    func sizeThatFits(
+        proposal: ProposedViewSize,
+        subviews: Subviews,
+        cache: inout ()
+    ) -> CGSize {
+        guard let subview = subviews.first else { return .zero }
+
+        let width = ProfileHeaderLayoutGuardrails.boundedWidth(proposedWidth: proposal.width)
+        let size = subview.sizeThatFits(
+            ProposedViewSize(width: width, height: proposal.height)
+        )
+
+        return CGSize(width: width, height: size.height)
+    }
+
+    func placeSubviews(
+        in bounds: CGRect,
+        proposal: ProposedViewSize,
+        subviews: Subviews,
+        cache: inout ()
+    ) {
+        guard let subview = subviews.first else { return }
+
+        let width = ProfileHeaderLayoutGuardrails.boundedWidth(
+            proposedWidth: bounds.width > 0 ? bounds.width : proposal.width
+        )
+        subview.place(
+            at: bounds.origin,
+            proposal: ProposedViewSize(width: width, height: bounds.height)
+        )
     }
 }
 
@@ -172,28 +215,122 @@ private struct ProfileHeaderTopControls<BackButton: View, MenuButton: View>: Vie
     }
 }
 
+private struct ProfileHeaderAvatarActionsLayout: Layout {
+    private let horizontalSpacing: CGFloat = 16
+    private let verticalSpacing: CGFloat = 12
+
+    func sizeThatFits(
+        proposal: ProposedViewSize,
+        subviews: Subviews,
+        cache: inout ()
+    ) -> CGSize {
+        guard subviews.count >= 2 else { return .zero }
+
+        let availableWidth = proposal.width ?? horizontalSize(subviews: subviews).width
+        let avatarSize = subviews[0].sizeThatFits(.unspecified)
+        let actionsSize = subviews[1].sizeThatFits(.unspecified)
+        let horizontalWidth = avatarSize.width + horizontalSpacing + actionsSize.width
+
+        if horizontalWidth <= availableWidth {
+            return CGSize(
+                width: availableWidth,
+                height: max(avatarSize.height, actionsSize.height)
+            )
+        }
+
+        return CGSize(
+            width: availableWidth,
+            height: avatarSize.height + verticalSpacing + actionsSize.height
+        )
+    }
+
+    func placeSubviews(
+        in bounds: CGRect,
+        proposal: ProposedViewSize,
+        subviews: Subviews,
+        cache: inout ()
+    ) {
+        guard subviews.count >= 2 else { return }
+
+        let avatarSize = subviews[0].sizeThatFits(.unspecified)
+        let actionsSize = subviews[1].sizeThatFits(.unspecified)
+        let horizontalWidth = avatarSize.width + horizontalSpacing + actionsSize.width
+
+        if horizontalWidth <= bounds.width {
+            let avatarOrigin = CGPoint(
+                x: bounds.minX,
+                y: bounds.maxY - avatarSize.height
+            )
+            let actionsOrigin = CGPoint(
+                x: bounds.maxX - actionsSize.width,
+                y: bounds.maxY - actionsSize.height
+            )
+
+            subviews[0].place(
+                at: avatarOrigin,
+                proposal: ProposedViewSize(width: avatarSize.width, height: avatarSize.height)
+            )
+            subviews[1].place(
+                at: actionsOrigin,
+                proposal: ProposedViewSize(width: actionsSize.width, height: actionsSize.height)
+            )
+        } else {
+            subviews[0].place(
+                at: bounds.origin,
+                proposal: ProposedViewSize(width: avatarSize.width, height: avatarSize.height)
+            )
+            subviews[1].place(
+                at: CGPoint(x: bounds.minX, y: bounds.minY + avatarSize.height + verticalSpacing),
+                proposal: ProposedViewSize(width: min(actionsSize.width, bounds.width), height: actionsSize.height)
+            )
+        }
+    }
+
+    private func horizontalSize(subviews: Subviews) -> CGSize {
+        guard subviews.count >= 2 else { return .zero }
+        let avatarSize = subviews[0].sizeThatFits(.unspecified)
+        let actionsSize = subviews[1].sizeThatFits(.unspecified)
+
+        return CGSize(
+            width: avatarSize.width + horizontalSpacing + actionsSize.width,
+            height: max(avatarSize.height, actionsSize.height)
+        )
+    }
+}
+
 private struct ProfileBannerArtwork: View {
     let bannerURL: URL?
 
     @EnvironmentObject private var appSettings: AppSettingsStore
 
     var body: some View {
-        ZStack {
+        ZStack(alignment: .bottom) {
             bannerContent
 
             LinearGradient(
                 colors: [
                     Color.black.opacity(0.08),
-                    Color.clear,
-                    appSettings.themePalette.groupedBackground.opacity(0.28)
+                    Color.clear
                 ],
                 startPoint: .top,
                 endPoint: .bottom
             )
+
+            LinearGradient(
+                stops: [
+                    .init(color: Color.clear, location: 0),
+                    .init(color: appSettings.themePalette.background.opacity(0.22), location: 0.42),
+                    .init(color: appSettings.themePalette.background.opacity(0.72), location: 0.78),
+                    .init(color: appSettings.themePalette.background, location: 1)
+                ],
+                startPoint: .top,
+                endPoint: .bottom
+            )
+            .frame(height: profileHeaderBannerFadeHeight)
         }
         .frame(maxWidth: .infinity)
         .frame(height: profileHeaderBannerHeight)
-        .background(appSettings.themePalette.secondaryBackground)
+        .background(appSettings.themePalette.background)
         .clipped()
     }
 
@@ -219,18 +356,13 @@ private struct ProfileBannerArtwork: View {
 
     private var bannerFallback: some View {
         ZStack {
-            LinearGradient(
-                colors: [
-                    appSettings.themePalette.secondaryBackground,
-                    appSettings.primaryColor.opacity(0.20),
-                    appSettings.themePalette.background
-                ],
-                startPoint: .topLeading,
-                endPoint: .bottomTrailing
-            )
+            Rectangle()
+                .fill(appSettings.primaryGradient)
+                .opacity(appSettings.usesPrimaryGradientForProminentButtons ? 0.92 : 0.34)
+                .background(appSettings.themePalette.secondaryBackground)
 
             Circle()
-                .fill(Color.white.opacity(0.42))
+                .fill(Color.white.opacity(appSettings.usesPrimaryGradientForProminentButtons ? 0.36 : 0.42))
                 .frame(width: 152, height: 152)
                 .blur(radius: 18)
                 .offset(x: 120, y: -40)
@@ -314,20 +446,11 @@ private struct ProfileAvatarView: View {
     private var avatarFallback: some View {
         ZStack {
             Circle()
-                .fill(
-                    LinearGradient(
-                        colors: [
-                            Color.accentColor.opacity(0.9),
-                            appSettings.themePalette.tertiaryFill
-                        ],
-                        startPoint: .topLeading,
-                        endPoint: .bottomTrailing
-                    )
-                )
+                .fill(appSettings.primaryGradient)
 
             Text(String(displayName.prefix(1)).uppercased())
                 .font(.system(size: 34, weight: .bold, design: .rounded))
-                .foregroundStyle(.white)
+                .foregroundStyle(appSettings.buttonTextColor)
         }
     }
 }
@@ -344,14 +467,14 @@ private struct ProfileIdentityBlock: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text(displayName)
+            Text(FlowLayoutGuardrails.softWrapped(displayName, maxNonBreakingRunLength: 14, minimumLength: 14))
                 .font(appSettings.appFont(size: 30, weight: .heavy))
                 .foregroundStyle(appSettings.themePalette.foreground)
                 .lineLimit(2)
                 .fixedSize(horizontal: false, vertical: true)
 
             HStack(alignment: .firstTextBaseline, spacing: 6) {
-                Text(handle)
+                Text(FlowLayoutGuardrails.softWrapped(handle, maxNonBreakingRunLength: 18, minimumLength: 18))
                     .font(appSettings.appFont(.subheadline))
                     .foregroundStyle(appSettings.themePalette.mutedForeground)
                     .lineLimit(1)
@@ -424,7 +547,7 @@ private struct ProfileKnownFollowersRow: View {
         HStack(alignment: .center, spacing: 10) {
             ProfileKnownFollowersAvatarStack(followers: visibleFollowers)
 
-            Text("Followed by \(namesText)")
+            Text("Followed by \(softWrappedNamesText)")
                 .font(appSettings.appFont(.footnote, weight: .medium))
                 .foregroundStyle(appSettings.themePalette.mutedForeground)
                 .lineLimit(2)
@@ -437,6 +560,10 @@ private struct ProfileKnownFollowersRow: View {
 
     private var namesText: String {
         visibleFollowers.map(\.displayName).joined(separator: ", ")
+    }
+
+    private var softWrappedNamesText: String {
+        FlowLayoutGuardrails.softWrapped(namesText, maxNonBreakingRunLength: 16, minimumLength: 18)
     }
 }
 
@@ -525,7 +652,7 @@ private struct ProfileInfoRow: View {
         HStack(spacing: 8) {
             Image(systemName: systemImage)
                 .imageScale(.small)
-                .foregroundStyle(appSettings.themePalette.mutedForeground)
+                .foregroundStyle(iconForegroundStyle)
             Text(text)
                 .font(appSettings.appFont(.footnote))
                 .foregroundStyle(appSettings.themePalette.mutedForeground)
@@ -535,6 +662,10 @@ private struct ProfileInfoRow: View {
                 .layoutPriority(1)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private var iconForegroundStyle: Color {
+        systemImage == "link" ? appSettings.themeIconAccentColor : appSettings.themePalette.mutedForeground
     }
 }
 
@@ -557,15 +688,13 @@ private struct ProfileHeaderSkeleton<BackButton: View, MenuButton: View>: View {
                 }
 
             VStack(alignment: .leading, spacing: 14) {
-                HStack(alignment: .bottom, spacing: 16) {
+                ProfileHeaderAvatarActionsLayout {
                     Circle()
                         .fill(appSettings.themePalette.secondaryFill)
                         .frame(
                             width: profileHeaderAvatarSize,
                             height: profileHeaderAvatarSize
                         )
-
-                    Spacer(minLength: 0)
 
                     HStack(spacing: 10) {
                         ForEach(0..<4, id: \.self) { _ in
@@ -609,17 +738,14 @@ private struct ProfileHeaderSkeleton<BackButton: View, MenuButton: View>: View {
                     }
                 }
             }
-            .frame(width: profileContentWidth, alignment: .leading)
+            .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.horizontal, profileHeaderContentHorizontalPadding)
             .padding(.top, -(profileHeaderAvatarSize / 2))
+            .padding(.bottom, 18)
         }
-        .frame(width: UIScreen.main.bounds.width, alignment: .leading)
+        .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.bottom, 8)
         .redacted(reason: .placeholder)
-    }
-
-    private var profileContentWidth: CGFloat {
-        max(UIScreen.main.bounds.width - (profileHeaderContentHorizontalPadding * 2), 0)
     }
 }
 

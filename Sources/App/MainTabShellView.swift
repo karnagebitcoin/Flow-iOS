@@ -19,7 +19,7 @@ struct MainTabShellView: View {
 
         var symbolName: String {
             switch self {
-            case .home: return "house"
+            case .home: return "building.columns"
             case .search: return "magnifyingglass"
             case .dms: return "bubble.left"
             case .activity: return "bell"
@@ -42,6 +42,7 @@ struct MainTabShellView: View {
     @State private var isActivityRootVisible = true
     @State private var isDMRootVisible = true
     @State private var isHomeSideMenuPresented = false
+    @State private var bottomTabBarHeight: CGFloat = FloatingComposeButtonLayout.defaultBottomTabBarHeight
 
     @StateObject private var homeViewModel = HomeFeedViewModel(
         relayURL: URL(string: RelaySettingsStore.defaultReadRelayURLs.first ?? "wss://relay.damus.io/")!
@@ -89,9 +90,15 @@ struct MainTabShellView: View {
             }
         }
         .safeAreaInset(edge: .bottom, spacing: 0) {
-            if isBottomTabBarVisible {
+            if shouldReserveBottomTabBarInsetSpace {
                 bottomTabBar
                     .transition(.move(edge: .bottom).combined(with: .opacity))
+            }
+        }
+        .overlay(alignment: .bottomTrailing) {
+            if appSettings.floatingComposeButtonEnabled {
+                floatingComposeButtonOverlay
+                    .transition(.scale(scale: 0.92).combined(with: .opacity))
             }
         }
         .overlay(alignment: .bottomTrailing) {
@@ -209,6 +216,10 @@ struct MainTabShellView: View {
         .onChange(of: appSettings.liveReactsEnabled) { _, _ in
             configureLiveReactsSubscription()
         }
+        .onPreferenceChange(BottomTabBarHeightPreferenceKey.self) { newValue in
+            guard newValue > 0, abs(bottomTabBarHeight - newValue) >= 0.5 else { return }
+            bottomTabBarHeight = newValue
+        }
         .onChange(of: appSettings.activityNotificationPreferenceSignature) { _, _ in
             activityViewModel.notificationPreferencesChanged()
         }
@@ -245,7 +256,9 @@ struct MainTabShellView: View {
             HStack(spacing: 0) {
                 tabBarButton(for: .home)
                 tabBarButton(for: .search)
-                composeTabButton
+                if !appSettings.floatingComposeButtonEnabled {
+                    composeTabButton
+                }
                 tabBarButton(for: .dms)
                 tabBarButton(for: .activity)
             }
@@ -257,9 +270,15 @@ struct MainTabShellView: View {
             bottomTabBarBackground
                 .ignoresSafeArea(edges: .bottom)
         }
+        .overlay {
+            GeometryReader { proxy in
+                Color.clear
+                    .preference(key: BottomTabBarHeightPreferenceKey.self, value: proxy.size.height)
+            }
+        }
     }
 
-        @ViewBuilder
+    @ViewBuilder
     private var bottomTabBarBackground: some View {
         if appSettings.activeTheme == .sakura {
             ZStack {
@@ -319,16 +338,49 @@ struct MainTabShellView: View {
         } label: {
             Image(systemName: "plus")
                 .font(.system(size: 24, weight: .semibold))
-                .foregroundStyle(.white)
+                .foregroundStyle(appSettings.buttonTextColor)
                 .frame(width: 54, height: 54)
                 .background(appSettings.primaryGradient, in: Circle())
                 .shadow(color: .black.opacity(0.14), radius: 10, x: 0, y: 4)
         }
         .buttonStyle(.plain)
         .frame(maxWidth: .infinity)
-        .offset(y: -10)
-        .padding(.bottom, -10)
+        .offset(y: -4)
+        .padding(.bottom, -4)
         .accessibilityLabel("Compose note")
+    }
+
+    private var floatingComposeButtonOverlay: some View {
+        GeometryReader { proxy in
+            composeFloatingButton
+                .padding(.trailing, 18)
+                .padding(.bottom, floatingComposeBottomPadding(safeAreaBottom: proxy.safeAreaInsets.bottom))
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
+                .animation(.interactiveSpring(response: 0.18, dampingFraction: 0.9), value: isBottomTabBarVisible)
+        }
+    }
+
+    private var composeFloatingButton: some View {
+        Button {
+            handleComposeTap()
+        } label: {
+            Image(systemName: "plus")
+                .font(.system(size: 25, weight: .semibold))
+                .foregroundStyle(appSettings.buttonTextColor)
+                .frame(width: 58, height: 58)
+                .background(appSettings.primaryGradient, in: Circle())
+                .shadow(color: .black.opacity(0.18), radius: 12, x: 0, y: 5)
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Compose note")
+    }
+
+    private func floatingComposeBottomPadding(safeAreaBottom: CGFloat) -> CGFloat {
+        FloatingComposeButtonLayout.bottomPadding(
+            safeAreaBottom: safeAreaBottom,
+            bottomTabBarHeight: bottomTabBarHeight,
+            isBottomTabBarVisible: isBottomTabBarVisible
+        )
     }
 
     private var effectiveWriteRelayURLs: [URL] {
@@ -343,7 +395,25 @@ struct MainTabShellView: View {
     }
 
     private var isBottomTabBarVisible: Bool {
-        !isHomeSideMenuPresented && (selectedTab != .dms || isDMRootVisible)
+        ScrollChromeLayout.isBottomTabBarVisible(
+            isHomeSideMenuPresented: isHomeSideMenuPresented,
+            selectedTabIsDirectMessages: selectedTab == .dms,
+            isDirectMessagesRootVisible: isDMRootVisible
+        )
+    }
+
+    private var shouldReserveBottomTabBarInsetSpace: Bool {
+        ScrollChromeLayout.reservesBottomTabBarInsetSpace(
+            isBottomTabBarVisible: isBottomTabBarVisible,
+            usesOverlayBottomTabBar: shouldOverlayBottomTabBar
+        )
+    }
+
+    private var shouldOverlayBottomTabBar: Bool {
+        ScrollChromeLayout.usesOverlayBottomTabBar(
+            selectedTabIsHome: selectedTab == .home,
+            isHomeSideMenuPresented: isHomeSideMenuPresented
+        )
     }
 
     private var composeSheetDraftBinding: Binding<AppComposeSheetDraft?> {
@@ -442,5 +512,59 @@ struct MainTabShellView: View {
 
     private func syncActivityTabActiveState() {
         activityViewModel.setActivityTabActive(isActivityListVisible)
+    }
+}
+
+struct FloatingComposeButtonLayout {
+    static let defaultBottomTabBarHeight: CGFloat = 65
+    private static let visibleBottomBarGap: CGFloat = 14
+    private static let hiddenBottomGap: CGFloat = 10
+    private static let requestedVerticalDrop: CGFloat = 12
+
+    static func bottomPadding(
+        safeAreaBottom: CGFloat,
+        bottomTabBarHeight: CGFloat,
+        isBottomTabBarVisible: Bool
+    ) -> CGFloat {
+        let safeAreaBottom = max(0, safeAreaBottom)
+
+        guard isBottomTabBarVisible else {
+            return max(0, safeAreaBottom + hiddenBottomGap - requestedVerticalDrop)
+        }
+
+        let bottomTabBarHeight = max(bottomTabBarHeight, defaultBottomTabBarHeight)
+        return max(0, safeAreaBottom + bottomTabBarHeight + visibleBottomBarGap - requestedVerticalDrop)
+    }
+}
+
+struct ScrollChromeLayout {
+    static func isBottomTabBarVisible(
+        isHomeSideMenuPresented: Bool,
+        selectedTabIsDirectMessages: Bool,
+        isDirectMessagesRootVisible: Bool
+    ) -> Bool {
+        !isHomeSideMenuPresented && (!selectedTabIsDirectMessages || isDirectMessagesRootVisible)
+    }
+
+    static func usesOverlayBottomTabBar(
+        selectedTabIsHome: Bool,
+        isHomeSideMenuPresented: Bool
+    ) -> Bool {
+        false
+    }
+
+    static func reservesBottomTabBarInsetSpace(
+        isBottomTabBarVisible: Bool,
+        usesOverlayBottomTabBar: Bool
+    ) -> Bool {
+        isBottomTabBarVisible && !usesOverlayBottomTabBar
+    }
+}
+
+private struct BottomTabBarHeightPreferenceKey: PreferenceKey {
+    static let defaultValue: CGFloat = 0
+
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = max(value, nextValue())
     }
 }

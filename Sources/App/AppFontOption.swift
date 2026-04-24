@@ -204,35 +204,11 @@ enum AppFontOption: String, CaseIterable, Codable, Identifiable, Hashable, Senda
         }
     }
 
-    var requiresFlowPlus: Bool {
-        switch self {
-        case .system:
-            return false
-        case .mono,
-             .ebGaramond,
-             .dmSans,
-             .inter,
-             .monaSans,
-             .hubotSans,
-             .publicSans,
-             .spaceGrotesk,
-             .geistSans,
-             .nacelle,
-             .elmsSans,
-             .nunito:
-            return true
-        }
-    }
-
     var isEnabled: Bool {
         true
     }
 
     var usesSystemMonospacedDesign: Bool {
         self == .mono
-    }
-
-    func isSelectable(with hasFlowPlus: Bool) -> Bool {
-        isEnabled && (!requiresFlowPlus || hasFlowPlus)
     }
 }

@@ -308,6 +308,81 @@ final class FlowNostrDBTests: XCTestCase {
         XCTAssertNil(diagnostics.lastOpenError)
     }
 
+    func testDiagnosticsRetainFailedMapsizeAttemptsAfterFallbackSucceeds() throws {
+        let rootURL = try makeRootURL(prefix: "FlowNostrDBMapsizeFailureDiagnostics")
+        defer { try? FileManager.default.removeItem(at: rootURL) }
+
+        let fileManager = FlowNostrDBTestFileManager(rootURL: rootURL)
+        let attempts = FlowNostrDBAttemptLog()
+        let openErrors = FlowNostrDBOpenErrorLog()
+        let fallbackThreshold = size_t(2) * 1024 * 1024 * 1024
+        let database = FlowNostrDB(
+            fileManager: fileManager,
+            initialMapsize: size_t(8) * 1024 * 1024 * 1024,
+            minimumMapsize: size_t(1) * 1024 * 1024 * 1024,
+            openDatabase: { path, ingestThreads, mapsize, writerScratchBufferSize, flags in
+                attempts.values.append(mapsize)
+                guard mapsize <= fallbackThreshold else {
+                    openErrors.value = "simulated mmap failure for \(mapsize)"
+                    return nil
+                }
+
+                openErrors.value = nil
+                return path.withCString { rawPath in
+                    flow_ndb_open(
+                        rawPath,
+                        ingestThreads,
+                        mapsize,
+                        writerScratchBufferSize,
+                        flags
+                    )
+                }
+            },
+            lastOpenError: {
+                openErrors.value
+            }
+        )
+
+        let diagnostics = database.diagnosticsSnapshot()
+
+        XCTAssertTrue(diagnostics.isOpen)
+        XCTAssertEqual(attempts.values, [
+            size_t(8) * 1024 * 1024 * 1024,
+            size_t(4) * 1024 * 1024 * 1024,
+            size_t(2) * 1024 * 1024 * 1024,
+        ])
+        let failedMapsizes = diagnostics.failedOpenAttempts.map { $0.mapsizeBytes }
+        XCTAssertEqual(failedMapsizes, [
+            Int64(size_t(8) * 1024 * 1024 * 1024),
+            Int64(size_t(4) * 1024 * 1024 * 1024),
+        ])
+        let failedMessages = diagnostics.failedOpenAttempts.map { $0.errorMessage }
+        XCTAssertEqual(failedMessages, [
+            "simulated mmap failure for 8589934592",
+            "simulated mmap failure for 4294967296",
+        ])
+        XCTAssertNil(diagnostics.lastOpenError)
+    }
+
+    func testShimReportsLMDBOpenErrorWhenDatabaseDirectoryIsInvalid() {
+        let handle = "/dev/null/flow".withCString { rawPath in
+            flow_ndb_open(
+                rawPath,
+                1,
+                size_t(16) * 1024 * 1024,
+                Int32(2 * 1024 * 1024),
+                Int32(FLOW_NDB_FLAG_NO_STATS)
+            )
+        }
+
+        XCTAssertNil(handle)
+        guard let rawError = flow_ndb_last_open_error() else {
+            XCTFail("Expected an LMDB open error")
+            return
+        }
+        XCTAssertTrue(String(cString: rawError).contains("mdb_env_open failed:"))
+    }
+
     func testRequiresRebuildWhenDiskUsageCrossesThreshold() throws {
         let rootURL = try makeRootURL(prefix: "FlowNostrDBRetentionThreshold")
         defer { try? FileManager.default.removeItem(at: rootURL) }
@@ -487,4 +562,8 @@ private final class FlowNostrDBTestFileManager: FileManager, @unchecked Sendable
 
 private final class FlowNostrDBAttemptLog: @unchecked Sendable {
     var values: [size_t] = []
+}
+
+private final class FlowNostrDBOpenErrorLog: @unchecked Sendable {
+    var value: String?
 }

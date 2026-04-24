@@ -2,6 +2,7 @@ import AVFoundation
 import CryptoKit
 import Foundation
 import ImageIO
+import Network
 import SwiftUI
 import UIKit
 
@@ -73,6 +74,44 @@ struct FlowMediaFetchedResponse: Sendable {
     var exceededByteLimit = false
 }
 
+final class FlowNetworkPathMonitor: ObservableObject, @unchecked Sendable {
+    static let shared = FlowNetworkPathMonitor()
+
+    @Published private(set) var isUsingWiFi = false
+
+    private let monitor: NWPathMonitor
+    private let queue = DispatchQueue(label: "com.21media.haloapp.network-path-monitor")
+    private let lock = NSLock()
+    private var currentIsUsingWiFi = false
+
+    init(monitor: NWPathMonitor = NWPathMonitor()) {
+        self.monitor = monitor
+        monitor.pathUpdateHandler = { [weak self] path in
+            self?.update(path)
+        }
+        monitor.start(queue: queue)
+        update(monitor.currentPath)
+    }
+
+    var isCurrentlyUsingWiFi: Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return currentIsUsingWiFi
+    }
+
+    private func update(_ path: NWPath) {
+        let nextIsUsingWiFi = path.status == .satisfied && path.usesInterfaceType(.wifi)
+
+        lock.lock()
+        currentIsUsingWiFi = nextIsUsingWiFi
+        lock.unlock()
+
+        DispatchQueue.main.async { [weak self] in
+            self?.isUsingWiFi = nextIsUsingWiFi
+        }
+    }
+}
+
 enum FlowImageCacheRequestKind: Hashable, Sendable {
     case standard
     case profileImage
@@ -83,6 +122,7 @@ enum FlowImageCacheRequestKind: Hashable, Sendable {
     case fullscreen
 
     static let profileImageByteLimit = 2 * 1_024 * 1_024
+    static let profileImageWiFiByteLimit = 4 * 1_024 * 1_024
     static let feedImageByteLimit = 3 * 1_024 * 1_024
     static let largeGIFAutoplayByteLimit = 2 * 1_024 * 1_024
 
@@ -101,14 +141,14 @@ enum FlowImageCacheRequestKind: Hashable, Sendable {
         }
     }
 
-    func maxByteCount(enforcingNetworkLimit: Bool) -> Int? {
+    func maxByteCount(enforcingNetworkLimit: Bool, usingWiFi: Bool = false) -> Int? {
         guard enforcingNetworkLimit else { return nil }
 
         switch self {
         case .standard:
             return nil
         case .profileImage, .avatar, .profileImageFullscreen:
-            return Self.profileImageByteLimit
+            return usingWiFi ? Self.profileImageWiFiByteLimit : Self.profileImageByteLimit
         case .profileBanner, .feedThumbnail:
             return Self.feedImageByteLimit
         case .fullscreen:
@@ -363,7 +403,11 @@ private actor FlowMediaFailureBackoff {
 }
 
 actor FlowImageCache {
-    static let shared = FlowImageCache()
+    static let shared = FlowImageCache(
+        isUsingWiFiConnection: {
+            FlowNetworkPathMonitor.shared.isCurrentlyUsingWiFi
+        }
+    )
     typealias ImageDataFetcher = @Sendable (URLRequest, Int?) async -> FlowMediaFetchedResponse?
     private static let maxSourceImagePixelCount: CGFloat = 48_000_000
     private static let liveImageDataFetcher: ImageDataFetcher = { request, maxByteCount in
@@ -388,6 +432,7 @@ actor FlowImageCache {
     private let directoryURL: URL
     private let urlCache: URLCache
     private let fetchImageData: ImageDataFetcher
+    private let isUsingWiFiConnection: @Sendable () -> Bool
     private let failureBackoff: FlowMediaFailureBackoff
     private let memoryCache = NSCache<NSString, UIImage>()
     private let dataCache = NSCache<NSURL, NSData>()
@@ -406,6 +451,22 @@ actor FlowImageCache {
         urlCache: URLCache = .shared,
         fetchImageData: @escaping ImageDataFetcher = FlowImageCache.liveImageDataFetcher
     ) {
+        self.init(
+            fileManager: fileManager,
+            rootDirectoryURL: rootDirectoryURL,
+            urlCache: urlCache,
+            fetchImageData: fetchImageData,
+            isUsingWiFiConnection: { false }
+        )
+    }
+
+    init(
+        fileManager: FileManager = .default,
+        rootDirectoryURL: URL? = nil,
+        urlCache: URLCache = .shared,
+        fetchImageData: @escaping ImageDataFetcher = FlowImageCache.liveImageDataFetcher,
+        isUsingWiFiConnection: @escaping @Sendable () -> Bool
+    ) {
         self.fileManager = fileManager
         let root = fileManager.urls(for: .cachesDirectory, in: .userDomainMask).first
             ?? URL(fileURLWithPath: NSTemporaryDirectory())
@@ -413,6 +474,7 @@ actor FlowImageCache {
             ?? root.appendingPathComponent("flow-media-cache", isDirectory: true)
         self.urlCache = urlCache
         self.fetchImageData = fetchImageData
+        self.isUsingWiFiConnection = isUsingWiFiConnection
         self.failureBackoff = FlowMediaFailureBackoff()
         memoryCache.totalCostLimit = (FlowMediaCache.sharedURLCacheMemoryCapacity * 3) / 4
         dataCache.totalCostLimit = FlowMediaCache.sharedURLCacheMemoryCapacity / 4
@@ -618,7 +680,15 @@ actor FlowImageCache {
         guard await failureBackoff.canAttempt(url) else {
             return nil
         }
-        let maxByteCount = kind.maxByteCount(enforcingNetworkLimit: enforceNetworkByteLimit)
+        let usingWiFi = isUsingWiFiConnection()
+        let maxByteCount = kind.maxByteCount(
+            enforcingNetworkLimit: shouldEnforceNetworkByteLimit(
+                kind: kind,
+                requested: enforceNetworkByteLimit,
+                usingWiFi: usingWiFi
+            ),
+            usingWiFi: usingWiFi
+        )
         guard canAttemptSizeLimitedRequest(for: url, maxByteCount: maxByteCount) else {
             return nil
         }
@@ -641,6 +711,16 @@ actor FlowImageCache {
         let data = await validatedData(from: response, for: url, maxByteCount: maxByteCount)
         recordNetworkResult(data, tracking: tracking)
         return storeData(data: data, for: url, cacheKey: cacheKey, persistToDisk: true)
+    }
+
+    private func shouldEnforceNetworkByteLimit(
+        kind: FlowImageCacheRequestKind,
+        requested: Bool,
+        usingWiFi: Bool
+    ) -> Bool {
+        guard requested else { return false }
+        guard kind == .feedThumbnail else { return true }
+        return !usingWiFi
     }
 
     func prefetch(urls: [URL]) async {

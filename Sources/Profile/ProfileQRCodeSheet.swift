@@ -199,7 +199,7 @@ struct ProfileQRCodeSheet: View {
                         .font(.subheadline.weight(.semibold))
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 10)
-                        .foregroundStyle(.white)
+                        .foregroundStyle(appSettings.buttonTextColor)
                         .background(appSettings.primaryGradient, in: Capsule())
                 }
                 .buttonStyle(.plain)

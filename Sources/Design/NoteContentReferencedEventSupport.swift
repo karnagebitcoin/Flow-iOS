@@ -1,6 +1,71 @@
 import NostrSDK
 import SwiftUI
 
+private struct ReferencedNoteCardChromeModifier: ViewModifier {
+    @EnvironmentObject private var appSettings: AppSettingsStore
+
+    func body(content: Content) -> some View {
+        let shape = RoundedRectangle(cornerRadius: 12, style: .continuous)
+        let holographicOption = appSettings.activeHolographicGradientOption
+        let holographicAccents = holographicOption?.accentPalette(for: appSettings.activeTheme)
+        let holographicBorder = holographicOption?.borderColor(for: appSettings.activeTheme)
+        let usesDarkGradientTreatment = appSettings.activeTheme.usesDarkGradientTreatment
+
+        content
+            .background {
+                shape
+                    .fill(appSettings.themePalette.quoteBackground)
+                    .overlay {
+                        if let holographicAccents {
+                            shape.fill(
+                                LinearGradient(
+                                    colors: [
+                                        holographicAccents.secondary.opacity(usesDarkGradientTreatment ? 0.18 : 0.13),
+                                        holographicAccents.primary.opacity(usesDarkGradientTreatment ? 0.10 : 0.05),
+                                        Color.clear
+                                    ],
+                                    startPoint: .topLeading,
+                                    endPoint: .bottomTrailing
+                                )
+                            )
+                        }
+                    }
+            }
+            .overlay {
+                if let holographicAccents, let holographicBorder {
+                    ZStack {
+                        shape
+                            .stroke(holographicBorder, lineWidth: 0.75)
+
+                        shape
+                            .inset(by: 1)
+                            .stroke(
+                                LinearGradient(
+                                    colors: [
+                                        holographicAccents.secondary.opacity(usesDarkGradientTreatment ? 0.34 : 0.24),
+                                        holographicAccents.primary.opacity(usesDarkGradientTreatment ? 0.18 : 0.10),
+                                        Color.white.opacity(usesDarkGradientTreatment ? 0.05 : 0.18)
+                                    ],
+                                    startPoint: .topLeading,
+                                    endPoint: .bottomTrailing
+                                ),
+                                lineWidth: 0.7
+                            )
+                    }
+                } else {
+                    shape
+                        .stroke(appSettings.themePalette.separator, lineWidth: 0.5)
+                }
+            }
+            .shadow(
+                color: holographicAccents?.shadow.opacity(usesDarkGradientTreatment ? 0.12 : 0.07) ?? .clear,
+                radius: holographicAccents == nil ? 0 : 12,
+                x: 0,
+                y: holographicAccents == nil ? 0 : 7
+            )
+    }
+}
+
 private actor EmbeddedReferencedNoteCache {
     static let shared = EmbeddedReferencedNoteCache()
 
@@ -344,14 +409,7 @@ struct NostrEventReferenceFallbackView: View {
             }
         }
         .padding(12)
-        .background(
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .fill(appSettings.themePalette.quoteBackground)
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .stroke(appSettings.themePalette.separator, lineWidth: 0.5)
-        )
+        .modifier(ReferencedNoteCardChromeModifier())
     }
 
     @ViewBuilder
@@ -384,7 +442,7 @@ struct NostrEventReferenceFallbackView: View {
             }
             if showExternalIcon {
                 Image(systemName: "arrow.up.right.square")
-                    .foregroundStyle(appSettings.themePalette.mutedForeground)
+                    .foregroundStyle(appSettings.themeIconAccentColor)
             }
         }
     }
@@ -460,14 +518,7 @@ struct NostrEventReferenceCardView: View {
             Spacer(minLength: 0)
         }
         .padding(12)
-        .background(
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .fill(appSettings.themePalette.quoteBackground)
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .stroke(appSettings.themePalette.separator, lineWidth: 0.5)
-        )
+        .modifier(ReferencedNoteCardChromeModifier())
     }
 
     @ViewBuilder
@@ -525,14 +576,7 @@ struct NostrEventReferenceCardView: View {
             )
         }
         .padding(10)
-        .background(
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .fill(appSettings.themePalette.quoteBackground)
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .stroke(appSettings.themePalette.separator, lineWidth: 0.5)
-        )
+        .modifier(ReferencedNoteCardChromeModifier())
     }
 
     private func cardAvatar(for item: FeedItem) -> some View {

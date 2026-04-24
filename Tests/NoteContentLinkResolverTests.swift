@@ -3,6 +3,47 @@ import NostrSDK
 @testable import Flow
 
 final class NoteContentLinkResolverTests: XCTestCase {
+    func testBareDomainURLUsesHTTPSLinkTarget() throws {
+        let token = NoteContentToken(type: .url, value: "google.com")
+
+        let url = try XCTUnwrap(
+            NoteContentLinkResolver.linkURL(
+                for: token,
+                allowsInAppProfileRouting: false
+            )
+        )
+
+        XCTAssertEqual(url.absoluteString, "https://google.com")
+    }
+
+    func testBareDomainURLTrimsTrailingPunctuationForLinkTarget() throws {
+        let token = NoteContentToken(type: .url, value: "google.com,")
+
+        let url = try XCTUnwrap(
+            NoteContentLinkResolver.linkURL(
+                for: token,
+                allowsInAppProfileRouting: false
+            )
+        )
+
+        XCTAssertEqual(url.absoluteString, "https://google.com")
+    }
+
+    func testBareDomainTokenKeepsDisplayValueButGetsClickableTarget() throws {
+        let tokens = NoteContentParser.tokenize(content: "Search google.com")
+        let token = try XCTUnwrap(tokens.first { $0.type == .url })
+
+        XCTAssertEqual(token.value, "google.com")
+        XCTAssertEqual(NoteContentParser.lastWebsiteURL(in: tokens)?.absoluteString, "https://google.com")
+        XCTAssertEqual(
+            NoteContentLinkResolver.linkURL(
+                for: token,
+                allowsInAppProfileRouting: false
+            )?.absoluteString,
+            "https://google.com"
+        )
+    }
+
     func testMentionLinkUsesInAppProfileRouteWhenProfileTapAvailable() throws {
         let pubkey = String(format: "%064x", 1)
         let npub = try XCTUnwrap(PublicKey(hex: pubkey)?.npub)

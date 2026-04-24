@@ -244,7 +244,8 @@ struct ThreadDetailView: View {
                         item: viewModel.rootItem,
                         isHiddenByNSFW: hideNSFWEnabled && viewModel.rootItem.moderationEvents.contains(where: { $0.containsNSFWHashtag }),
                         reactionCount: rootReactionCount,
-                        commentCount: threadReplies.count,
+                        commentCount: rootReplyCount,
+                        repostCount: rootRepostCount,
                         showReactions: appSettings.reactionsVisibleInFeeds,
                         isFollowingAuthor: followStore.isFollowing(viewModel.rootItem.displayAuthorPubkey),
                         rootFollowStatusIconName: rootFollowStatusIconName,
@@ -276,9 +277,7 @@ struct ThreadDetailView: View {
                         shareLink: rootNoteShareLink
                     )
 
-                    Divider()
-                        .overlay(appSettings.themePalette.chromeBorder)
-                        .padding(.leading, 16)
+                    ThreadDetailSeparator(leadingPadding: 16)
 
                     ThreadDetailContentSection(
                         selectedContentTab: $selectedContentTab,
@@ -394,6 +393,14 @@ struct ThreadDetailView: View {
 
     private var rootReactionCount: Int {
         reactionStats.reactionCount(for: viewModel.rootItem.displayEventID)
+    }
+
+    private var rootReplyCount: Int {
+        max(threadReplies.count, reactionStats.replyCount(for: viewModel.rootItem.displayEventID))
+    }
+
+    private var rootRepostCount: Int {
+        reactionStats.repostCount(for: viewModel.rootItem.displayEventID)
     }
 
     private var articleMetadata: NostrLongFormArticleMetadata? {

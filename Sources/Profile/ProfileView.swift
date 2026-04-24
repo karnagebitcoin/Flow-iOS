@@ -177,7 +177,7 @@ struct ProfileView: View {
         let visibleReplyCounts = ReplyCountEstimator.counts(for: visibleItems)
 
         ZStack {
-            AppThemeBackgroundView()
+            AppThemeBackgroundView(holographicSpotlight: .profile)
                 .ignoresSafeArea()
 
             List {
@@ -212,7 +212,14 @@ struct ProfileView: View {
                     )
                 }
                 .listRowSeparator(.hidden)
-                .listRowInsets(EdgeInsets())
+                .listRowInsets(
+                    EdgeInsets(
+                        top: 0,
+                        leading: 0,
+                        bottom: 0,
+                        trailing: 0
+                    )
+                )
                 .listRowBackground(Color.clear)
 
                 Section {
@@ -277,6 +284,7 @@ struct ProfileView: View {
                                 currentPubkey: auth.currentAccount?.pubkey
                             ),
                             commentCount: visibleReplyCounts[item.displayEventID.lowercased()] ?? 0,
+                            repostCount: reactionStats.repostCount(for: item.displayEventID),
                             showReactions: appSettings.reactionsVisibleInFeeds,
                             avatarMenuActions: .init(
                                 followLabel: followStore.isFollowing(item.displayAuthorPubkey) ? "Unfollow" : "Follow",
@@ -319,7 +327,7 @@ struct ProfileView: View {
                                 trailing: Self.feedHorizontalInset
                             )
                         )
-                        .listRowSeparator(.visible)
+                        .listRowSeparator(appSettings.themePalette.feedCardStyle == nil ? .visible : .hidden)
                         .listRowSeparatorTint(appSettings.themePalette.separator)
                         .listRowBackground(Color.clear)
                         .onAppear {
@@ -536,7 +544,7 @@ struct ProfileView: View {
     }
 
     private var actionRow: some View {
-        HStack(spacing: 10) {
+        HStack(spacing: 8) {
             if isOwnProfile {
                 qrActionButton
                 editProfileActionButton
@@ -547,7 +555,7 @@ struct ProfileView: View {
                 followActionButton
             }
         }
-        .frame(maxWidth: .infinity, alignment: .trailing)
+        .fixedSize(horizontal: true, vertical: false)
     }
 
     private var dmActionButton: some View {

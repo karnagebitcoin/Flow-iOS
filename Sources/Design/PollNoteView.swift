@@ -53,14 +53,22 @@ struct PollNoteView: View {
                         if isSubmittingVote {
                             ProgressView()
                                 .controlSize(.small)
+                                .tint(appSettings.buttonTextColor)
                         }
                         Text("Vote")
                             .font(.subheadline.weight(.semibold))
                     }
-                    .foregroundStyle(.white)
+                    .foregroundStyle(appSettings.buttonTextColor)
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 12)
-                    .background(Color.accentColor, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                    .background {
+                        RoundedRectangle(cornerRadius: 14, style: .continuous)
+                            .fill(
+                                appSettings.usesPrimaryGradientForProminentButtons
+                                    ? AnyShapeStyle(appSettings.primaryGradient)
+                                    : AnyShapeStyle(Color.accentColor)
+                            )
+                    }
                 }
                 .buttonStyle(.plain)
                 .disabled(!canSubmitVote)

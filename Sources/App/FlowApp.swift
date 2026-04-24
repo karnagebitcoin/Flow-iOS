@@ -11,7 +11,6 @@ struct FlowApp: App {
     @Environment(\.scenePhase) private var scenePhase
     @StateObject private var authManager = AuthManager()
     @StateObject private var appSettings = AppSettingsStore.shared
-    @StateObject private var premiumStore = FlowPremiumStore()
     @StateObject private var relaySettings = RelaySettingsStore.shared
     @StateObject private var followStore = FollowStore.shared
     @StateObject private var toastCenter = AppToastCenter()
@@ -43,7 +42,6 @@ struct FlowApp: App {
             }
             .environmentObject(authManager)
             .environmentObject(appSettings)
-            .environmentObject(premiumStore)
             .environmentObject(relaySettings)
             .environmentObject(followStore)
             .environmentObject(toastCenter)
@@ -58,10 +56,11 @@ struct FlowApp: App {
                 appSettings.configure(accountPubkey: authManager.currentAccount?.pubkey)
                 updateGlobalTypographyAppearance()
                 updateBreakReminderMonitoring()
+                await MainActor.run {
+                    AppIconRotator.rotateWeeklyIfNeeded()
+                }
 
                 Task(priority: .utility) {
-                    await premiumStore.refreshProducts()
-                    await premiumStore.refreshEntitlements()
                     await appSettings.refreshNotificationAuthorizationStatus()
                     await presentPendingSharedComposeDraftIfPossible()
                 }
@@ -100,9 +99,10 @@ struct FlowApp: App {
             .onChange(of: scenePhase) { _, newValue in
                 updateBreakReminderMonitoring()
                 guard newValue == .active else { return }
+                Task { @MainActor in
+                    AppIconRotator.rotateWeeklyIfNeeded()
+                }
                 Task(priority: .utility) {
-                    await premiumStore.refreshProducts()
-                    await premiumStore.refreshEntitlements()
                     await presentPendingSharedComposeDraftIfPossible()
                 }
             }
@@ -396,7 +396,7 @@ private final class QRCodeFlipMonitor: ObservableObject {
     private var inactiveSampleCount = 0
 
     init() {
-        motionQueue.name = "com.21media.flow.qr-flip-monitor"
+        motionQueue.name = "com.21media.haloapp.qr-flip-monitor"
         motionQueue.qualityOfService = .userInteractive
     }
 
