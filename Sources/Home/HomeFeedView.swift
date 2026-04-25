@@ -269,7 +269,7 @@ struct HomeFeedView: View {
             if viewModel.feedSource != .polls {
                 FlowCapsuleTabBar(
                     selection: $viewModel.mode,
-                    items: FeedMode.allCases,
+                    items: HomeFeedMode.allCases,
                     selectedBackground: topNavigationControlFill,
                     title: { $0.title }
                 )

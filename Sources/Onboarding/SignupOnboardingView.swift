@@ -63,21 +63,21 @@ struct SignupOnboardingView: View {
 
     private enum OnboardingButtonStyleOption: Hashable, Identifiable {
         case solid(PrimaryColorOption)
-        case holographic(HolographicGradientOption)
+        case expressive(ExpressiveGradientOption)
 
-        static let defaultOption: Self = .holographic(.softHolographicSheen)
+        static let defaultOption: Self = .expressive(.aurora)
 
         static var allOptions: [Self] {
             PrimaryColorOption.allCases.map(Self.solid) +
-                HolographicGradientOption.allCases.map(Self.holographic)
+                ExpressiveGradientOption.allCases.map(Self.expressive)
         }
 
         var id: String {
             switch self {
             case .solid(let option):
                 return "solid-\(option.rawValue)"
-            case .holographic(let option):
-                return "holographic-\(option.rawValue)"
+            case .expressive(let option):
+                return "expressive-\(option.rawValue)"
             }
         }
 
@@ -85,7 +85,7 @@ struct SignupOnboardingView: View {
             switch self {
             case .solid(let option):
                 return option.title
-            case .holographic(let option):
+            case .expressive(let option):
                 return option.title
             }
         }
@@ -94,8 +94,8 @@ struct SignupOnboardingView: View {
             switch self {
             case .solid(let option):
                 return option.color
-            case .holographic(let option):
-                return option.defaultLinkColor
+            case .expressive(let option):
+                return option.linkColor(at: 0)
             }
         }
 
@@ -103,8 +103,8 @@ struct SignupOnboardingView: View {
             switch self {
             case .solid:
                 return .white
-            case .holographic:
-                return .black
+            case .expressive(let option):
+                return option.buttonTextColor
             }
         }
 
@@ -116,7 +116,7 @@ struct SignupOnboardingView: View {
                     startPoint: .topLeading,
                     endPoint: .bottomTrailing
                 )
-            case .holographic(let option):
+            case .expressive(let option):
                 return option.buttonGradient
             }
         }
@@ -133,13 +133,13 @@ struct SignupOnboardingView: View {
                     startPoint: .topLeading,
                     endPoint: .bottomTrailing
                 )
-            case .holographic(let option):
+            case .expressive(let option):
                 return option.uiGradient
             }
         }
 
         var isHolographic: Bool {
-            if case .holographic = self {
+            if case .expressive = self {
                 return true
             }
             return false
@@ -1056,14 +1056,13 @@ struct SignupOnboardingView: View {
     }
 
     private func applySelectedButtonStyle() {
-        appSettings.primaryColor = selectedButtonStyleOption.primaryColor
-        appSettings.buttonTextColor = selectedButtonStyleOption.buttonTextColor
-
         switch selectedButtonStyleOption {
-        case .solid:
+        case .solid(let option):
+            appSettings.primaryColor = option.color
             appSettings.clearButtonGradient()
-        case .holographic(let option):
-            appSettings.buttonGradientOption = option
+        case .expressive(let option):
+            appSettings.expressiveGradientOption = option
+            appSettings.expressiveLinkColorIndex = 0
         }
     }
 

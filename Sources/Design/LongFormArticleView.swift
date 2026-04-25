@@ -156,7 +156,6 @@ struct LongFormArticlePreviewView: View {
 
     private var previewMetadataRow: some View {
         HStack(spacing: 8) {
-            metadataBadge(title: "Article", systemImage: "doc.text")
             metadataBadge(title: "\(article.readingTimeMinutes) min", systemImage: "clock")
 
             Spacer(minLength: 8)
@@ -208,6 +207,34 @@ struct LongFormArticlePreviewView: View {
 
 }
 
+enum LongFormArticleReaderLayout {
+    static let showsArticleTypeBadge = false
+    static let showsBookmarkAction = false
+    static let showsShareAction = true
+    static let usesRuledAuthorSection = true
+    static let heroMinHeight: CGFloat = 460
+    static let heroCornerRadius: CGFloat = 0
+    static let contentHorizontalPadding: CGFloat = 20
+    static let contentMaxWidth: CGFloat = 760
+    static let heroHeaderOverlap: CGFloat = 56
+    static let heroImageOpacity = 0.82
+    static let heroBaseFadeOpacity = 0.12
+    static let heroTopFadeOpacity = 0.02
+    static let heroMiddleFadeOpacity = 0.24
+    static let heroBottomFadeOpacity = 1.0
+    static let authorFallbackBlurRadius: CGFloat = 22
+    static let shareButtonDiameter: CGFloat = 48
+    static let followButtonHorizontalPadding: CGFloat = 20
+    static let followButtonVerticalPadding: CGFloat = 11
+
+    static func heroBackgroundURL(
+        article: NostrLongFormArticleMetadata,
+        authorAvatarURL: URL?
+    ) -> URL? {
+        article.imageURL ?? authorAvatarURL
+    }
+}
+
 struct LongFormArticleReaderView: View {
     private struct MentionMetadataDecoder: MetadataCoding {}
 
@@ -217,6 +244,7 @@ struct LongFormArticleReaderView: View {
     let article: NostrLongFormArticleMetadata
     let isOwnedByCurrentUser: Bool
     let isFollowingAuthor: Bool
+    let shareLink: String
     let onFollowToggle: () -> Void
     let onProfileTap: ((String) -> Void)?
     let onHashtagTap: ((String) -> Void)?
@@ -228,6 +256,7 @@ struct LongFormArticleReaderView: View {
         article: NostrLongFormArticleMetadata,
         isOwnedByCurrentUser: Bool,
         isFollowingAuthor: Bool,
+        shareLink: String,
         onFollowToggle: @escaping () -> Void,
         onProfileTap: ((String) -> Void)? = nil,
         onHashtagTap: ((String) -> Void)? = nil
@@ -236,6 +265,7 @@ struct LongFormArticleReaderView: View {
         self.article = article
         self.isOwnedByCurrentUser = isOwnedByCurrentUser
         self.isFollowingAuthor = isFollowingAuthor
+        self.shareLink = shareLink
         self.onFollowToggle = onFollowToggle
         self.onProfileTap = onProfileTap
         self.onHashtagTap = onHashtagTap
@@ -267,51 +297,107 @@ struct LongFormArticleReaderView: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 28) {
-            headerSection
+        VStack(alignment: .leading, spacing: 0) {
+            heroSection
 
-            if let imageURL = article.imageURL {
-                LongFormArticleRemoteImage(
-                    url: imageURL,
-                    alt: article.title,
-                    aspectRatio: 16 / 9,
-                    maxHeight: 420
-                )
+            VStack(alignment: .leading, spacing: 28) {
+                articleHeaderSection
+                    .padding(.top, -LongFormArticleReaderLayout.heroHeaderOverlap)
+                    .zIndex(1)
+
+                articleBody
+
+                if !article.tags.isEmpty {
+                    footerTagsSection
+                }
             }
-
-            articleBody
-
-            if !article.tags.isEmpty {
-                footerTagsSection
-            }
+            .frame(maxWidth: LongFormArticleReaderLayout.contentMaxWidth, alignment: .leading)
+            .padding(.horizontal, LongFormArticleReaderLayout.contentHorizontalPadding)
+            .frame(maxWidth: .infinity, alignment: .center)
         }
-        .frame(maxWidth: 760, alignment: .leading)
+        .frame(maxWidth: .infinity, alignment: .top)
         .environment(\.openURL, OpenURLAction { url in
             handleOpenURL(url)
         })
     }
 
-    private var headerSection: some View {
-        VStack(alignment: .leading, spacing: 18) {
-            HStack(spacing: 8) {
-                readerMetaBadge(title: "Article", systemImage: "doc.text")
-                readerMetaBadge(title: "\(article.readingTimeMinutes) min", systemImage: "clock")
+    private var heroSection: some View {
+        ZStack(alignment: .bottom) {
+            heroBackground
+            heroFade
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .frame(minHeight: LongFormArticleReaderLayout.heroMinHeight, alignment: .bottomLeading)
+        .background(appSettings.themePalette.background)
+        .clipped()
+        .ignoresSafeArea(edges: .top)
+    }
 
-                Text(publishedDateLabel)
-                    .font(appSettings.appFont(.caption1))
-                    .foregroundStyle(appSettings.themePalette.secondaryForeground)
-                    .lineLimit(1)
+    @ViewBuilder
+    private var heroBackground: some View {
+        if let heroBackgroundURL, !appSettings.textOnlyMode {
+            CachedAsyncImage(url: heroBackgroundURL) { phase in
+                switch phase {
+                case .success(let image):
+                    image
+                        .resizable()
+                        .scaledToFill()
+                        .blur(radius: usesAuthorFallbackHero ? LongFormArticleReaderLayout.authorFallbackBlurRadius : 0)
+                        .saturation(usesAuthorFallbackHero ? 0.82 : 0.94)
+                        .opacity(LongFormArticleReaderLayout.heroImageOpacity)
+                default:
+                    heroFallbackBackground
+                }
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .clipped()
+        } else {
+            heroFallbackBackground
+        }
+    }
+
+    private var heroFallbackBackground: some View {
+        LinearGradient(
+            colors: [
+                appSettings.primaryColor.opacity(0.18),
+                appSettings.themePalette.secondaryBackground,
+                appSettings.themePalette.background
+            ],
+            startPoint: .topLeading,
+            endPoint: .bottomTrailing
+        )
+    }
+
+    private var articleHeaderSection: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            ViewThatFits(in: .horizontal) {
+                HStack(alignment: .center, spacing: 12) {
+                    articleMetaBadges
+                    Spacer(minLength: 12)
+                    articleShareButton
+                }
+
+                VStack(alignment: .leading, spacing: 14) {
+                    articleMetaBadges
+
+                    HStack {
+                        Spacer(minLength: 0)
+                        articleShareButton
+                    }
+                }
             }
 
-            VStack(alignment: .leading, spacing: 10) {
+            VStack(alignment: .leading, spacing: 12) {
                 Text(FlowLayoutGuardrails.softWrapped(article.title))
                     .font(appSettings.appFont(.largeTitle, weight: .bold))
+                    .foregroundStyle(appSettings.themePalette.foreground)
                     .fixedSize(horizontal: false, vertical: true)
 
                 if let summary = article.summary, !summary.isEmpty {
                     Text(FlowLayoutGuardrails.softWrapped(summary))
                         .font(appSettings.appFont(.title3))
                         .foregroundStyle(appSettings.themePalette.secondaryForeground)
+                        .lineSpacing(5)
                         .fixedSize(horizontal: false, vertical: true)
                 }
             }
@@ -320,48 +406,108 @@ struct LongFormArticleReaderView: View {
         }
     }
 
-    private var authorRow: some View {
-        HStack(alignment: .center, spacing: 12) {
-            authorIdentity
-
-            Spacer(minLength: 12)
-
-            if isOwnedByCurrentUser {
-                Text("You")
-                    .font(appSettings.appFont(.footnote, weight: .semibold))
-                    .foregroundStyle(appSettings.themePalette.secondaryForeground)
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 6)
-                    .background(appSettings.themePalette.tertiaryFill, in: Capsule())
-            } else {
-                Button(isFollowingAuthor ? "Following" : "Follow") {
-                    onFollowToggle()
-                }
-                .font(appSettings.appFont(.footnote, weight: .semibold))
-                .foregroundStyle(isFollowingAuthor ? appSettings.themePalette.secondaryForeground : appSettings.buttonTextColor)
-                .padding(.horizontal, 12)
-                .padding(.vertical, 7)
-                .background(
-                    isFollowingAuthor ? AnyShapeStyle(appSettings.themePalette.tertiaryFill) : AnyShapeStyle(appSettings.primaryGradient),
-                    in: Capsule()
-                )
-                .overlay {
-                    Capsule()
-                        .stroke(
-                            isFollowingAuthor
-                                ? appSettings.themePalette.separator
-                                : appSettings.primaryColor.opacity(0.7),
-                            lineWidth: 0.9
-                        )
-                }
-                .buttonStyle(.plain)
-            }
+    private var heroFade: some View {
+        let fadeColor = appSettings.themePalette.background
+        return ZStack {
+            fadeColor.opacity(LongFormArticleReaderLayout.heroBaseFadeOpacity)
+            LinearGradient(
+                colors: [
+                    fadeColor.opacity(LongFormArticleReaderLayout.heroTopFadeOpacity),
+                    fadeColor.opacity(LongFormArticleReaderLayout.heroMiddleFadeOpacity),
+                    fadeColor.opacity(LongFormArticleReaderLayout.heroBottomFadeOpacity)
+                ],
+                startPoint: .top,
+                endPoint: .bottom
+            )
         }
-        .padding(16)
-        .background(appSettings.themePalette.secondaryBackground, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
-        .overlay {
-            RoundedRectangle(cornerRadius: 20, style: .continuous)
-                .stroke(appSettings.themePalette.separator, lineWidth: 0.8)
+    }
+
+    private var articleMetaBadges: some View {
+        HStack(spacing: 10) {
+            readerMetaBadge(title: "\(article.readingTimeMinutes) min read", systemImage: "clock")
+            readerMetaBadge(title: publishedDateLabel, systemImage: "calendar")
+        }
+    }
+
+    private var articleShareButton: some View {
+        ShareLink(item: shareLink) {
+            Image(systemName: "square.and.arrow.up")
+                .font(.system(size: 17, weight: .semibold))
+                .foregroundStyle(appSettings.themePalette.foreground)
+                .frame(
+                    width: LongFormArticleReaderLayout.shareButtonDiameter,
+                    height: LongFormArticleReaderLayout.shareButtonDiameter
+                )
+                .background(appSettings.themePalette.secondaryBackground, in: Circle())
+                .overlay {
+                    Circle()
+                        .stroke(appSettings.themePalette.separator.opacity(0.8), lineWidth: 0.8)
+                }
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Share article")
+    }
+
+    private var heroBackgroundURL: URL? {
+        LongFormArticleReaderLayout.heroBackgroundURL(
+            article: article,
+            authorAvatarURL: item.avatarURL
+        )
+    }
+
+    private var usesAuthorFallbackHero: Bool {
+        article.imageURL == nil && heroBackgroundURL == item.avatarURL
+    }
+
+    private var authorRuleColor: Color {
+        appSettings.themePalette.separator.opacity(0.82)
+    }
+
+    private var authorRow: some View {
+        VStack(spacing: 0) {
+            Divider()
+                .overlay(authorRuleColor)
+
+            HStack(alignment: .center, spacing: 14) {
+                authorIdentity
+
+                Spacer(minLength: 12)
+
+                if isOwnedByCurrentUser {
+                    Text("You")
+                        .font(appSettings.appFont(.subheadline, weight: .semibold))
+                        .foregroundStyle(appSettings.themePalette.secondaryForeground)
+                        .padding(.horizontal, LongFormArticleReaderLayout.followButtonHorizontalPadding)
+                        .padding(.vertical, LongFormArticleReaderLayout.followButtonVerticalPadding)
+                        .background(appSettings.themePalette.tertiaryFill, in: Capsule())
+                } else {
+                    Button(isFollowingAuthor ? "Following" : "Follow") {
+                        onFollowToggle()
+                    }
+                    .font(appSettings.appFont(.subheadline, weight: .semibold))
+                    .foregroundStyle(isFollowingAuthor ? appSettings.themePalette.secondaryForeground : appSettings.buttonTextColor)
+                    .padding(.horizontal, LongFormArticleReaderLayout.followButtonHorizontalPadding)
+                    .padding(.vertical, LongFormArticleReaderLayout.followButtonVerticalPadding)
+                    .background(
+                        isFollowingAuthor ? AnyShapeStyle(appSettings.themePalette.tertiaryFill) : AnyShapeStyle(appSettings.primaryGradient),
+                        in: Capsule()
+                    )
+                    .overlay {
+                        Capsule()
+                            .stroke(
+                                isFollowingAuthor
+                                    ? appSettings.themePalette.separator
+                                    : appSettings.primaryColor.opacity(0.7),
+                                lineWidth: 0.9
+                            )
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            .padding(.vertical, 16)
+
+            Divider()
+                .overlay(authorRuleColor)
         }
     }
 
@@ -381,7 +527,7 @@ struct LongFormArticleReaderView: View {
 
     private var authorIdentityContent: some View {
         HStack(alignment: .center, spacing: 12) {
-            AvatarView(url: item.avatarURL, fallback: item.displayName, size: 50)
+            AvatarView(url: item.avatarURL, fallback: item.displayName, size: 52)
 
             VStack(alignment: .leading, spacing: 4) {
                 Text(item.displayName)
@@ -399,7 +545,7 @@ struct LongFormArticleReaderView: View {
                     Text(nip05)
                         .font(appSettings.appFont(.caption1))
                         .foregroundStyle(appSettings.themePalette.secondaryForeground)
-                        .lineLimit(1)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
             }
         }
@@ -571,7 +717,11 @@ struct LongFormArticleReaderView: View {
         .foregroundStyle(appSettings.themePalette.secondaryForeground)
         .padding(.horizontal, 10)
         .padding(.vertical, 6)
-        .background(appSettings.themePalette.tertiaryFill, in: Capsule())
+        .background(appSettings.themePalette.secondaryBackground.opacity(0.82), in: Capsule())
+        .overlay {
+            Capsule()
+                .stroke(appSettings.themePalette.separator.opacity(0.8), lineWidth: 0.7)
+        }
     }
 
     private func headingFont(for level: Int) -> Font {

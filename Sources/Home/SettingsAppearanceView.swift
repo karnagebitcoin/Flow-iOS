@@ -14,32 +14,8 @@ struct SettingsAppearanceView: View {
     var body: some View {
         ThemedSettingsForm {
             Section("Appearance") {
-                Button {
-                    onOpenPrimaryColorPicker()
-                } label: {
-                    HStack(spacing: 12) {
-                        Text("Primary Color")
-                            .foregroundStyle(.primary)
-
-                        Spacer(minLength: 12)
-
-                        Circle()
-                            .fill(appSettings.primaryColor)
-                            .frame(width: 22, height: 22)
-                            .overlay {
-                                Circle()
-                                    .stroke(appSettings.themeSeparator(defaultOpacity: 0.08), lineWidth: 1)
-                            }
-
-                        Image(systemName: "chevron.right")
-                            .font(.footnote.weight(.semibold))
-                            .foregroundStyle(.tertiary)
-                    }
-                }
-                .buttonStyle(.plain)
-
                 VStack(alignment: .leading, spacing: 10) {
-                    Text("Theme")
+                    Text("Color Palette")
                         .font(.footnote.weight(.semibold))
                         .foregroundStyle(.secondary)
 
@@ -58,15 +34,24 @@ struct SettingsAppearanceView: View {
                 .padding(.vertical, 2)
             }
 
-            Section("Customize") {
-                SettingsNavigationRow(
-                    title: "Button Style",
-                    subtitle: buttonGradientSummary,
-                    systemImage: "sparkles"
-                ) {
-                    SettingsButtonGradientView()
-                }
+            Section("Visual Mode") {
+                VStack(alignment: .leading, spacing: 12) {
+                    FlowCapsuleTabBar(
+                        selection: $appSettings.visualAccentMode,
+                        items: AppVisualAccentMode.allCases,
+                        title: { $0.title }
+                    )
 
+                    if appSettings.visualAccentMode == .expressive {
+                        expressiveAccentSection
+                    } else {
+                        minimalAccentSection
+                    }
+                }
+                .padding(.vertical, 2)
+            }
+
+            Section("Customize") {
                 SettingsNavigationRow(
                     title: "Typography",
                     subtitle: appSettings.activeFontOption.title,
@@ -117,13 +102,6 @@ struct SettingsAppearanceView: View {
         }
         .navigationTitle("Appearance")
         .navigationBarTitleDisplayMode(.inline)
-    }
-
-    private var buttonGradientSummary: String {
-        if appSettings.generatedButtonGradient != nil {
-            return "Generated"
-        }
-        return appSettings.buttonGradientOption?.title ?? "Solid"
     }
 
     private var notePreviewCard: some View {
@@ -259,6 +237,119 @@ struct SettingsAppearanceView: View {
         .disabled(!option.isEnabled)
     }
 
+    private var expressiveAccentSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            LazyVGrid(
+                columns: [
+                    GridItem(.flexible(), spacing: 10),
+                    GridItem(.flexible(), spacing: 10)
+                ],
+                spacing: 10
+            ) {
+                ForEach(ExpressiveGradientOption.allCases) { option in
+                    expressiveGradientCard(for: option)
+                }
+            }
+
+            HStack(spacing: 12) {
+                Text("Link Color")
+                    .foregroundStyle(.primary)
+
+                Spacer(minLength: 12)
+
+                Circle()
+                    .fill(appSettings.linkColor)
+                    .frame(width: 22, height: 22)
+                    .overlay {
+                        Circle()
+                            .stroke(appSettings.themeSeparator(defaultOpacity: 0.08), lineWidth: 1)
+                    }
+
+                Button {
+                    appSettings.refreshExpressiveLinkColor()
+                } label: {
+                    Image(systemName: "arrow.clockwise")
+                        .font(.footnote.weight(.semibold))
+                        .foregroundStyle(appSettings.primaryColor)
+                        .frame(width: 32, height: 32)
+                        .background(appSettings.primaryColor.opacity(0.12), in: Circle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Refresh link color")
+            }
+            .padding(.top, 2)
+        }
+    }
+
+    private var minimalAccentSection: some View {
+        Button {
+            appSettings.visualAccentMode = .minimal
+            onOpenPrimaryColorPicker()
+        } label: {
+            HStack(spacing: 12) {
+                Text("Primary Color")
+                    .foregroundStyle(.primary)
+
+                Spacer(minLength: 12)
+
+                Circle()
+                    .fill(appSettings.primaryColor)
+                    .frame(width: 22, height: 22)
+                    .overlay {
+                        Circle()
+                            .stroke(appSettings.themeSeparator(defaultOpacity: 0.08), lineWidth: 1)
+                    }
+
+                Image(systemName: "chevron.right")
+                    .font(.footnote.weight(.semibold))
+                    .foregroundStyle(.tertiary)
+            }
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func expressiveGradientCard(for option: ExpressiveGradientOption) -> some View {
+        let isSelected = appSettings.visualAccentMode == .expressive && appSettings.expressiveGradientOption == option
+
+        return Button {
+            appSettings.expressiveGradientOption = option
+        } label: {
+            VStack(alignment: .leading, spacing: 9) {
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .fill(option.buttonGradient)
+                    .frame(height: 46)
+                    .overlay(alignment: .topTrailing) {
+                        if isSelected {
+                            Image(systemName: "checkmark.circle.fill")
+                                .font(.system(size: 18, weight: .semibold))
+                                .foregroundStyle(option.buttonTextColor)
+                                .padding(7)
+                        }
+                    }
+
+                Text(option.title)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.primary)
+                    .lineLimit(1)
+            }
+            .padding(10)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(
+                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    .fill(appSettings.themePalette.secondaryBackground)
+            )
+            .overlay {
+                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    .stroke(
+                        isSelected ? appSettings.linkColor : appSettings.themeSeparator(defaultOpacity: 0.18),
+                        lineWidth: isSelected ? 1.5 : 1
+                    )
+            }
+            .contentShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+        }
+        .buttonStyle(.plain)
+    }
+
     private func themePreviewFill(for option: AppThemeOption) -> LinearGradient {
         switch option {
         case .system:
@@ -280,11 +371,8 @@ struct SettingsAppearanceView: View {
                 endPoint: .bottomTrailing
             )
         case .sakura:
-            return AppThemeOption.sakura.fixedPrimaryGradient ?? LinearGradient(
-                colors: [
-                    Color(red: 0.976, green: 0.659, blue: 1.0),
-                    Color(red: 1.0, green: 0.404, blue: 0.941)
-                ],
+            return LinearGradient(
+                colors: [Color.white, Color(.systemGray6)],
                 startPoint: .topLeading,
                 endPoint: .bottomTrailing
             )
@@ -349,7 +437,7 @@ struct SettingsAppearanceView: View {
         case .white, .light, .system:
             return Color(.label).opacity(0.75)
         case .sakura:
-            return Color(red: 0.45, green: 0.21, blue: 0.32)
+            return Color(.label).opacity(0.75)
         case .dracula:
             return Color(red: 0.973, green: 0.973, blue: 0.949).opacity(0.92)
         case .gamer:

@@ -93,6 +93,61 @@ final class NostrFeedServiceTests: XCTestCase {
         XCTAssertEqual(fetchCount, 2)
     }
 
+    func testFastRelayModeHonorsTimeoutWhenAnotherRelayStalls() async throws {
+        let rootURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("FlowFastRelayTimeout-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: rootURL, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: rootURL) }
+
+        let fileManager = TestFileManager(rootURL: rootURL)
+        let nostrDatabase = FlowNostrDB(fileManager: fileManager)
+        let fastRelayEvent = makeEvent(
+            id: hex("a"),
+            pubkey: hex("b"),
+            kind: 1,
+            tags: [],
+            content: "fast relay",
+            createdAt: 1_700_000_300
+        )
+        let slowRelayEvent = makeEvent(
+            id: hex("c"),
+            pubkey: hex("d"),
+            kind: 1,
+            tags: [],
+            content: "slow relay",
+            createdAt: 1_700_000_400
+        )
+        let relayClient = DelayedRelayClient(
+            eventsByRelay: [
+                relayURL: [fastRelayEvent],
+                relayURL2: [slowRelayEvent]
+            ],
+            delaysByRelay: [
+                relayURL2: 700_000_000
+            ]
+        )
+        let service = makeFeedService(
+            relayClient: relayClient,
+            fileManager: fileManager,
+            nostrDatabase: nostrDatabase
+        )
+
+        let startedAt = Date()
+        let items = try await service.fetchFeed(
+            relayURLs: [relayURL, relayURL2],
+            kinds: [1],
+            limit: 10,
+            until: nil,
+            hydrationMode: .cachedProfilesOnly,
+            fetchTimeout: 0.1,
+            relayFetchMode: .firstNonEmptyRelay
+        )
+        let elapsed = Date().timeIntervalSince(startedAt)
+
+        XCTAssertEqual(items.map(\.id), [fastRelayEvent.id])
+        XCTAssertLessThan(elapsed, 0.35)
+    }
+
     func testProfileEventServicePersistsFetchedMetadataSnapshotsLocally() async throws {
         let rootURL = FileManager.default.temporaryDirectory
             .appendingPathComponent("FlowProfileEventService-\(UUID().uuidString)", isDirectory: true)
@@ -183,6 +238,99 @@ final class NostrFeedServiceTests: XCTestCase {
         let diagnostics = nostrDatabase.diagnosticsSnapshot()
         XCTAssertEqual(diagnostics.sessionIngestedProfileCount, 1)
         XCTAssertEqual(diagnostics.successfulIngestCallCount, 1)
+    }
+
+    func testFastFollowingFeedHonorsTimeoutForSlowEmptyAuthorBatch() async throws {
+        let rootURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("FlowFastFollowingFeed-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: rootURL, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: rootURL) }
+
+        let fileManager = TestFileManager(rootURL: rootURL)
+        let database = FlowNostrDB(fileManager: fileManager)
+
+        let activeAuthor = hex("a")
+        let delayedAuthor = hex("b")
+        let fillerAuthors = (0..<249).map { index in
+            String(format: "%064x", index + 1)
+        }
+        let authors = [activeAuthor] + fillerAuthors + [delayedAuthor]
+        let event = makeEvent(
+            id: hex("c"),
+            pubkey: activeAuthor,
+            kind: 1,
+            tags: [],
+            content: "Fresh following post",
+            createdAt: 1_700_000_250
+        )
+
+        let relayClient = AuthorBatchDelayRelayClient(
+            events: [event],
+            delayedAuthors: [delayedAuthor],
+            delayNanoseconds: 2_000_000_000
+        )
+        let service = makeFeedService(
+            relayClient: relayClient,
+            fileManager: fileManager,
+            nostrDatabase: database
+        )
+
+        let startedAt = Date()
+        let items = try await service.fetchFollowingFeed(
+            relayURLs: [relayURL],
+            authors: authors,
+            kinds: [1],
+            limit: 1,
+            until: nil,
+            hydrationMode: .cachedProfilesOnly,
+            fetchTimeout: 1,
+            relayFetchMode: .firstRelayWithEvents
+        )
+        let elapsed = Date().timeIntervalSince(startedAt)
+
+        XCTAssertEqual(items.map(\.id), [event.id])
+        XCTAssertLessThan(elapsed, 1.2)
+    }
+
+    func testFastFollowingFeedHonorsTimeoutForSlowEmptyRelay() async throws {
+        let rootURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("FlowFastFollowingRelayTimeout-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: rootURL, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: rootURL) }
+
+        let fileManager = TestFileManager(rootURL: rootURL)
+        let database = FlowNostrDB(fileManager: fileManager)
+        let author = hex("e")
+        let relayClient = DelayedRelayClient(
+            eventsByRelay: [
+                relayURL: [],
+                relayURL2: []
+            ],
+            delaysByRelay: [
+                relayURL2: 700_000_000
+            ]
+        )
+        let service = makeFeedService(
+            relayClient: relayClient,
+            fileManager: fileManager,
+            nostrDatabase: database
+        )
+
+        let startedAt = Date()
+        let items = try await service.fetchFollowingFeed(
+            relayURLs: [relayURL, relayURL2],
+            authors: [author],
+            kinds: [1],
+            limit: 10,
+            until: nil,
+            hydrationMode: .cachedProfilesOnly,
+            fetchTimeout: 0.1,
+            relayFetchMode: .firstRelayWithEvents
+        )
+        let elapsed = Date().timeIntervalSince(startedAt)
+
+        XCTAssertTrue(items.isEmpty)
+        XCTAssertLessThan(elapsed, 0.35)
     }
 
     func testSearchProfilesReturnsLocalMatchWithoutRelayFetchWhenLimitSatisfied() async throws {
@@ -1094,6 +1242,55 @@ final class NostrFeedServiceTests: XCTestCase {
         XCTAssertEqual(fetchCount, 1)
     }
 
+    func testFirstNonEmptyRelayModeReturnsBeforeSlowEmptyRelays() async throws {
+        let rootURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("FlowFirstNonEmptyRelay-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: rootURL, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: rootURL) }
+
+        let fileManager = TestFileManager(rootURL: rootURL)
+        let database = FlowNostrDB(fileManager: fileManager)
+        let authorPubkey = hex("a")
+        let event = makeEvent(
+            id: hex("1"),
+            pubkey: authorPubkey,
+            kind: 1,
+            tags: [],
+            content: "fast relay event"
+        )
+        let relayClient = DelayedRelayClient(
+            eventsByRelay: [
+                relayURL: [event],
+                relayURL2: []
+            ],
+            delaysByRelay: [
+                relayURL: 40_000_000,
+                relayURL2: 700_000_000
+            ]
+        )
+        let service = makeFeedService(
+            relayClient: relayClient,
+            fileManager: fileManager,
+            nostrDatabase: database
+        )
+
+        let startedAt = Date()
+        let items = try await service.fetchAuthorFeed(
+            relayURLs: [relayURL, relayURL2],
+            authorPubkey: authorPubkey,
+            kinds: [1],
+            limit: 1,
+            until: nil,
+            hydrationMode: .cachedProfilesOnly,
+            fetchTimeout: 1,
+            relayFetchMode: .firstRelayWithEvents
+        )
+        let elapsed = Date().timeIntervalSince(startedAt)
+
+        XCTAssertEqual(items.map(\.id), [event.id])
+        XCTAssertLessThan(elapsed, 0.35)
+    }
+
     func testReplyContextPreviewPresentationUsesParentSnippetForReplies() {
         let rootEvent = makeEvent(
             id: hex("1"),
@@ -1178,6 +1375,63 @@ private actor SpyRelayClient: NostrRelayEventFetching {
 
     func fetchCount() -> Int {
         fetchCallCount
+    }
+}
+
+private actor DelayedRelayClient: NostrRelayEventFetching {
+    private let eventsByRelay: [URL: [Flow.NostrEvent]]
+    private let delaysByRelay: [URL: UInt64]
+
+    init(eventsByRelay: [URL: [Flow.NostrEvent]], delaysByRelay: [URL: UInt64]) {
+        self.eventsByRelay = eventsByRelay
+        self.delaysByRelay = delaysByRelay
+    }
+
+    func fetchEvents(
+        relayURL: URL,
+        filter: NostrFilter,
+        timeout: TimeInterval
+    ) async throws -> [Flow.NostrEvent] {
+        if let delay = delaysByRelay[relayURL] {
+            try await Task.sleep(nanoseconds: delay)
+        }
+
+        let authors = Set(filter.authors ?? [])
+        let kinds = Set(filter.kinds ?? [])
+        return (eventsByRelay[relayURL] ?? []).filter { event in
+            (authors.isEmpty || authors.contains(event.pubkey)) &&
+                (kinds.isEmpty || kinds.contains(event.kind))
+        }
+    }
+}
+
+private final class AuthorBatchDelayRelayClient: NostrRelayEventFetching, @unchecked Sendable {
+    private let events: [Flow.NostrEvent]
+    private let delayedAuthors: Set<String>
+    private let delayNanoseconds: UInt64
+
+    init(events: [Flow.NostrEvent], delayedAuthors: [String], delayNanoseconds: UInt64) {
+        self.events = events
+        self.delayedAuthors = Set(delayedAuthors)
+        self.delayNanoseconds = delayNanoseconds
+    }
+
+    func fetchEvents(
+        relayURL: URL,
+        filter: NostrFilter,
+        timeout: TimeInterval
+    ) async throws -> [Flow.NostrEvent] {
+        let authors = Set(filter.authors ?? [])
+        let kinds = Set(filter.kinds ?? [])
+
+        if !authors.isDisjoint(with: delayedAuthors) {
+            try await Task.sleep(nanoseconds: delayNanoseconds)
+        }
+
+        return events.filter { event in
+            (authors.isEmpty || authors.contains(event.pubkey)) &&
+                (kinds.isEmpty || kinds.contains(event.kind))
+        }
     }
 }
 

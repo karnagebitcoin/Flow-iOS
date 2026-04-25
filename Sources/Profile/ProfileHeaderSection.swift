@@ -1,7 +1,12 @@
 import SwiftUI
 
-private let profileHeaderBannerHeight: CGFloat = 220
-private let profileHeaderBannerFadeHeight: CGFloat = 108
+enum ProfileHeaderBannerMetrics {
+    static let height: CGFloat = 268
+    static let fadeHeight: CGFloat = 188
+    static let loadedImageOpacity: Double = 0.7
+    static let loadedImageSaturation: Double = 0.92
+}
+
 private let profileHeaderAvatarSize: CGFloat = 104
 private let profileHeaderContentHorizontalPadding: CGFloat = 16
 private let profileHeaderSkeletonInfoRowWidths: [CGFloat] = [184, 152, 228]
@@ -11,10 +16,38 @@ enum ProfileHeaderLayoutGuardrails {
         proposedWidth: CGFloat?,
         fallbackWidth: CGFloat = UIScreen.main.bounds.width
     ) -> CGFloat {
+        let candidate: CGFloat
         if let proposedWidth, proposedWidth.isFinite, proposedWidth > 0 {
-            return proposedWidth
+            candidate = proposedWidth
+        } else {
+            candidate = fallbackWidth
         }
-        return fallbackWidth
+
+        guard fallbackWidth.isFinite, fallbackWidth > 0 else {
+            return candidate
+        }
+
+        return min(candidate, fallbackWidth)
+    }
+
+    static func trailingControlOriginX(
+        parentWidth: CGFloat,
+        visibleWidth: CGFloat,
+        controlWidth: CGFloat,
+        horizontalPadding: CGFloat
+    ) -> CGFloat {
+        let width = boundedWidth(
+            proposedWidth: min(parentWidth, visibleWidth),
+            fallbackWidth: visibleWidth
+        )
+        return max(horizontalPadding, width - horizontalPadding - controlWidth)
+    }
+
+    static func topControlsTopPadding(
+        safeAreaInset: CGFloat,
+        minimumPadding: CGFloat = 12
+    ) -> CGFloat {
+        minimumPadding + max(0, safeAreaInset)
     }
 }
 
@@ -46,6 +79,7 @@ struct ProfileHeaderContent {
 
 struct ProfileHeaderSection<BackButton: View, MenuButton: View, ActionRow: View>: View {
     let isLoading: Bool
+    let topSafeAreaInset: CGFloat
     let content: ProfileHeaderContent
     let onFollowingTap: () -> Void
     let onProfileTap: (String) -> Void
@@ -61,6 +95,7 @@ struct ProfileHeaderSection<BackButton: View, MenuButton: View, ActionRow: View>
 
     init(
         isLoading: Bool,
+        topSafeAreaInset: CGFloat = 0,
         content: ProfileHeaderContent,
         onFollowingTap: @escaping () -> Void,
         onProfileTap: @escaping (String) -> Void,
@@ -72,6 +107,7 @@ struct ProfileHeaderSection<BackButton: View, MenuButton: View, ActionRow: View>
         @ViewBuilder actionRow: () -> ActionRow
     ) {
         self.isLoading = isLoading
+        self.topSafeAreaInset = topSafeAreaInset
         self.content = content
         self.onFollowingTap = onFollowingTap
         self.onProfileTap = onProfileTap
@@ -87,6 +123,7 @@ struct ProfileHeaderSection<BackButton: View, MenuButton: View, ActionRow: View>
         ProfileHeaderWidthBoundaryLayout {
             if isLoading {
                 ProfileHeaderSkeleton(
+                    topSafeAreaInset: topSafeAreaInset,
                     backButton: backButton,
                     menuButton: menuButton
                 )
@@ -100,8 +137,9 @@ struct ProfileHeaderSection<BackButton: View, MenuButton: View, ActionRow: View>
     private var loadedContent: some View {
         VStack(alignment: .leading, spacing: 0) {
             ProfileBannerArtwork(bannerURL: content.bannerURL)
-                .overlay(alignment: .top) {
+                .overlay(alignment: .topLeading) {
                     ProfileHeaderTopControls(
+                        topSafeAreaInset: topSafeAreaInset,
                         backButton: backButton,
                         menuButton: menuButton
                     )
@@ -197,27 +235,27 @@ private struct ProfileHeaderWidthBoundaryLayout: Layout {
 }
 
 private struct ProfileHeaderTopControls<BackButton: View, MenuButton: View>: View {
+    let topSafeAreaInset: CGFloat
     let backButton: BackButton
     let menuButton: MenuButton
 
     var body: some View {
-        HStack {
+        ProfileHeaderTopControlsLayout(topSafeAreaInset: topSafeAreaInset) {
             backButton
-
-            Spacer(minLength: 0)
-
             menuButton
         }
-        .padding(.horizontal, 16)
-        .padding(.top, 12)
         .zIndex(4)
         .unredacted()
     }
 }
 
-private struct ProfileHeaderAvatarActionsLayout: Layout {
-    private let horizontalSpacing: CGFloat = 16
-    private let verticalSpacing: CGFloat = 12
+private struct ProfileHeaderTopControlsLayout: Layout {
+    let topSafeAreaInset: CGFloat
+
+    private let horizontalPadding: CGFloat = 16
+    private var topPadding: CGFloat {
+        ProfileHeaderLayoutGuardrails.topControlsTopPadding(safeAreaInset: topSafeAreaInset)
+    }
 
     func sizeThatFits(
         proposal: ProposedViewSize,
@@ -226,7 +264,73 @@ private struct ProfileHeaderAvatarActionsLayout: Layout {
     ) -> CGSize {
         guard subviews.count >= 2 else { return .zero }
 
-        let availableWidth = proposal.width ?? horizontalSize(subviews: subviews).width
+        let width = ProfileHeaderLayoutGuardrails.boundedWidth(proposedWidth: proposal.width)
+        let backSize = subviews[0].sizeThatFits(.unspecified)
+        let menuSize = subviews[1].sizeThatFits(.unspecified)
+
+        return CGSize(
+            width: width,
+            height: topPadding + max(backSize.height, menuSize.height)
+        )
+    }
+
+    func placeSubviews(
+        in bounds: CGRect,
+        proposal: ProposedViewSize,
+        subviews: Subviews,
+        cache: inout ()
+    ) {
+        guard subviews.count >= 2 else { return }
+
+        let width = ProfileHeaderLayoutGuardrails.boundedWidth(
+            proposedWidth: bounds.width > 0 ? bounds.width : proposal.width
+        )
+        let backSize = subviews[0].sizeThatFits(.unspecified)
+        let menuSize = subviews[1].sizeThatFits(.unspecified)
+        let backOrigin = CGPoint(
+            x: bounds.minX + horizontalPadding,
+            y: bounds.minY + topPadding
+        )
+        let menuOriginX = ProfileHeaderLayoutGuardrails.trailingControlOriginX(
+            parentWidth: bounds.width,
+            visibleWidth: width,
+            controlWidth: menuSize.width,
+            horizontalPadding: horizontalPadding
+        )
+        let menuOrigin = CGPoint(
+            x: bounds.minX + menuOriginX,
+            y: bounds.minY + topPadding
+        )
+
+        subviews[0].place(
+            at: backOrigin,
+            proposal: ProposedViewSize(width: backSize.width, height: backSize.height)
+        )
+        subviews[1].place(
+            at: menuOrigin,
+            proposal: ProposedViewSize(width: menuSize.width, height: menuSize.height)
+        )
+    }
+}
+
+private struct ProfileHeaderAvatarActionsLayout: Layout {
+    private let horizontalSpacing: CGFloat = 16
+    private let verticalSpacing: CGFloat = 12
+    private var fallbackContentWidth: CGFloat {
+        max(0, UIScreen.main.bounds.width - (profileHeaderContentHorizontalPadding * 2))
+    }
+
+    func sizeThatFits(
+        proposal: ProposedViewSize,
+        subviews: Subviews,
+        cache: inout ()
+    ) -> CGSize {
+        guard subviews.count >= 2 else { return .zero }
+
+        let availableWidth = ProfileHeaderLayoutGuardrails.boundedWidth(
+            proposedWidth: proposal.width,
+            fallbackWidth: fallbackContentWidth
+        )
         let avatarSize = subviews[0].sizeThatFits(.unspecified)
         let actionsSize = subviews[1].sizeThatFits(.unspecified)
         let horizontalWidth = avatarSize.width + horizontalSpacing + actionsSize.width
@@ -252,18 +356,28 @@ private struct ProfileHeaderAvatarActionsLayout: Layout {
     ) {
         guard subviews.count >= 2 else { return }
 
+        let availableWidth = ProfileHeaderLayoutGuardrails.boundedWidth(
+            proposedWidth: bounds.width > 0 ? bounds.width : proposal.width,
+            fallbackWidth: fallbackContentWidth
+        )
+        let placementBounds = CGRect(
+            x: bounds.minX,
+            y: bounds.minY,
+            width: availableWidth,
+            height: bounds.height
+        )
         let avatarSize = subviews[0].sizeThatFits(.unspecified)
         let actionsSize = subviews[1].sizeThatFits(.unspecified)
         let horizontalWidth = avatarSize.width + horizontalSpacing + actionsSize.width
 
-        if horizontalWidth <= bounds.width {
+        if horizontalWidth <= availableWidth {
             let avatarOrigin = CGPoint(
-                x: bounds.minX,
-                y: bounds.maxY - avatarSize.height
+                x: placementBounds.minX,
+                y: placementBounds.maxY - avatarSize.height
             )
             let actionsOrigin = CGPoint(
-                x: bounds.maxX - actionsSize.width,
-                y: bounds.maxY - actionsSize.height
+                x: placementBounds.maxX - actionsSize.width,
+                y: placementBounds.maxY - actionsSize.height
             )
 
             subviews[0].place(
@@ -276,12 +390,12 @@ private struct ProfileHeaderAvatarActionsLayout: Layout {
             )
         } else {
             subviews[0].place(
-                at: bounds.origin,
+                at: placementBounds.origin,
                 proposal: ProposedViewSize(width: avatarSize.width, height: avatarSize.height)
             )
             subviews[1].place(
-                at: CGPoint(x: bounds.minX, y: bounds.minY + avatarSize.height + verticalSpacing),
-                proposal: ProposedViewSize(width: min(actionsSize.width, bounds.width), height: actionsSize.height)
+                at: CGPoint(x: placementBounds.minX, y: placementBounds.minY + avatarSize.height + verticalSpacing),
+                proposal: ProposedViewSize(width: min(actionsSize.width, availableWidth), height: actionsSize.height)
             )
         }
     }
@@ -304,32 +418,47 @@ private struct ProfileBannerArtwork: View {
     @EnvironmentObject private var appSettings: AppSettingsStore
 
     var body: some View {
-        ZStack(alignment: .bottom) {
-            bannerContent
-
-            LinearGradient(
-                colors: [
-                    Color.black.opacity(0.08),
-                    Color.clear
-                ],
-                startPoint: .top,
-                endPoint: .bottom
+        GeometryReader { proxy in
+            let width = ProfileHeaderLayoutGuardrails.boundedWidth(
+                proposedWidth: proxy.size.width
             )
 
-            LinearGradient(
-                stops: [
-                    .init(color: Color.clear, location: 0),
-                    .init(color: appSettings.themePalette.background.opacity(0.22), location: 0.42),
-                    .init(color: appSettings.themePalette.background.opacity(0.72), location: 0.78),
-                    .init(color: appSettings.themePalette.background, location: 1)
-                ],
-                startPoint: .top,
-                endPoint: .bottom
-            )
-            .frame(height: profileHeaderBannerFadeHeight)
+            Rectangle()
+                .fill(appSettings.themePalette.background)
+                .frame(width: width, height: ProfileHeaderBannerMetrics.height)
+                .overlay(alignment: .topLeading) {
+                    bannerContent
+                        .frame(width: width, height: ProfileHeaderBannerMetrics.height)
+                        .clipped()
+                }
+                .overlay(alignment: .topLeading) {
+                    LinearGradient(
+                        colors: [
+                            Color.black.opacity(0.08),
+                            Color.clear
+                        ],
+                        startPoint: .top,
+                        endPoint: .bottom
+                    )
+                    .frame(width: width, height: ProfileHeaderBannerMetrics.height)
+                }
+                .overlay(alignment: .bottomLeading) {
+                    LinearGradient(
+                        stops: [
+                            .init(color: Color.clear, location: 0),
+                            .init(color: appSettings.themePalette.background.opacity(0.3), location: 0.34),
+                            .init(color: appSettings.themePalette.background.opacity(0.78), location: 0.72),
+                            .init(color: appSettings.themePalette.background, location: 1)
+                        ],
+                        startPoint: .top,
+                        endPoint: .bottom
+                    )
+                    .frame(width: width, height: ProfileHeaderBannerMetrics.fadeHeight)
+                }
+                .clipped()
         }
-        .frame(maxWidth: .infinity)
-        .frame(height: profileHeaderBannerHeight)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .frame(height: ProfileHeaderBannerMetrics.height)
         .background(appSettings.themePalette.background)
         .clipped()
     }
@@ -342,9 +471,7 @@ private struct ProfileBannerArtwork: View {
             CachedAsyncImage(url: bannerURL, kind: .profileBanner) { phase in
                 switch phase {
                 case .success(let image):
-                    image
-                        .resizable()
-                        .scaledToFill()
+                    loadedBannerImage(image)
                 case .empty, .failure:
                     bannerFallback
                 }
@@ -352,6 +479,14 @@ private struct ProfileBannerArtwork: View {
         } else {
             bannerFallback
         }
+    }
+
+    private func loadedBannerImage(_ image: Image) -> some View {
+        image
+            .resizable()
+            .scaledToFill()
+            .saturation(ProfileHeaderBannerMetrics.loadedImageSaturation)
+            .opacity(ProfileHeaderBannerMetrics.loadedImageOpacity)
     }
 
     private var bannerFallback: some View {
@@ -553,7 +688,10 @@ private struct ProfileKnownFollowersRow: View {
                 .lineLimit(2)
                 .fixedSize(horizontal: false, vertical: true)
                 .layoutPriority(1)
+                .frame(maxWidth: .infinity, alignment: .leading)
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .clipped()
         .accessibilityElement(children: .combine)
         .accessibilityLabel("Followed by \(namesText)")
     }
@@ -670,6 +808,7 @@ private struct ProfileInfoRow: View {
 }
 
 private struct ProfileHeaderSkeleton<BackButton: View, MenuButton: View>: View {
+    let topSafeAreaInset: CGFloat
     let backButton: BackButton
     let menuButton: MenuButton
 
@@ -679,9 +818,10 @@ private struct ProfileHeaderSkeleton<BackButton: View, MenuButton: View>: View {
         VStack(alignment: .leading, spacing: 0) {
             Rectangle()
                 .fill(appSettings.themePalette.secondaryFill)
-                .frame(height: profileHeaderBannerHeight)
-                .overlay(alignment: .top) {
+                .frame(height: ProfileHeaderBannerMetrics.height)
+                .overlay(alignment: .topLeading) {
                     ProfileHeaderTopControls(
+                        topSafeAreaInset: topSafeAreaInset,
                         backButton: backButton,
                         menuButton: menuButton
                     )

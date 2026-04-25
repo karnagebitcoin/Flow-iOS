@@ -5,43 +5,21 @@ import UIKit
 
 final class AppThemeOptionTests: XCTestCase {
     @MainActor
-    func testSakuraThemeIsFreeAndUsesLightMode() {
-        XCTAssertTrue(AppThemeOption.sakura.isEnabled)
+    func testSakuraThemeIsLegacyAndNormalizesToLight() {
+        XCTAssertFalse(AppThemeOption.sakura.isEnabled)
+        XCTAssertEqual(AppThemeOption.sakura.normalizedSelection, .light)
         XCTAssertEqual(AppThemeOption.sakura.preferredColorScheme, .light)
         XCTAssertNil(AppThemeOption.sakura.fixedPrimaryColor)
         XCTAssertNil(AppThemeOption.sakura.fixedPrimaryGradient)
-        XCTAssertEqual(AppThemeOption.sakura.qrShareBackgroundResourceName, "sakura-share-bg.json")
-        assertColor(
-            AppThemeOption.sakura.palette.mutedForeground,
-            matches: UIColor(red: 0.992, green: 0.647, blue: 0.835, alpha: 1)
-        )
-        assertColor(AppThemeOption.sakura.palette.quoteBackground, matches: .white)
-        assertColor(
-            AppThemeOption.sakura.palette.separator,
-            matches: UIColor(red: 1.0, green: 0.882, blue: 0.945, alpha: 1)
-        )
-        assertColor(AppThemeOption.sakura.palette.linkPreviewBackground, matches: .white)
-        assertColor(
-            AppThemeOption.sakura.palette.chromeBorder,
-            matches: UIColor(red: 1.0, green: 0.882, blue: 0.945, alpha: 1)
-        )
-        assertColor(
-            AppThemeOption.sakura.palette.linkPreviewBorder,
-            matches: UIColor(red: 1.0, green: 0.882, blue: 0.945, alpha: 1)
-        )
-        assertColor(AppThemeOption.sakura.palette.articlePreviewBackgroundTop, matches: .white)
-        assertColor(AppThemeOption.sakura.palette.articlePreviewBackgroundBottom, matches: .white)
-        assertColor(
-            AppThemeOption.sakura.palette.articlePreviewBorder,
-            matches: UIColor(red: 1.0, green: 0.882, blue: 0.945, alpha: 1)
-        )
+        XCTAssertNil(AppThemeOption.sakura.qrShareBackgroundResourceName)
+        assertColor(AppThemeOption.sakura.palette.background, matches: .white)
         XCTAssertNotNil(AppThemeOption.sakura.palette.capsuleTabStyle)
         XCTAssertNotNil(AppThemeOption.sakura.palette.profileActionStyle)
         XCTAssertNotNil(AppThemeOption.sakura.palette.pollStyle)
     }
 
     @MainActor
-    func testDraculaThemeIsFreeAndUsesDarkMode() {
+    func testMidnightPaletteIsFreeAndUsesDarkMode() {
         XCTAssertTrue(AppThemeOption.dracula.isEnabled)
         XCTAssertEqual(AppThemeOption.dracula.preferredColorScheme, .dark)
         XCTAssertNil(AppThemeOption.dracula.fixedPrimaryColor)
@@ -97,7 +75,7 @@ final class AppThemeOptionTests: XCTestCase {
     }
 
     @MainActor
-    func testGamerThemeIsFreeAndUsesDarkMode() {
+    func testNeonPaletteIsFreeAndUsesDarkMode() {
         XCTAssertTrue(AppThemeOption.gamer.isEnabled)
         XCTAssertEqual(AppThemeOption.gamer.preferredColorScheme, .dark)
         XCTAssertNil(AppThemeOption.gamer.fixedPrimaryColor)
@@ -129,10 +107,10 @@ final class AppThemeOptionTests: XCTestCase {
     }
 
     @MainActor
-    func testSkyThemeIsFreeAndUsesMinimalLightPalette() {
+    func testAirPaletteIsFreeAndUsesMinimalLightPalette() {
         XCTAssertTrue(AppThemeOption.holographicLight.isEnabled)
         XCTAssertEqual(AppThemeOption.holographicLight.preferredColorScheme, .light)
-        XCTAssertEqual(AppThemeOption.holographicLight.title, "Sky")
+        XCTAssertEqual(AppThemeOption.holographicLight.title, "Air")
         XCTAssertNil(AppThemeOption.holographicLight.fixedPrimaryColor)
         XCTAssertNil(AppThemeOption.holographicLight.fixedPrimaryGradient)
         XCTAssertNil(AppThemeOption.holographicLight.qrShareBackgroundResourceName)
@@ -160,6 +138,58 @@ final class AppThemeOptionTests: XCTestCase {
             AppThemeOption.holographicLight.palette.profileActionStyle!.primaryForeground,
             matches: UIColor(red: 0.235, green: 0.612, blue: 1.0, alpha: 1)
         )
+    }
+
+    @MainActor
+    func testDecorativeThemeNamesBecomeColorPalettesAndSakuraIsRemoved() {
+        XCTAssertEqual(AppThemeOption.dracula.title, "Midnight")
+        XCTAssertEqual(AppThemeOption.gamer.title, "Neon")
+        XCTAssertEqual(AppThemeOption.holographicLight.title, "Air")
+        XCTAssertEqual(AppThemeOption.sakura.normalizedSelection, .light)
+        XCTAssertFalse(AppThemeOption.appearanceOptions.contains(.sakura))
+        XCTAssertEqual(
+            AppThemeOption.appearanceOptions,
+            [.light, .dark, .black, .system, .dracula, .gamer, .holographicLight]
+        )
+    }
+
+    @MainActor
+    func testExpressiveAccentModeUsesGradientAndExtractedLinkColor() {
+        let defaults = UserDefaults(suiteName: #function)!
+        defaults.removePersistentDomain(forName: #function)
+        let authStore = AuthStore(defaults: defaults)
+        let settings = AppSettingsStore(defaults: defaults, authStore: authStore)
+
+        settings.visualAccentMode = .expressive
+        settings.expressiveGradientOption = .aurora
+        settings.expressiveLinkColorIndex = 0
+
+        XCTAssertTrue(settings.usesPrimaryGradientForProminentButtons)
+        XCTAssertEqual(settings.visualAccentMode, .expressive)
+        XCTAssertEqual(settings.expressiveGradientOption, .aurora)
+        assertColor(settings.linkColor, matches: UIColor(red: 1.0, green: 0x6E / 255.0, blue: 0xC4 / 255.0, alpha: 1))
+
+        settings.refreshExpressiveLinkColor()
+
+        XCTAssertEqual(settings.expressiveLinkColorIndex, 1)
+        assertColor(settings.linkColor, matches: UIColor(red: 0x78 / 255.0, green: 0x73 / 255.0, blue: 0xF5 / 255.0, alpha: 1))
+    }
+
+    @MainActor
+    func testMinimalAccentModeUsesPrimaryColorForButtonsAndLinks() {
+        let defaults = UserDefaults(suiteName: #function)!
+        defaults.removePersistentDomain(forName: #function)
+        let authStore = AuthStore(defaults: defaults)
+        let settings = AppSettingsStore(defaults: defaults, authStore: authStore)
+        let minimalColor = Color(red: 0.12, green: 0.34, blue: 0.78)
+
+        settings.visualAccentMode = .minimal
+        settings.primaryColor = minimalColor
+
+        XCTAssertFalse(settings.usesPrimaryGradientForProminentButtons)
+        XCTAssertEqual(settings.visualAccentMode, .minimal)
+        assertColor(settings.primaryColor, matches: UIColor(red: 0.12, green: 0.34, blue: 0.78, alpha: 1))
+        assertColor(settings.linkColor, matches: UIColor(red: 0.12, green: 0.34, blue: 0.78, alpha: 1))
     }
 
     @MainActor
@@ -218,7 +248,7 @@ final class AppThemeOptionTests: XCTestCase {
 
         settings.buttonGradientOption = nil
         XCTAssertFalse(settings.usesPrimaryGradientForProminentButtons)
-        XCTAssertEqual(settings.activeHolographicGradientOption, .softHolographicSheen)
+        XCTAssertNil(settings.activeHolographicGradientOption)
     }
 
     @MainActor
@@ -244,7 +274,7 @@ final class AppThemeOptionTests: XCTestCase {
     }
 
     @MainActor
-    func testGeneratedButtonGradientPersistsAndOverridesPresetGradient() {
+    func testGeneratedButtonGradientMigratesToCuratedExpressiveGradient() {
         let defaults = UserDefaults(suiteName: #function)!
         defaults.removePersistentDomain(forName: #function)
         let authStore = AuthStore(defaults: defaults)
@@ -263,11 +293,13 @@ final class AppThemeOptionTests: XCTestCase {
         let reloaded = AppSettingsStore(defaults: defaults, authStore: authStore)
         reloaded.configure(accountPubkey: pubkey)
 
-        XCTAssertNil(reloaded.buttonGradientOption)
-        XCTAssertEqual(reloaded.generatedButtonGradient, generated)
+        XCTAssertEqual(reloaded.visualAccentMode, .expressive)
+        XCTAssertEqual(reloaded.expressiveGradientOption, .aurora)
+        XCTAssertEqual(reloaded.buttonGradientOption, .softHolographicSheen)
+        XCTAssertNil(reloaded.generatedButtonGradient)
         XCTAssertTrue(reloaded.usesPrimaryGradientForProminentButtons)
-        XCTAssertNil(reloaded.activeButtonGradientOption)
-        XCTAssertEqual(reloaded.activeGeneratedButtonGradient, generated)
+        XCTAssertEqual(reloaded.activeButtonGradientOption, .softHolographicSheen)
+        XCTAssertNil(reloaded.activeGeneratedButtonGradient)
     }
 
     @MainActor
@@ -279,7 +311,7 @@ final class AppThemeOptionTests: XCTestCase {
     }
 
     @MainActor
-    func testButtonTextColorPersistsAcrossStoreReload() {
+    func testMinimalButtonTextColorIsDerivedFromPrimaryColorAcrossReload() {
         let defaults = UserDefaults(suiteName: #function)!
         defaults.removePersistentDomain(forName: #function)
         let authStore = AuthStore(defaults: defaults)
@@ -287,14 +319,16 @@ final class AppThemeOptionTests: XCTestCase {
         let settings = AppSettingsStore(defaults: defaults, authStore: authStore)
 
         settings.configure(accountPubkey: pubkey)
+        settings.primaryColor = Color(red: 0.92, green: 0.90, blue: 0.80)
         settings.buttonTextColor = Color(red: 0.05, green: 0.10, blue: 0.15)
 
         let reloaded = AppSettingsStore(defaults: defaults, authStore: authStore)
         reloaded.configure(accountPubkey: pubkey)
 
+        XCTAssertEqual(reloaded.visualAccentMode, .minimal)
         assertColor(
             reloaded.buttonTextColor,
-            matches: UIColor(red: 0.05, green: 0.10, blue: 0.15, alpha: 1)
+            matches: UIColor.black
         )
     }
 
@@ -310,17 +344,20 @@ final class AppThemeOptionTests: XCTestCase {
         settings.theme = .holographicLight
         settings.holographicLightGradientOption = .strongRainbowFoil
 
-        XCTAssertEqual(settings.activeHolographicGradientOption, .strongRainbowFoil)
+        XCTAssertEqual(settings.expressiveGradientOption, .prism)
+        XCTAssertEqual(settings.activeHolographicGradientOption, .neonHolographicBlend)
 
         let reloaded = AppSettingsStore(defaults: defaults, authStore: authStore)
         reloaded.configure(accountPubkey: pubkey)
 
-        XCTAssertEqual(reloaded.buttonGradientOption, .strongRainbowFoil)
-        XCTAssertEqual(reloaded.holographicDarkGradientOption, .strongRainbowFoil)
+        XCTAssertEqual(reloaded.visualAccentMode, .expressive)
+        XCTAssertEqual(reloaded.expressiveGradientOption, .prism)
+        XCTAssertEqual(reloaded.buttonGradientOption, .neonHolographicBlend)
+        XCTAssertEqual(reloaded.holographicDarkGradientOption, .neonHolographicBlend)
     }
 
     @MainActor
-    func testHolographicSpotlightOnlyAppearsOnSkyScreens() {
+    func testHolographicSpotlightOnlyAppearsOnAirScreens() {
         XCTAssertTrue(AppThemeBackgroundSpotlight.feed.isVisible(for: .holographicLight))
         XCTAssertTrue(AppThemeBackgroundSpotlight.profile.isVisible(for: .holographicLight))
         XCTAssertFalse(AppThemeBackgroundSpotlight.feed.isVisible(for: .holographicDark))
@@ -370,7 +407,7 @@ final class AppThemeOptionTests: XCTestCase {
         XCTAssertTrue(AppThemeOption.black.isEnabled)
         XCTAssertEqual(
             AppThemeOption.appearanceOptions,
-            [.light, .dark, .black, .system, .sakura, .dracula, .gamer, .holographicLight]
+            [.light, .dark, .black, .system, .dracula, .gamer, .holographicLight]
         )
         XCTAssertFalse(AppThemeOption.appearanceOptions.contains(.white))
         XCTAssertFalse(AppThemeOption.appearanceOptions.contains(.holographicDark))
@@ -384,11 +421,11 @@ final class AppThemeOptionTests: XCTestCase {
         let settings = AppSettingsStore(defaults: defaults, authStore: authStore)
 
         settings.theme = .system
-        settings.beginThemePreview(.sakura)
+        settings.beginThemePreview(.holographicLight)
 
-        XCTAssertEqual(settings.activeTheme, .sakura)
+        XCTAssertEqual(settings.activeTheme, .holographicLight)
         XCTAssertEqual(settings.preferredColorScheme, .light)
-        XCTAssertEqual(settings.previewTheme, .sakura)
+        XCTAssertEqual(settings.previewTheme, .holographicLight)
     }
 
     @MainActor
@@ -677,7 +714,7 @@ final class AppThemeOptionTests: XCTestCase {
     func testAdditionalThemesResolveCustomQRCodePresentationBackgrounds() {
         XCTAssertEqual(
             ProfileQRCodePresentationBackground.resourceName(for: .sakura),
-            "sakura-share-bg.json"
+            ProfileQRCodePresentationBackground.defaultResourceName
         )
         XCTAssertEqual(
             ProfileQRCodePresentationBackground.resourceName(for: .dracula),
@@ -699,10 +736,7 @@ final class AppThemeOptionTests: XCTestCase {
 
     @MainActor
     func testBundledThemeAssetsExistInMainBundle() {
-        XCTAssertNotNil(
-            Bundle.main.url(forResource: "sakura-share-bg", withExtension: "json"),
-            "Missing bundled Sakura QR share background"
-        )
+        XCTAssertNil(AppThemeOption.sakura.qrShareBackgroundResourceName)
     }
 
     @MainActor
@@ -820,6 +854,76 @@ final class AppThemeOptionTests: XCTestCase {
                 usesOverlayBottomTabBar: false
             )
         )
+    }
+
+    func testAudioPlayerProgressClampsToPlayableRange() {
+        XCTAssertEqual(
+            NoteAudioPlayerLayout.progress(currentTime: -8, duration: 120),
+            0,
+            accuracy: 0.0001
+        )
+        XCTAssertEqual(
+            NoteAudioPlayerLayout.progress(currentTime: 30, duration: 120),
+            0.25,
+            accuracy: 0.0001
+        )
+        XCTAssertEqual(
+            NoteAudioPlayerLayout.progress(currentTime: 140, duration: 120),
+            1,
+            accuracy: 0.0001
+        )
+        XCTAssertEqual(
+            NoteAudioPlayerLayout.progress(currentTime: 30, duration: 0),
+            0,
+            accuracy: 0.0001
+        )
+    }
+
+    func testAudioPlayerSeekSecondsClampDragProgress() {
+        XCTAssertEqual(
+            NoteAudioPlayerLayout.seekSeconds(forProgress: -0.5, duration: 80),
+            0,
+            accuracy: 0.0001
+        )
+        XCTAssertEqual(
+            NoteAudioPlayerLayout.seekSeconds(forProgress: 0.5, duration: 80),
+            40,
+            accuracy: 0.0001
+        )
+        XCTAssertEqual(
+            NoteAudioPlayerLayout.seekSeconds(forProgress: 1.5, duration: 80),
+            80,
+            accuracy: 0.0001
+        )
+    }
+
+    func testAudioPlayerUsesLargePlayButtonAndScrubbableWaveformHeight() {
+        XCTAssertGreaterThanOrEqual(NoteAudioPlayerLayout.playButtonDiameter, 52)
+        XCTAssertGreaterThanOrEqual(NoteAudioPlayerLayout.waveformHeight, 44)
+    }
+
+    func testSelectingSearchTabRequestsSearchRootReset() {
+        let effects = MainTabSelectionPolicy.effects(
+            previousTab: .home,
+            selectedTab: .search,
+            wasActivityRootVisible: true
+        )
+
+        XCTAssertTrue(effects.resetsSearchRoot)
+        XCTAssertFalse(effects.resetsHomeRoot)
+        XCTAssertFalse(effects.resetsActivityRoot)
+    }
+
+    func testReselectingSearchTabRequestsSearchRootReset() {
+        let effects = MainTabSelectionPolicy.effects(
+            previousTab: .search,
+            selectedTab: .search,
+            wasActivityRootVisible: true
+        )
+
+        XCTAssertTrue(effects.resetsSearchRoot)
+        XCTAssertFalse(effects.resetsHomeRoot)
+        XCTAssertFalse(effects.resetsActivityRoot)
     }
 
     @MainActor

@@ -86,7 +86,7 @@ enum AppFontOption: String, CaseIterable, Codable, Identifiable, Hashable, Senda
         case .mono:
             return "flow://"
         case .ebGaramond:
-            return "Sakura"
+            return "Editorial"
         case .dmSans:
             return "Moments"
         case .inter:

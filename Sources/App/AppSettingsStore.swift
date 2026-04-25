@@ -23,7 +23,6 @@ enum AppThemeOption: String, CaseIterable, Codable, Identifiable, Hashable, Send
         .dark,
         .black,
         .system,
-        .sakura,
         .dracula,
         .gamer,
         .holographicLight
@@ -31,11 +30,11 @@ enum AppThemeOption: String, CaseIterable, Codable, Identifiable, Hashable, Send
 
     var normalizedSelection: AppThemeOption {
         switch self {
-        case .white:
+        case .white, .sakura:
             return .light
         case .holographicDark:
             return .dark
-        case .system, .black, .sakura, .dracula, .gamer, .holographicLight, .dark, .light:
+        case .system, .black, .dracula, .gamer, .holographicLight, .dark, .light:
             return self
         }
     }
@@ -49,13 +48,13 @@ enum AppThemeOption: String, CaseIterable, Codable, Identifiable, Hashable, Send
         case .white:
             return "Light"
         case .sakura:
-            return "Sakura"
+            return "Light"
         case .dracula:
-            return "Dracula"
+            return "Midnight"
         case .gamer:
-            return "Gamer"
+            return "Neon"
         case .holographicLight:
-            return "Sky"
+            return "Air"
         case .holographicDark:
             return "Dark"
         case .dark:
@@ -74,7 +73,7 @@ enum AppThemeOption: String, CaseIterable, Codable, Identifiable, Hashable, Send
         case .white:
             return "sun.haze.fill"
         case .sakura:
-            return "leaf.fill"
+            return "sun.haze.fill"
         case .dracula:
             return "moon.stars.fill"
         case .gamer:
@@ -97,13 +96,13 @@ enum AppThemeOption: String, CaseIterable, Codable, Identifiable, Hashable, Send
         case .white:
             return "Bright appearance"
         case .sakura:
-            return "Paper whites with gradient blossom pinks"
+            return "Bright appearance"
         case .dracula:
-            return "Moody shadows with classic violet and neon accents"
+            return "Deep shadows with cool violet surfaces"
         case .gamer:
-            return "Carbon black with neon violet, cyan, and energy-green accents"
+            return "Carbon black with electric cyan surfaces"
         case .holographicLight:
-            return "Clean light theme with soft sky highlights"
+            return "Bright surfaces with soft sky chrome"
         case .holographicDark:
             return "Legacy dark appearance"
         case .dark:
@@ -115,9 +114,9 @@ enum AppThemeOption: String, CaseIterable, Codable, Identifiable, Hashable, Send
 
     var isEnabled: Bool {
         switch self {
-        case .system, .black, .sakura, .dracula, .gamer, .holographicLight, .dark, .light:
+        case .system, .black, .dracula, .gamer, .holographicLight, .dark, .light:
             return true
-        case .white, .holographicDark:
+        case .white, .sakura, .holographicDark:
             return false
         }
     }
@@ -143,9 +142,7 @@ enum AppThemeOption: String, CaseIterable, Codable, Identifiable, Hashable, Send
 
     var qrShareBackgroundResourceName: String? {
         switch self {
-        case .sakura:
-            return "sakura-share-bg.json"
-        case .system, .black, .white, .dracula, .gamer, .holographicLight, .holographicDark, .dark, .light:
+        case .system, .black, .white, .sakura, .dracula, .gamer, .holographicLight, .holographicDark, .dark, .light:
             return nil
         }
     }
@@ -159,7 +156,7 @@ enum AppThemeOption: String, CaseIterable, Codable, Identifiable, Hashable, Send
         case .white:
             return AppThemePalette.white
         case .sakura:
-            return AppThemePalette.sakura
+            return AppThemePalette.white
         case .dracula:
             return AppThemePalette.dracula
         case .gamer:
@@ -613,6 +610,148 @@ enum HolographicGradientOption: String, CaseIterable, Codable, Identifiable, Has
     }
 }
 
+enum AppVisualAccentMode: String, CaseIterable, Codable, Identifiable, Hashable, Sendable {
+    case expressive
+    case minimal
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .expressive:
+            return "Expressive"
+        case .minimal:
+            return "Minimal"
+        }
+    }
+
+    var subtitle: String {
+        switch self {
+        case .expressive:
+            return "Gradient buttons with an extracted link color"
+        case .minimal:
+            return "One primary color for buttons and links"
+        }
+    }
+}
+
+enum ExpressiveGradientOption: String, CaseIterable, Codable, Identifiable, Hashable, Sendable {
+    case aurora
+    case prism
+    case ember
+    case bloom
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .aurora:
+            return "Aurora"
+        case .prism:
+            return "Prism"
+        case .ember:
+            return "Ember"
+        case .bloom:
+            return "Bloom"
+        }
+    }
+
+    var legacyHolographicOption: HolographicGradientOption {
+        switch self {
+        case .aurora:
+            return .softHolographicSheen
+        case .prism:
+            return .neonHolographicBlend
+        case .ember:
+            return .holographicChromeLook
+        case .bloom:
+            return .radialHolographicGlow
+        }
+    }
+
+    var buttonGradient: LinearGradient {
+        legacyHolographicOption.buttonGradient
+    }
+
+    var uiGradient: LinearGradient {
+        legacyHolographicOption.uiGradient
+    }
+
+    var buttonTextColor: Color {
+        switch self {
+        case .aurora, .prism:
+            return .white
+        case .ember, .bloom:
+            return .black
+        }
+    }
+
+    var linkColors: [Color] {
+        switch self {
+        case .aurora:
+            return [
+                Self.hex(0xFF6EC4),
+                Self.hex(0x7873F5),
+                Self.hex(0x18A8D8),
+                Self.hex(0x2F9D55)
+            ]
+        case .prism:
+            return [
+                Self.hex(0xFF00CC),
+                Self.hex(0x3333FF),
+                Self.hex(0x008C99),
+                Self.hex(0xD94F00)
+            ]
+        case .ember:
+            return [
+                Self.hex(0xD14B3D),
+                Self.hex(0xA56800),
+                Self.hex(0x6C63B8),
+                Self.hex(0x408238)
+            ]
+        case .bloom:
+            return [
+                Self.hex(0x5B8CFF),
+                Self.hex(0xC45DAE),
+                Self.hex(0x2A9F66),
+                Self.hex(0x8B63D8)
+            ]
+        }
+    }
+
+    func linkColor(at index: Int) -> Color {
+        let colors = linkColors
+        guard !colors.isEmpty else { return legacyHolographicOption.defaultLinkColor }
+        let normalizedIndex = Self.normalizedLinkColorIndex(index, count: colors.count)
+        return colors[normalizedIndex]
+    }
+
+    static func mapped(from option: HolographicGradientOption) -> ExpressiveGradientOption {
+        switch option {
+        case .softHolographicSheen, .iridescentPastelFilm, .pearlHolographicGradient:
+            return .aurora
+        case .neonHolographicBlend, .strongRainbowFoil, .multiLayerHolographicFoil:
+            return .prism
+        case .holographicChromeLook:
+            return .ember
+        case .radialHolographicGlow:
+            return .bloom
+        }
+    }
+
+    static func normalizedLinkColorIndex(_ index: Int, count: Int) -> Int {
+        guard count > 0 else { return 0 }
+        return ((index % count) + count) % count
+    }
+
+    private static func hex(_ value: Int) -> Color {
+        let red = Double((value >> 16) & 0xFF) / 255.0
+        let green = Double((value >> 8) & 0xFF) / 255.0
+        let blue = Double(value & 0xFF) / 255.0
+        return Color(red: red, green: green, blue: blue)
+    }
+}
+
 struct StoredColor: Codable, Hashable, Sendable {
     let archivedData: Data
 
@@ -898,6 +1037,10 @@ final class AppSettingsStore: ObservableObject {
         private enum CodingKeys: String, CodingKey {
             case primaryColor
             case theme
+            case visualAccentMode
+            case expressiveGradientOption
+            case expressiveLinkColorIndex
+            case minimalPrimaryColor
             case buttonGradientOption
             case generatedButtonGradient
             case buttonTextColor
@@ -938,6 +1081,10 @@ final class AppSettingsStore: ObservableObject {
 
         var primaryColor: StoredColor?
         var theme: AppThemeOption = .system
+        var visualAccentMode: AppVisualAccentMode = .minimal
+        var expressiveGradientOption: ExpressiveGradientOption = .aurora
+        var expressiveLinkColorIndex: Int = 0
+        var minimalPrimaryColor: StoredColor?
         var buttonGradientOption: HolographicGradientOption?
         var generatedButtonGradient: GeneratedButtonGradient?
         var buttonTextColor: StoredColor?
@@ -980,6 +1127,7 @@ final class AppSettingsStore: ObservableObject {
             primaryColor = try container.decodeIfPresent(StoredColor.self, forKey: .primaryColor)
             let decodedTheme = (try? container.decode(AppThemeOption.self, forKey: .theme)) ?? .system
             theme = decodedTheme.normalizedSelection
+            minimalPrimaryColor = try container.decodeIfPresent(StoredColor.self, forKey: .minimalPrimaryColor) ?? primaryColor
             buttonGradientOption = try container.decodeIfPresent(HolographicGradientOption.self, forKey: .buttonGradientOption)
             generatedButtonGradient = try container.decodeIfPresent(GeneratedButtonGradient.self, forKey: .generatedButtonGradient)
             buttonTextColor = try container.decodeIfPresent(StoredColor.self, forKey: .buttonTextColor)
@@ -999,6 +1147,17 @@ final class AppSettingsStore: ObservableObject {
                     break
                 }
             }
+            expressiveGradientOption = try container.decodeIfPresent(
+                ExpressiveGradientOption.self,
+                forKey: .expressiveGradientOption
+            ) ?? buttonGradientOption.map(ExpressiveGradientOption.mapped(from:)) ?? .aurora
+            let decodedLinkColorIndex = try container.decodeIfPresent(Int.self, forKey: .expressiveLinkColorIndex) ?? 0
+            expressiveLinkColorIndex = ExpressiveGradientOption.normalizedLinkColorIndex(
+                decodedLinkColorIndex,
+                count: expressiveGradientOption.linkColors.count
+            )
+            visualAccentMode = try container.decodeIfPresent(AppVisualAccentMode.self, forKey: .visualAccentMode)
+                ?? ((buttonGradientOption != nil || generatedButtonGradient != nil) ? .expressive : .minimal)
             fontOption = (try? container.decode(AppFontOption.self, forKey: .fontOption)) ?? .system
             fontSize = (try? container.decode(AppFontSize.self, forKey: .fontSize)) ?? .medium
             breakReminderInterval = (try? container.decode(BreakReminderInterval.self, forKey: .breakReminderInterval)) ?? .fortyMinutes
@@ -1049,10 +1208,17 @@ final class AppSettingsStore: ObservableObject {
 
         func encode(to encoder: Encoder) throws {
             var container = encoder.container(keyedBy: CodingKeys.self)
-            try container.encodeIfPresent(primaryColor, forKey: .primaryColor)
+            let encodedMinimalColor = minimalPrimaryColor ?? primaryColor
+            try container.encodeIfPresent(encodedMinimalColor, forKey: .primaryColor)
+            try container.encodeIfPresent(encodedMinimalColor, forKey: .minimalPrimaryColor)
             try container.encode(theme, forKey: .theme)
-            try container.encodeIfPresent(buttonGradientOption, forKey: .buttonGradientOption)
-            try container.encodeIfPresent(generatedButtonGradient, forKey: .generatedButtonGradient)
+            try container.encode(visualAccentMode, forKey: .visualAccentMode)
+            try container.encode(expressiveGradientOption, forKey: .expressiveGradientOption)
+            try container.encode(expressiveLinkColorIndex, forKey: .expressiveLinkColorIndex)
+            let legacyButtonGradient = visualAccentMode == .expressive
+                ? expressiveGradientOption.legacyHolographicOption
+                : nil
+            try container.encodeIfPresent(legacyButtonGradient, forKey: .buttonGradientOption)
             try container.encodeIfPresent(buttonTextColor, forKey: .buttonTextColor)
             try container.encode(fontOption, forKey: .fontOption)
             try container.encode(fontSize, forKey: .fontSize)
@@ -1153,29 +1319,117 @@ final class AppSettingsStore: ObservableObject {
     }
 
     var primaryColor: Color {
-        get { persistedSettings.primaryColor?.color ?? Self.defaultPrimaryColor }
+        get {
+            switch persistedSettings.visualAccentMode {
+            case .expressive:
+                return linkColor
+            case .minimal:
+                return persistedSettings.minimalPrimaryColor?.color ?? persistedSettings.primaryColor?.color ?? Self.defaultPrimaryColor
+            }
+        }
         set {
-            persistedSettings.primaryColor = StoredColor(color: newValue)
+            let storedColor = StoredColor(color: newValue)
+            persistedSettings.visualAccentMode = .minimal
+            persistedSettings.primaryColor = storedColor
+            persistedSettings.minimalPrimaryColor = storedColor
+            persistedSettings.buttonTextColor = nil
             persist()
         }
     }
 
-    var buttonGradientOption: HolographicGradientOption? {
-        get { persistedSettings.buttonGradientOption }
+    var linkColor: Color {
+        switch persistedSettings.visualAccentMode {
+        case .expressive:
+            return persistedSettings.expressiveGradientOption.linkColor(at: persistedSettings.expressiveLinkColorIndex)
+        case .minimal:
+            return persistedSettings.minimalPrimaryColor?.color ?? persistedSettings.primaryColor?.color ?? Self.defaultPrimaryColor
+        }
+    }
+
+    var visualAccentMode: AppVisualAccentMode {
+        get { persistedSettings.visualAccentMode }
         set {
-            persistedSettings.buttonGradientOption = newValue
+            persistedSettings.visualAccentMode = newValue
+            if newValue == .minimal {
+                persistedSettings.buttonTextColor = nil
+            }
+            normalizeExpressiveLinkColorIndex()
+            persist()
+        }
+    }
+
+    var expressiveGradientOption: ExpressiveGradientOption {
+        get { persistedSettings.expressiveGradientOption }
+        set {
+            persistedSettings.visualAccentMode = .expressive
+            persistedSettings.expressiveGradientOption = newValue
+            persistedSettings.buttonGradientOption = newValue.legacyHolographicOption
+            persistedSettings.generatedButtonGradient = nil
+            normalizeExpressiveLinkColorIndex()
+            persist()
+        }
+    }
+
+    var expressiveLinkColorIndex: Int {
+        get { persistedSettings.expressiveLinkColorIndex }
+        set {
+            persistedSettings.expressiveLinkColorIndex = ExpressiveGradientOption.normalizedLinkColorIndex(
+                newValue,
+                count: persistedSettings.expressiveGradientOption.linkColors.count
+            )
+            persist()
+        }
+    }
+
+    func refreshExpressiveLinkColor() {
+        let colorCount = persistedSettings.expressiveGradientOption.linkColors.count
+        guard colorCount > 1 else { return }
+        persistedSettings.visualAccentMode = .expressive
+        persistedSettings.expressiveLinkColorIndex = ExpressiveGradientOption.normalizedLinkColorIndex(
+            persistedSettings.expressiveLinkColorIndex + 1,
+            count: colorCount
+        )
+        persist()
+    }
+
+    private func normalizeExpressiveLinkColorIndex() {
+        persistedSettings.expressiveLinkColorIndex = ExpressiveGradientOption.normalizedLinkColorIndex(
+            persistedSettings.expressiveLinkColorIndex,
+            count: persistedSettings.expressiveGradientOption.linkColors.count
+        )
+    }
+
+    var buttonGradientOption: HolographicGradientOption? {
+        get {
+            persistedSettings.visualAccentMode == .expressive
+                ? persistedSettings.expressiveGradientOption.legacyHolographicOption
+                : nil
+        }
+        set {
+            if let newValue {
+                persistedSettings.visualAccentMode = .expressive
+                persistedSettings.expressiveGradientOption = ExpressiveGradientOption.mapped(from: newValue)
+                persistedSettings.buttonGradientOption = newValue
+                normalizeExpressiveLinkColorIndex()
+            } else {
+                persistedSettings.visualAccentMode = .minimal
+                persistedSettings.buttonGradientOption = nil
+            }
             persistedSettings.generatedButtonGradient = nil
             persist()
         }
     }
 
     var generatedButtonGradient: GeneratedButtonGradient? {
-        get { persistedSettings.generatedButtonGradient }
+        get { nil }
         set {
             persistedSettings.generatedButtonGradient = newValue
             if newValue != nil {
+                persistedSettings.visualAccentMode = .expressive
+                persistedSettings.expressiveGradientOption = .aurora
                 persistedSettings.buttonGradientOption = nil
             }
+            normalizeExpressiveLinkColorIndex()
             persist()
         }
     }
@@ -1193,8 +1447,10 @@ final class AppSettingsStore: ObservableObject {
     }
 
     func clearButtonGradient() {
+        persistedSettings.visualAccentMode = .minimal
         persistedSettings.buttonGradientOption = nil
         persistedSettings.generatedButtonGradient = nil
+        persistedSettings.buttonTextColor = nil
         persist()
     }
 
@@ -1213,11 +1469,13 @@ final class AppSettingsStore: ObservableObject {
     }
 
     var activeGeneratedButtonGradient: GeneratedButtonGradient? {
-        generatedButtonGradient
+        nil
     }
 
     var activeHolographicGradientOption: HolographicGradientOption? {
-        activeTheme == .holographicLight ? (buttonGradientOption ?? .softHolographicSheen) : nil
+        activeTheme == .holographicLight && visualAccentMode == .expressive
+            ? expressiveGradientOption.legacyHolographicOption
+            : nil
     }
 
     var themeIconAccentColor: Color {
@@ -1225,7 +1483,7 @@ final class AppSettingsStore: ObservableObject {
     }
 
     var usesPrimaryGradientForProminentButtons: Bool {
-        activeButtonGradientOption != nil || activeGeneratedButtonGradient != nil
+        visualAccentMode == .expressive
     }
 
     var primaryGradient: LinearGradient {
@@ -1878,15 +2136,11 @@ final class AppSettingsStore: ObservableObject {
     }
 
     private static func primaryGradient(for settings: PersistedSettings) -> LinearGradient {
-        if let generatedButtonGradient = settings.generatedButtonGradient {
-            return generatedButtonGradient.gradient
+        if settings.visualAccentMode == .expressive {
+            return settings.expressiveGradientOption.buttonGradient
         }
 
-        if let buttonGradientOption = settings.buttonGradientOption {
-            return buttonGradientOption.buttonGradient
-        }
-
-        let color = settings.primaryColor?.color ?? defaultPrimaryColor
+        let color = settings.minimalPrimaryColor?.color ?? settings.primaryColor?.color ?? defaultPrimaryColor
         return LinearGradient(
             colors: [color, color],
             startPoint: .topLeading,
@@ -1895,7 +2149,24 @@ final class AppSettingsStore: ObservableObject {
     }
 
     private static func buttonTextColor(for settings: PersistedSettings) -> Color {
-        settings.buttonTextColor?.color(fallback: defaultButtonTextColor) ?? defaultButtonTextColor
+        if settings.visualAccentMode == .expressive {
+            return settings.expressiveGradientOption.buttonTextColor
+        }
+        let color = settings.minimalPrimaryColor?.color ?? settings.primaryColor?.color ?? defaultPrimaryColor
+        return contrastingForegroundColor(for: color)
+    }
+
+    private static func contrastingForegroundColor(for color: Color) -> Color {
+        let uiColor = UIColor(color)
+        var red: CGFloat = 0
+        var green: CGFloat = 0
+        var blue: CGFloat = 0
+        var alpha: CGFloat = 0
+        guard uiColor.getRed(&red, green: &green, blue: &blue, alpha: &alpha) else {
+            return defaultButtonTextColor
+        }
+        let luminance = (0.299 * Double(red)) + (0.587 * Double(green)) + (0.114 * Double(blue))
+        return luminance > 0.68 ? .black : .white
     }
 
     private func migrateScopedSpamFilterMarkedPubkeysIfNeeded() {

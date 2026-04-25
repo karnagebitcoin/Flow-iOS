@@ -40,6 +40,7 @@ final class ProfileViewModel: ObservableObject {
     @Published private(set) var profile: NostrProfile?
     @Published private(set) var metadataSnapshot: ProfileMetadataSnapshot?
     @Published private(set) var followingCount: Int = 0
+    @Published private(set) var hasResolvedFollowingCount = false
     @Published private(set) var followsCurrentUser = false
     @Published private(set) var knownFollowers: [ProfileKnownFollower] = []
     @Published private(set) var items: [FeedItem] = [] {
@@ -69,11 +70,19 @@ final class ProfileViewModel: ObservableObject {
     private let relayClient: any NostrRelayEventPublishing
     private let seenEventStore: any SeenEventStoring
     private let mediaUploadService: ProfileMediaUploadService
-    static let requestedFeedKinds = [1, 6, 16, 1068, 1111, 1244]
+    static let requestedFeedKinds = [
+        FeedKindFilters.shortTextNote,
+        FeedKindFilters.repost,
+        16,
+        FeedKindFilters.poll,
+        FeedKindFilters.comment,
+        FeedKindFilters.voiceComment,
+        FeedKindFilters.longFormArticle
+    ]
 
     private let requestKinds = ProfileViewModel.requestedFeedKinds
     private static let fastProfileFetchTimeout: TimeInterval = 3
-    private static let fastProfileRelayFetchMode: RelayFetchMode = .firstNonEmptyRelay
+    private static let fastProfileRelayFetchMode: RelayFetchMode = .firstRelayWithEvents
     private static let knownFollowersFetchTimeout: TimeInterval = 4
     private static let knownFollowersDisplayLimit = 5
     private static let knownFollowersCandidateLimit = 240
@@ -234,6 +243,7 @@ final class ProfileViewModel: ObservableObject {
         }
         if let cachedFollowingCount = await service.cachedFollowingCount(pubkey: pubkey) {
             followingCount = cachedFollowingCount
+            hasResolvedFollowingCount = true
         }
 
         let requestHydrationMode: FeedItemHydrationMode = .cachedProfilesOnly
@@ -251,12 +261,14 @@ final class ProfileViewModel: ObservableObject {
             fetchTimeout: requestFetchTimeout,
             relayFetchMode: requestRelayFetchMode
         )
-        async let fetchedFollowingCount = service.fetchFollowingCount(
-            relayURLs: readRelayURLs,
-            pubkey: pubkey,
-            fetchTimeout: requestFetchTimeout,
-            relayFetchMode: requestRelayFetchMode
-        )
+        async let fetchedFollowListSnapshot: FollowListSnapshot? = {
+            try? await service.fetchFollowListSnapshot(
+                relayURLs: readRelayURLs,
+                pubkey: pubkey,
+                fetchTimeout: requestFetchTimeout,
+                relayFetchMode: requestRelayFetchMode
+            )
+        }()
         async let fetchedMetadataResult: Result<ProfileMetadataSnapshot?, Error> = {
             do {
                 return .success(try await fetchProfileMetadataSnapshot(relayURLs: readRelayURLs, pubkey: pubkey))
@@ -290,7 +302,10 @@ final class ProfileViewModel: ObservableObject {
         if let resolvedProfile = await fetchedProfile {
             profile = resolvedProfile
         }
-        followingCount = await fetchedFollowingCount
+        if let resolvedFollowListSnapshot = await fetchedFollowListSnapshot {
+            followingCount = resolvedFollowListSnapshot.followedPubkeys.count
+            hasResolvedFollowingCount = true
+        }
 
         switch await fetchedMetadataResult {
         case .success(let snapshot):
@@ -350,9 +365,7 @@ final class ProfileViewModel: ObservableObject {
             mergeKeepingNewest(itemsToMerge: feedWindow.items)
             scheduleItemHydration(for: items)
         } catch {
-            errorMessage = mode == .postsAndReplies
-                ? "Couldn't load more replies."
-                : "Couldn't load more posts."
+            errorMessage = loadMoreErrorMessage(for: mode)
         }
     }
 
@@ -363,11 +376,11 @@ final class ProfileViewModel: ObservableObject {
 
     func prepareForSelectedModeIfNeeded() async {
         guard hasCompletedInitialLoad else { return }
-        guard mode == .postsAndReplies else { return }
+        guard mode == .postsAndReplies || mode == .articles else { return }
         guard !hasReachedEnd else { return }
 
-        let minimumVisibleReplies = min(max(pageSize / 3, 8), pageSize)
-        guard filteredItems(items, for: .postsAndReplies).count < minimumVisibleReplies else { return }
+        let minimumVisibleItems = min(max(pageSize / 3, 8), pageSize)
+        guard filteredItems(items, for: mode).count < minimumVisibleItems else { return }
 
         await refresh()
     }
@@ -624,12 +637,18 @@ final class ProfileViewModel: ObservableObject {
                 return false
             }
 
-            switch mode {
-            case .posts:
-                return !item.displayEvent.isReplyNote
-            case .postsAndReplies:
-                return item.displayEvent.isReplyNote
-            }
+            return ProfileFeedVisibility.isVisible(item, in: mode)
+        }
+    }
+
+    private func loadMoreErrorMessage(for mode: FeedMode) -> String {
+        switch mode {
+        case .posts:
+            return "Couldn't load more posts."
+        case .postsAndReplies:
+            return "Couldn't load more replies."
+        case .articles:
+            return "Couldn't load more articles."
         }
     }
 
@@ -677,8 +696,9 @@ final class ProfileViewModel: ObservableObject {
         moderationSnapshot: MuteFilterSnapshot? = nil
     ) async throws -> FeedWindow {
         let targetMode = mode
-        let batchSize = targetMode == .postsAndReplies ? max(pageSize, 100) : pageSize
-        let maxBatches = targetMode == .postsAndReplies ? 4 : 1
+        let shouldSearchOlderPages = targetMode == .postsAndReplies || targetMode == .articles
+        let batchSize = shouldSearchOlderPages ? max(pageSize, 100) : pageSize
+        let maxBatches = shouldSearchOlderPages ? 4 : 1
 
         var aggregated: [FeedItem] = []
         var nextUntil = until
@@ -810,6 +830,20 @@ final class ProfileViewModel: ObservableObject {
         }
 
         return ordered
+    }
+}
+
+enum ProfileFeedVisibility {
+    static func isVisible(_ item: FeedItem, in mode: FeedMode) -> Bool {
+        switch mode {
+        case .posts:
+            return item.event.kind != FeedKindFilters.longFormArticle &&
+                !item.displayEvent.isReplyNote
+        case .postsAndReplies:
+            return item.displayEvent.isReplyNote
+        case .articles:
+            return item.event.kind == FeedKindFilters.longFormArticle
+        }
     }
 }
 

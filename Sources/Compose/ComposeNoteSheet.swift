@@ -95,16 +95,23 @@ struct ComposeNoteSheet: View {
             .navigationTitle(composerNavigationTitle)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItemGroup(placement: .topBarLeading) {
-                    Button("Cancel") {
-                        dismiss()
+                ToolbarItem(placement: .topBarLeading) {
+                    HStack(spacing: ComposeToolbarLayout.leadingItemSpacing) {
+                        Button {
+                            dismiss()
+                        } label: {
+                            Text("Cancel")
+                                .font(ComposeToolbarLayout.cancelButtonFont)
+                        }
+                        draftLibraryToolbarButton
                     }
-                    draftLibraryToolbarButton
                 }
 
-                ToolbarItemGroup(placement: .topBarTrailing) {
-                    composeToolbarAvatar
-                    publishToolbarButton
+                ToolbarItem(placement: .topBarTrailing) {
+                    HStack(spacing: ComposeToolbarLayout.trailingItemSpacing) {
+                        composeToolbarAvatar
+                        publishToolbarButton
+                    }
                 }
             }
         }
@@ -262,6 +269,21 @@ struct ComposeNoteSheet: View {
                         .font(.caption.weight(.semibold))
                         .monospacedDigit()
                 }
+            }
+            .font(.subheadline.weight(.semibold))
+            .foregroundStyle(appSettings.themePalette.secondaryForeground)
+            .padding(.horizontal, ComposeToolbarLayout.draftButtonHorizontalPadding)
+            .padding(.vertical, ComposeToolbarLayout.draftButtonVerticalPadding)
+            .background(
+                Capsule()
+                    .fill(appSettings.themePalette.tertiaryFill.opacity(ComposeToolbarLayout.draftButtonBackgroundOpacity))
+            )
+            .overlay {
+                Capsule()
+                    .stroke(
+                        appSettings.themePalette.separator.opacity(ComposeToolbarLayout.draftButtonBorderOpacity),
+                        lineWidth: 0.7
+                    )
             }
         }
         .accessibilityLabel(draftLibraryAccessibilityLabel)
@@ -2009,6 +2031,19 @@ struct ComposeNoteSheet: View {
     }
 }
 
+enum ComposeToolbarLayout {
+    static let leadingItemSpacing: CGFloat = 8
+    static let trailingItemSpacing: CGFloat = 8
+    static let cancelButtonFontWeight: Font.Weight = .semibold
+    static let publishButtonFontWeight: Font.Weight = .semibold
+    static let cancelButtonFont = Font.subheadline.weight(cancelButtonFontWeight)
+    static let publishButtonFont = Font.subheadline.weight(publishButtonFontWeight)
+    static let draftButtonHorizontalPadding: CGFloat = 9
+    static let draftButtonVerticalPadding: CGFloat = 6
+    static let draftButtonBackgroundOpacity = 0.92
+    static let draftButtonBorderOpacity = 0.62
+}
+
 private struct ComposePublishToolbarButton: View {
     @EnvironmentObject private var appSettings: AppSettingsStore
 
@@ -2028,7 +2063,7 @@ private struct ComposePublishToolbarButton: View {
                     Text(title)
                 }
             }
-            .font(.subheadline.weight(.semibold))
+            .font(ComposeToolbarLayout.publishButtonFont)
             .foregroundStyle(appSettings.buttonTextColor)
             .padding(.horizontal, 16)
             .padding(.vertical, 8)

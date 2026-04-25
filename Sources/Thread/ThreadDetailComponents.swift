@@ -656,12 +656,17 @@ struct ThreadDetailArticleBody: View {
                 VStack(alignment: .leading, spacing: 28) {
                     if isHiddenByNSFW {
                         ThreadDetailNSFWHiddenCard()
+                            .padding(.horizontal, 20)
+                            .padding(.top, 18)
+                            .frame(maxWidth: 820, alignment: .leading)
+                            .frame(maxWidth: .infinity, alignment: .center)
                     } else {
                         LongFormArticleReaderView(
                             item: item,
                             article: articleMetadata,
                             isOwnedByCurrentUser: isOwnedByCurrentUser,
                             isFollowingAuthor: isFollowingAuthor,
+                            shareLink: shareLink,
                             onFollowToggle: onFollowToggle,
                             onProfileTap: onOpenProfile,
                             onHashtagTap: onOpenHashtag
@@ -683,21 +688,23 @@ struct ThreadDetailArticleBody: View {
                                     shareLink: shareLink
                                 )
                             }
+                            .padding(.horizontal, 20)
+                            .frame(maxWidth: 820, alignment: .leading)
+                            .frame(maxWidth: .infinity, alignment: .center)
                         }
 
                         if let errorMessage {
                             Text(errorMessage)
                                 .font(.footnote)
                                 .foregroundStyle(appSettings.themePalette.secondaryForeground)
+                                .padding(.horizontal, 20)
+                                .frame(maxWidth: 820, alignment: .center)
                                 .frame(maxWidth: .infinity, alignment: .center)
                         }
                     }
                 }
-                .padding(.horizontal, 20)
-                .padding(.top, 18)
                 .padding(.bottom, 24)
-                .frame(maxWidth: 820, alignment: .leading)
-                .frame(maxWidth: .infinity, alignment: .center)
+                .frame(maxWidth: .infinity, alignment: .top)
             }
         }
     }

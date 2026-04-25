@@ -1,6 +1,23 @@
 import SwiftUI
 import UIKit
 
+enum ProfileViewLayout {
+    static func followingCountText(
+        isOwnProfile: Bool,
+        ownFollowingCount: Int,
+        remoteFollowingCount: Int,
+        hasResolvedRemoteFollowingCount: Bool
+    ) -> String {
+        if isOwnProfile {
+            return "\(max(ownFollowingCount, 0)) following"
+        }
+        guard hasResolvedRemoteFollowingCount else {
+            return "following"
+        }
+        return "\(max(remoteFollowingCount, 0)) following"
+    }
+}
+
 struct ProfileView: View {
     private static let feedHorizontalInset: CGFloat = 14
     private static let bottomScrollClearance: CGFloat = 110
@@ -39,7 +56,7 @@ struct ProfileView: View {
             websiteDisplayText: viewModel.websiteURL.map(websiteDisplayText(for:)),
             lightningAddress: viewModel.lightningAddress,
             followsCurrentUser: viewModel.followsCurrentUser,
-            followingCountText: "\(displayedFollowingCount) following",
+            followingCountText: profileFollowingCountText,
             followStatusIconName: profileFollowStatusIconName,
             knownFollowers: isOwnProfile ? [] : viewModel.knownFollowers,
             actionMessage: actionMessage
@@ -77,6 +94,15 @@ struct ProfileView: View {
         }
 
         return followStore.followedPubkeys.count
+    }
+
+    private var profileFollowingCountText: String {
+        ProfileViewLayout.followingCountText(
+            isOwnProfile: isOwnProfile,
+            ownFollowingCount: followStore.followedPubkeys.count,
+            remoteFollowingCount: viewModel.followingCount,
+            hasResolvedRemoteFollowingCount: viewModel.hasResolvedFollowingCount
+        )
     }
 
     private var isInitialProfileMetadataLoading: Bool {
@@ -173,152 +199,100 @@ struct ProfileView: View {
     }
 
     var body: some View {
-        let visibleItems = viewModel.visibleItems
-        let visibleReplyCounts = ReplyCountEstimator.counts(for: visibleItems)
+        GeometryReader { proxy in
+            let visibleItems = viewModel.visibleItems
+            let visibleReplyCounts = ReplyCountEstimator.counts(for: visibleItems)
+            let topSafeAreaInset = proxy.safeAreaInsets.top
 
-        ZStack {
-            AppThemeBackgroundView(holographicSpotlight: .profile)
-                .ignoresSafeArea()
+            ZStack {
+                AppThemeBackgroundView(holographicSpotlight: .profile)
+                    .ignoresSafeArea()
 
-            List {
-                Section {
-                    ProfileHeaderSection(
-                        isLoading: isInitialProfileMetadataLoading,
-                        content: profileHeaderContent,
-                        onFollowingTap: {
-                            selectedFollowingRoute = FollowingListRoute(pubkey: viewModel.pubkey)
-                        },
-                        onProfileTap: { pubkey in
-                            openProfile(pubkey: pubkey)
-                        },
-                        onHashtagTap: { hashtag in
-                            openHashtagFeed(hashtag: hashtag)
-                        },
-                        onRelayTap: { relayURL in
-                            openRelayFeed(relayURL: relayURL)
-                        },
-                        onAvatarTap: {
-                            isShowingAvatarViewer = true
-                        },
-                        backButton: {
-                            profileBackButton
-                        },
-                        menuButton: {
-                            profileMenuButton
-                        },
-                        actionRow: {
-                            actionRow
-                        }
-                    )
-                }
-                .listRowSeparator(.hidden)
-                .listRowInsets(
-                    EdgeInsets(
-                        top: 0,
-                        leading: 0,
-                        bottom: 0,
-                        trailing: 0
-                    )
-                )
-                .listRowBackground(Color.clear)
-
-                Section {
-                    VStack(alignment: .leading, spacing: 10) {
-                        FlowCapsuleTabBar(
-                            selection: $viewModel.mode,
-                            items: FeedMode.allCases,
-                            title: { $0.title }
-                        )
-                    }
-                    .padding(.vertical, 4)
-                }
-                .listRowSeparator(.hidden)
-                .listRowBackground(Color.clear)
-
-                if viewModel.isLoading && visibleItems.isEmpty {
-                    ForEach(0..<6, id: \.self) { _ in
-                        ProfileFeedLoadingRow()
-                            .listRowInsets(
-                                EdgeInsets(
-                                    top: 0,
-                                    leading: Self.feedHorizontalInset,
-                                    bottom: 0,
-                                    trailing: Self.feedHorizontalInset
-                                )
-                            )
-                            .listRowSeparator(.hidden)
-                            .listRowBackground(Color.clear)
-                    }
-                } else if visibleItems.isEmpty {
-                    VStack(spacing: 8) {
-                        if let errorMessage = viewModel.errorMessage {
-                            Text(errorMessage)
-                                .font(.body)
-                                .multilineTextAlignment(.center)
-                                .foregroundStyle(appSettings.themePalette.secondaryForeground)
-                        } else {
-                            Text(viewModel.mode == .posts ? "No posts yet" : "No replies yet")
-                                .font(.body)
-                                .foregroundStyle(appSettings.themePalette.secondaryForeground)
-                        }
-                    }
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 24)
-                    .listRowInsets(
-                        EdgeInsets(
-                            top: 0,
-                            leading: Self.feedHorizontalInset,
-                            bottom: 0,
-                            trailing: Self.feedHorizontalInset
-                        )
-                    )
-                    .listRowSeparator(.hidden)
-                    .listRowBackground(Color.clear)
-                } else {
-                    ForEach(visibleItems) { item in
-                        FeedRowView(
-                            item: item,
-                            reactionCount: reactionStats.reactionCount(for: item.displayEventID),
-                            isLikedByCurrentUser: reactionStats.isReactedByCurrentUser(
-                                for: item.displayEventID,
-                                currentPubkey: auth.currentAccount?.pubkey
-                            ),
-                            commentCount: visibleReplyCounts[item.displayEventID.lowercased()] ?? 0,
-                            repostCount: reactionStats.repostCount(for: item.displayEventID),
-                            showReactions: appSettings.reactionsVisibleInFeeds,
-                            avatarMenuActions: .init(
-                                followLabel: followStore.isFollowing(item.displayAuthorPubkey) ? "Unfollow" : "Follow",
-                                onFollowToggle: {
-                                    followStore.toggleFollow(item.displayAuthorPubkey)
-                                },
-                                onViewProfile: {
-                                    openProfile(pubkey: item.displayAuthorPubkey)
-                                }
-                            ),
-                            onHashtagTap: { hashtag in
-                                openHashtagFeed(hashtag: hashtag)
+                List {
+                    Section {
+                        ProfileHeaderSection(
+                            isLoading: isInitialProfileMetadataLoading,
+                            topSafeAreaInset: topSafeAreaInset,
+                            content: profileHeaderContent,
+                            onFollowingTap: {
+                                selectedFollowingRoute = FollowingListRoute(pubkey: viewModel.pubkey)
                             },
                             onProfileTap: { pubkey in
                                 openProfile(pubkey: pubkey)
                             },
-                            onOpenThread: {
-                                shouldAutoFocusReplyInThread = false
-                                selectedThreadItem = item.threadNavigationItem
-                            },
-                            onRepostActorTap: { pubkey in
-                                openProfile(pubkey: pubkey)
-                            },
-                            onReferencedEventTap: { referencedItem in
-                                shouldAutoFocusReplyInThread = false
-                                selectedThreadItem = referencedItem.threadNavigationItem
+                            onHashtagTap: { hashtag in
+                                openHashtagFeed(hashtag: hashtag)
                             },
                             onRelayTap: { relayURL in
                                 openRelayFeed(relayURL: relayURL)
                             },
-                            onOptimisticPublished: { publishedItem in
-                                viewModel.insertOptimisticPublishedItem(publishedItem)
+                            onAvatarTap: {
+                                isShowingAvatarViewer = true
+                            },
+                            backButton: {
+                                profileBackButton
+                            },
+                            menuButton: {
+                                profileMenuButton
+                            },
+                            actionRow: {
+                                actionRow
                             }
                         )
+                    }
+                    .listRowSeparator(.hidden)
+                    .listRowInsets(
+                        EdgeInsets(
+                            top: 0,
+                            leading: 0,
+                            bottom: 0,
+                            trailing: 0
+                        )
+                    )
+                    .listRowBackground(Color.clear)
+
+                    Section {
+                        VStack(alignment: .leading, spacing: 10) {
+                            FlowCapsuleTabBar(
+                                selection: $viewModel.mode,
+                                items: FeedMode.allCases,
+                                title: { $0.title }
+                            )
+                        }
+                        .padding(.vertical, 4)
+                    }
+                    .listRowSeparator(.hidden)
+                    .listRowBackground(Color.clear)
+
+                    if viewModel.isLoading && visibleItems.isEmpty {
+                        ForEach(0..<6, id: \.self) { _ in
+                            ProfileFeedLoadingRow()
+                                .listRowInsets(
+                                    EdgeInsets(
+                                        top: 0,
+                                        leading: Self.feedHorizontalInset,
+                                        bottom: 0,
+                                        trailing: Self.feedHorizontalInset
+                                    )
+                                )
+                                .listRowSeparator(.hidden)
+                                .listRowBackground(Color.clear)
+                        }
+                    } else if visibleItems.isEmpty {
+                        VStack(spacing: 8) {
+                            if let errorMessage = viewModel.errorMessage {
+                                Text(errorMessage)
+                                    .font(.body)
+                                    .multilineTextAlignment(.center)
+                                    .foregroundStyle(appSettings.themePalette.secondaryForeground)
+                            } else {
+                                Text(emptyStateText(for: viewModel.mode))
+                                    .font(.body)
+                                    .foregroundStyle(appSettings.themePalette.secondaryForeground)
+                            }
+                        }
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 24)
                         .listRowInsets(
                             EdgeInsets(
                                 top: 0,
@@ -327,58 +301,116 @@ struct ProfileView: View {
                                 trailing: Self.feedHorizontalInset
                             )
                         )
-                        .listRowSeparator(appSettings.themePalette.feedCardStyle == nil ? .visible : .hidden)
-                        .listRowSeparatorTint(appSettings.themePalette.separator)
+                        .listRowSeparator(.hidden)
                         .listRowBackground(Color.clear)
-                        .onAppear {
-                            if appSettings.reactionsVisibleInFeeds {
-                                reactionStats.prefetch(events: [item.displayEvent], relayURLs: effectiveReadRelayURLs)
-                            }
-                            Task {
-                                await viewModel.loadMoreIfNeeded(currentItem: item)
+                    } else {
+                        ForEach(visibleItems) { item in
+                            FeedRowView(
+                                item: item,
+                                reactionCount: reactionStats.reactionCount(for: item.displayEventID),
+                                isLikedByCurrentUser: reactionStats.isReactedByCurrentUser(
+                                    for: item.displayEventID,
+                                    currentPubkey: auth.currentAccount?.pubkey
+                                ),
+                                commentCount: visibleReplyCounts[item.displayEventID.lowercased()] ?? 0,
+                                repostCount: reactionStats.repostCount(for: item.displayEventID),
+                                showReactions: appSettings.reactionsVisibleInFeeds,
+                                avatarMenuActions: .init(
+                                    followLabel: followStore.isFollowing(item.displayAuthorPubkey) ? "Unfollow" : "Follow",
+                                    onFollowToggle: {
+                                        followStore.toggleFollow(item.displayAuthorPubkey)
+                                    },
+                                    onViewProfile: {
+                                        openProfile(pubkey: item.displayAuthorPubkey)
+                                    }
+                                ),
+                                onHashtagTap: { hashtag in
+                                    openHashtagFeed(hashtag: hashtag)
+                                },
+                                onProfileTap: { pubkey in
+                                    openProfile(pubkey: pubkey)
+                                },
+                                onOpenThread: {
+                                    shouldAutoFocusReplyInThread = false
+                                    selectedThreadItem = item.threadNavigationItem
+                                },
+                                onRepostActorTap: { pubkey in
+                                    openProfile(pubkey: pubkey)
+                                },
+                                onReferencedEventTap: { referencedItem in
+                                    shouldAutoFocusReplyInThread = false
+                                    selectedThreadItem = referencedItem.threadNavigationItem
+                                },
+                                onRelayTap: { relayURL in
+                                    openRelayFeed(relayURL: relayURL)
+                                },
+                                onOptimisticPublished: { publishedItem in
+                                    viewModel.insertOptimisticPublishedItem(publishedItem)
+                                }
+                            )
+                            .listRowInsets(
+                                EdgeInsets(
+                                    top: 0,
+                                    leading: Self.feedHorizontalInset,
+                                    bottom: 0,
+                                    trailing: Self.feedHorizontalInset
+                                )
+                            )
+                            .listRowSeparator(appSettings.themePalette.feedCardStyle == nil ? .visible : .hidden)
+                            .listRowSeparatorTint(appSettings.themePalette.separator)
+                            .listRowBackground(Color.clear)
+                            .onAppear {
+                                if appSettings.reactionsVisibleInFeeds {
+                                    reactionStats.prefetch(events: [item.displayEvent], relayURLs: effectiveReadRelayURLs)
+                                }
+                                Task {
+                                    await viewModel.loadMoreIfNeeded(currentItem: item)
+                                }
                             }
                         }
                     }
-                }
 
-                if viewModel.isLoadingMore {
-                    HStack {
-                        Spacer()
-                        ProgressView()
-                        Spacer()
-                    }
-                    .padding(.vertical, 8)
-                    .listRowInsets(
-                        EdgeInsets(
-                            top: 0,
-                            leading: Self.feedHorizontalInset,
-                            bottom: 0,
-                            trailing: Self.feedHorizontalInset
+                    if viewModel.isLoadingMore {
+                        HStack {
+                            Spacer()
+                            ProgressView()
+                            Spacer()
+                        }
+                        .padding(.vertical, 8)
+                        .listRowInsets(
+                            EdgeInsets(
+                                top: 0,
+                                leading: Self.feedHorizontalInset,
+                                bottom: 0,
+                                trailing: Self.feedHorizontalInset
+                            )
                         )
-                    )
-                    .listRowSeparator(.hidden)
-                    .listRowBackground(Color.clear)
-                }
-
-                if !visibleItems.isEmpty || viewModel.isLoadingMore {
-                    Color.clear
-                        .frame(height: Self.bottomScrollClearance)
-                        .listRowInsets(EdgeInsets())
                         .listRowSeparator(.hidden)
                         .listRowBackground(Color.clear)
+                    }
+
+                    if !visibleItems.isEmpty || viewModel.isLoadingMore {
+                        Color.clear
+                            .frame(height: Self.bottomScrollClearance)
+                            .listRowInsets(EdgeInsets())
+                            .listRowSeparator(.hidden)
+                            .listRowBackground(Color.clear)
+                    }
                 }
-            }
-            .listStyle(.plain)
-            .scrollContentBackground(.hidden)
-            .background(Color.clear)
-            .refreshable {
-                await viewModel.refresh()
-                await viewModel.refreshFollowRelationship(currentAccountPubkey: auth.currentAccount?.pubkey)
-                await viewModel.refreshKnownFollowers(
-                    currentAccountPubkey: auth.currentAccount?.pubkey,
-                    followedPubkeys: followStore.followedPubkeys
-                )
-                muteStore.refreshFromRelay()
+                .listStyle(.plain)
+                .contentMargins(.top, 0, for: .scrollContent)
+                .scrollContentBackground(.hidden)
+                .background(Color.clear)
+                .ignoresSafeArea(edges: .top)
+                .refreshable {
+                    await viewModel.refresh()
+                    await viewModel.refreshFollowRelationship(currentAccountPubkey: auth.currentAccount?.pubkey)
+                    await viewModel.refreshKnownFollowers(
+                        currentAccountPubkey: auth.currentAccount?.pubkey,
+                        followedPubkeys: followStore.followedPubkeys
+                    )
+                    muteStore.refreshFromRelay()
+                }
             }
         }
         .navigationTitle("")
@@ -746,6 +778,17 @@ struct ProfileView: View {
                 from: viewModel.visibleItems
             )
         )
+    }
+
+    private func emptyStateText(for mode: FeedMode) -> String {
+        switch mode {
+        case .posts:
+            return "No posts yet"
+        case .postsAndReplies:
+            return "No replies yet"
+        case .articles:
+            return "No articles yet"
+        }
     }
 
     private func openProfile(pubkey: String) {

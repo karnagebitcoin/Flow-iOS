@@ -21,7 +21,7 @@ final class HomeFeedViewModel: ObservableObject {
     private struct VisibleItemsCacheKey: Equatable {
         let itemsRevision: Int
         let feedSource: HomePrimaryFeedSource
-        let mode: FeedMode
+        let mode: HomeFeedMode
         let showKinds: [Int]
         let mediaOnly: Bool
         let hideNSFW: Bool
@@ -38,8 +38,14 @@ final class HomeFeedViewModel: ObservableObject {
         }
     }
     @Published private(set) var bufferedNewItems: [FeedItem] = []
-    @Published var mode: FeedMode = .posts {
-        didSet { clearVisibleItemsCache() }
+    @Published var mode: HomeFeedMode = .posts {
+        didSet {
+            clearVisibleItemsCache()
+            guard mode != oldValue else { return }
+            Task { [weak self] in
+                await self?.prepareForSelectedModeIfNeeded()
+            }
+        }
     }
     @Published private(set) var isLoading = false
     @Published private(set) var isLoadingMore = false
@@ -73,8 +79,11 @@ final class HomeFeedViewModel: ObservableObject {
     private let mutedConversationStoragePrefix = "homeFeedMutedConversations"
     private static let fastHomeFetchTimeout: TimeInterval = 3
     private static let fastHomeRelayFetchMode: RelayFetchMode = .firstNonEmptyRelay
-    private static let followingHomeFetchTimeout: TimeInterval = 8
+    private static let followingHomeFetchTimeout: TimeInterval = 3
     private static let followingPaginationFetchTimeout: TimeInterval = 12
+    private nonisolated static let followingInitialNotesVisibleTarget = 12
+    private nonisolated static let followingInitialRepliesVisibleTarget = 8
+    private nonisolated static let pollsInitialVisibleTarget = 8
     private static let liveCatchUpFetchTimeout: TimeInterval = 4
     private static let liveCatchUpMinimumInterval: TimeInterval = 15
     private static let liveCatchUpOverlapSeconds = 90
@@ -129,6 +138,26 @@ final class HomeFeedViewModel: ObservableObject {
 
     nonisolated static func trendingWindowTraversalLimitForTesting(isInitialPage: Bool) -> Int {
         trendingWindowTraversalLimit(isInitialPage: isInitialPage)
+    }
+
+    nonisolated static func initialVisibleTargetForTesting(
+        source: HomePrimaryFeedSource,
+        mode: HomeFeedMode?,
+        limit: Int
+    ) -> Int {
+        initialVisibleTarget(for: source, mode: mode, limit: limit)
+    }
+
+    nonisolated static func minimumVisibleItemsForSelectedModeForTesting(
+        source: HomePrimaryFeedSource,
+        mode: HomeFeedMode,
+        pageSize: Int
+    ) -> Int {
+        minimumVisibleItemsForSelectedMode(
+            source: source,
+            mode: mode,
+            pageSize: pageSize
+        )
     }
 
     init(
@@ -234,8 +263,8 @@ final class HomeFeedViewModel: ObservableObject {
         return "No posts match the current filters."
     }
 
-    // Following history should be fetched exhaustively so older notes are not
-    // truncated just because the first responding relay has no more results.
+    // Following uses a fast initial pass so the first screen can render quickly,
+    // then falls back to exhaustive pagination for deeper history.
     static func requestStrategy(
         for source: HomePrimaryFeedSource,
         isPagination: Bool
@@ -244,7 +273,7 @@ final class HomeFeedViewModel: ObservableObject {
         case .following, .polls:
             return FeedRequestStrategy(
                 fetchTimeout: isPagination ? Self.followingPaginationFetchTimeout : Self.followingHomeFetchTimeout,
-                relayFetchMode: .allRelays
+                relayFetchMode: isPagination ? .allRelays : .firstNonEmptyRelay
             )
         default:
             return FeedRequestStrategy(
@@ -455,6 +484,21 @@ final class HomeFeedViewModel: ObservableObject {
         }
     }
 
+    func prepareForSelectedModeIfNeeded() async {
+        guard feedSource == .following else { return }
+        guard !isLoading, !isSilentRefreshing else { return }
+        guard !hasReachedEnd else { return }
+
+        let minimumVisibleItems = Self.minimumVisibleItemsForSelectedMode(
+            source: feedSource,
+            mode: mode,
+            pageSize: pageSize
+        )
+        guard Self.visibleItemCount(items, mode: mode) < minimumVisibleItems else { return }
+
+        await refresh(silent: true)
+    }
+
     func isKindGroupEnabled(_ option: FeedKindFilterOption) -> Bool {
         let selected = Set(showKinds)
         return option.kinds.allSatisfy { selected.contains($0) }
@@ -643,14 +687,11 @@ final class HomeFeedViewModel: ObservableObject {
                     throw HomeFeedError.followingRequiresLogin
                 }
 
-                var followings = localFollowings()
-                if followings.isEmpty {
-                    followings = try await service.fetchFollowings(
-                        relayURLs: requestRelayURLs,
-                        pubkey: requestUserPubkey,
-                        relayFetchMode: requestRelayFetchMode
-                    )
-                }
+                let followings = try await resolveFollowingPubkeys(
+                    currentUserPubkey: requestUserPubkey,
+                    relayURLs: requestRelayURLs,
+                    relayFetchMode: requestRelayFetchMode
+                )
 
                 if requestSource != feedSource || requestUserPubkey != currentUserPubkey {
                     guard latestRefreshRequestID == refreshRequestID else { return }
@@ -676,6 +717,18 @@ final class HomeFeedViewModel: ObservableObject {
                     return
                 }
 
+                await primeFollowingItemsFromLocalCacheIfNeeded(
+                    startedWithEmptyItems: startedWithEmptyItems,
+                    authors: followingFeedAuthors,
+                    kinds: requestKinds,
+                    mode: mode,
+                    source: requestSource,
+                    followingPubkeys: followings,
+                    userPubkey: requestUserPubkey,
+                    refreshRequestID: refreshRequestID,
+                    hydrationMode: requestHydrationMode
+                )
+
                 startLiveUpdatesIfNeeded(forceRestart: true)
 
                 let followingPage = try await fetchFollowingFeedPage(
@@ -684,6 +737,12 @@ final class HomeFeedViewModel: ObservableObject {
                     kinds: requestKinds,
                     limit: pageSize,
                     until: nil,
+                    mode: mode,
+                    minimumVisibleCount: Self.initialVisibleTarget(
+                        for: requestSource,
+                        mode: mode,
+                        limit: pageSize
+                    ),
                     hydrationMode: requestHydrationMode,
                     fetchTimeout: requestFetchTimeout,
                     relayFetchMode: requestRelayFetchMode,
@@ -696,14 +755,11 @@ final class HomeFeedViewModel: ObservableObject {
                     throw HomeFeedError.pollsRequiresLogin
                 }
 
-                var followings = localFollowings()
-                if followings.isEmpty {
-                    followings = try await service.fetchFollowings(
-                        relayURLs: requestRelayURLs,
-                        pubkey: requestUserPubkey,
-                        relayFetchMode: requestRelayFetchMode
-                    )
-                }
+                let followings = try await resolveFollowingPubkeys(
+                    currentUserPubkey: requestUserPubkey,
+                    relayURLs: requestRelayURLs,
+                    relayFetchMode: requestRelayFetchMode
+                )
 
                 if requestSource != feedSource || requestUserPubkey != currentUserPubkey {
                     guard latestRefreshRequestID == refreshRequestID else { return }
@@ -729,6 +785,18 @@ final class HomeFeedViewModel: ObservableObject {
                     return
                 }
 
+                await primeFollowingItemsFromLocalCacheIfNeeded(
+                    startedWithEmptyItems: startedWithEmptyItems,
+                    authors: pollAuthors,
+                    kinds: FeedKindFilters.pollKinds,
+                    mode: nil,
+                    source: requestSource,
+                    followingPubkeys: followings,
+                    userPubkey: requestUserPubkey,
+                    refreshRequestID: refreshRequestID,
+                    hydrationMode: requestHydrationMode
+                )
+
                 startLiveUpdatesIfNeeded(forceRestart: true)
 
                 let pollsPage = try await fetchFollowingFeedPage(
@@ -737,6 +805,11 @@ final class HomeFeedViewModel: ObservableObject {
                     kinds: FeedKindFilters.pollKinds,
                     limit: pageSize,
                     until: nil,
+                    minimumVisibleCount: Self.initialVisibleTarget(
+                        for: requestSource,
+                        mode: nil,
+                        limit: pageSize
+                    ),
                     hydrationMode: requestHydrationMode,
                     fetchTimeout: requestFetchTimeout,
                     relayFetchMode: requestRelayFetchMode,
@@ -958,6 +1031,7 @@ final class HomeFeedViewModel: ObservableObject {
                     kinds: requestKinds,
                     limit: pageSize,
                     until: until,
+                    mode: mode,
                     hydrationMode: requestHydrationMode,
                     fetchTimeout: requestFetchTimeout,
                     relayFetchMode: requestRelayFetchMode,
@@ -1476,6 +1550,46 @@ final class HomeFeedViewModel: ObservableObject {
         }
     }
 
+    nonisolated static func prefixForVisibleModeLimitForTesting(
+        _ items: [FeedItem],
+        mode: HomeFeedMode,
+        visibleLimit: Int
+    ) -> [FeedItem] {
+        prefixForVisibleModeLimit(items, mode: mode, visibleLimit: visibleLimit)
+    }
+
+    private nonisolated static func visibleItemCount(_ items: [FeedItem], mode: HomeFeedMode) -> Int {
+        items.reduce(into: 0) { count, item in
+            if mode.includes(item) {
+                count += 1
+            }
+        }
+    }
+
+    private nonisolated static func prefixForVisibleModeLimit(
+        _ items: [FeedItem],
+        mode: HomeFeedMode,
+        visibleLimit: Int
+    ) -> [FeedItem] {
+        guard visibleLimit > 0 else { return [] }
+
+        var visibleCount = 0
+        var result: [FeedItem] = []
+        result.reserveCapacity(items.count)
+
+        for item in items {
+            result.append(item)
+            if mode.includes(item) {
+                visibleCount += 1
+                if visibleCount >= visibleLimit {
+                    break
+                }
+            }
+        }
+
+        return result
+    }
+
     private func filterVisibleItems(_ source: [FeedItem], ignoreMediaOnly: Bool = false) -> [FeedItem] {
         let allowedKinds = Set(feedSource == .polls ? FeedKindFilters.pollKinds : showKinds)
         let hideNSFW = AppSettingsStore.shared.hideNSFWContent
@@ -1505,13 +1619,8 @@ final class HomeFeedViewModel: ObservableObject {
                 return false
             }
 
-            if feedSource != .polls {
-                switch mode {
-                case .posts where item.displayEvent.isReplyNote:
-                    return false
-                default:
-                    break
-                }
+            if feedSource != .polls && !mode.includes(item) {
+                return false
             }
 
             if feedSource != .polls && !ignoreMediaOnly && mediaOnly && !item.displayEvent.hasMedia {
@@ -1694,6 +1803,78 @@ final class HomeFeedViewModel: ObservableObject {
             .map(normalizePubkey)
             .filter { !$0.isEmpty }
             .sorted()
+    }
+
+    private func resolveFollowingPubkeys(
+        currentUserPubkey: String,
+        relayURLs: [URL],
+        relayFetchMode: RelayFetchMode
+    ) async throws -> [String] {
+        var followings = localFollowings()
+        if followings.isEmpty,
+           let cachedSnapshot = await service.cachedFollowListSnapshot(pubkey: currentUserPubkey) {
+            followings = cachedSnapshot.followedPubkeys
+        }
+
+        if followings.isEmpty {
+            followings = try await service.fetchFollowings(
+                relayURLs: relayURLs,
+                pubkey: currentUserPubkey,
+                relayFetchMode: relayFetchMode
+            )
+        }
+
+        return followings
+    }
+
+    private func primeFollowingItemsFromLocalCacheIfNeeded(
+        startedWithEmptyItems: Bool,
+        authors: [String],
+        kinds: [Int],
+        mode: HomeFeedMode?,
+        source: HomePrimaryFeedSource,
+        followingPubkeys: [String],
+        userPubkey: String?,
+        refreshRequestID: Int,
+        hydrationMode: FeedItemHydrationMode
+    ) async {
+        guard startedWithEmptyItems else { return }
+        guard items.isEmpty else { return }
+        guard latestRefreshRequestID == refreshRequestID else { return }
+
+        let localPage = try? await fetchFollowingFeedPage(
+            relayURLs: [],
+            authors: authors,
+            kinds: kinds,
+            limit: pageSize,
+            until: nil,
+            mode: mode,
+            minimumVisibleCount: Self.initialVisibleTarget(
+                for: source,
+                mode: mode,
+                limit: pageSize
+            ),
+            hydrationMode: hydrationMode,
+            fetchTimeout: 0,
+            relayFetchMode: .allRelays,
+            moderationSnapshot: muteFilterSnapshot
+        )
+
+        guard latestRefreshRequestID == refreshRequestID else { return }
+        guard source == feedSource, userPubkey == currentUserPubkey else { return }
+        guard let localItems = localPage?.items, !localItems.isEmpty else { return }
+
+        let mergedItems = pruneItemsForSource(
+            pruneMutedItems(localItems),
+            feedSource: source,
+            followingPubkeys: source == .following ? followingPubkeys : nil
+        )
+
+        guard !mergedItems.isEmpty else { return }
+
+        items = mergedItems
+        knownEventIDs = Set(mergedItems.map(\.id))
+        oldestCreatedAt = mergedItems.last?.event.createdAt ?? localItems.last?.event.createdAt
     }
 
     private func normalizePubkey(_ value: String?) -> String {
@@ -1977,6 +2158,8 @@ final class HomeFeedViewModel: ObservableObject {
         kinds: [Int],
         limit: Int,
         until: Int?,
+        mode: HomeFeedMode? = nil,
+        minimumVisibleCount: Int? = nil,
         hydrationMode: FeedItemHydrationMode = .full,
         fetchTimeout: TimeInterval = 12,
         relayFetchMode: RelayFetchMode = .allRelays,
@@ -1986,15 +2169,26 @@ final class HomeFeedViewModel: ObservableObject {
             return HomeFeedPageResult(items: [], hadMoreAvailable: false)
         }
 
-        let probeLimit = min(max(limit * 4, 120), 240)
-        let maxBackfillRounds = 6
+        let maxBackfillRounds = minimumVisibleCount == nil ? 6 : 2
+        let targetVisibleCount = max(1, min(limit, minimumVisibleCount ?? limit))
+        let probeLimit: Int
+        if minimumVisibleCount != nil {
+            probeLimit = min(max(targetVisibleCount * 4, 60), 120)
+        } else {
+            probeLimit = min(max(limit * 4, 120), 240)
+        }
         var collected: [FeedItem] = []
         var cursor = until
         var exhausted = false
         var lastBatchCount = 0
         var roundsCompleted = 0
 
-        while roundsCompleted < maxBackfillRounds && collected.count < limit {
+        while roundsCompleted < maxBackfillRounds {
+            let qualifiedCount = mode.map { Self.visibleItemCount(collected, mode: $0) } ?? collected.count
+            if qualifiedCount >= targetVisibleCount {
+                break
+            }
+
             let fetched = try await service.fetchFollowingFeed(
                 relayURLs: relayURLs,
                 authors: authors,
@@ -2015,7 +2209,8 @@ final class HomeFeedViewModel: ObservableObject {
 
             collected = mergeItemArrays(primary: collected, secondary: fetched)
 
-            if collected.count > limit || fetched.count >= probeLimit {
+            let updatedQualifiedCount = mode.map { Self.visibleItemCount(collected, mode: $0) } ?? collected.count
+            if updatedQualifiedCount >= targetVisibleCount || fetched.count >= probeLimit {
                 break
             }
 
@@ -2034,9 +2229,13 @@ final class HomeFeedViewModel: ObservableObject {
             roundsCompleted += 1
         }
 
-        let pageItems = Array(collected.prefix(limit))
+        let qualifiedCount = mode.map { Self.visibleItemCount(collected, mode: $0) } ?? collected.count
+        let pageVisibleLimit = min(limit, max(qualifiedCount, 1))
+        let pageItems = mode.map {
+            Self.prefixForVisibleModeLimit(collected, mode: $0, visibleLimit: pageVisibleLimit)
+        } ?? Array(collected.prefix(limit))
         let hadMoreAvailable =
-            collected.count > limit ||
+            qualifiedCount > limit ||
             lastBatchCount >= probeLimit ||
             (!exhausted && !pageItems.isEmpty)
 
@@ -2044,6 +2243,43 @@ final class HomeFeedViewModel: ObservableObject {
             items: pageItems,
             hadMoreAvailable: hadMoreAvailable
         )
+    }
+
+    private nonisolated static func initialVisibleTarget(
+        for source: HomePrimaryFeedSource,
+        mode: HomeFeedMode?,
+        limit: Int
+    ) -> Int {
+        let baseline: Int
+        switch source {
+        case .polls:
+            baseline = pollsInitialVisibleTarget
+        case .following:
+            baseline = mode == .postsAndReplies
+                ? followingInitialRepliesVisibleTarget
+                : followingInitialNotesVisibleTarget
+        default:
+            baseline = limit
+        }
+
+        return max(1, min(limit, baseline))
+    }
+
+    private nonisolated static func minimumVisibleItemsForSelectedMode(
+        source: HomePrimaryFeedSource,
+        mode: HomeFeedMode,
+        pageSize: Int
+    ) -> Int {
+        switch source {
+        case .following:
+            return initialVisibleTarget(
+                for: source,
+                mode: mode,
+                limit: pageSize
+            )
+        default:
+            return min(max(pageSize / 3, 8), pageSize)
+        }
     }
 
     private func fetchInterestsFeedPage(

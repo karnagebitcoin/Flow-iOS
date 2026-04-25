@@ -2,7 +2,7 @@ import SwiftUI
 
 struct MainTabShellView: View {
     @Environment(\.scenePhase) private var scenePhase
-    private enum Tab: String, CaseIterable, Hashable {
+    enum Tab: String, CaseIterable, Hashable {
         case home
         case search
         case dms
@@ -36,6 +36,7 @@ struct MainTabShellView: View {
 
     @State private var selectedTab: Tab = .home
     @State private var homeRootResetID = UUID()
+    @State private var searchRootResetID = UUID()
     @State private var activityRootResetID = UUID()
     @State private var isShowingAuthSheet = false
     @State private var authSheetInitialTab: AuthSheetTab = .signIn
@@ -72,6 +73,7 @@ struct MainTabShellView: View {
                     viewModel: searchViewModel,
                     isActive: selectedTab == .search
                 )
+                    .id(searchRootResetID)
                     .tag(Tab.search)
                     .toolbar(.hidden, for: .tabBar)
 
@@ -435,24 +437,30 @@ struct MainTabShellView: View {
 
     private func handleTabSelection(_ tab: Tab) {
         let previousTab = selectedTab
-        let wasActivityRootVisible = isActivityRootVisible
+        let selectionEffects = MainTabSelectionPolicy.effects(
+            previousTab: previousTab,
+            selectedTab: tab,
+            wasActivityRootVisible: isActivityRootVisible
+        )
 
         if tab != .home {
             isHomeSideMenuPresented = false
         }
 
-        if previousTab == .activity, tab != .activity {
-            resetActivityTabToRoot()
-        } else if tab == .activity, previousTab == .activity, !wasActivityRootVisible {
+        if selectionEffects.resetsActivityRoot {
             resetActivityTabToRoot()
         }
 
         selectedTab = tab
         syncActivityTabActiveState()
 
-        guard tab == .home else { return }
+        if selectionEffects.resetsHomeRoot {
+            homeRootResetID = UUID()
+        }
 
-        homeRootResetID = UUID()
+        if selectionEffects.resetsSearchRoot {
+            searchRootResetID = UUID()
+        }
     }
 
     private func configureActivityViewModel() {
@@ -558,6 +566,27 @@ struct ScrollChromeLayout {
         usesOverlayBottomTabBar: Bool
     ) -> Bool {
         isBottomTabBarVisible && !usesOverlayBottomTabBar
+    }
+}
+
+struct MainTabSelectionEffects: Equatable {
+    let resetsHomeRoot: Bool
+    let resetsSearchRoot: Bool
+    let resetsActivityRoot: Bool
+}
+
+enum MainTabSelectionPolicy {
+    static func effects(
+        previousTab: MainTabShellView.Tab,
+        selectedTab: MainTabShellView.Tab,
+        wasActivityRootVisible: Bool
+    ) -> MainTabSelectionEffects {
+        MainTabSelectionEffects(
+            resetsHomeRoot: selectedTab == .home,
+            resetsSearchRoot: selectedTab == .search,
+            resetsActivityRoot: previousTab == .activity &&
+                (selectedTab != .activity || !wasActivityRootVisible)
+        )
     }
 }
 

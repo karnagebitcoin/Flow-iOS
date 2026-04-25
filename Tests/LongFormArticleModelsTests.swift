@@ -74,6 +74,53 @@ final class LongFormArticleModelsTests: XCTestCase {
             .codeBlock(language: "swift", code: "print(\"hello\")")
         )
     }
+
+    func testReaderHeroPrefersCoverImageOverAuthorAvatar() throws {
+        let event = makeArticleEvent(
+            tags: [
+                ["title", "Visual Article"],
+                ["image", "https://cdn.example.com/cover.jpg"]
+            ],
+            content: "Hello world"
+        )
+        let article = try XCTUnwrap(NostrLongFormArticleMetadata(event: event))
+        let avatarURL = URL(string: "https://cdn.example.com/avatar.jpg")!
+
+        let heroURL = LongFormArticleReaderLayout.heroBackgroundURL(
+            article: article,
+            authorAvatarURL: avatarURL
+        )
+
+        XCTAssertEqual(heroURL?.absoluteString, "https://cdn.example.com/cover.jpg")
+    }
+
+    func testReaderHeroFallsBackToAuthorAvatarWithoutCoverImage() throws {
+        let event = makeArticleEvent(
+            tags: [
+                ["title", "Avatar-backed Article"]
+            ],
+            content: "Hello world"
+        )
+        let article = try XCTUnwrap(NostrLongFormArticleMetadata(event: event))
+        let avatarURL = URL(string: "https://cdn.example.com/avatar.jpg")!
+
+        let heroURL = LongFormArticleReaderLayout.heroBackgroundURL(
+            article: article,
+            authorAvatarURL: avatarURL
+        )
+
+        XCTAssertEqual(heroURL, avatarURL)
+    }
+
+    func testReaderHeroChromeMatchesRequestedControls() {
+        XCTAssertFalse(LongFormArticleReaderLayout.showsArticleTypeBadge)
+        XCTAssertFalse(LongFormArticleReaderLayout.showsBookmarkAction)
+        XCTAssertTrue(LongFormArticleReaderLayout.showsShareAction)
+        XCTAssertTrue(LongFormArticleReaderLayout.usesRuledAuthorSection)
+        XCTAssertEqual(LongFormArticleReaderLayout.heroCornerRadius, 0)
+        XCTAssertGreaterThan(LongFormArticleReaderLayout.heroHeaderOverlap, 0)
+        XCTAssertGreaterThanOrEqual(LongFormArticleReaderLayout.followButtonVerticalPadding, 10)
+    }
 }
 
 private func makeArticleEvent(

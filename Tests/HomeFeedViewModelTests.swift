@@ -51,11 +51,11 @@ final class HomeFeedViewModelTests: XCTestCase {
     }
 
     @MainActor
-    func testFollowingRefreshUsesExhaustiveRelayStrategy() {
+    func testFollowingRefreshUsesFastRelayStrategy() {
         let strategy = HomeFeedViewModel.requestStrategy(for: .following, isPagination: false)
 
-        XCTAssertEqual(strategy.relayFetchMode, .allRelays)
-        XCTAssertEqual(strategy.fetchTimeout, 8)
+        XCTAssertEqual(strategy.relayFetchMode, .firstNonEmptyRelay)
+        XCTAssertEqual(strategy.fetchTimeout, 3)
     }
 
     @MainActor
@@ -72,6 +72,66 @@ final class HomeFeedViewModelTests: XCTestCase {
 
         XCTAssertEqual(strategy.relayFetchMode, .firstNonEmptyRelay)
         XCTAssertEqual(strategy.fetchTimeout, 3)
+    }
+
+    @MainActor
+    func testFollowingInitialLoadTargetsASmallerVisibleSlice() {
+        XCTAssertEqual(
+            HomeFeedViewModel.initialVisibleTargetForTesting(
+                source: .following,
+                mode: .posts,
+                limit: 100
+            ),
+            12
+        )
+        XCTAssertEqual(
+            HomeFeedViewModel.initialVisibleTargetForTesting(
+                source: .following,
+                mode: .postsAndReplies,
+                limit: 100
+            ),
+            8
+        )
+    }
+
+    @MainActor
+    func testFollowingModeSwitchOnlyRequiresInitialVisibleSlice() {
+        XCTAssertEqual(
+            HomeFeedViewModel.minimumVisibleItemsForSelectedModeForTesting(
+                source: .following,
+                mode: .posts,
+                pageSize: 100
+            ),
+            12
+        )
+        XCTAssertEqual(
+            HomeFeedViewModel.minimumVisibleItemsForSelectedModeForTesting(
+                source: .following,
+                mode: .postsAndReplies,
+                pageSize: 100
+            ),
+            8
+        )
+    }
+
+    @MainActor
+    func testPaginationKeepsFullVisibleTargetOutsideInitialFollowingPass() {
+        XCTAssertEqual(
+            HomeFeedViewModel.initialVisibleTargetForTesting(
+                source: .network,
+                mode: .posts,
+                limit: 100
+            ),
+            100
+        )
+        XCTAssertEqual(
+            HomeFeedViewModel.initialVisibleTargetForTesting(
+                source: .polls,
+                mode: nil,
+                limit: 100
+            ),
+            8
+        )
     }
 
     @MainActor

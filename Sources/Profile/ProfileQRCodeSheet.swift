@@ -551,28 +551,13 @@ struct ProfileQRCodePresentationBackground: View {
         theme.qrShareBackgroundResourceName ?? defaultResourceName
     }
 
-    private var isSakuraBackground: Bool {
-        resourceName == AppThemeOption.sakura.qrShareBackgroundResourceName
-    }
-
     private var usesLightBackdrop: Bool {
-        isSakuraBackground || resourceName == Self.defaultResourceName
+        resourceName == Self.defaultResourceName
     }
 
     var body: some View {
         ZStack {
-            if isSakuraBackground {
-                LinearGradient(
-                    colors: [
-                        Color(red: 1.0, green: 0.986, blue: 0.994),
-                        Color(red: 0.994, green: 0.948, blue: 0.975),
-                        Color(red: 0.979, green: 0.870, blue: 0.935)
-                    ],
-                    startPoint: .topLeading,
-                    endPoint: .bottomTrailing
-                )
-                .ignoresSafeArea()
-            } else if usesLightBackdrop {
+            if usesLightBackdrop {
                 Color(red: 1.0, green: 0.894, blue: 0.886)
                     .ignoresSafeArea()
             } else {
@@ -585,20 +570,13 @@ struct ProfileQRCodePresentationBackground: View {
                 opacity: 1,
                 backgroundStyle: usesLightBackdrop ? .light : .dark
             )
-            .scaleEffect(isSakuraBackground ? 1.18 : 1)
             .ignoresSafeArea()
 
             LinearGradient(
                 colors: [
-                    isSakuraBackground
-                        ? Color.white.opacity(0.03)
-                        : (usesLightBackdrop ? Color.black.opacity(0.04) : Color.black.opacity(0.12)),
-                    isSakuraBackground
-                        ? Color(red: 0.53, green: 0.16, blue: 0.42).opacity(0.10)
-                        : (usesLightBackdrop ? Color.black.opacity(0.08) : Color.black.opacity(0.20)),
-                    isSakuraBackground
-                        ? Color(red: 0.41, green: 0.08, blue: 0.30).opacity(0.18)
-                        : (usesLightBackdrop ? Color.black.opacity(0.18) : Color.black.opacity(0.28))
+                    usesLightBackdrop ? Color.black.opacity(0.04) : Color.black.opacity(0.12),
+                    usesLightBackdrop ? Color.black.opacity(0.08) : Color.black.opacity(0.20),
+                    usesLightBackdrop ? Color.black.opacity(0.18) : Color.black.opacity(0.28)
                 ],
                 startPoint: .top,
                 endPoint: .bottom

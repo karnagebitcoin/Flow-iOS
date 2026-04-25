@@ -12,7 +12,7 @@ enum FeedPaginationHeuristic {
     }
 }
 
-enum FeedMode: String, CaseIterable, Identifiable {
+enum HomeFeedMode: String, CaseIterable, Identifiable {
     case posts
     case postsAndReplies
 
@@ -24,6 +24,34 @@ enum FeedMode: String, CaseIterable, Identifiable {
             return "Notes"
         case .postsAndReplies:
             return "Replies"
+        }
+    }
+
+    func includes(_ item: FeedItem) -> Bool {
+        switch self {
+        case .posts:
+            return !item.displayEvent.isReplyNote
+        case .postsAndReplies:
+            return item.displayEvent.isReplyNote
+        }
+    }
+}
+
+enum FeedMode: String, CaseIterable, Identifiable {
+    case posts
+    case postsAndReplies
+    case articles
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .posts:
+            return "Notes"
+        case .postsAndReplies:
+            return "Replies"
+        case .articles:
+            return "Articles"
         }
     }
 }

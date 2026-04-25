@@ -699,6 +699,10 @@ enum RelayFetchMode: Sendable, Equatable {
     // keeps listening to all relays within the caller's timeout instead of
     // trusting the first relay that happens to return a non-empty response.
     case firstNonEmptyRelay
+
+    // Stricter latency path for screens where one slow empty relay should not
+    // hold up visible content once another relay has matching events.
+    case firstRelayWithEvents
 }
 
 struct NostrFeedService: Sendable {
@@ -846,13 +850,7 @@ struct NostrFeedService: Sendable {
         moderationSnapshot: MuteFilterSnapshot? = nil
     ) async throws -> [FeedItem] {
         guard limit > 0 else { return [] }
-        let normalizedAuthors = Array(
-            Set(
-                authors
-                    .map { $0.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() }
-                    .filter { !$0.isEmpty }
-            )
-        )
+        let normalizedAuthors = normalizedUniquePubkeys(authors)
         guard !normalizedAuthors.isEmpty else { return [] }
 
         let kindsSet = Set(kinds)
@@ -862,7 +860,10 @@ struct NostrFeedService: Sendable {
             240
         )
 
-        let fetchedEvents = try await withThrowingTaskGroup(of: [NostrEvent].self) { group in
+        let fetchedEventsResult: (events: [NostrEvent], successfulBatches: Int, firstError: Error?) = await withTaskGroup(
+            of: (events: [NostrEvent]?, error: Error?).self,
+            returning: (events: [NostrEvent], successfulBatches: Int, firstError: Error?).self
+        ) { group in
             for batch in authorBatches {
                 group.addTask {
                     let filter = NostrFilter(
@@ -871,23 +872,51 @@ struct NostrFeedService: Sendable {
                         limit: perBatchLimit,
                         until: until
                     )
-                    return try await fetchTimelineEvents(
-                        relayURLs: relayURLs,
-                        filter: filter,
-                        timeout: fetchTimeout,
-                        useCache: false,
-                        relayFetchMode: relayFetchMode
-                    )
+
+                    do {
+                        let events = try await fetchTimelineEvents(
+                            relayURLs: relayURLs,
+                            filter: filter,
+                            timeout: fetchTimeout,
+                            useCache: false,
+                            relayFetchMode: relayFetchMode
+                        )
+                        return (events: events, error: nil)
+                    } catch {
+                        return (events: nil, error: error)
+                    }
                 }
             }
 
             var merged: [NostrEvent] = []
-            for try await batchEvents in group {
-                merged.append(contentsOf: batchEvents)
+            var successfulBatches = 0
+            var firstError: Error?
+
+            for await result in group {
+                if let batchEvents = result.events {
+                    successfulBatches += 1
+                    merged.append(contentsOf: batchEvents)
+
+                    if relayFetchMode == .firstRelayWithEvents, merged.count >= limit {
+                        group.cancelAll()
+                        break
+                    }
+                } else if firstError == nil, let error = result.error {
+                    firstError = error
+                }
             }
-            return merged
+
+            return (merged, successfulBatches, firstError)
         }
-        .filter { kindsSet.contains($0.kind) }
+
+        if fetchedEventsResult.events.isEmpty,
+           fetchedEventsResult.successfulBatches == 0,
+           let firstError = fetchedEventsResult.firstError {
+            throw firstError
+        }
+
+        let fetchedEvents = fetchedEventsResult.events
+            .filter { kindsSet.contains($0.kind) }
         let visibleEvents = filterVisibleEvents(fetchedEvents, moderationSnapshot: moderationSnapshot)
         let timelineEvents = Array(
             deduplicateEvents(visibleEvents)
@@ -3252,12 +3281,19 @@ struct NostrFeedService: Sendable {
         useCache: Bool = true
     ) async throws -> [NostrEvent] {
         let events: [NostrEvent]
+        let fetchOperation = {
+            try await fetchEventsEnforcingTimeout(
+                relayURL: relayURL,
+                filter: filter,
+                timeout: timeout
+            )
+        }
         if !useCache {
-            events = try await relayClient.fetchEvents(relayURL: relayURL, filter: filter, timeout: timeout)
+            events = try await fetchOperation()
         } else {
             let cacheKey = generateTimelineKey(relayURL: relayURL, filter: filter)
             events = try await timelineCache.events(for: cacheKey) {
-                try await relayClient.fetchEvents(relayURL: relayURL, filter: filter, timeout: timeout)
+                try await fetchOperation()
             }
         }
 
@@ -3281,6 +3317,58 @@ struct NostrFeedService: Sendable {
         if localTimelineEventsSatisfyRequest(localEvents, filter: filter),
            !shouldRefillFromRelays(relayURLs: targets, filter: filter) {
             return localEvents
+        }
+
+        if relayFetchMode == .firstRelayWithEvents {
+            let result: (events: [NostrEvent], successfulFetches: Int, firstError: Error?) = await withTaskGroup(
+                of: (events: [NostrEvent]?, error: Error?).self,
+                returning: (events: [NostrEvent], successfulFetches: Int, firstError: Error?).self
+            ) { group in
+                for relayURL in targets {
+                    group.addTask {
+                        do {
+                            let events = try await fetchTimelineEvents(
+                                relayURL: relayURL,
+                                filter: filter,
+                                timeout: timeout,
+                                useCache: useCache
+                            )
+                            return (events: events, error: nil)
+                        } catch {
+                            return (events: nil, error: error)
+                        }
+                    }
+                }
+
+                var firstError: Error?
+                var successfulFetches = 0
+
+                for await item in group {
+                    if let events = item.events {
+                        successfulFetches += 1
+                        guard !events.isEmpty else { continue }
+                        group.cancelAll()
+                        return (events, successfulFetches, firstError)
+                    } else if firstError == nil, let error = item.error {
+                        firstError = error
+                    }
+                }
+
+                return ([], successfulFetches, firstError)
+            }
+
+            if !result.events.isEmpty {
+                return mergedTimelineEvents(localEvents + result.events, filter: filter)
+            }
+
+            if !localEvents.isEmpty {
+                return localEvents
+            }
+
+            if result.successfulFetches == 0, let firstError = result.firstError {
+                throw firstError
+            }
+            return []
         }
 
         let result: (mergedEvents: [NostrEvent], successfulFetches: Int, firstError: Error?) = await withTaskGroup(
@@ -3310,10 +3398,7 @@ struct NostrFeedService: Sendable {
             for await item in group {
                 if let events = item.events {
                     successfulFetches += 1
-                    switch relayFetchMode {
-                    case .allRelays, .firstNonEmptyRelay:
-                        mergedEvents.append(contentsOf: events)
-                    }
+                    mergedEvents.append(contentsOf: events)
                 } else if firstError == nil, let error = item.error {
                     firstError = error
                 }
@@ -3356,6 +3441,66 @@ struct NostrFeedService: Sendable {
             return false
         }
         return true
+    }
+
+    private func fetchEventsEnforcingTimeout(
+        relayURL: URL,
+        filter: NostrFilter,
+        timeout: TimeInterval
+    ) async throws -> [NostrEvent] {
+        guard timeout > 0 else {
+            return try await relayClient.fetchEvents(
+                relayURL: relayURL,
+                filter: filter,
+                timeout: timeout
+            )
+        }
+
+        let continuationBox = RelayFetchContinuationBox<[NostrEvent]>()
+        return try await withCheckedThrowingContinuation { continuation in
+            var timeoutTask: Task<Void, Never>?
+
+            let relayTask = Task {
+                do {
+                    let events = try await relayClient.fetchEvents(
+                        relayURL: relayURL,
+                        filter: filter,
+                        timeout: timeout
+                    )
+                    if await continuationBox.resumeIfNeeded(
+                        continuation: continuation,
+                        with: .success(events)
+                    ) {
+                        timeoutTask?.cancel()
+                    }
+                } catch {
+                    if await continuationBox.resumeIfNeeded(
+                        continuation: continuation,
+                        with: .failure(error)
+                    ) {
+                        timeoutTask?.cancel()
+                    }
+                }
+            }
+
+            timeoutTask = Task {
+                try? await Task.sleep(
+                    nanoseconds: Self.timeoutNanoseconds(for: timeout)
+                )
+                guard !Task.isCancelled else { return }
+
+                if await continuationBox.resumeIfNeeded(
+                    continuation: continuation,
+                    with: .failure(RelayFetchTimeoutError.timedOut)
+                ) {
+                    relayTask.cancel()
+                }
+            }
+        }
+    }
+
+    private nonisolated static func timeoutNanoseconds(for timeout: TimeInterval) -> UInt64 {
+        UInt64(max(timeout, 0) * 1_000_000_000)
     }
 
     private func shouldRefillFromRelays(
@@ -3468,5 +3613,23 @@ private extension Array {
         }
 
         return result
+    }
+}
+
+private enum RelayFetchTimeoutError: Error {
+    case timedOut
+}
+
+private actor RelayFetchContinuationBox<Value> {
+    private var hasResumed = false
+
+    func resumeIfNeeded(
+        continuation: CheckedContinuation<Value, Error>,
+        with result: Result<Value, Error>
+    ) -> Bool {
+        guard !hasResumed else { return false }
+        hasResumed = true
+        continuation.resume(with: result)
+        return true
     }
 }

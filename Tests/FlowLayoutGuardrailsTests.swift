@@ -1,4 +1,5 @@
 import XCTest
+import SwiftUI
 @testable import Flow
 
 final class FlowLayoutGuardrailsTests: XCTestCase {
@@ -64,12 +65,35 @@ final class FlowLayoutGuardrailsTests: XCTestCase {
     func testProfileHeaderWidthUsesFiniteProposal() {
         XCTAssertEqual(
             ProfileHeaderLayoutGuardrails.boundedWidth(
-                proposedWidth: 375,
+                proposedWidth: 300,
                 fallbackWidth: 320
             ),
-            375,
+            300,
             accuracy: 0.0001
         )
+    }
+
+    func testProfileHeaderWidthCapsOversizedProposalToVisibleFallback() {
+        XCTAssertEqual(
+            ProfileHeaderLayoutGuardrails.boundedWidth(
+                proposedWidth: 420,
+                fallbackWidth: 320
+            ),
+            320,
+            accuracy: 0.0001
+        )
+    }
+
+    func testProfileHeaderTrailingChromeIgnoresOversizedParentWidth() {
+        let originX = ProfileHeaderLayoutGuardrails.trailingControlOriginX(
+            parentWidth: 1_200,
+            visibleWidth: 320,
+            controlWidth: 36,
+            horizontalPadding: 16
+        )
+
+        XCTAssertEqual(originX, 268, accuracy: 0.0001)
+        XCTAssertLessThanOrEqual(originX + 36, 304)
     }
 
     func testProfileHeaderWidthFallsBackWhenProposalIsInvalid() {
@@ -98,4 +122,75 @@ final class FlowLayoutGuardrailsTests: XCTestCase {
             accuracy: 0.0001
         )
     }
+
+    func testProfileHeaderBannerUsesMoreImmersiveHeight() {
+        XCTAssertGreaterThanOrEqual(ProfileHeaderBannerMetrics.height, 260)
+        XCTAssertGreaterThanOrEqual(
+            ProfileHeaderBannerMetrics.fadeHeight,
+            ProfileHeaderBannerMetrics.height * 0.68
+        )
+    }
+
+    func testLoadedProfileBannerImagesAreMutedIntoChrome() {
+        XCTAssertLessThanOrEqual(ProfileHeaderBannerMetrics.loadedImageOpacity, 0.72)
+        XCTAssertGreaterThan(ProfileHeaderBannerMetrics.loadedImageOpacity, 0.5)
+    }
+
+    func testProfileHeaderTopControlsRespectTopSafeArea() {
+        XCTAssertEqual(
+            ProfileHeaderLayoutGuardrails.topControlsTopPadding(safeAreaInset: 0),
+            12,
+            accuracy: 0.0001
+        )
+        XCTAssertEqual(
+            ProfileHeaderLayoutGuardrails.topControlsTopPadding(safeAreaInset: 47),
+            59,
+            accuracy: 0.0001
+        )
+        XCTAssertEqual(
+            ProfileHeaderLayoutGuardrails.topControlsTopPadding(safeAreaInset: -8),
+            12,
+            accuracy: 0.0001
+        )
+    }
+
+    func testComposeToolbarUsesCompactThemeAwareControls() {
+        XCTAssertEqual(ComposeToolbarLayout.cancelButtonFontWeight, ComposeToolbarLayout.publishButtonFontWeight)
+        XCTAssertEqual(ComposeToolbarLayout.cancelButtonFontWeight, .semibold)
+        XCTAssertLessThanOrEqual(ComposeToolbarLayout.leadingItemSpacing, 8)
+        XCTAssertLessThanOrEqual(ComposeToolbarLayout.trailingItemSpacing, 8)
+        XCTAssertGreaterThan(ComposeToolbarLayout.draftButtonBackgroundOpacity, 0)
+        XCTAssertLessThanOrEqual(ComposeToolbarLayout.draftButtonBackgroundOpacity, 1)
+    }
+
+    func testProfileFollowingCountTextDoesNotShowZeroBeforeRemoteCountResolves() {
+        XCTAssertEqual(
+            ProfileViewLayout.followingCountText(
+                isOwnProfile: false,
+                ownFollowingCount: 12,
+                remoteFollowingCount: 0,
+                hasResolvedRemoteFollowingCount: false
+            ),
+            "following"
+        )
+        XCTAssertEqual(
+            ProfileViewLayout.followingCountText(
+                isOwnProfile: false,
+                ownFollowingCount: 12,
+                remoteFollowingCount: 0,
+                hasResolvedRemoteFollowingCount: true
+            ),
+            "0 following"
+        )
+        XCTAssertEqual(
+            ProfileViewLayout.followingCountText(
+                isOwnProfile: true,
+                ownFollowingCount: 12,
+                remoteFollowingCount: 0,
+                hasResolvedRemoteFollowingCount: false
+            ),
+            "12 following"
+        )
+    }
+
 }
