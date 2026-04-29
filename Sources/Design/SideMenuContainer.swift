@@ -2,17 +2,26 @@ import SwiftUI
 
 enum SideMenuTransitionLayout {
     static let menuWidthFraction: CGFloat = 0.78
-    static let primaryContentOpenScale: CGFloat = 0.94
+    static let menuClosedOffsetFraction: CGFloat = 1.08
+    static let menuClosedOpacity: Double = 0
+    static let primaryContentOpenScale: CGFloat = 0.965
+    static let primaryContentOpenOffsetFraction: CGFloat = 0.045
+    static let primaryContentOpenOffsetMaximum: CGFloat = 18
     static let primaryContentOpenCornerRadius: CGFloat = 26
     static let menuTrailingCornerRadius: CGFloat = 30
     static let backdropOpacity: Double = 0.24
+    static let backdropBlurRadius: CGFloat = 3
     static let rowStaggerDelay: TimeInterval = 0.045
-    static let rowClosedYOffset: CGFloat = 10
+    static let rowClosedXOffset: CGFloat = -10
+    static let rowClosedYOffset: CGFloat = 0
     static let rowClosedOpacity: Double = 0
     static let profileHeaderPrimaryFillOpacity: Double = 0.08
     static let menuIconBackgroundOpacity: Double = 0.12
+    static let primaryContentZIndex: Double = 0
+    static let backdropZIndex: Double = 1
+    static let menuZIndex: Double = 2
     static let usesParentZStack = true
-    static let keepsMenuBehindPrimaryContent = true
+    static let keepsMenuBehindPrimaryContent = false
     static let clipsCompositionToContainerBounds = true
 
     static func animation(reduceMotion: Bool) -> Animation? {
@@ -25,9 +34,7 @@ enum SideMenuTransitionLayout {
     }
 
     static func primaryContentOpenOffset(for containerWidth: CGFloat) -> CGFloat {
-        let menuWidth = menuWidth(for: containerWidth)
-        let visibleContentWidth: CGFloat = 64
-        return max(0, min(menuWidth, containerWidth - visibleContentWidth))
+        max(0, min(containerWidth * primaryContentOpenOffsetFraction, primaryContentOpenOffsetMaximum))
     }
 }
 
@@ -56,11 +63,17 @@ struct SideMenuContainer<Content: View, Menu: View>: View {
             )
 
             ZStack(alignment: .leading) {
-                menuLayer(width: menuWidth)
-                    .zIndex(0)
-
                 primaryContentLayer(offset: contentOffset)
-                    .zIndex(1)
+                    .zIndex(SideMenuTransitionLayout.primaryContentZIndex)
+
+                if isOpen {
+                    backdropLayer()
+                        .zIndex(SideMenuTransitionLayout.backdropZIndex)
+                        .transition(.opacity)
+                }
+
+                menuLayer(width: menuWidth)
+                    .zIndex(SideMenuTransitionLayout.menuZIndex)
             }
             .frame(width: geometry.size.width, height: geometry.size.height)
             .clipped()
@@ -79,8 +92,8 @@ struct SideMenuContainer<Content: View, Menu: View>: View {
             .clipShape(SideMenuTrailingRoundedShape(radius: SideMenuTransitionLayout.menuTrailingCornerRadius))
             .contentShape(SideMenuTrailingRoundedShape(radius: SideMenuTransitionLayout.menuTrailingCornerRadius))
             .shadow(color: .black.opacity(isOpen ? 0.18 : 0), radius: isOpen ? 22 : 0, x: 10, y: 16)
-            .offset(x: isOpen ? 0 : -width * 0.42)
-            .opacity(isOpen ? 1 : 0.82)
+            .offset(x: isOpen ? 0 : -width * SideMenuTransitionLayout.menuClosedOffsetFraction)
+            .opacity(isOpen ? 1 : SideMenuTransitionLayout.menuClosedOpacity)
             .allowsHitTesting(isOpen)
             .accessibilityHidden(!isOpen)
     }
@@ -93,6 +106,7 @@ struct SideMenuContainer<Content: View, Menu: View>: View {
                 anchor: .center
             )
             .offset(x: isOpen ? offset : 0)
+            .blur(radius: isOpen ? SideMenuTransitionLayout.backdropBlurRadius : 0)
             .clipShape(
                 RoundedRectangle(
                     cornerRadius: isOpen ? SideMenuTransitionLayout.primaryContentOpenCornerRadius : 0,
@@ -100,21 +114,20 @@ struct SideMenuContainer<Content: View, Menu: View>: View {
                 )
             )
             .shadow(color: .black.opacity(isOpen ? 0.22 : 0), radius: isOpen ? 20 : 0, x: -8, y: 14)
-            .overlay {
-                if isOpen {
-                    Button {
-                        closeMenu()
-                    } label: {
-                        Rectangle()
-                            .fill(Color.black.opacity(SideMenuTransitionLayout.backdropOpacity))
-                            .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel("Dismiss side menu")
-                    .accessibilityAddTraits(.isButton)
-                    .transition(.opacity)
-                }
-            }
+    }
+
+    private func backdropLayer() -> some View {
+        Button {
+            closeMenu()
+        } label: {
+            Rectangle()
+                .fill(Color.black.opacity(SideMenuTransitionLayout.backdropOpacity))
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Dismiss side menu")
+        .accessibilityAddTraits(.isButton)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
     private func closeMenu() {

@@ -76,7 +76,7 @@ struct HomeSlideoutMenuView: View {
                     revealedMenuRow(index: 1) {
                         menuButton(
                             title: "View Profile",
-                            icon: "person.crop.circle",
+                            icon: "person",
                             action: onViewProfile
                         )
                     }
@@ -261,7 +261,10 @@ struct HomeSlideoutMenuView: View {
     ) -> some View {
         content()
             .opacity(isMenuPresented ? 1 : SideMenuTransitionLayout.rowClosedOpacity)
-            .offset(y: isMenuPresented ? 0 : SideMenuTransitionLayout.rowClosedYOffset)
+            .offset(
+                x: isMenuPresented ? 0 : SideMenuTransitionLayout.rowClosedXOffset,
+                y: isMenuPresented ? 0 : SideMenuTransitionLayout.rowClosedYOffset
+            )
             .animation(rowAnimation(index: index), value: isMenuPresented)
     }
 

@@ -313,14 +313,21 @@ final class FlowLayoutGuardrailsTests: XCTestCase {
         XCTAssertGreaterThanOrEqual(SideMenuTransitionLayout.menuTrailingCornerRadius, 28)
         XCTAssertGreaterThan(SideMenuTransitionLayout.backdropOpacity, 0.16)
         XCTAssertTrue(SideMenuTransitionLayout.usesParentZStack)
-        XCTAssertTrue(SideMenuTransitionLayout.keepsMenuBehindPrimaryContent)
+        XCTAssertFalse(SideMenuTransitionLayout.keepsMenuBehindPrimaryContent)
         XCTAssertTrue(SideMenuTransitionLayout.clipsCompositionToContainerBounds)
+        XCTAssertGreaterThan(SideMenuTransitionLayout.menuZIndex, SideMenuTransitionLayout.primaryContentZIndex)
+        XCTAssertGreaterThan(SideMenuTransitionLayout.menuZIndex, SideMenuTransitionLayout.backdropZIndex)
+        XCTAssertGreaterThanOrEqual(SideMenuTransitionLayout.menuClosedOffsetFraction, 1)
+        XCTAssertEqual(SideMenuTransitionLayout.menuClosedOpacity, 0, accuracy: 0.0001)
+        XCTAssertLessThanOrEqual(SideMenuTransitionLayout.primaryContentOpenOffsetFraction, 0.06)
+        XCTAssertGreaterThan(SideMenuTransitionLayout.backdropBlurRadius, 0)
     }
 
     func testSideMenuRowsUseStaggeredFadeSlideMotion() {
         XCTAssertGreaterThan(SideMenuTransitionLayout.rowStaggerDelay, 0)
         XCTAssertLessThanOrEqual(SideMenuTransitionLayout.rowStaggerDelay, 0.08)
-        XCTAssertGreaterThan(SideMenuTransitionLayout.rowClosedYOffset, 0)
+        XCTAssertLessThan(SideMenuTransitionLayout.rowClosedXOffset, 0)
+        XCTAssertEqual(SideMenuTransitionLayout.rowClosedYOffset, 0, accuracy: 0.0001)
         XCTAssertLessThan(SideMenuTransitionLayout.rowClosedOpacity, 1)
         XCTAssertGreaterThan(SideMenuTransitionLayout.profileHeaderPrimaryFillOpacity, 0)
         XCTAssertGreaterThan(SideMenuTransitionLayout.menuIconBackgroundOpacity, 0)
