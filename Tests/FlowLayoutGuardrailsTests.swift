@@ -172,6 +172,13 @@ final class FlowLayoutGuardrailsTests: XCTestCase {
         XCTAssertEqual(BreakReminderChoiceLayout.takeBreakCloseDelay, 4, accuracy: 0.0001)
     }
 
+    func testBreakReminderChoiceUsesFullScreenSurface() {
+        XCTAssertTrue(BreakReminderChoiceLayout.usesFullScreenSurface)
+        XCTAssertEqual(BreakReminderChoiceLayout.surfaceCornerRadius, 0, accuracy: 0.0001)
+        XCTAssertEqual(BreakReminderChoiceLayout.surfaceHorizontalInset, 0, accuracy: 0.0001)
+        XCTAssertEqual(BreakReminderChoiceLayout.surfaceBottomInset, 0, accuracy: 0.0001)
+    }
+
     func testManageAccountsGlassUsesWhiteTintWithReadableText() {
         XCTAssertGreaterThanOrEqual(ManageAccountsGlassStyle.darkSurfaceWhiteOpacity, 0.28)
         XCTAssertGreaterThanOrEqual(ManageAccountsGlassStyle.darkBorderWhiteOpacity, 0.24)

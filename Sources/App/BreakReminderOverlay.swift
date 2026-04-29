@@ -181,8 +181,6 @@ struct BreakReminderOverlayHost: View {
 }
 
 struct BreakReminderOverlayPresentation: View {
-    @Environment(\.colorScheme) private var colorScheme
-
     let quote: BreakReminderQuote
     let onContinue: () -> Void
     let onTakeBreakCompleted: () -> Void
@@ -208,22 +206,17 @@ struct BreakReminderOverlayPresentation: View {
 
     var body: some View {
         GeometryReader { proxy in
-            ZStack(alignment: .bottom) {
-                Color.black
-                    .opacity(colorScheme == .dark ? 0.28 : 0.14)
-                    .ignoresSafeArea()
-                    .contentShape(Rectangle())
-                    .transition(.opacity)
-
+            ZStack {
                 BreakReminderSheet(
                     quote: quote,
                     onContinue: onContinue,
                     onTakeBreakCompleted: onTakeBreakCompleted
                 )
-                .padding(.horizontal, 12)
-                .padding(.bottom, max(proxy.safeAreaInsets.bottom, 12))
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
-                .transition(.move(edge: .bottom).combined(with: .opacity))
+                .padding(.horizontal, BreakReminderChoiceLayout.surfaceHorizontalInset)
+                .padding(.bottom, BreakReminderChoiceLayout.surfaceBottomInset)
+                .frame(width: proxy.size.width, height: proxy.size.height)
+                .ignoresSafeArea()
+                .transition(.opacity)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
@@ -242,26 +235,22 @@ struct BreakReminderSheet: View {
 
     var body: some View {
         ZStack {
-            RoundedRectangle(cornerRadius: 30, style: .continuous)
-                .fill(reminderBackgroundColor)
+            reminderBackgroundColor
+                .ignoresSafeArea()
 
             reminderArtwork
 
             centeredContent
-                .padding(.horizontal, 26)
+                .padding(.horizontal, 28)
+                .padding(.vertical, 36)
+                .frame(maxWidth: 520)
         }
-        .frame(maxWidth: 540, alignment: .center)
-        .frame(height: 340)
-        .clipShape(RoundedRectangle(cornerRadius: 30, style: .continuous))
-        .overlay {
-            RoundedRectangle(cornerRadius: 30, style: .continuous)
-                .stroke(reminderBorderColor, lineWidth: 0.9)
-        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .contentShape(Rectangle())
         .onDisappear {
             takeBreakTask?.cancel()
             takeBreakTask = nil
         }
-        .shadow(color: .black.opacity(colorScheme == .dark ? 0.34 : 0.12), radius: 22, x: 0, y: 10)
         .accessibilityElement(children: .contain)
     }
 
@@ -392,12 +381,6 @@ struct BreakReminderSheet: View {
         colorScheme == .dark ? .black : .white
     }
 
-    private var reminderBorderColor: Color {
-        colorScheme == .dark
-            ? Color.white.opacity(0.12)
-            : Color.black.opacity(0.08)
-    }
-
     private var reminderTextColor: Color {
         colorScheme == .dark
             ? Color.white.opacity(0.92)
@@ -423,6 +406,10 @@ enum BreakReminderChoiceLayout {
     static let continueButtonTitle = "Continue"
     static let successText = "Wise choice! Enjoy!"
     static let takeBreakCloseDelay: TimeInterval = 4
+    static let usesFullScreenSurface = true
+    static let surfaceCornerRadius: CGFloat = 0
+    static let surfaceHorizontalInset: CGFloat = 0
+    static let surfaceBottomInset: CGFloat = 0
 
     static var takeBreakCloseDelayNanoseconds: UInt64 {
         UInt64(takeBreakCloseDelay * 1_000_000_000)
