@@ -211,7 +211,7 @@ struct HomeFeedView: View {
                 isShowingSideMenu: $isShowingSideMenu,
                 topNavigationBar: { AnyView(topNavigationBar) },
                 feedContent: { AnyView(feedContent) },
-                sideMenuOverlay: { AnyView(sideMenuOverlay) }
+                sideMenuContent: { AnyView(sideMenuContent) }
             )
             .modifier(navigationDestinationsModifier)
         }
@@ -521,48 +521,35 @@ struct HomeFeedView: View {
         return appSettings.settingsFormSurfaceStyle(for: effectiveColorScheme)
     }
 
-    private var sideMenuOverlay: some View {
-        GeometryReader { geometry in
-            ZStack(alignment: .leading) {
-                Color.black.opacity(0.22)
-                    .ignoresSafeArea()
-                    .onTapGesture {
-                        closeSideMenu()
-                    }
-
-                HomeSlideoutMenuView(
-                    onViewProfile: {
-                        if let pubkey = auth.currentAccount?.pubkey {
-                            openProfile(pubkey: pubkey)
-                        }
-                        closeSideMenu()
-                    },
-                    onOpenScannedProfile: { pubkey in
-                        closeSideMenu()
-                        openProfile(pubkey: pubkey)
-                    },
-                    onManageSettings: {
-                        closeSideMenu()
-                        isShowingSettings = true
-                    },
-                    onManageAccounts: {
-                        closeSideMenu()
-                        openAuthSheet(tab: .accounts)
-                    },
-                    onLogout: {
-                        auth.logout()
-                        closeSideMenu()
-                    },
-                    onClose: {
-                        closeSideMenu()
-                    }
-                )
-                .environmentObject(auth)
-                .frame(width: min(320, geometry.size.width * 0.82))
-                .frame(maxHeight: .infinity, alignment: .top)
-                .transition(.move(edge: .leading))
+    private var sideMenuContent: some View {
+        HomeSlideoutMenuView(
+            onViewProfile: {
+                if let pubkey = auth.currentAccount?.pubkey {
+                    openProfile(pubkey: pubkey)
+                }
+                closeSideMenu()
+            },
+            onOpenScannedProfile: { pubkey in
+                closeSideMenu()
+                openProfile(pubkey: pubkey)
+            },
+            onManageSettings: {
+                closeSideMenu()
+                isShowingSettings = true
+            },
+            onManageAccounts: {
+                closeSideMenu()
+                openAuthSheet(tab: .accounts)
+            },
+            onLogout: {
+                auth.logout()
+                closeSideMenu()
+            },
+            onClose: {
+                closeSideMenu()
             }
-        }
+        )
+        .environmentObject(auth)
     }
 
     private var filterButton: some View {
@@ -1306,30 +1293,26 @@ struct HomeFeedView: View {
 }
 
 private struct HomeFeedRootContent: View {
-    @Environment(\.accessibilityReduceMotion) private var accessibilityReduceMotion
     @Binding var isShowingSideMenu: Bool
 
     let topNavigationBar: () -> AnyView
     let feedContent: () -> AnyView
-    let sideMenuOverlay: () -> AnyView
+    let sideMenuContent: () -> AnyView
 
     var body: some View {
-        ZStack(alignment: .leading) {
-            AppThemeBackgroundView(holographicSpotlight: .feed)
-                .ignoresSafeArea()
+        SideMenuContainer(isOpen: $isShowingSideMenu) {
+            sideMenuContent()
+        } content: {
+            ZStack(alignment: .leading) {
+                AppThemeBackgroundView(holographicSpotlight: .feed)
+                    .ignoresSafeArea()
 
-            VStack(spacing: 0) {
-                topNavigationBar()
-                feedContent()
-            }
-            .disabled(isShowingSideMenu)
-
-            if isShowingSideMenu {
-                sideMenuOverlay()
-                    .transition(FlowTransitionMotion.sidePanelTransition(reduceMotion: accessibilityReduceMotion))
+                VStack(spacing: 0) {
+                    topNavigationBar()
+                    feedContent()
+                }
             }
         }
-        .animation(FlowTransitionMotion.sidePanelAnimation(reduceMotion: accessibilityReduceMotion), value: isShowingSideMenu)
         .toolbar(.hidden, for: .navigationBar)
     }
 }

@@ -304,6 +304,30 @@ final class FlowLayoutGuardrailsTests: XCTestCase {
         XCTAssertEqual(SearchBarGlassStyle.fieldCornerRadius, 22, accuracy: 0.0001)
     }
 
+    func testSideMenuTransitionUsesContainedSoftPushDrawer() {
+        XCTAssertEqual(SideMenuTransitionLayout.menuWidthFraction, 0.78, accuracy: 0.0001)
+        XCTAssertGreaterThanOrEqual(SideMenuTransitionLayout.menuWidthFraction, 0.75)
+        XCTAssertLessThanOrEqual(SideMenuTransitionLayout.menuWidthFraction, 0.80)
+        XCTAssertLessThan(SideMenuTransitionLayout.primaryContentOpenScale, 1)
+        XCTAssertGreaterThanOrEqual(SideMenuTransitionLayout.primaryContentOpenCornerRadius, 24)
+        XCTAssertGreaterThanOrEqual(SideMenuTransitionLayout.menuTrailingCornerRadius, 28)
+        XCTAssertGreaterThan(SideMenuTransitionLayout.backdropOpacity, 0.16)
+        XCTAssertTrue(SideMenuTransitionLayout.usesParentZStack)
+        XCTAssertTrue(SideMenuTransitionLayout.keepsMenuBehindPrimaryContent)
+        XCTAssertTrue(SideMenuTransitionLayout.clipsCompositionToContainerBounds)
+    }
+
+    func testSideMenuRowsUseStaggeredFadeSlideMotion() {
+        XCTAssertGreaterThan(SideMenuTransitionLayout.rowStaggerDelay, 0)
+        XCTAssertLessThanOrEqual(SideMenuTransitionLayout.rowStaggerDelay, 0.08)
+        XCTAssertGreaterThan(SideMenuTransitionLayout.rowClosedYOffset, 0)
+        XCTAssertLessThan(SideMenuTransitionLayout.rowClosedOpacity, 1)
+        XCTAssertGreaterThan(SideMenuTransitionLayout.profileHeaderPrimaryFillOpacity, 0)
+        XCTAssertGreaterThan(SideMenuTransitionLayout.menuIconBackgroundOpacity, 0)
+        XCTAssertNil(SideMenuTransitionLayout.animation(reduceMotion: true))
+        XCTAssertNotNil(SideMenuTransitionLayout.animation(reduceMotion: false))
+    }
+
     func testAuthSheetSignInAndAccountsUseStableSharedChrome() {
         XCTAssertEqual(AuthSheetChromeLayout.navigationTitle(for: .signIn), "Account")
         XCTAssertEqual(AuthSheetChromeLayout.navigationTitle(for: .accounts), "Account")

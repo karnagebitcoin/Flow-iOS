@@ -37,8 +37,7 @@ enum FlowTransitionMotion {
     }
 
     static func sidePanelAnimation(reduceMotion: Bool) -> Animation? {
-        guard !reduceMotion else { return nil }
-        return .timingCurve(0.22, 1, 0.36, 1, duration: duration(.sidePanelOpen, reduceMotion: false))
+        SideMenuTransitionLayout.animation(reduceMotion: reduceMotion)
     }
 
     static func numberPopAnimation(reduceMotion: Bool) -> Animation? {

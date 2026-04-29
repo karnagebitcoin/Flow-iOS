@@ -40,78 +40,75 @@ struct ActivityView: View {
         let _ = appSettings.spamReplyFilterSignature
 
         NavigationStack {
-            ZStack(alignment: .leading) {
-                AppThemeBackgroundView()
-                    .ignoresSafeArea()
+            SideMenuContainer(isOpen: $isShowingSideMenu) {
+                sideMenuContent
+            } content: {
+                ZStack(alignment: .leading) {
+                    AppThemeBackgroundView()
+                        .ignoresSafeArea()
 
-                VStack(spacing: 0) {
-                    topNavigationBar
+                    VStack(spacing: 0) {
+                        topNavigationBar
 
-                    List {
-                        Section {
-                            FlowCapsuleTabBar(
-                                selection: $viewModel.selectedFilter,
-                                items: ActivityFilter.allCases,
-                                title: { $0.title }
-                            )
-                            .accessibilityLabel("Pulse filter")
-                        }
-                        .listRowSeparator(.hidden)
-                        .listRowBackground(Color.clear)
+                        List {
+                            Section {
+                                FlowCapsuleTabBar(
+                                    selection: $viewModel.selectedFilter,
+                                    items: ActivityFilter.allCases,
+                                    title: { $0.title }
+                                )
+                                .accessibilityLabel("Pulse filter")
+                            }
+                            .listRowSeparator(.hidden)
+                            .listRowBackground(Color.clear)
 
-                        if viewModel.isLoading && viewModel.items.isEmpty {
-                            ForEach(0..<5, id: \.self) { _ in
-                                loadingRow
+                            if viewModel.isLoading && viewModel.items.isEmpty {
+                                ForEach(0..<5, id: \.self) { _ in
+                                    loadingRow
+                                        .listRowSeparator(.hidden)
+                                        .listRowBackground(Color.clear)
+                                }
+                            } else if viewModel.visibleItems.isEmpty {
+                                emptyStateRow
                                     .listRowSeparator(.hidden)
                                     .listRowBackground(Color.clear)
-                            }
-                        } else if viewModel.visibleItems.isEmpty {
-                            emptyStateRow
-                                .listRowSeparator(.hidden)
-                                .listRowBackground(Color.clear)
-                        } else {
-                            ForEach(viewModel.visibleItems) { item in
-                                ActivityRowCell(
-                                    item: item,
-                                    isMuted: muteStore.isMuted(item.actorPubkey),
-                                    onTap: {
-                                        selectedThreadRoute = threadRoute(for: item)
-                                    },
-                                    onAvatarTap: {
-                                        selectedProfileRoute = ProfileRoute(pubkey: item.actorPubkey)
-                                    }
-                                )
-                                .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16))
-                                .listRowSeparatorTint(appSettings.themePalette.chromeBorder)
-                                .listRowBackground(Color.clear)
+                            } else {
+                                ForEach(viewModel.visibleItems) { item in
+                                    ActivityRowCell(
+                                        item: item,
+                                        isMuted: muteStore.isMuted(item.actorPubkey),
+                                        onTap: {
+                                            selectedThreadRoute = threadRoute(for: item)
+                                        },
+                                        onAvatarTap: {
+                                            selectedProfileRoute = ProfileRoute(pubkey: item.actorPubkey)
+                                        }
+                                    )
+                                    .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16))
+                                    .listRowSeparatorTint(appSettings.themePalette.chromeBorder)
+                                    .listRowBackground(Color.clear)
+                                }
                             }
                         }
+                        .listStyle(.plain)
+                        .scrollContentBackground(.hidden)
+                        .background(Color.clear)
+                        .refreshable {
+                            relaySettings.configure(
+                                accountPubkey: auth.currentAccount?.pubkey,
+                                nsec: auth.currentNsec
+                            )
+                            configureFollowStore()
+                            configureMuteStore()
+                            viewModel.configure(
+                                currentUserPubkey: auth.currentAccount?.pubkey,
+                                readRelayURLs: effectiveReadRelayURLs
+                            )
+                            await viewModel.refresh()
+                        }
                     }
-                    .listStyle(.plain)
-                    .scrollContentBackground(.hidden)
-                    .background(Color.clear)
-                    .refreshable {
-                        relaySettings.configure(
-                            accountPubkey: auth.currentAccount?.pubkey,
-                            nsec: auth.currentNsec
-                        )
-                        configureFollowStore()
-                        configureMuteStore()
-                        viewModel.configure(
-                            currentUserPubkey: auth.currentAccount?.pubkey,
-                            readRelayURLs: effectiveReadRelayURLs
-                        )
-                        await viewModel.refresh()
-                    }
-                }
-                .disabled(isShowingSideMenu)
-
-                if isShowingSideMenu {
-                    sideMenuOverlay
-                        .transition(FlowTransitionMotion.sidePanelTransition(reduceMotion: accessibilityReduceMotion))
                 }
             }
-            .animation(FlowTransitionMotion.sidePanelAnimation(reduceMotion: accessibilityReduceMotion), value: isShowingSideMenu)
             .toolbar(.hidden, for: .navigationBar)
             .task(id: isTabActive) {
                 guard isTabActive else { return }
@@ -347,48 +344,35 @@ struct ActivityView: View {
         }
     }
 
-    private var sideMenuOverlay: some View {
-        GeometryReader { geometry in
-            ZStack(alignment: .leading) {
-                Color.black.opacity(0.22)
-                    .ignoresSafeArea()
-                    .onTapGesture {
-                        closeSideMenu()
-                    }
-
-                HomeSlideoutMenuView(
-                    onViewProfile: {
-                        if let pubkey = auth.currentAccount?.pubkey {
-                            openProfile(pubkey: pubkey)
-                        }
-                        closeSideMenu()
-                    },
-                    onOpenScannedProfile: { pubkey in
-                        closeSideMenu()
-                        openProfile(pubkey: pubkey)
-                    },
-                    onManageSettings: {
-                        closeSideMenu()
-                        isShowingSettings = true
-                    },
-                    onManageAccounts: {
-                        closeSideMenu()
-                        openAuthSheet(tab: .accounts)
-                    },
-                    onLogout: {
-                        auth.logout()
-                        closeSideMenu()
-                    },
-                    onClose: {
-                        closeSideMenu()
-                    }
-                )
-                .environmentObject(auth)
-                .frame(width: min(320, geometry.size.width * 0.82))
-                .frame(maxHeight: .infinity, alignment: .top)
-                .transition(.move(edge: .leading))
+    private var sideMenuContent: some View {
+        HomeSlideoutMenuView(
+            onViewProfile: {
+                if let pubkey = auth.currentAccount?.pubkey {
+                    openProfile(pubkey: pubkey)
+                }
+                closeSideMenu()
+            },
+            onOpenScannedProfile: { pubkey in
+                closeSideMenu()
+                openProfile(pubkey: pubkey)
+            },
+            onManageSettings: {
+                closeSideMenu()
+                isShowingSettings = true
+            },
+            onManageAccounts: {
+                closeSideMenu()
+                openAuthSheet(tab: .accounts)
+            },
+            onLogout: {
+                auth.logout()
+                closeSideMenu()
+            },
+            onClose: {
+                closeSideMenu()
             }
-        }
+        )
+        .environmentObject(auth)
     }
 
     private var notificationSettingsSheet: some View {

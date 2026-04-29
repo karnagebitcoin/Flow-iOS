@@ -11,6 +11,7 @@
 		019D969B17182132A3302134 /* midl.c in Sources */ = {isa = PBXBuildFile; fileRef = 3CD01B3CCD290336C325682C /* midl.c */; settings = {COMPILER_FLAGS = "-w"; }; };
 		0292A13AA7AF6B7B8FD3C2D7 /* SettingsFeedsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4E1013C51262B3CCECCD3F2C /* SettingsFeedsView.swift */; };
 		0407D100155DCC5BB9C49A4E /* AppHaptics.swift in Sources */ = {isa = PBXBuildFile; fileRef = 925F46E0FC75C191103D09E9 /* AppHaptics.swift */; };
+		A6D5C4B3E2F1908172635441 /* SideMenuContainer.swift in Sources */ = {isa = PBXBuildFile; fileRef = A6D5C4B3E2F1908172635440 /* SideMenuContainer.swift */; };
 		F10A7B8C9D0E112233445567 /* FlowTransitionMotion.swift in Sources */ = {isa = PBXBuildFile; fileRef = F10A7B8C9D0E112233445566 /* FlowTransitionMotion.swift */; };
 		0627B86CB55C015CC15C16D3 /* ComposeNotePublishService.swift in Sources */ = {isa = PBXBuildFile; fileRef = DB9619AA2B74AE8DE02E11D9 /* ComposeNotePublishService.swift */; };
 		064EA2E56841A005EFBA1B89 /* AuthStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 98FAC17906D393F287394FBD /* AuthStore.swift */; };
@@ -375,6 +376,7 @@
 		6128242D14E4D2BA8E780A1C /* FeedStorageProtocols.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FeedStorageProtocols.swift; sourceTree = "<group>"; };
 		627CF27D95376BB59328988A /* nostr_bech32.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = nostr_bech32.c; sourceTree = "<group>"; };
 		63D554ED3C23A4F578BBAB7C /* CompactMediaAttachmentPreview.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CompactMediaAttachmentPreview.swift; sourceTree = "<group>"; };
+		A6D5C4B3E2F1908172635440 /* SideMenuContainer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SideMenuContainer.swift; sourceTree = "<group>"; };
 		63DD057C6352DD0CC08FD79A /* ComposeNoteSheetSupport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ComposeNoteSheetSupport.swift; sourceTree = "<group>"; };
 		668778178F4FBD32B9CAB751 /* SearchViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SearchViewModel.swift; sourceTree = "<group>"; };
 		67F2F5076A590F9C3206D189 /* SettingsInterestsFeedView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsInterestsFeedView.swift; sourceTree = "<group>"; };
@@ -1031,6 +1033,7 @@
 				3D961155CF6467EAA934FDBA /* ReactionButton.swift */,
 				AFABF13735545F8FDEA81317 /* RelativeTimestampFormatter.swift */,
 				F745B0E0C0E6590C3A09BE26 /* ReshareActionSheetView.swift */,
+				A6D5C4B3E2F1908172635440 /* SideMenuContainer.swift */,
 			);
 			path = Design;
 			sourceTree = "<group>";
@@ -1338,6 +1341,7 @@
 				47CE76B972995AF553AE736A /* SearchViewModel.swift in Sources */,
 				F5A88BF49CAC7037A80321BA /* SearchViewModelTypes.swift in Sources */,
 				7DE4C13ED08EDAB073D7DBE2 /* SeenEventStore.swift in Sources */,
+				A6D5C4B3E2F1908172635441 /* SideMenuContainer.swift in Sources */,
 				26725AD373B892D2B989A5C9 /* SettingsAppearanceView.swift in Sources */,
 				E5FFC6E5FA3CED1A29886870 /* SettingsComponents.swift in Sources */,
 				1E98E7D696A1316E33D08107 /* SettingsCustomFeedsView.swift in Sources */,

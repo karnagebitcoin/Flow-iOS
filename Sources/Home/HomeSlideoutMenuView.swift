@@ -2,6 +2,8 @@ import SwiftUI
 
 struct HomeSlideoutMenuView: View {
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.accessibilityReduceMotion) private var accessibilityReduceMotion
+    @Environment(\.sideMenuPresentationIsOpen) private var isMenuPresented
     @EnvironmentObject private var auth: AuthManager
     @EnvironmentObject private var appSettings: AppSettingsStore
     @EnvironmentObject private var relaySettings: RelaySettingsStore
@@ -28,11 +30,17 @@ struct HomeSlideoutMenuView: View {
                 } label: {
                     Image(systemName: "xmark")
                         .font(.system(size: 16, weight: .semibold))
+                        .foregroundStyle(appSettings.themePalette.foreground)
                         .frame(width: 32, height: 32)
-                        .background(appSettings.themePalette.sheetCardBackground)
+                        .background(appSettings.themePalette.sheetCardBackground.opacity(0.82), in: Circle())
+                        .overlay {
+                            Circle()
+                                .stroke(appSettings.themePalette.separator.opacity(0.22), lineWidth: 0.8)
+                        }
                         .clipShape(Circle())
                 }
                 .buttonStyle(.plain)
+                .accessibilityLabel("Close menu")
             }
             .padding(.horizontal, 16)
             .padding(.top, 18)
@@ -41,46 +49,68 @@ struct HomeSlideoutMenuView: View {
             Divider()
                 .overlay(appSettings.themeSeparator(defaultOpacity: 0.18))
 
-            ScrollView {
-                VStack(alignment: .leading, spacing: 0) {
+            ScrollView(.vertical, showsIndicators: false) {
+                VStack(alignment: .leading, spacing: 2) {
                     if let currentAccount = auth.currentAccount {
-                        accountHeader(currentAccount)
-                            .padding(.horizontal, 16)
-                            .padding(.vertical, 14)
+                        revealedMenuRow(index: 0) {
+                            accountHeader(currentAccount)
+                                .padding(14)
+                                .background(
+                                    appSettings.primaryColor.opacity(
+                                        SideMenuTransitionLayout.profileHeaderPrimaryFillOpacity
+                                    ),
+                                    in: RoundedRectangle(cornerRadius: 22, style: .continuous)
+                                )
+                                .overlay {
+                                    RoundedRectangle(cornerRadius: 22, style: .continuous)
+                                        .stroke(appSettings.primaryColor.opacity(0.1), lineWidth: 0.8)
+                                }
+                                .padding(.horizontal, 16)
+                                .padding(.vertical, 14)
+                        }
 
                         Divider()
                             .overlay(appSettings.themeSeparator(defaultOpacity: 0.18))
                     }
 
-                    menuButton(
-                        title: "View Profile",
-                        icon: "person.crop.circle",
-                        action: onViewProfile
-                    )
+                    revealedMenuRow(index: 1) {
+                        menuButton(
+                            title: "View Profile",
+                            icon: "person.crop.circle",
+                            action: onViewProfile
+                        )
+                    }
 
-                    menuButton(
-                        title: "Settings",
-                        icon: "gearshape",
-                        action: onManageSettings
-                    )
+                    revealedMenuRow(index: 2) {
+                        menuButton(
+                            title: "Settings",
+                            icon: "gearshape",
+                            action: onManageSettings
+                        )
+                    }
 
-                    menuButton(
-                        title: "Manage Accounts",
-                        icon: "arrow.left.arrow.right.circle",
-                        action: onManageAccounts
-                    )
+                    revealedMenuRow(index: 3) {
+                        menuButton(
+                            title: "Manage Accounts",
+                            icon: "arrow.left.arrow.right.circle",
+                            action: onManageAccounts
+                        )
+                    }
 
                     if auth.isLoggedIn {
-                        menuButton(
-                            title: "Log Out",
-                            icon: "rectangle.portrait.and.arrow.right",
-                            tint: .red,
-                            action: onLogout
-                        )
+                        revealedMenuRow(index: 4) {
+                            menuButton(
+                                title: "Log Out",
+                                icon: "rectangle.portrait.and.arrow.right",
+                                tint: .red,
+                                action: onLogout
+                            )
+                        }
                     }
 
                     Spacer(minLength: 24)
                 }
+                .padding(.top, 6)
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
@@ -153,7 +183,11 @@ struct HomeSlideoutMenuView: View {
                     .font(.system(size: 17, weight: .semibold))
                     .foregroundStyle(appSettings.themePalette.foreground)
                     .frame(width: 36, height: 36)
-                    .background(appSettings.themePalette.sheetCardBackground, in: Circle())
+                    .background(appSettings.themePalette.sheetCardBackground.opacity(0.86), in: Circle())
+                    .overlay {
+                        Circle()
+                            .stroke(appSettings.themePalette.separator.opacity(0.2), lineWidth: 0.8)
+                    }
             }
             .buttonStyle(.plain)
             .accessibilityLabel("Show profile QR")
@@ -199,11 +233,15 @@ struct HomeSlideoutMenuView: View {
         return Button {
             action()
         } label: {
-            HStack(spacing: 12) {
+            HStack(spacing: 14) {
                 Image(systemName: icon)
                     .font(.system(size: 18, weight: .medium))
                     .foregroundStyle(iconTint)
-                    .frame(width: 22)
+                    .frame(width: 34, height: 34)
+                    .background(
+                        iconTint.opacity(SideMenuTransitionLayout.menuIconBackgroundOpacity),
+                        in: Circle()
+                    )
 
                 Text(title)
                     .font(appSettings.appFont(.body))
@@ -212,9 +250,28 @@ struct HomeSlideoutMenuView: View {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.horizontal, 16)
-            .padding(.vertical, 13)
+            .padding(.vertical, 10)
         }
         .buttonStyle(.plain)
+    }
+
+    private func revealedMenuRow<Content: View>(
+        index: Int,
+        @ViewBuilder content: () -> Content
+    ) -> some View {
+        content()
+            .opacity(isMenuPresented ? 1 : SideMenuTransitionLayout.rowClosedOpacity)
+            .offset(y: isMenuPresented ? 0 : SideMenuTransitionLayout.rowClosedYOffset)
+            .animation(rowAnimation(index: index), value: isMenuPresented)
+    }
+
+    private func rowAnimation(index: Int) -> Animation? {
+        guard !accessibilityReduceMotion else { return nil }
+
+        let animation = Animation.easeOut(duration: 0.24)
+        guard isMenuPresented else { return animation }
+
+        return animation.delay(Double(index) * SideMenuTransitionLayout.rowStaggerDelay)
     }
 
     @MainActor

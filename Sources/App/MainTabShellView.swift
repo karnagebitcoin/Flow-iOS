@@ -205,7 +205,7 @@ struct MainTabShellView: View {
             }
             configureLiveReactsSubscription()
         }
-        .animation(.easeInOut(duration: 0.2), value: isHomeSideMenuPresented)
+        .animation(FlowTransitionMotion.sidePanelAnimation(reduceMotion: accessibilityReduceMotion), value: isHomeSideMenuPresented)
         .animation(.easeInOut(duration: 0.2), value: isDMRootVisible)
         .tint(appSettings.primaryColor)
         .statusBarHidden(false)
