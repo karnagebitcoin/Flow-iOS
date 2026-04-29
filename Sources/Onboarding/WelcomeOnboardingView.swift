@@ -6,7 +6,7 @@ struct WelcomeOnboardingView: View {
     @EnvironmentObject private var relaySettings: RelaySettingsStore
     @State private var presentedAuthTab: AuthSheetTab?
     @State private var hasAnimatedIn = false
-    @State private var welcomeSelection = WelcomeArtworkSelection.random()
+    @State private var welcomeSelection = WelcomeArtworkSelection.initial()
 
     var body: some View {
         ZStack {

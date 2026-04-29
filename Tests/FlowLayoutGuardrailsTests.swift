@@ -254,6 +254,14 @@ final class FlowLayoutGuardrailsTests: XCTestCase {
         )
     }
 
+    func testWelcomeArtworkSelectionStartsFromFirstOrderedImage() {
+        XCTAssertEqual(
+            WelcomeArtwork.orderedCycle,
+            [.cityConversation, .cozyBedroom, .cafeConversation]
+        )
+        XCTAssertEqual(WelcomeArtworkSelection.initial().artwork, WelcomeArtwork.orderedCycle[0])
+    }
+
     func testWelcomeScratchRevealCompletionUsesCoverageThreshold() {
         XCTAssertFalse(
             WelcomeScratchRevealLayout.shouldAdvance(coverage: WelcomeScratchRevealLayout.completionThreshold - 0.01)

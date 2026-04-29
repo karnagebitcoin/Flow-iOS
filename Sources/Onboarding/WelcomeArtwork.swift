@@ -5,6 +5,12 @@ enum WelcomeArtwork: String, CaseIterable, Identifiable, Hashable, Sendable {
     case cozyBedroom = "welcome-scene-bedroom"
     case cafeConversation = "welcome-scene-cafe"
 
+    static let orderedCycle: [WelcomeArtwork] = [
+        .cityConversation,
+        .cozyBedroom,
+        .cafeConversation
+    ]
+
     var id: String { rawValue }
 
     var assetName: String { rawValue }
@@ -14,10 +20,10 @@ struct WelcomeArtworkSelection: Hashable, Sendable {
     let artwork: WelcomeArtwork
     let primaryColorOption: AppPrimaryColorOption
 
-    static func random() -> WelcomeArtworkSelection {
+    static func initial(primaryColorOption: AppPrimaryColorOption = AppPrimaryColorOption.random()) -> WelcomeArtworkSelection {
         WelcomeArtworkSelection(
-            artwork: WelcomeArtwork.allCases.randomElement() ?? .cityConversation,
-            primaryColorOption: AppPrimaryColorOption.random()
+            artwork: WelcomeArtwork.orderedCycle[0],
+            primaryColorOption: primaryColorOption
         )
     }
 }
@@ -32,7 +38,7 @@ enum WelcomeScratchRevealLayout {
 
     static func nextArtwork(
         after artwork: WelcomeArtwork,
-        in sequence: [WelcomeArtwork] = WelcomeArtwork.allCases
+        in sequence: [WelcomeArtwork] = WelcomeArtwork.orderedCycle
     ) -> WelcomeArtwork {
         guard !sequence.isEmpty else { return artwork }
         guard let currentIndex = sequence.firstIndex(of: artwork) else {

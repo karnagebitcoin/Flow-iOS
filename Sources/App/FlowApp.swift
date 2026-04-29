@@ -17,7 +17,7 @@ struct FlowApp: App {
     @StateObject private var composeSheetCoordinator = AppComposeSheetCoordinator()
     @StateObject private var composeDraftStore = AppComposeDraftStore()
     @StateObject private var breakReminderCoordinator = BreakReminderCoordinator()
-    @State private var launchSplashSelection = WelcomeArtworkSelection.random()
+    @State private var launchSplashSelection = WelcomeArtworkSelection.initial()
     @State private var isLaunchSplashVisible = false
     @State private var hasPresentedLaunchSplash = false
 
@@ -181,7 +181,7 @@ struct FlowApp: App {
         guard !hasPresentedLaunchSplash else { return }
 
         hasPresentedLaunchSplash = true
-        launchSplashSelection = WelcomeArtworkSelection.random()
+        launchSplashSelection = WelcomeArtworkSelection.initial()
         withAnimation(.easeInOut(duration: 0.20)) {
             isLaunchSplashVisible = true
         }
