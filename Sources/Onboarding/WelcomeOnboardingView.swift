@@ -10,8 +10,8 @@ struct WelcomeOnboardingView: View {
 
     var body: some View {
         ZStack {
-            WelcomeArtworkBackgroundView(
-                artwork: welcomeSelection.artwork,
+            WelcomeScratchRevealBackgroundView(
+                initialArtwork: welcomeSelection.artwork,
                 overlayOpacity: 0.28
             )
 

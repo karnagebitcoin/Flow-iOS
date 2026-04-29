@@ -239,6 +239,30 @@ final class FlowLayoutGuardrailsTests: XCTestCase {
         )
     }
 
+    func testWelcomeScratchRevealAdvancesThroughArtworkSequence() {
+        XCTAssertEqual(
+            WelcomeScratchRevealLayout.nextArtwork(after: .cityConversation),
+            .cozyBedroom
+        )
+        XCTAssertEqual(
+            WelcomeScratchRevealLayout.nextArtwork(after: .cozyBedroom),
+            .cafeConversation
+        )
+        XCTAssertEqual(
+            WelcomeScratchRevealLayout.nextArtwork(after: .cafeConversation),
+            .cityConversation
+        )
+    }
+
+    func testWelcomeScratchRevealCompletionUsesCoverageThreshold() {
+        XCTAssertFalse(
+            WelcomeScratchRevealLayout.shouldAdvance(coverage: WelcomeScratchRevealLayout.completionThreshold - 0.01)
+        )
+        XCTAssertTrue(
+            WelcomeScratchRevealLayout.shouldAdvance(coverage: WelcomeScratchRevealLayout.completionThreshold)
+        )
+    }
+
     func testProfileFollowingCountTextDoesNotShowZeroBeforeRemoteCountResolves() {
         XCTAssertEqual(
             ProfileViewLayout.followingCountText(
