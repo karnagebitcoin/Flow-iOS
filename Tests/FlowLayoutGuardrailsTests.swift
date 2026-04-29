@@ -296,9 +296,12 @@ final class FlowLayoutGuardrailsTests: XCTestCase {
     func testWelcomeScratchHeartBurstTravelsFromBottomTowardPageMiddle() {
         let viewportSize = CGSize(width: 390, height: 844)
         let particles = WelcomeScratchHeartBurstLayout.particles(in: viewportSize)
+        let uniqueTints = Set(particles.map(\.tint))
 
         XCTAssertEqual(particles.count, WelcomeScratchHeartBurstLayout.particleCount)
-        XCTAssertTrue(particles.allSatisfy { WelcomeScratchHeartBurstLayout.heartEmojis.contains($0.emoji) })
+        XCTAssertTrue(particles.allSatisfy { $0.symbolName == WelcomeScratchHeartBurstLayout.heartSymbolName })
+        XCTAssertGreaterThanOrEqual(uniqueTints.count, 4)
+        XCTAssertGreaterThanOrEqual(WelcomeScratchHeartBurstLayout.heartTints.count, uniqueTints.count)
         XCTAssertTrue(particles.allSatisfy { $0.bottomLift >= 36 })
         XCTAssertTrue(particles.allSatisfy { $0.yTravel >= viewportSize.height * 0.44 })
         XCTAssertTrue(particles.allSatisfy { $0.yTravel <= viewportSize.height * 0.58 })

@@ -68,9 +68,36 @@ enum WelcomeScratchRevealLayout {
     }
 }
 
+enum WelcomeScratchHeartBurstTint: CaseIterable, Hashable {
+    case coral
+    case pink
+    case amber
+    case mint
+    case sky
+    case violet
+
+    var color: Color {
+        switch self {
+        case .coral:
+            Color(red: 1.00, green: 0.31, blue: 0.24)
+        case .pink:
+            Color(red: 1.00, green: 0.20, blue: 0.55)
+        case .amber:
+            Color(red: 1.00, green: 0.68, blue: 0.15)
+        case .mint:
+            Color(red: 0.16, green: 0.78, blue: 0.55)
+        case .sky:
+            Color(red: 0.20, green: 0.62, blue: 1.00)
+        case .violet:
+            Color(red: 0.62, green: 0.36, blue: 1.00)
+        }
+    }
+}
+
 struct WelcomeScratchHeartBurstParticle: Identifiable, Equatable {
     let id = UUID()
-    let emoji: String
+    let symbolName: String
+    let tint: WelcomeScratchHeartBurstTint
     let xDrift: CGFloat
     let yTravel: CGFloat
     let sway: CGFloat
@@ -87,7 +114,8 @@ struct WelcomeScratchHeartBurstParticle: Identifiable, Equatable {
 
 enum WelcomeScratchHeartBurstLayout {
     static let particleCount = 22
-    static let heartEmojis = ["❤️", "🩷", "💕", "💖"]
+    static let heartSymbolName = "heart.fill"
+    static let heartTints: [WelcomeScratchHeartBurstTint] = WelcomeScratchHeartBurstTint.allCases
 
     static func particles(in viewportSize: CGSize) -> [WelcomeScratchHeartBurstParticle] {
         let width = max(viewportSize.width, 1)
@@ -105,7 +133,8 @@ enum WelcomeScratchHeartBurstLayout {
             )
 
             return WelcomeScratchHeartBurstParticle(
-                emoji: heartEmojis[index % heartEmojis.count],
+                symbolName: heartSymbolName,
+                tint: heartTints[index % heartTints.count],
                 xDrift: width * ((wave * 0.23) + ((progress - 0.5) * 0.1) + sideBias),
                 yTravel: yTravel,
                 sway: width * CGFloat(sin(Double(index) * 0.47)) * 0.05,
@@ -370,8 +399,10 @@ private struct WelcomeScratchHeartParticleView: View {
     @State private var isAnimating = false
 
     var body: some View {
-        Text(particle.emoji)
-            .font(.system(size: particle.size))
+        Image(systemName: particle.symbolName)
+            .font(.system(size: particle.size, weight: .black))
+            .symbolRenderingMode(.monochrome)
+            .foregroundStyle(particle.tint.color)
             .opacity(isVisible ? (isAnimating ? 0 : particle.opacity) : 0)
             .scaleEffect(isAnimating ? particle.endScale : particle.startScale)
             .offset(
