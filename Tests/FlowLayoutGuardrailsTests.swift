@@ -251,6 +251,16 @@ final class FlowLayoutGuardrailsTests: XCTestCase {
         XCTAssertGreaterThan(ManageAccountsGlassStyle.textShadowOpacity, 0)
     }
 
+    func testManageAccountSwitchMotionUsesLivelyButContainedFeedback() {
+        XCTAssertEqual(ManageAccountSwitchMotion.activePillTitle, "Active")
+        XCTAssertEqual(ManageAccountSwitchMotion.toastText(for: "Avery"), "Switched to Avery")
+        XCTAssertLessThan(ManageAccountSwitchMotion.pressedScale, 1)
+        XCTAssertGreaterThan(ManageAccountSwitchMotion.avatarSelectedScale, 1)
+        XCTAssertGreaterThan(ManageAccountSwitchMotion.haloFinalScale, ManageAccountSwitchMotion.haloInitialScale)
+        XCTAssertEqual(ManageAccountSwitchMotion.duration(.selection, reduceMotion: true), 0, accuracy: 0.0001)
+        XCTAssertNil(ManageAccountSwitchMotion.selectionAnimation(reduceMotion: true))
+    }
+
     func testAuthSheetSignInAndAccountsUseStableSharedChrome() {
         XCTAssertEqual(AuthSheetChromeLayout.navigationTitle(for: .signIn), "Account")
         XCTAssertEqual(AuthSheetChromeLayout.navigationTitle(for: .accounts), "Account")

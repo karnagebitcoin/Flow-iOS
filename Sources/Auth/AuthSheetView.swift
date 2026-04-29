@@ -23,6 +23,82 @@ enum ManageAccountsGlassStyle {
     static let legacyControlWhiteTintDarkOpacity: Double = 0.18
 }
 
+enum ManageAccountSwitchMotion {
+    enum Timing {
+        case selection
+        case halo
+        case toast
+    }
+
+    static let activePillTitle = "Active"
+    static let pressedScale: CGFloat = 0.975
+    static let avatarSelectedScale: CGFloat = 1.06
+    static let haloInitialScale: CGFloat = 0.84
+    static let haloFinalScale: CGFloat = 1.62
+    static let haloInitialOpacity: Double = 0.58
+    static let haloFinalOpacity: Double = 0
+    static let haloLineWidth: CGFloat = 2
+    static let activeRowDarkFillOpacity: Double = 0.18
+    static let activeRowLightFillOpacity: Double = 0.10
+    static let activeRowDarkStrokeOpacity: Double = 0.34
+    static let activeRowLightStrokeOpacity: Double = 0.18
+
+    static func toastText(for displayName: String) -> String {
+        "Switched to \(displayName)"
+    }
+
+    static func duration(_ timing: Timing, reduceMotion: Bool) -> TimeInterval {
+        guard !reduceMotion else { return 0 }
+
+        switch timing {
+        case .selection:
+            return 0.34
+        case .halo:
+            return 0.72
+        case .toast:
+            return 1.65
+        }
+    }
+
+    static func selectionAnimation(reduceMotion: Bool) -> Animation? {
+        guard !reduceMotion else { return nil }
+        return .spring(response: duration(.selection, reduceMotion: false), dampingFraction: 0.76)
+    }
+
+    static func pressAnimation(reduceMotion: Bool) -> Animation? {
+        guard !reduceMotion else { return nil }
+        return .easeOut(duration: 0.12)
+    }
+
+    static func haloAnimation(reduceMotion: Bool) -> Animation? {
+        guard !reduceMotion else { return nil }
+        return .easeOut(duration: duration(.halo, reduceMotion: false))
+    }
+
+    static func toastAnimation(reduceMotion: Bool) -> Animation? {
+        guard !reduceMotion else { return nil }
+        return .spring(response: 0.32, dampingFraction: 0.82)
+    }
+
+    static func activePillTransition(reduceMotion: Bool) -> AnyTransition {
+        guard !reduceMotion else { return .identity }
+        return .scale(scale: 0.88).combined(with: .opacity)
+    }
+
+    static func toastTransition(reduceMotion: Bool) -> AnyTransition {
+        guard !reduceMotion else { return .identity }
+
+        return .asymmetric(
+            insertion: .move(edge: .bottom).combined(with: .opacity),
+            removal: .opacity
+        )
+    }
+
+    static func nanoseconds(for duration: TimeInterval) -> UInt64 {
+        UInt64((max(duration, 0) * 1_000_000_000).rounded())
+    }
+}
+
 enum AuthSheetChromeLayout {
     static let headerHorizontalPadding: CGFloat = 16
     static let headerTopPadding: CGFloat = 8
@@ -59,6 +135,16 @@ enum AuthSheetChromeLayout {
     }
 }
 
+private struct AccountSwitchPulse: Equatable {
+    let id: UUID
+    let accountID: String
+
+    init(accountID: String) {
+        id = UUID()
+        self.accountID = accountID
+    }
+}
+
 struct AuthSheetView: View {
     private enum PostAuthDestination {
         case dismiss
@@ -69,6 +155,7 @@ struct AuthSheetView: View {
     @EnvironmentObject private var appSettings: AppSettingsStore
     @EnvironmentObject private var relaySettings: RelaySettingsStore
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.accessibilityReduceMotion) private var accessibilityReduceMotion
     @Environment(\.dismiss) private var dismiss
 
     private let initialTab: AuthSheetTab
@@ -81,6 +168,9 @@ struct AuthSheetView: View {
     @State private var signInError: String?
     @State private var accountProfiles: [String: NostrProfile] = [:]
     @State private var pendingAccountRemoval: AuthAccount?
+    @State private var accountSwitchPulse: AccountSwitchPulse?
+    @State private var accountSwitchToastText: String?
+    @State private var accountSwitchFeedbackTask: Task<Void, Never>?
     @State private var postAuthDestination: PostAuthDestination
 
     init(
@@ -378,7 +468,7 @@ struct AuthSheetView: View {
     }
 
     private var accountsExperience: some View {
-        ZStack {
+        ZStack(alignment: .bottom) {
             accountsBackdrop
                 .ignoresSafeArea()
 
@@ -409,6 +499,13 @@ struct AuthSheetView: View {
             .safeAreaInset(edge: .bottom) {
                 Color.clear.frame(height: AuthSheetChromeLayout.bottomSafeAreaSpacerHeight)
             }
+
+            accountSwitchToastOverlay
+                .padding(.horizontal, 28)
+                .padding(.bottom, 24)
+        }
+        .onDisappear {
+            accountSwitchFeedbackTask?.cancel()
         }
     }
 
@@ -864,12 +961,31 @@ struct AuthSheetView: View {
     }
 
     private func accountRow(for account: AuthAccount) -> some View {
-        HStack(spacing: 14) {
+        let isCurrentAccount = auth.currentAccount?.id == account.id
+        let isSwitchingAccount = accountSwitchPulse?.accountID == account.id
+
+        return HStack(spacing: 14) {
             Button {
-                auth.switchAccount(to: account)
+                performAccountSwitch(to: account)
             } label: {
                 HStack(spacing: 14) {
                     accountAvatar(for: account, size: 50)
+                        .scaleEffect(
+                            isSwitchingAccount && !accessibilityReduceMotion
+                                ? ManageAccountSwitchMotion.avatarSelectedScale
+                                : 1
+                        )
+                        .overlay {
+                            if let pulse = accountSwitchPulse,
+                               pulse.accountID == account.id,
+                               !accessibilityReduceMotion {
+                                ManageAccountSwitchHalo(
+                                    color: appSettings.primaryColor,
+                                    reduceMotion: accessibilityReduceMotion
+                                )
+                                .id(pulse.id)
+                            }
+                        }
 
                     VStack(alignment: .leading, spacing: 4) {
                         Text(accountDisplayName(for: account))
@@ -894,26 +1010,100 @@ struct AuthSheetView: View {
 
                     Spacer(minLength: 0)
 
-                    if auth.currentAccount?.id == account.id {
-                        Image(systemName: "checkmark.circle.fill")
-                            .font(.title3.weight(.semibold))
-                            .foregroundStyle(.primary)
-                            .shadow(
-                                color: accountsTextShadowColor,
-                                radius: 8,
-                                y: 3
-                            )
+                    if isCurrentAccount {
+                        activeAccountPill
+                            .transition(ManageAccountSwitchMotion.activePillTransition(
+                                reduceMotion: accessibilityReduceMotion
+                            ))
                     }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
+                .contentShape(Rectangle())
             }
-            .buttonStyle(.plain)
+            .buttonStyle(ManageAccountSwitchRowButtonStyle(reduceMotion: accessibilityReduceMotion))
             .frame(maxWidth: .infinity, alignment: .leading)
+            .accessibilityLabel("Switch to \(accountDisplayName(for: account))")
+            .accessibilityHint(isCurrentAccount ? "This is the active account." : "Makes this account active.")
 
             accountDeleteButton(for: account)
         }
         .padding(.horizontal, 18)
         .padding(.vertical, 14)
+        .background {
+            if isCurrentAccount {
+                RoundedRectangle(cornerRadius: 24, style: .continuous)
+                    .fill(appSettings.primaryColor.opacity(
+                        colorScheme == .dark
+                            ? ManageAccountSwitchMotion.activeRowDarkFillOpacity
+                            : ManageAccountSwitchMotion.activeRowLightFillOpacity
+                    ))
+                    .overlay {
+                        RoundedRectangle(cornerRadius: 24, style: .continuous)
+                            .stroke(appSettings.primaryColor.opacity(
+                                colorScheme == .dark
+                                    ? ManageAccountSwitchMotion.activeRowDarkStrokeOpacity
+                                    : ManageAccountSwitchMotion.activeRowLightStrokeOpacity
+                            ), lineWidth: 1)
+                    }
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 6)
+                    .transition(.opacity)
+            }
+        }
+        .animation(
+            ManageAccountSwitchMotion.selectionAnimation(reduceMotion: accessibilityReduceMotion),
+            value: auth.currentAccount?.id
+        )
+    }
+
+    private var activeAccountPill: some View {
+        HStack(spacing: 6) {
+            Circle()
+                .fill(appSettings.primaryColor)
+                .frame(width: 6, height: 6)
+
+            Text(ManageAccountSwitchMotion.activePillTitle)
+                .font(.caption2.weight(.bold))
+        }
+        .foregroundStyle(accountsPrimaryTextColor)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 6)
+        .background(
+            Capsule(style: .continuous)
+                .fill(Color.white.opacity(colorScheme == .dark ? 0.20 : 0.68))
+        )
+        .overlay {
+            Capsule(style: .continuous)
+                .stroke(
+                    appSettings.primaryColor.opacity(colorScheme == .dark ? 0.46 : 0.20),
+                    lineWidth: 1
+                )
+        }
+        .shadow(
+            color: accountsTextShadowColor,
+            radius: accountsTextShadowRadius,
+            y: accountsTextShadowYOffset
+        )
+        .accessibilityLabel("Active account")
+    }
+
+    @ViewBuilder
+    private var accountSwitchToastOverlay: some View {
+        if let accountSwitchToastText {
+            Text(accountSwitchToastText)
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(accountsPrimaryTextColor)
+                .multilineTextAlignment(.center)
+                .lineLimit(2)
+                .padding(.horizontal, 16)
+                .padding(.vertical, 12)
+                .background(accountsSurfaceBackground(cornerRadius: 22))
+                .transition(ManageAccountSwitchMotion.toastTransition(
+                    reduceMotion: accessibilityReduceMotion
+                ))
+                .allowsHitTesting(false)
+                .accessibilityLabel(accountSwitchToastText)
+        }
     }
 
     @ViewBuilder
@@ -986,6 +1176,60 @@ struct AuthSheetView: View {
         .padding(.vertical, 16)
         .background(authBlurCardBackground(cornerRadius: 24))
         .buttonStyle(.plain)
+    }
+
+    private func performAccountSwitch(to account: AuthAccount) {
+        guard auth.currentAccount?.id != account.id else { return }
+
+        let displayName = accountDisplayName(for: account)
+        let toastText = ManageAccountSwitchMotion.toastText(for: displayName)
+        let pulse = AccountSwitchPulse(accountID: account.id)
+        let reduceMotion = accessibilityReduceMotion
+
+        accountSwitchFeedbackTask?.cancel()
+        animateAccountSwitch(using: ManageAccountSwitchMotion.selectionAnimation(reduceMotion: reduceMotion)) {
+            auth.switchAccount(to: account)
+            accountSwitchPulse = reduceMotion ? nil : pulse
+            accountSwitchToastText = toastText
+        }
+
+        accountSwitchFeedbackTask = Task { @MainActor in
+            if !reduceMotion {
+                try? await Task.sleep(nanoseconds: ManageAccountSwitchMotion.nanoseconds(
+                    for: ManageAccountSwitchMotion.duration(.halo, reduceMotion: false)
+                ))
+                guard !Task.isCancelled else { return }
+                if accountSwitchPulse?.id == pulse.id {
+                    accountSwitchPulse = nil
+                }
+            }
+
+            let toastDelay = reduceMotion
+                ? 1.15
+                : max(
+                    ManageAccountSwitchMotion.duration(.toast, reduceMotion: false)
+                        - ManageAccountSwitchMotion.duration(.halo, reduceMotion: false),
+                    0
+                )
+            try? await Task.sleep(nanoseconds: ManageAccountSwitchMotion.nanoseconds(for: toastDelay))
+            guard !Task.isCancelled else { return }
+
+            animateAccountSwitch(using: ManageAccountSwitchMotion.toastAnimation(reduceMotion: reduceMotion)) {
+                if accountSwitchToastText == toastText {
+                    accountSwitchToastText = nil
+                }
+            }
+        }
+    }
+
+    private func animateAccountSwitch(using animation: Animation?, updates: () -> Void) {
+        if let animation {
+            withAnimation(animation) {
+                updates()
+            }
+        } else {
+            updates()
+        }
     }
 
     private func handleSignIn() {
@@ -1144,5 +1388,57 @@ struct AuthSheetView: View {
                 .foregroundStyle(appSettings.avatarFallbackForeground(forAccountPubkey: account.pubkey))
         }
         .frame(width: size, height: size)
+    }
+}
+
+private struct ManageAccountSwitchRowButtonStyle: ButtonStyle {
+    let reduceMotion: Bool
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .scaleEffect(
+                configuration.isPressed && !reduceMotion
+                    ? ManageAccountSwitchMotion.pressedScale
+                    : 1
+            )
+            .animation(
+                ManageAccountSwitchMotion.pressAnimation(reduceMotion: reduceMotion),
+                value: configuration.isPressed
+            )
+    }
+}
+
+private struct ManageAccountSwitchHalo: View {
+    let color: Color
+    let reduceMotion: Bool
+    @State private var isExpanded = false
+
+    var body: some View {
+        Circle()
+            .stroke(
+                color.opacity(
+                    isExpanded
+                        ? ManageAccountSwitchMotion.haloFinalOpacity
+                        : ManageAccountSwitchMotion.haloInitialOpacity
+                ),
+                lineWidth: ManageAccountSwitchMotion.haloLineWidth
+            )
+            .scaleEffect(
+                isExpanded
+                    ? ManageAccountSwitchMotion.haloFinalScale
+                    : ManageAccountSwitchMotion.haloInitialScale
+            )
+            .opacity(reduceMotion ? 0 : 1)
+            .onAppear {
+                guard !reduceMotion else { return }
+
+                if let animation = ManageAccountSwitchMotion.haloAnimation(reduceMotion: false) {
+                    withAnimation(animation) {
+                        isExpanded = true
+                    }
+                } else {
+                    isExpanded = true
+                }
+            }
     }
 }
