@@ -9,6 +9,20 @@ enum AuthSheetTab: String, CaseIterable, Identifiable {
     var id: String { rawValue }
 }
 
+enum ManageAccountsGlassStyle {
+    static let darkSurfaceWhiteOpacity: Double = 0.34
+    static let lightSurfaceWhiteOpacity: Double = 0.76
+    static let darkBorderWhiteOpacity: Double = 0.28
+    static let lightBorderBlackOpacity: Double = 0.04
+    static let primaryTextWhiteOpacity: Double = 0.96
+    static let secondaryTextWhiteOpacity: Double = 0.80
+    static let textShadowOpacity: Double = 0.24
+    static let darkShadowOpacity: Double = 0.18
+    static let lightShadowOpacity: Double = 0.08
+    static let controlWhiteTintOpacity: Double = 0.30
+    static let legacyControlWhiteTintDarkOpacity: Double = 0.18
+}
+
 struct AuthSheetView: View {
     private enum PostAuthDestination {
         case dismiss
@@ -23,6 +37,8 @@ struct AuthSheetView: View {
 
     private let initialTab: AuthSheetTab
     private let availableTabs: [AuthSheetTab]
+    private let signUpSeedPrimaryColorOption: AppPrimaryColorOption
+    private let signUpSeedTheme: AppThemeOption
     private let onSelectedTabChange: (AuthSheetTab) -> Void
     @State private var selectedTab: AuthSheetTab
     @State private var privateKeyInput = ""
@@ -34,11 +50,15 @@ struct AuthSheetView: View {
     init(
         initialTab: AuthSheetTab = .signIn,
         availableTabs: [AuthSheetTab] = AuthSheetTab.allCases,
+        signUpSeedPrimaryColorOption: AppPrimaryColorOption = .defaultOption,
+        signUpSeedTheme: AppThemeOption = AppSettingsStore.defaultThemeForCurrentTime(),
         onSelectedTabChange: @escaping (AuthSheetTab) -> Void = { _ in }
     ) {
         let validTabs = availableTabs.isEmpty ? [.signIn] : availableTabs
         self.initialTab = initialTab
         self.availableTabs = validTabs
+        self.signUpSeedPrimaryColorOption = signUpSeedPrimaryColorOption
+        self.signUpSeedTheme = signUpSeedTheme
         self.onSelectedTabChange = onSelectedTabChange
         let resolvedInitialTab = validTabs.contains(initialTab) ? initialTab : validTabs[0]
         _selectedTab = State(initialValue: resolvedInitialTab)
@@ -57,40 +77,21 @@ struct AuthSheetView: View {
                         },
                         onComplete: {
                             handlePostAuthenticationCompletion()
-                        }
+                        },
+                        initialPrimaryColorOption: resolvedSignUpSeedPrimaryColorOption,
+                        initialThemeOption: resolvedSignUpSeedTheme
                     )
                 } else if selectedTab == .signIn {
                     signInExperience
                 } else {
-                    ZStack {
-                        AppThemeBackgroundView()
-                            .ignoresSafeArea()
-
-                        Form {
-                            if availableTabs.count > 1 {
-                                FlowCapsuleTabBar(
-                                    selection: $selectedTab,
-                                    items: availableTabs,
-                                    title: { $0.rawValue }
-                                )
-                                .listRowBackground(appSettings.themePalette.secondaryGroupedBackground)
-                            }
-
-                            switch selectedTab {
-                            case .signIn:
-                                signInSection
-                            case .signUp:
-                                EmptyView()
-                            case .accounts:
-                                accountsSection
-                            }
-                        }
-                        .scrollContentBackground(.hidden)
-                        .background(Color.clear)
-                    }
+                    accountsExperience
                 }
             }
-            .navigationTitle(selectedTab == .signUp ? "Create Account" : "Account")
+            .navigationTitle(
+                selectedTab == .signUp
+                    ? "Create Account"
+                    : (selectedTab == .accounts ? "Manage Accounts" : "Account")
+            )
             .navigationBarTitleDisplayMode(.inline)
             .toolbar(selectedTab == .signIn ? .hidden : .visible, for: .navigationBar)
             .onChange(of: selectedTab) { _, newValue in
@@ -152,11 +153,14 @@ struct AuthSheetView: View {
     private var signInExperience: some View {
         ZStack {
             signInBackdrop
+                .ignoresSafeArea()
 
             ScrollView(showsIndicators: false) {
                 VStack(spacing: 18) {
+                    Color.clear.frame(height: 24)
+
                     if availableTabs.count > 1 {
-                        signInTabBarCard
+                        authTabBarCard
                     }
 
                     if #available(iOS 26.0, *) {
@@ -171,7 +175,6 @@ struct AuthSheetView: View {
                         }
                     }
 
-                    signInFooterNote
                 }
                 .padding(.horizontal, 20)
                 .padding(.bottom, 48)
@@ -283,33 +286,6 @@ struct AuthSheetView: View {
                 }
                 .buttonStyle(.plain)
             }
-        } footer: {
-            Text("Use private-key sign in to enable posting, reactions, and replies. If your key was backed up before, you can restore it from iCloud here.")
-        }
-    }
-
-    private var signInBackdrop: some View {
-        ZStack {
-            UnicornStudioBackgroundView(
-                source: .bundledJSON("sign_in_background.json"),
-                opacity: 1,
-                backgroundStyle: .clear,
-                allowsInteraction: false
-            )
-            .ignoresSafeArea()
-
-            LinearGradient(
-                colors: [
-                    Color.clear,
-                    Color.clear,
-                    Color.white.opacity(0.02),
-                    Color.black.opacity(0.08),
-                    Color.black.opacity(0.14)
-                ],
-                startPoint: .top,
-                endPoint: .bottom
-            )
-            .ignoresSafeArea()
         }
     }
 
@@ -318,7 +294,7 @@ struct AuthSheetView: View {
         VStack(alignment: .leading, spacing: 14) {
             Text("Sign in with your private key")
                 .font(.footnote.weight(.semibold))
-                .foregroundStyle(authInk.opacity(0.78))
+                .foregroundStyle(Color.white.opacity(0.96))
 
             signInPrivateKeyField
 
@@ -335,12 +311,15 @@ struct AuthSheetView: View {
         .background(authBlurCardBackground(cornerRadius: 28))
     }
 
-    private var signInTabBarCard: some View {
+    private var authTabBarCard: some View {
         Group {
             if #available(iOS 26.0, *) {
                 FlowCapsuleTabBar(
                     selection: $selectedTab,
                     items: availableTabs,
+                    selectedBackground: Color.white.opacity(0.98),
+                    selectedForeground: authInk,
+                    selectedStroke: Color.white.opacity(0.72),
                     title: { $0.rawValue }
                 )
                 .padding(.horizontal, 10)
@@ -350,11 +329,87 @@ struct AuthSheetView: View {
                 FlowCapsuleTabBar(
                     selection: $selectedTab,
                     items: availableTabs,
+                    selectedBackground: Color.white.opacity(0.98),
+                    selectedForeground: authInk,
+                    selectedStroke: Color.white.opacity(0.72),
                     title: { $0.rawValue }
                 )
                 .padding(.horizontal, 10)
                 .padding(.vertical, 10)
                 .background(.ultraThinMaterial, in: Capsule(style: .continuous))
+            }
+        }
+        .frame(maxWidth: .infinity)
+    }
+
+    private var accountsExperience: some View {
+        ZStack {
+            accountsBackdrop
+                .ignoresSafeArea()
+
+            ScrollView(showsIndicators: false) {
+                VStack(alignment: .leading, spacing: 18) {
+                    if availableTabs.count > 1 {
+                        authTabBarCard
+                    }
+
+                    accountsListCard
+
+                    if auth.isLoggedIn {
+                        accountsLogoutCard
+                    }
+                }
+                .frame(maxWidth: 520, alignment: .leading)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 18)
+                .padding(.top, availableTabs.count > 1 ? 76 : 24)
+                .padding(.bottom, 40)
+            }
+        }
+    }
+
+    private var signInBackdrop: some View {
+        authBackdrop(using: signInBackdropArtwork, showsBottomFade: false)
+    }
+
+    private var accountsBackdrop: some View {
+        authBackdrop(using: accountsBackdropArtwork)
+    }
+
+    private func authBackdrop<Artwork: View>(
+        using artwork: Artwork,
+        showsBottomFade: Bool = true
+    ) -> some View {
+        ZStack {
+            artwork
+
+            LinearGradient(
+                colors: showsBottomFade
+                    ? [
+                        Color.black.opacity(colorScheme == .dark ? 0.24 : 0.08),
+                        .clear,
+                        Color.black.opacity(colorScheme == .dark ? 0.22 : 0.10)
+                    ]
+                    : [
+                        Color.black.opacity(colorScheme == .dark ? 0.18 : 0.06),
+                        .clear
+                    ],
+                startPoint: .top,
+                endPoint: .bottom
+            )
+
+            if showsBottomFade {
+                LinearGradient(
+                    stops: [
+                        .init(color: Color.clear, location: 0),
+                        .init(color: appSettings.themePalette.background.opacity(0.18), location: 0.38),
+                        .init(color: appSettings.themePalette.background.opacity(0.52), location: 0.66),
+                        .init(color: appSettings.themePalette.background.opacity(0.82), location: 0.84),
+                        .init(color: appSettings.themePalette.background, location: 1)
+                    ],
+                    startPoint: .top,
+                    endPoint: .bottom
+                )
             }
         }
     }
@@ -371,7 +426,7 @@ struct AuthSheetView: View {
             )
             .overlay {
                 RoundedRectangle(cornerRadius: 18, style: .continuous)
-                    .stroke(Color.white.opacity(colorScheme == .dark ? 0.18 : 0.34), lineWidth: 1.15)
+                    .stroke(authBorderColor(darkOpacity: 0.18), lineWidth: 1.15)
             }
     }
 
@@ -385,15 +440,17 @@ struct AuthSheetView: View {
                         .font(.headline.weight(.semibold))
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 17)
-                        .foregroundStyle(authInk)
+                        .foregroundStyle(signInPrimaryButtonForeground)
                 }
                 .buttonStyle(.plain)
                 .glassEffect(
                     .regular
-                        .tint(Color.white.opacity(0.44))
+                        .tint(signInPrimaryButtonFill)
                         .interactive(),
                     in: Capsule(style: .continuous)
                 )
+                .disabled(!canSubmitSignIn)
+                .opacity(canSubmitSignIn ? 1 : 0.78)
             } else {
                 Button {
                     handleSignIn()
@@ -402,22 +459,25 @@ struct AuthSheetView: View {
                         .font(.headline.weight(.semibold))
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 17)
-                        .foregroundStyle(authPrimaryButtonForeground)
+                        .foregroundStyle(signInPrimaryButtonForeground)
                         .background(
                             Capsule(style: .continuous)
-                                .fill(authPrimaryButtonFill)
+                                .fill(signInPrimaryButtonFill)
                         )
                         .overlay {
                             Capsule(style: .continuous)
-                                .stroke(authPrimaryButtonBorder, lineWidth: 1)
+                                .stroke(signInPrimaryButtonBorder, lineWidth: 1)
                         }
                         .shadow(
-                            color: colorScheme == .light ? Color.black.opacity(0.08) : .clear,
-                            radius: colorScheme == .light ? 10 : 0,
-                            y: colorScheme == .light ? 5 : 0
+                            color: colorScheme == .light && canSubmitSignIn
+                                ? Color.black.opacity(0.08)
+                                : .clear,
+                            radius: colorScheme == .light && canSubmitSignIn ? 10 : 0,
+                            y: colorScheme == .light && canSubmitSignIn ? 5 : 0
                         )
                 }
                 .buttonStyle(.plain)
+                .disabled(!canSubmitSignIn)
             }
         }
     }
@@ -458,20 +518,11 @@ struct AuthSheetView: View {
         }
     }
 
-    private var signInFooterNote: some View {
-        Text("Use private-key sign in to enable posting, reactions, and replies. If your key was backed up before, you can restore it from iCloud here.")
-            .font(.footnote)
-            .foregroundStyle(Color.white.opacity(colorScheme == .dark ? 0.80 : 0.92))
-            .multilineTextAlignment(.center)
-            .padding(.horizontal, 12)
-            .shadow(color: Color.black.opacity(0.18), radius: 10, y: 6)
-    }
-
     private var legacySignInCard: some View {
         VStack(alignment: .leading, spacing: 14) {
             Text("Sign in with your private key")
                 .font(.footnote.weight(.semibold))
-                .foregroundStyle(.secondary)
+                .foregroundStyle(Color.white.opacity(0.96))
 
             signInPrivateKeyField
 
@@ -512,10 +563,41 @@ struct AuthSheetView: View {
             }
             .overlay {
                 shape
-                    .stroke(Color.white.opacity(colorScheme == .dark ? 0.16 : 0.34), lineWidth: 0.9)
+                    .stroke(authBorderColor(darkOpacity: 0.16), lineWidth: 0.9)
             }
             .shadow(
                 color: Color.black.opacity(colorScheme == .dark ? 0.16 : 0.08),
+                radius: colorScheme == .dark ? 20 : 16,
+                y: colorScheme == .dark ? 10 : 8
+            )
+    }
+
+    private func accountsSurfaceBackground(cornerRadius: CGFloat) -> some View {
+        let shape = RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+
+        return shape
+            .fill(.ultraThinMaterial)
+            .overlay {
+                shape
+                    .fill(Color.white.opacity(
+                        colorScheme == .dark
+                            ? ManageAccountsGlassStyle.darkSurfaceWhiteOpacity
+                            : ManageAccountsGlassStyle.lightSurfaceWhiteOpacity
+                    ))
+            }
+            .overlay {
+                shape
+                    .stroke(
+                        authBorderColor(darkOpacity: ManageAccountsGlassStyle.darkBorderWhiteOpacity),
+                        lineWidth: 1.1
+                    )
+            }
+            .shadow(
+                color: Color.black.opacity(
+                    colorScheme == .dark
+                        ? ManageAccountsGlassStyle.darkShadowOpacity
+                        : ManageAccountsGlassStyle.lightShadowOpacity
+                ),
                 radius: colorScheme == .dark ? 20 : 16,
                 y: colorScheme == .dark ? 10 : 8
             )
@@ -530,7 +612,7 @@ struct AuthSheetView: View {
             }
             .overlay {
                 Capsule(style: .continuous)
-                    .stroke(Color.white.opacity(colorScheme == .dark ? 0.16 : 0.32), lineWidth: 0.9)
+                    .stroke(authBorderColor(darkOpacity: 0.16), lineWidth: 0.9)
             }
             .shadow(
                 color: Color.black.opacity(colorScheme == .dark ? 0.14 : 0.06),
@@ -541,6 +623,32 @@ struct AuthSheetView: View {
 
     private var authInk: Color {
         Color(red: 0.06, green: 0.10, blue: 0.18)
+    }
+
+    private var accountsPrimaryTextColor: Color {
+        colorScheme == .dark
+            ? Color.white.opacity(ManageAccountsGlassStyle.primaryTextWhiteOpacity)
+            : authInk
+    }
+
+    private var accountsSecondaryTextColor: Color {
+        colorScheme == .dark
+            ? Color.white.opacity(ManageAccountsGlassStyle.secondaryTextWhiteOpacity)
+            : authInk.opacity(0.62)
+    }
+
+    private var accountsTextShadowColor: Color {
+        colorScheme == .dark
+            ? Color.black.opacity(ManageAccountsGlassStyle.textShadowOpacity)
+            : .clear
+    }
+
+    private var accountsTextShadowRadius: CGFloat {
+        colorScheme == .dark ? 5 : 0
+    }
+
+    private var accountsTextShadowYOffset: CGFloat {
+        colorScheme == .dark ? 2 : 0
     }
 
     private var authPrimaryButtonFill: Color {
@@ -555,6 +663,41 @@ struct AuthSheetView: View {
         colorScheme == .dark ? Color.white.opacity(0.08) : authInk.opacity(0.16)
     }
 
+    private var normalizedPrivateKeyInput: String {
+        privateKeyInput.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private var canSubmitSignIn: Bool {
+        !normalizedPrivateKeyInput.isEmpty
+    }
+
+    private var signInAccentColor: Color {
+        resolvedSignUpSeedPrimaryColorOption.color
+    }
+
+    private var signInPrimaryButtonFill: Color {
+        signInAccentColor.opacity(canSubmitSignIn ? 0.96 : 0.42)
+    }
+
+    private var signInPrimaryButtonForeground: Color {
+        let resolved = UIColor(signInAccentColor)
+            .resolvedColor(with: UITraitCollection(userInterfaceStyle: .light))
+        var red: CGFloat = 0
+        var green: CGFloat = 0
+        var blue: CGFloat = 0
+        var alpha: CGFloat = 0
+        guard resolved.getRed(&red, green: &green, blue: &blue, alpha: &alpha) else {
+            return .white
+        }
+        let luminance = (0.299 * red) + (0.587 * green) + (0.114 * blue)
+        let baseForeground: Color = luminance > 0.68 ? .black : .white
+        return baseForeground.opacity(canSubmitSignIn ? 1 : 0.74)
+    }
+
+    private var signInPrimaryButtonBorder: Color {
+        signInAccentColor.opacity(canSubmitSignIn ? 0.20 : 0.14)
+    }
+
     private var closeButtonForeground: Color {
         colorScheme == .dark ? .white.opacity(0.92) : authInk
     }
@@ -564,7 +707,7 @@ struct AuthSheetView: View {
     }
 
     private var closeButtonBorder: Color {
-        appSettings.themePalette.separator.opacity(colorScheme == .dark ? 0.92 : 0.72)
+        colorScheme == .dark ? appSettings.themePalette.separator.opacity(0.92) : Color.black.opacity(0.04)
     }
 
     private var closeToolbarButton: some View {
@@ -573,108 +716,249 @@ struct AuthSheetView: View {
                 Button {
                     dismiss()
                 } label: {
-                    Text("Close")
-                        .font(.subheadline.weight(.semibold))
+                    Image(systemName: "xmark")
+                        .font(.system(size: 14, weight: .bold))
                         .foregroundStyle(authInk)
-                        .padding(.horizontal, 14)
-                        .padding(.vertical, 10)
+                        .frame(width: 36, height: 36)
                 }
                 .buttonStyle(.plain)
                 .glassEffect(
                     .regular
                         .tint(Color.white.opacity(0.22))
                         .interactive(),
-                    in: Capsule(style: .continuous)
+                    in: Circle()
                 )
             } else {
                 Button {
                     dismiss()
                 } label: {
-                    Text("Close")
-                        .font(.subheadline.weight(.semibold))
+                    Image(systemName: "xmark")
+                        .font(.system(size: 14, weight: .bold))
                         .foregroundStyle(closeButtonForeground)
-                        .padding(.horizontal, 14)
-                        .padding(.vertical, 10)
-                        .background(closeButtonBackground, in: Capsule(style: .continuous))
+                        .frame(width: 36, height: 36)
+                        .background(closeButtonBackground, in: Circle())
                         .overlay {
-                            Capsule(style: .continuous)
+                            Circle()
                                 .stroke(closeButtonBorder, lineWidth: 1)
                         }
                 }
                 .buttonStyle(.plain)
             }
         }
+        .accessibilityLabel("Close")
     }
 
     @ViewBuilder
-    private var accountsSection: some View {
-        Section {
-            if auth.accounts.isEmpty {
-                Text("No saved accounts yet.")
-                    .foregroundStyle(appSettings.themePalette.mutedForeground)
-                    .listRowBackground(appSettings.themePalette.secondaryGroupedBackground)
-            } else {
-                ForEach(auth.accounts) { account in
-                    HStack(spacing: 12) {
-                        Button {
-                            auth.switchAccount(to: account)
-                        } label: {
-                            HStack(spacing: 12) {
-                                accountAvatar(for: account)
-
-                                VStack(alignment: .leading, spacing: 2) {
-                                    Text(accountDisplayName(for: account))
-                                        .font(.body.weight(.semibold))
-                                        .foregroundStyle(.primary)
-                                        .lineLimit(1)
-                                    if let handle = accountHandle(for: account) {
-                                        Text(handle)
-                                            .font(.caption)
-                                            .foregroundStyle(appSettings.themePalette.mutedForeground)
-                                            .lineLimit(1)
-                                    }
-                                    Text(accountBackupLabel(for: account))
-                                        .font(.caption2)
-                                        .foregroundStyle(appSettings.themePalette.mutedForeground)
-                                }
-                                Spacer()
-                                if auth.currentAccount?.id == account.id {
-                                    Image(systemName: "checkmark.circle.fill")
-                                        .foregroundStyle(appSettings.primaryColor)
-                                }
-                            }
-                        }
-                        .buttonStyle(.plain)
-
-                        Button(role: .destructive) {
-                            pendingAccountRemoval = account
-                        } label: {
-                            Image(systemName: "minus.circle")
-                                .font(.title3)
-                                .foregroundStyle(.red)
-                        }
-                        .buttonStyle(.plain)
-                        .accessibilityLabel("Remove account")
-                    }
-                    .listRowBackground(appSettings.themePalette.secondaryGroupedBackground)
-                }
-            }
-        }
-
-        if auth.isLoggedIn {
-            Section {
-                Button("Log Out", role: .destructive) {
-                    auth.logout()
-                }
-            }
-            .listRowBackground(appSettings.themePalette.secondaryGroupedBackground)
+    private var signInBackdropArtwork: some View {
+        if appSettings.textOnlyMode {
+            authBackdropFallbackArtwork
+        } else {
+            Image("signin-background")
+                .resizable()
+                .scaledToFill()
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+                .clipped()
         }
     }
 
+    @ViewBuilder
+    private var accountsBackdropArtwork: some View {
+        if appSettings.textOnlyMode {
+            authBackdropFallbackArtwork
+        } else {
+            Image("manage-accounts-background")
+                .resizable()
+                .scaledToFill()
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+                .clipped()
+        }
+    }
+
+    private var authBackdropFallbackArtwork: some View {
+        ZStack {
+            Rectangle()
+                .fill(appSettings.primaryGradient)
+                .opacity(appSettings.usesPrimaryGradientForProminentButtons ? 0.96 : 0.84)
+                .background(appSettings.themePalette.secondaryBackground)
+
+            Circle()
+                .fill(Color.white.opacity(appSettings.usesPrimaryGradientForProminentButtons ? 0.34 : 0.18))
+                .frame(width: 170, height: 170)
+                .blur(radius: 20)
+                .offset(x: 124, y: -44)
+
+            Circle()
+                .fill(appSettings.primaryColor.opacity(0.24))
+                .frame(width: 190, height: 190)
+                .blur(radius: 28)
+                .offset(x: -138, y: 54)
+        }
+    }
+
+    private var accountsListCard: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            if auth.accounts.isEmpty {
+                Text("Your saved accounts will show up here.")
+                    .font(.footnote)
+                    .foregroundStyle(accountsSecondaryTextColor)
+                    .shadow(
+                        color: accountsTextShadowColor,
+                        radius: accountsTextShadowRadius,
+                        y: accountsTextShadowYOffset
+                    )
+                    .padding(.horizontal, 18)
+                    .padding(.vertical, 18)
+            } else {
+                ForEach(Array(auth.accounts.enumerated()), id: \.element.id) { index, account in
+                    accountRow(for: account)
+
+                    if index < auth.accounts.count - 1 {
+                        Divider()
+                            .padding(.leading, 82)
+                            .padding(.trailing, 18)
+                    }
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(accountsSurfaceBackground(cornerRadius: 28))
+    }
+
+    private func accountRow(for account: AuthAccount) -> some View {
+        HStack(spacing: 14) {
+            Button {
+                auth.switchAccount(to: account)
+            } label: {
+                HStack(spacing: 14) {
+                    accountAvatar(for: account, size: 50)
+
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(accountDisplayName(for: account))
+                            .font(.body.weight(.semibold))
+                            .foregroundStyle(accountsPrimaryTextColor)
+                            .lineLimit(1)
+
+                        if let handle = accountHandle(for: account) {
+                            Text(handle)
+                                .font(.caption)
+                                .foregroundStyle(accountsSecondaryTextColor)
+                                .lineLimit(1)
+                        }
+
+                        Text(accountBackupLabel(for: account))
+                            .font(.caption2)
+                            .foregroundStyle(accountsSecondaryTextColor)
+                            .lineLimit(2)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .shadow(
+                        color: accountsTextShadowColor,
+                        radius: accountsTextShadowRadius,
+                        y: accountsTextShadowYOffset
+                    )
+
+                    Spacer(minLength: 0)
+
+                    if auth.currentAccount?.id == account.id {
+                        Image(systemName: "checkmark.circle.fill")
+                            .font(.title3.weight(.semibold))
+                            .foregroundStyle(accountsPrimaryTextColor)
+                            .shadow(
+                                color: accountsTextShadowColor,
+                                radius: 8,
+                                y: 3
+                            )
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .buttonStyle(.plain)
+            .frame(maxWidth: .infinity, alignment: .leading)
+
+            accountDeleteButton(for: account)
+        }
+        .padding(.horizontal, 18)
+        .padding(.vertical, 14)
+    }
+
+    @ViewBuilder
+    private func accountDeleteButton(for account: AuthAccount) -> some View {
+        let label = Image(systemName: "minus")
+            .font(.system(size: 14, weight: .bold))
+            .foregroundStyle(Color.white.opacity(ManageAccountsGlassStyle.primaryTextWhiteOpacity))
+            .shadow(
+                color: accountsTextShadowColor,
+                radius: accountsTextShadowRadius,
+                y: accountsTextShadowYOffset
+            )
+            .frame(width: 38, height: 38)
+            .overlay {
+                Circle()
+                    .stroke(
+                        authBorderColor(darkOpacity: ManageAccountsGlassStyle.darkBorderWhiteOpacity),
+                        lineWidth: 0.95
+                    )
+            }
+
+        if #available(iOS 26.0, *) {
+            Button(role: .destructive) {
+                pendingAccountRemoval = account
+            } label: {
+                label
+            }
+            .buttonStyle(.plain)
+            .glassEffect(
+                .regular
+                    .tint(Color.white.opacity(ManageAccountsGlassStyle.controlWhiteTintOpacity))
+                    .interactive(),
+                in: Circle()
+            )
+            .accessibilityLabel("Remove account")
+        } else {
+            Button(role: .destructive) {
+                pendingAccountRemoval = account
+            } label: {
+                label
+                    .background(
+                        Circle()
+                            .fill(.ultraThinMaterial)
+                            .overlay {
+                                Circle()
+                                    .fill(Color.white.opacity(
+                                        colorScheme == .dark
+                                            ? ManageAccountsGlassStyle.legacyControlWhiteTintDarkOpacity
+                                            : 0.10
+                                    ))
+                            }
+                    )
+            }
+            .buttonStyle(.plain)
+            .shadow(
+                color: Color.black.opacity(colorScheme == .dark ? 0.12 : 0.06),
+                radius: colorScheme == .dark ? 16 : 12,
+                y: colorScheme == .dark ? 8 : 6
+            )
+            .accessibilityLabel("Remove account")
+        }
+    }
+
+    private var accountsLogoutCard: some View {
+        Button("Log Out", role: .destructive) {
+            auth.logout()
+        }
+        .font(.headline.weight(.semibold))
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 16)
+        .background(accountsSurfaceBackground(cornerRadius: 24))
+        .buttonStyle(.plain)
+    }
+
     private func handleSignIn() {
+        guard canSubmitSignIn else { return }
         signInError = nil
         do {
-            _ = try auth.loginWithNsecOrHex(privateKeyInput)
+            _ = try auth.loginWithNsecOrHex(normalizedPrivateKeyInput)
             privateKeyInput = ""
             handlePostAuthenticationCompletion()
         } catch {
@@ -737,6 +1021,20 @@ struct AuthSheetView: View {
         accountProfiles[account.pubkey.lowercased()]
     }
 
+    private func authBorderColor(darkOpacity: Double) -> Color {
+        colorScheme == .dark
+            ? Color.white.opacity(darkOpacity)
+            : Color.black.opacity(ManageAccountsGlassStyle.lightBorderBlackOpacity)
+    }
+
+    private var resolvedSignUpSeedPrimaryColorOption: AppPrimaryColorOption {
+        auth.currentAccount == nil ? signUpSeedPrimaryColorOption : appSettings.primaryColorOption
+    }
+
+    private var resolvedSignUpSeedTheme: AppThemeOption {
+        auth.currentAccount == nil ? signUpSeedTheme : appSettings.theme
+    }
+
     private func accountDisplayName(for account: AuthAccount) -> String {
         if let profile = profile(for: account) {
             if let displayName = normalized(profile.displayName), !displayName.isEmpty {
@@ -783,7 +1081,7 @@ struct AuthSheetView: View {
     }
 
     @ViewBuilder
-    private func accountAvatar(for account: AuthAccount) -> some View {
+    private func accountAvatar(for account: AuthAccount, size: CGFloat = 42) -> some View {
         let fallbackName = accountDisplayName(for: account)
         if let avatarURL = avatarURL(for: account) {
             CachedAsyncImage(url: avatarURL, kind: .avatar) { phase in
@@ -796,21 +1094,21 @@ struct AuthSheetView: View {
                     accountAvatarFallback(name: fallbackName, account: account)
                 }
             }
-            .frame(width: 42, height: 42)
+            .frame(width: size, height: size)
             .clipShape(Circle())
         } else {
-            accountAvatarFallback(name: fallbackName, account: account)
+            accountAvatarFallback(name: fallbackName, account: account, size: size)
         }
     }
 
-    private func accountAvatarFallback(name: String, account: AuthAccount) -> some View {
+    private func accountAvatarFallback(name: String, account: AuthAccount, size: CGFloat = 42) -> some View {
         ZStack {
             Circle()
                 .fill(appSettings.avatarFallbackGradient(forAccountPubkey: account.pubkey))
             Text(String(name.prefix(1)).uppercased())
-                .font(.subheadline.weight(.semibold))
+                .font(.system(size: max(16, size * 0.34), weight: .semibold))
                 .foregroundStyle(appSettings.avatarFallbackForeground(forAccountPubkey: account.pubkey))
         }
-        .frame(width: 42, height: 42)
+        .frame(width: size, height: size)
     }
 }

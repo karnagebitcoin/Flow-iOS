@@ -172,6 +172,14 @@ final class FlowLayoutGuardrailsTests: XCTestCase {
         XCTAssertEqual(BreakReminderChoiceLayout.takeBreakCloseDelay, 4, accuracy: 0.0001)
     }
 
+    func testManageAccountsGlassUsesWhiteTintWithReadableText() {
+        XCTAssertGreaterThanOrEqual(ManageAccountsGlassStyle.darkSurfaceWhiteOpacity, 0.28)
+        XCTAssertGreaterThanOrEqual(ManageAccountsGlassStyle.darkBorderWhiteOpacity, 0.24)
+        XCTAssertGreaterThanOrEqual(ManageAccountsGlassStyle.primaryTextWhiteOpacity, 0.94)
+        XCTAssertGreaterThanOrEqual(ManageAccountsGlassStyle.secondaryTextWhiteOpacity, 0.76)
+        XCTAssertGreaterThan(ManageAccountsGlassStyle.textShadowOpacity, 0)
+    }
+
     func testProfileFollowingCountTextDoesNotShowZeroBeforeRemoteCountResolves() {
         XCTAssertEqual(
             ProfileViewLayout.followingCountText(
