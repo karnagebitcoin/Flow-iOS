@@ -1947,7 +1947,7 @@ private actor NoteVideoAspectRatioCache {
 
 actor NoteShortMP4LoopPolicy {
     static let shared = NoteShortMP4LoopPolicy()
-    static let maximumLoopingDurationSeconds: TimeInterval = 15
+    static let maximumLoopingDurationSeconds: TimeInterval = 4
 
     private var cachedDecisions: [URL: Bool] = [:]
     private var inFlight: [URL: Task<Bool, Never>] = [:]

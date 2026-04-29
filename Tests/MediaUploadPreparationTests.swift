@@ -77,6 +77,10 @@ final class MediaUploadPreparationTests: XCTestCase {
         XCTAssertFalse(NoteShortMP4LoopPolicy.isCandidateURL(movURL))
     }
 
+    func testShortMP4LoopPolicyCapsGIFLikePlaybackAtFourSeconds() {
+        XCTAssertEqual(NoteShortMP4LoopPolicy.maximumLoopingDurationSeconds, 4, accuracy: 0.0001)
+    }
+
     func testPrepareGIFKeyboardUploadMediaKeepsStaticGIFAsGIF() async throws {
         let staticGIFData = Data(
             base64Encoded: "R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw=="
