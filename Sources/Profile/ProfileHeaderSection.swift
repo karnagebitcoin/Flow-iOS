@@ -51,6 +51,62 @@ enum ProfileHeaderLayoutGuardrails {
     }
 }
 
+enum ProfileHeaderEntranceElement {
+    case avatar
+    case identity
+}
+
+struct ProfileHeaderEntrancePresentation: Equatable {
+    let yOffset: CGFloat
+    let scale: CGFloat
+    let opacity: Double
+}
+
+enum ProfileHeaderEntranceMotion {
+    static func springResponse(for element: ProfileHeaderEntranceElement) -> Double {
+        switch element {
+        case .avatar:
+            0.62
+        case .identity:
+            0.46
+        }
+    }
+
+    static func dampingFraction(for element: ProfileHeaderEntranceElement) -> Double {
+        switch element {
+        case .avatar:
+            0.8
+        case .identity:
+            0.88
+        }
+    }
+
+    static func presentation(
+        for element: ProfileHeaderEntranceElement,
+        isSettled: Bool,
+        reduceMotion: Bool
+    ) -> ProfileHeaderEntrancePresentation {
+        guard !reduceMotion, !isSettled else {
+            return ProfileHeaderEntrancePresentation(yOffset: 0, scale: 1, opacity: 1)
+        }
+
+        switch element {
+        case .avatar:
+            return ProfileHeaderEntrancePresentation(yOffset: 18, scale: 0.9, opacity: 0.86)
+        case .identity:
+            return ProfileHeaderEntrancePresentation(yOffset: 8, scale: 0.98, opacity: 0.78)
+        }
+    }
+
+    static func animation(for element: ProfileHeaderEntranceElement, reduceMotion: Bool) -> Animation? {
+        guard !reduceMotion else { return nil }
+        return .spring(
+            response: springResponse(for: element),
+            dampingFraction: dampingFraction(for: element)
+        )
+    }
+}
+
 struct ProfileHeaderContent {
     let displayName: String
     let handle: String
@@ -92,6 +148,10 @@ struct ProfileHeaderSection<BackButton: View, MenuButton: View, ActionRow: View>
     private let actionRow: ActionRow
 
     @EnvironmentObject private var appSettings: AppSettingsStore
+    @Environment(\.accessibilityReduceMotion) private var accessibilityReduceMotion
+
+    @State private var entranceSettled = false
+    @State private var entranceContentID: String?
 
     init(
         isLoading: Bool,
@@ -152,6 +212,13 @@ struct ProfileHeaderSection<BackButton: View, MenuButton: View, ActionRow: View>
                         avatarURL: content.avatarURL,
                         onTap: onAvatarTap
                     )
+                    .modifier(
+                        ProfileHeaderEntranceModifier(
+                            element: .avatar,
+                            isSettled: entranceSettled,
+                            reduceMotion: accessibilityReduceMotion
+                        )
+                    )
 
                     actionRow
                 }
@@ -164,6 +231,13 @@ struct ProfileHeaderSection<BackButton: View, MenuButton: View, ActionRow: View>
                     followsCurrentUser: content.followsCurrentUser,
                     followingCountText: content.followingCountText,
                     onFollowingTap: onFollowingTap
+                )
+                .modifier(
+                    ProfileHeaderEntranceModifier(
+                        element: .identity,
+                        isSettled: entranceSettled,
+                        reduceMotion: accessibilityReduceMotion
+                    )
                 )
 
                 if let about = content.about, !about.isEmpty {
@@ -197,6 +271,67 @@ struct ProfileHeaderSection<BackButton: View, MenuButton: View, ActionRow: View>
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.bottom, 8)
+        .onAppear {
+            startEntranceIfNeeded(for: loadedContentEntranceID)
+        }
+        .onChange(of: loadedContentEntranceID) { _, newValue in
+            startEntranceIfNeeded(for: newValue)
+        }
+    }
+
+    private var loadedContentEntranceID: String {
+        [
+            content.displayName,
+            content.handle,
+            content.avatarURL?.absoluteString ?? ""
+        ].joined(separator: "|")
+    }
+
+    private func startEntranceIfNeeded(for contentID: String) {
+        guard entranceContentID != contentID else { return }
+        entranceContentID = contentID
+
+        if accessibilityReduceMotion {
+            entranceSettled = true
+            return
+        }
+
+        var resetTransaction = Transaction()
+        resetTransaction.disablesAnimations = true
+        withTransaction(resetTransaction) {
+            entranceSettled = false
+        }
+
+        Task { @MainActor in
+            await Task.yield()
+            entranceSettled = true
+        }
+    }
+}
+
+private struct ProfileHeaderEntranceModifier: ViewModifier {
+    let element: ProfileHeaderEntranceElement
+    let isSettled: Bool
+    let reduceMotion: Bool
+
+    func body(content: Content) -> some View {
+        let presentation = ProfileHeaderEntranceMotion.presentation(
+            for: element,
+            isSettled: isSettled,
+            reduceMotion: reduceMotion
+        )
+
+        content
+            .scaleEffect(presentation.scale, anchor: .center)
+            .offset(y: presentation.yOffset)
+            .opacity(presentation.opacity)
+            .animation(
+                ProfileHeaderEntranceMotion.animation(
+                    for: element,
+                    reduceMotion: reduceMotion
+                ),
+                value: isSettled
+            )
     }
 }
 

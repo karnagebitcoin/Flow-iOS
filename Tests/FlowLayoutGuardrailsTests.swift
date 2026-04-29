@@ -155,6 +155,35 @@ final class FlowLayoutGuardrailsTests: XCTestCase {
         )
     }
 
+    func testProfileHeaderEntranceMotionSettlesAvatarAndIdentityAtDifferentSpeeds() {
+        XCTAssertGreaterThan(
+            ProfileHeaderEntranceMotion.springResponse(for: .avatar),
+            ProfileHeaderEntranceMotion.springResponse(for: .identity)
+        )
+
+        let avatarStart = ProfileHeaderEntranceMotion.presentation(
+            for: .avatar,
+            isSettled: false,
+            reduceMotion: false
+        )
+        let identityStart = ProfileHeaderEntranceMotion.presentation(
+            for: .identity,
+            isSettled: false,
+            reduceMotion: false
+        )
+        let avatarReducedMotion = ProfileHeaderEntranceMotion.presentation(
+            for: .avatar,
+            isSettled: false,
+            reduceMotion: true
+        )
+
+        XCTAssertGreaterThan(avatarStart.yOffset, identityStart.yOffset)
+        XCTAssertLessThan(avatarStart.scale, identityStart.scale)
+        XCTAssertEqual(avatarReducedMotion.yOffset, 0, accuracy: 0.0001)
+        XCTAssertEqual(avatarReducedMotion.scale, 1, accuracy: 0.0001)
+        XCTAssertEqual(avatarReducedMotion.opacity, 1, accuracy: 0.0001)
+    }
+
     func testComposeToolbarUsesCompactThemeAwareControls() {
         XCTAssertEqual(ComposeToolbarLayout.cancelButtonFontWeight, ComposeToolbarLayout.publishButtonFontWeight)
         XCTAssertEqual(ComposeToolbarLayout.cancelButtonFontWeight, .semibold)
