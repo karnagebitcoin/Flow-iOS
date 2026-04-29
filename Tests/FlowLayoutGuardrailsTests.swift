@@ -244,10 +244,13 @@ final class FlowLayoutGuardrailsTests: XCTestCase {
     }
 
     func testManageAccountsGlassUsesWhiteTintWithReadableText() {
-        XCTAssertGreaterThanOrEqual(ManageAccountsGlassStyle.darkSurfaceWhiteOpacity, 0.28)
+        XCTAssertGreaterThanOrEqual(ManageAccountsGlassStyle.darkSurfaceWhiteOpacity, 0.44)
+        XCTAssertGreaterThanOrEqual(ManageAccountsGlassStyle.lightSurfaceWhiteOpacity, 0.86)
         XCTAssertGreaterThanOrEqual(ManageAccountsGlassStyle.darkBorderWhiteOpacity, 0.24)
         XCTAssertGreaterThanOrEqual(ManageAccountsGlassStyle.primaryTextWhiteOpacity, 0.94)
         XCTAssertGreaterThanOrEqual(ManageAccountsGlassStyle.secondaryTextWhiteOpacity, 0.76)
+        XCTAssertGreaterThanOrEqual(ManageAccountsGlassStyle.controlWhiteTintOpacity, 0.42)
+        XCTAssertTrue(ManageAccountsGlassStyle.deleteIconUsesPrimaryTextColor)
         XCTAssertGreaterThan(ManageAccountsGlassStyle.textShadowOpacity, 0)
     }
 

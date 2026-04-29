@@ -10,8 +10,8 @@ enum AuthSheetTab: String, CaseIterable, Identifiable {
 }
 
 enum ManageAccountsGlassStyle {
-    static let darkSurfaceWhiteOpacity: Double = 0.34
-    static let lightSurfaceWhiteOpacity: Double = 0.76
+    static let darkSurfaceWhiteOpacity: Double = 0.46
+    static let lightSurfaceWhiteOpacity: Double = 0.88
     static let darkBorderWhiteOpacity: Double = 0.28
     static let lightBorderBlackOpacity: Double = 0.04
     static let primaryTextWhiteOpacity: Double = 0.96
@@ -19,8 +19,9 @@ enum ManageAccountsGlassStyle {
     static let textShadowOpacity: Double = 0.24
     static let darkShadowOpacity: Double = 0.18
     static let lightShadowOpacity: Double = 0.08
-    static let controlWhiteTintOpacity: Double = 0.30
+    static let controlWhiteTintOpacity: Double = 0.44
     static let legacyControlWhiteTintDarkOpacity: Double = 0.18
+    static let deleteIconUsesPrimaryTextColor = true
 }
 
 enum ManageAccountSwitchMotion {
@@ -449,7 +450,7 @@ struct AuthSheetView: View {
                 )
                 .padding(.horizontal, AuthSheetChromeLayout.tabCardHorizontalPadding)
                 .padding(.vertical, AuthSheetChromeLayout.tabCardVerticalPadding)
-                .background(authBlurCapsuleBackground)
+                .background(authTabBarBackground)
             } else {
                 FlowCapsuleTabBar(
                     selection: $selectedTab,
@@ -461,7 +462,7 @@ struct AuthSheetView: View {
                 )
                 .padding(.horizontal, AuthSheetChromeLayout.tabCardHorizontalPadding)
                 .padding(.vertical, AuthSheetChromeLayout.tabCardVerticalPadding)
-                .background(.ultraThinMaterial, in: Capsule(style: .continuous))
+                .background(authTabBarBackground)
             }
         }
         .frame(maxWidth: .infinity)
@@ -762,6 +763,45 @@ struct AuthSheetView: View {
             )
     }
 
+    private var authTabBarBackground: some View {
+        Group {
+            if selectedTab == .accounts {
+                accountsCapsuleBackground
+            } else {
+                authBlurCapsuleBackground
+            }
+        }
+    }
+
+    private var accountsCapsuleBackground: some View {
+        Capsule(style: .continuous)
+            .fill(.ultraThinMaterial)
+            .overlay {
+                Capsule(style: .continuous)
+                    .fill(Color.white.opacity(
+                        colorScheme == .dark
+                            ? ManageAccountsGlassStyle.darkSurfaceWhiteOpacity
+                            : ManageAccountsGlassStyle.lightSurfaceWhiteOpacity
+                    ))
+            }
+            .overlay {
+                Capsule(style: .continuous)
+                    .stroke(
+                        authBorderColor(darkOpacity: ManageAccountsGlassStyle.darkBorderWhiteOpacity),
+                        lineWidth: 1.1
+                    )
+            }
+            .shadow(
+                color: Color.black.opacity(
+                    colorScheme == .dark
+                        ? ManageAccountsGlassStyle.darkShadowOpacity
+                        : ManageAccountsGlassStyle.lightShadowOpacity
+                ),
+                radius: colorScheme == .dark ? 20 : 16,
+                y: colorScheme == .dark ? 10 : 8
+            )
+    }
+
     private var authInk: Color {
         Color(red: 0.06, green: 0.10, blue: 0.18)
     }
@@ -957,7 +997,7 @@ struct AuthSheetView: View {
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(authBlurCardBackground(cornerRadius: 28))
+        .background(accountsSurfaceBackground(cornerRadius: 28))
     }
 
     private func accountRow(for account: AuthAccount) -> some View {
@@ -1110,7 +1150,7 @@ struct AuthSheetView: View {
     private func accountDeleteButton(for account: AuthAccount) -> some View {
         let label = Image(systemName: "minus")
             .font(.system(size: 14, weight: .bold))
-            .foregroundStyle(Color.white.opacity(ManageAccountsGlassStyle.primaryTextWhiteOpacity))
+            .foregroundStyle(accountsPrimaryTextColor)
             .shadow(
                 color: accountsTextShadowColor,
                 radius: accountsTextShadowRadius,
