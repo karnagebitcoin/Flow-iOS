@@ -68,6 +68,61 @@ enum WelcomeScratchRevealLayout {
     }
 }
 
+struct WelcomeScratchHeartBurstParticle: Identifiable, Equatable {
+    let id = UUID()
+    let emoji: String
+    let xDrift: CGFloat
+    let yTravel: CGFloat
+    let sway: CGFloat
+    let rotation: Double
+    let startScale: CGFloat
+    let endScale: CGFloat
+    let size: CGFloat
+    let duration: Double
+    let delay: Double
+    let opacity: Double
+    let blur: CGFloat
+    let bottomLift: CGFloat
+}
+
+enum WelcomeScratchHeartBurstLayout {
+    static let particleCount = 22
+    static let heartEmojis = ["❤️", "🩷", "💕", "💖"]
+
+    static func particles(in viewportSize: CGSize) -> [WelcomeScratchHeartBurstParticle] {
+        let width = max(viewportSize.width, 1)
+        let height = max(viewportSize.height, 1)
+        let count = max(particleCount, 1)
+
+        return (0..<count).map { index in
+            let progress = CGFloat(index) / CGFloat(max(count - 1, 1))
+            let wave = CGFloat(sin(Double(index) * 1.71))
+            let counterWave = CGFloat(cos(Double(index) * 0.83))
+            let sideBias: CGFloat = index.isMultiple(of: 2) ? -0.05 : 0.05
+            let yTravel = min(
+                max(height * (0.51 + counterWave * 0.035), height * 0.44),
+                height * 0.58
+            )
+
+            return WelcomeScratchHeartBurstParticle(
+                emoji: heartEmojis[index % heartEmojis.count],
+                xDrift: width * ((wave * 0.23) + ((progress - 0.5) * 0.1) + sideBias),
+                yTravel: yTravel,
+                sway: width * CGFloat(sin(Double(index) * 0.47)) * 0.05,
+                rotation: Double(sin(Double(index) * 0.69)) * 28,
+                startScale: 0.42 + CGFloat(index % 4) * 0.04,
+                endScale: 1.02 + CGFloat(index % 5) * 0.09,
+                size: 24 + CGFloat(index % 6) * 3,
+                duration: 1.15 + Double(index % 7) * 0.055,
+                delay: Double(index) * 0.018,
+                opacity: 0.78 + Double(index % 5) * 0.035,
+                blur: 0.5 + CGFloat(index % 4) * 0.22,
+                bottomLift: 38 + CGFloat(index % 5) * 4
+            )
+        }
+    }
+}
+
 struct WelcomeScratchProgressGrid: Equatable {
     private let columns: Int
     private let rows: Int
@@ -143,6 +198,7 @@ struct WelcomeScratchRevealBackgroundView: View {
     @State private var activeStroke: [CGPoint] = []
     @State private var progressGrid = WelcomeScratchProgressGrid()
     @State private var isAdvancingLayer = false
+    @State private var heartBurstTrigger = 0
 
     init(initialArtwork: WelcomeArtwork, overlayOpacity: Double = 0.22) {
         self.initialArtwork = initialArtwork
@@ -169,6 +225,11 @@ struct WelcomeScratchRevealBackgroundView: View {
                         lineWidth: WelcomeScratchRevealLayout.brushLineWidth
                     )
                 }
+
+                WelcomeScratchHeartBurstOverlay(
+                    trigger: heartBurstTrigger,
+                    reduceMotion: reduceMotion
+                )
             }
             .contentShape(Rectangle())
             .gesture(scratchGesture(in: geometry.size))
@@ -235,6 +296,9 @@ struct WelcomeScratchRevealBackgroundView: View {
 
     private func advanceLayer() {
         isAdvancingLayer = true
+        if !reduceMotion {
+            heartBurstTrigger += 1
+        }
 
         let applyAdvance = {
             currentArtwork = nextArtwork
@@ -255,6 +319,85 @@ struct WelcomeScratchRevealBackgroundView: View {
         completedStrokeBatches = []
         activeStroke = []
         progressGrid = WelcomeScratchProgressGrid()
+    }
+}
+
+private struct WelcomeScratchHeartBurstOverlay: View {
+    let trigger: Int
+    let reduceMotion: Bool
+
+    @State private var particles: [WelcomeScratchHeartBurstParticle] = []
+
+    var body: some View {
+        GeometryReader { geometry in
+            ZStack(alignment: .bottom) {
+                ForEach(particles) { particle in
+                    WelcomeScratchHeartParticleView(particle: particle)
+                }
+            }
+            .frame(width: geometry.size.width, height: geometry.size.height, alignment: .bottom)
+            .onChange(of: trigger) { _, _ in
+                emitBurst(in: geometry.size)
+            }
+        }
+        .allowsHitTesting(false)
+        .accessibilityHidden(true)
+    }
+
+    @MainActor
+    private func emitBurst(in size: CGSize) {
+        guard !reduceMotion else { return }
+
+        let freshParticles = WelcomeScratchHeartBurstLayout.particles(in: size)
+        particles.append(contentsOf: freshParticles)
+
+        for particle in freshParticles {
+            Task {
+                let lifetime = UInt64((particle.delay + particle.duration + 0.3) * 1_000_000_000)
+                try? await Task.sleep(nanoseconds: lifetime)
+                await MainActor.run {
+                    particles.removeAll { $0.id == particle.id }
+                }
+            }
+        }
+    }
+}
+
+private struct WelcomeScratchHeartParticleView: View {
+    let particle: WelcomeScratchHeartBurstParticle
+
+    @State private var isVisible = false
+    @State private var isAnimating = false
+
+    var body: some View {
+        Text(particle.emoji)
+            .font(.system(size: particle.size))
+            .opacity(isVisible ? (isAnimating ? 0 : particle.opacity) : 0)
+            .scaleEffect(isAnimating ? particle.endScale : particle.startScale)
+            .offset(
+                x: isAnimating ? particle.xDrift + particle.sway : 0,
+                y: isAnimating ? -(particle.yTravel + particle.bottomLift) : -particle.bottomLift
+            )
+            .rotationEffect(.degrees(isAnimating ? particle.rotation : particle.rotation * 0.18))
+            .blur(radius: isAnimating ? particle.blur : 0)
+            .shadow(color: Color.black.opacity(0.18), radius: 8, x: 0, y: 5)
+            .onAppear {
+                Task {
+                    if particle.delay > 0 {
+                        let delay = UInt64(particle.delay * 1_000_000_000)
+                        try? await Task.sleep(nanoseconds: delay)
+                    }
+                    await MainActor.run {
+                        isVisible = true
+                    }
+                    await Task.yield()
+                    await MainActor.run {
+                        withAnimation(.easeOut(duration: particle.duration)) {
+                            isAnimating = true
+                        }
+                    }
+                }
+            }
     }
 }
 

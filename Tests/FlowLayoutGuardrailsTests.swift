@@ -293,6 +293,20 @@ final class FlowLayoutGuardrailsTests: XCTestCase {
         )
     }
 
+    func testWelcomeScratchHeartBurstTravelsFromBottomTowardPageMiddle() {
+        let viewportSize = CGSize(width: 390, height: 844)
+        let particles = WelcomeScratchHeartBurstLayout.particles(in: viewportSize)
+
+        XCTAssertEqual(particles.count, WelcomeScratchHeartBurstLayout.particleCount)
+        XCTAssertTrue(particles.allSatisfy { WelcomeScratchHeartBurstLayout.heartEmojis.contains($0.emoji) })
+        XCTAssertTrue(particles.allSatisfy { $0.bottomLift >= 36 })
+        XCTAssertTrue(particles.allSatisfy { $0.yTravel >= viewportSize.height * 0.44 })
+        XCTAssertTrue(particles.allSatisfy { $0.yTravel <= viewportSize.height * 0.58 })
+        XCTAssertTrue(particles.allSatisfy { abs($0.xDrift) <= viewportSize.width * 0.34 })
+        XCTAssertTrue(particles.allSatisfy { $0.duration >= 1.15 })
+        XCTAssertGreaterThan(particles.last?.delay ?? 0, particles.first?.delay ?? 0)
+    }
+
     func testProfileFollowingCountTextDoesNotShowZeroBeforeRemoteCountResolves() {
         XCTAssertEqual(
             ProfileViewLayout.followingCountText(
