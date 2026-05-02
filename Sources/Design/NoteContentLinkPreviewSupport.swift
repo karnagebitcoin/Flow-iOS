@@ -179,12 +179,14 @@ enum YouTubeEmbedNavigationDecision: Equatable {
 }
 
 enum YouTubeEmbedNavigationPolicy {
-    static func decision(for navigationURL: URL?, embedURL: URL, isNewWindow: Bool) -> YouTubeEmbedNavigationDecision {
+    static func decision(
+        for navigationURL: URL?,
+        embedURL: URL,
+        isNewWindow: Bool,
+        isUserInitiated: Bool = true,
+        wrapperBaseURL: URL? = nil
+    ) -> YouTubeEmbedNavigationDecision {
         guard let navigationURL else { return .cancel }
-
-        if isNewWindow {
-            return .openExternally(navigationURL)
-        }
 
         guard let scheme = navigationURL.scheme?.lowercased() else {
             return .cancel
@@ -194,12 +196,22 @@ enum YouTubeEmbedNavigationPolicy {
             return .allowInWebView
         }
 
+        if isWrapperNavigation(navigationURL, wrapperBaseURL: wrapperBaseURL) {
+            return isNewWindow ? .cancel : .allowInWebView
+        }
+
         if scheme != "http" && scheme != "https" {
-            return .openExternally(navigationURL)
+            return isUserInitiated ? .openExternally(navigationURL) : .cancel
         }
 
         if isEmbedNavigation(navigationURL, embedURL: embedURL) {
             return .allowInWebView
+        }
+
+        guard isUserInitiated else { return .cancel }
+
+        if isNewWindow {
+            return .openExternally(navigationURL)
         }
 
         return .openExternally(navigationURL)
@@ -217,6 +229,20 @@ enum YouTubeEmbedNavigationPolicy {
         }
 
         return navigationURL.path.hasPrefix("/embed/")
+    }
+
+    private static func isWrapperNavigation(_ navigationURL: URL, wrapperBaseURL: URL?) -> Bool {
+        guard let wrapperBaseURL else { return false }
+        let navigationComponents = URLComponents(url: navigationURL, resolvingAgainstBaseURL: false)
+        let wrapperComponents = URLComponents(url: wrapperBaseURL, resolvingAgainstBaseURL: false)
+        guard navigationComponents?.scheme?.lowercased() == wrapperComponents?.scheme?.lowercased(),
+              navigationComponents?.host?.lowercased() == wrapperComponents?.host?.lowercased() else {
+            return false
+        }
+
+        let navigationPath = navigationComponents?.path ?? ""
+        let wrapperPath = wrapperComponents?.path ?? ""
+        return navigationPath == wrapperPath || navigationPath == "/" && wrapperPath.isEmpty
     }
 }
 
@@ -241,7 +267,9 @@ private struct YouTubeEmbedWebView: UIViewRepresentable {
             let decision = YouTubeEmbedNavigationPolicy.decision(
                 for: navigationAction.request.url,
                 embedURL: embedURL,
-                isNewWindow: navigationAction.targetFrame == nil
+                isNewWindow: navigationAction.targetFrame == nil,
+                isUserInitiated: navigationAction.navigationType == .linkActivated,
+                wrapperBaseURL: YouTubeEmbedWebView.refererBaseURL
             )
             handle(decision, decisionHandler: decisionHandler)
         }
@@ -256,7 +284,9 @@ private struct YouTubeEmbedWebView: UIViewRepresentable {
             let decision = YouTubeEmbedNavigationPolicy.decision(
                 for: navigationAction.request.url,
                 embedURL: embedURL,
-                isNewWindow: true
+                isNewWindow: true,
+                isUserInitiated: navigationAction.navigationType == .linkActivated,
+                wrapperBaseURL: YouTubeEmbedWebView.refererBaseURL
             )
             if case .openExternally(let url) = decision {
                 openExternally?(url)
@@ -363,7 +393,7 @@ private struct YouTubeEmbedWebView: UIViewRepresentable {
             .replacingOccurrences(of: ">", with: "&gt;")
     }
 
-    private static var refererBaseURL: URL? {
+    fileprivate static var refererBaseURL: URL? {
         let bundleIdentifier = Bundle.main.bundleIdentifier ?? "com.21media.haloapp"
         let safeIdentifier = bundleIdentifier
             .lowercased()

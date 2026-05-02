@@ -1,4 +1,6 @@
 import XCTest
+import SwiftUI
+import UIKit
 @testable import Flow
 
 final class ComposeNoteSheetModeTests: XCTestCase {
@@ -130,6 +132,66 @@ final class ComposeNoteSheetModeTests: XCTestCase {
         )
 
         XCTAssertNil(query)
+    }
+
+    @MainActor
+    func testComposeTextViewCoordinatorDoesNotEchoUnchangedInputState() {
+        var textValue = ""
+        var textSetCount = 0
+        var isFocusedValue = true
+        var selectedRangeValue = NSRange(location: 0, length: 0)
+        var selectedRangeSetCount = 0
+        var mentionsValue: [ComposeSelectedMention] = []
+        var mentionAnchorYValue: CGFloat = 44
+        var mentionAnchorYSetCount = 0
+        var mentionQueryChangeCount = 0
+
+        let coordinator = ComposeMultilineTextView.Coordinator(
+            text: Binding(
+                get: { textValue },
+                set: { newValue in
+                    textValue = newValue
+                    textSetCount += 1
+                }
+            ),
+            isFocused: Binding(
+                get: { isFocusedValue },
+                set: { isFocusedValue = $0 }
+            ),
+            selectedRange: Binding(
+                get: { selectedRangeValue },
+                set: { newValue in
+                    selectedRangeValue = newValue
+                    selectedRangeSetCount += 1
+                }
+            ),
+            mentions: Binding(
+                get: { mentionsValue },
+                set: { mentionsValue = $0 }
+            ),
+            mentionAnchorY: Binding(
+                get: { mentionAnchorYValue },
+                set: { newValue in
+                    mentionAnchorYValue = newValue
+                    mentionAnchorYSetCount += 1
+                }
+            ),
+            characterLimit: ComposeNoteTextLimit.maxCharacterCount,
+            onMentionQueryChange: { _ in
+                mentionQueryChangeCount += 1
+            }
+        )
+        let textView = UITextView()
+        textView.text = "hello"
+        textView.selectedRange = NSRange(location: 5, length: 0)
+
+        coordinator.textViewDidChange(textView)
+        coordinator.textViewDidChange(textView)
+
+        XCTAssertEqual(textSetCount, 1)
+        XCTAssertEqual(selectedRangeSetCount, 1)
+        XCTAssertEqual(mentionAnchorYSetCount, 0)
+        XCTAssertEqual(mentionQueryChangeCount, 0)
     }
 
     @MainActor

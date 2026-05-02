@@ -360,7 +360,7 @@ struct ProfileView: View {
                                 )
                             )
                             .listRowSeparator(appSettings.themePalette.feedCardStyle == nil ? .visible : .hidden)
-                            .listRowSeparatorTint(appSettings.themePalette.separator)
+                            .listRowSeparatorTint(appSettings.themePalette.chromeBorder)
                             .listRowBackground(Color.clear)
                             .onAppear {
                                 if appSettings.reactionsVisibleInFeeds {

@@ -17,6 +17,7 @@ struct HomeFeedView: View {
     @EnvironmentObject private var relaySettings: RelaySettingsStore
     @ObservedObject var viewModel: HomeFeedViewModel
     @Binding var isShowingSideMenu: Bool
+    @Binding var isRootVisible: Bool
     @Binding var scrollChromeOffsets: ScrollChromeOffsets
     let bottomTabBarHeight: CGFloat
     private let reactionStats = NoteReactionStatsService.shared
@@ -55,6 +56,19 @@ struct HomeFeedView: View {
         AnyView(navigationRoot)
             .modifier(sheetsModifier)
             .modifier(lifecycleModifier)
+            .onAppear(perform: updateRootVisibility)
+            .onChange(of: selectedThreadItem) { _, _ in
+                updateRootVisibility()
+            }
+            .onChange(of: selectedHashtagRoute) { _, _ in
+                updateRootVisibility()
+            }
+            .onChange(of: selectedProfileRoute) { _, _ in
+                updateRootVisibility()
+            }
+            .onChange(of: selectedRelayRoute) { _, _ in
+                updateRootVisibility()
+            }
     }
 
     private var sheetsModifier: HomeFeedSheets {
@@ -202,6 +216,13 @@ struct HomeFeedView: View {
         Task {
             await viewModel.refresh(silent: true)
         }
+    }
+
+    private func updateRootVisibility() {
+        isRootVisible = selectedThreadItem == nil
+            && selectedHashtagRoute == nil
+            && selectedProfileRoute == nil
+            && selectedRelayRoute == nil
     }
 
     private func handleProfileMetadataUpdated(_ notification: Notification) {
@@ -1027,7 +1048,7 @@ struct HomeFeedView: View {
                 Rectangle()
                     .fill(appSettings.themePalette.chromeBorder)
                     .frame(height: 0.7)
-                    .padding(.leading, Self.feedHorizontalInset)
+                    .padding(.leading, appSettings.fullWidthNoteRows ? 0 : Self.feedHorizontalInset)
             }
         }
         .onAppear {

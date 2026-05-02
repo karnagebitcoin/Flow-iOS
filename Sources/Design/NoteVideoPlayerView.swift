@@ -4,6 +4,7 @@ import UIKit
 struct NoteVideoPlayerView: View {
     let url: URL
     let layout: NoteContentMediaLayout
+    let fillsAvailableWidth: Bool
     let isGIFLike: Bool
     let aspectRatioHint: CGFloat?
     @State private var videoAspectRatio: CGFloat
@@ -14,11 +15,13 @@ struct NoteVideoPlayerView: View {
     init(
         url: URL,
         layout: NoteContentMediaLayout,
+        fillsAvailableWidth: Bool = false,
         isGIFLike: Bool = false,
         aspectRatioHint: CGFloat? = nil
     ) {
         self.url = url
         self.layout = layout
+        self.fillsAvailableWidth = fillsAvailableWidth
         self.isGIFLike = isGIFLike
         let normalizedHint = NoteImageLayoutGuide.normalizedAspectRatio(aspectRatioHint)
         self.aspectRatioHint = normalizedHint
@@ -35,7 +38,8 @@ struct NoteVideoPlayerView: View {
 
         NoteAspectRatioMediaLayout(
             aspectRatio: videoAspectRatio,
-            maxHeight: maxVideoHeight
+            maxHeight: maxVideoHeight,
+            fillsAvailableWidth: fillsAvailableWidth
         ) {
             ZStack {
                 Color.black.opacity(0.08)
@@ -186,6 +190,7 @@ struct NoteVideoPlayerView: View {
 private struct NoteAspectRatioMediaLayout: Layout {
     let aspectRatio: CGFloat
     let maxHeight: CGFloat
+    let fillsAvailableWidth: Bool
 
     func sizeThatFits(
         proposal: ProposedViewSize,
@@ -195,7 +200,8 @@ private struct NoteAspectRatioMediaLayout: Layout {
         FlowLayoutGuardrails.aspectFitMediaSize(
             availableWidth: proposal.width,
             aspectRatio: aspectRatio,
-            maxHeight: maxHeight
+            maxHeight: maxHeight,
+            preservesAvailableWidthWhenHeightCapped: fillsAvailableWidth
         )
     }
 
@@ -208,7 +214,8 @@ private struct NoteAspectRatioMediaLayout: Layout {
         let size = FlowLayoutGuardrails.aspectFitMediaSize(
             availableWidth: bounds.width,
             aspectRatio: aspectRatio,
-            maxHeight: maxHeight
+            maxHeight: maxHeight,
+            preservesAvailableWidthWhenHeightCapped: fillsAvailableWidth
         )
         let origin = CGPoint(x: bounds.minX, y: bounds.minY)
 

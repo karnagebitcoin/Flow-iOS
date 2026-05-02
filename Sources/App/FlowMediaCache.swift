@@ -996,28 +996,9 @@ actor FlowImageCache {
 
     private static func isLikelyRenderableImageData(
         _ data: Data,
-        contentType: String?
+        contentType _: String?
     ) -> Bool {
-        guard hasSupportedImageSignature(data) else { return false }
-
-        guard let normalizedContentType = normalizedContentType(contentType) else {
-            return true
-        }
-
-        if normalizedContentType == "image/svg+xml" {
-            return false
-        }
-
-        if normalizedContentType.hasPrefix("image/") {
-            return true
-        }
-
-        switch normalizedContentType {
-        case "application/octet-stream", "binary/octet-stream", "application/binary":
-            return true
-        default:
-            return false
-        }
+        hasSupportedImageSignature(data)
     }
 
     private static func isLikelyVideoURL(_ url: URL) -> Bool {
@@ -1027,16 +1008,6 @@ actor FlowImageCache {
         default:
             return false
         }
-    }
-
-    private static func normalizedContentType(_ contentType: String?) -> String? {
-        guard let contentType else { return nil }
-        let normalized = contentType
-            .split(separator: ";", maxSplits: 1)
-            .first?
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-            .lowercased()
-        return normalized?.isEmpty == true ? nil : normalized
     }
 
     private static func imageAspectRatio(from data: Data) -> CGFloat? {

@@ -60,7 +60,8 @@ enum FlowLayoutGuardrails {
         availableWidth: CGFloat?,
         aspectRatio: CGFloat?,
         maxHeight: CGFloat,
-        fallbackWidth: CGFloat = UIScreen.main.bounds.width
+        fallbackWidth: CGFloat = UIScreen.main.bounds.width,
+        preservesAvailableWidthWhenHeightCapped: Bool = false
     ) -> CGSize {
         let width = availableWidth.flatMap { value -> CGFloat? in
             guard value.isFinite, value > 0 else { return nil }
@@ -72,6 +73,10 @@ enum FlowLayoutGuardrails {
 
         if heightForFullWidth <= boundedMaxHeight {
             return CGSize(width: width, height: heightForFullWidth)
+        }
+
+        if preservesAvailableWidthWhenHeightCapped {
+            return CGSize(width: width, height: boundedMaxHeight)
         }
 
         return CGSize(width: boundedMaxHeight * ratio, height: boundedMaxHeight)
@@ -319,6 +324,7 @@ struct NoteContentView: View {
                                     NoteVideoPlayerView(
                                         url: url,
                                         layout: mediaLayout,
+                                        fillsAvailableWidth: mediaLayout == .feed && appSettings.fullWidthNoteRows,
                                         isGIFLike: Self.isGIFLikeVideoURL(
                                             url,
                                             in: gifLikeVideoURLKeys

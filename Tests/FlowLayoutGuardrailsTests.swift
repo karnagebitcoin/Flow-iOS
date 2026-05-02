@@ -64,6 +64,19 @@ final class FlowLayoutGuardrailsTests: XCTestCase {
         XCTAssertEqual(size.height, 300, accuracy: 0.0001)
     }
 
+    func testAspectFitMediaSizeCanPreserveFullWidthWhenTallMediaHeightIsCapped() {
+        let size = FlowLayoutGuardrails.aspectFitMediaSize(
+            availableWidth: 320,
+            aspectRatio: 0.4,
+            maxHeight: 300,
+            fallbackWidth: 320,
+            preservesAvailableWidthWhenHeightCapped: true
+        )
+
+        XCTAssertEqual(size.width, 320, accuracy: 0.0001)
+        XCTAssertEqual(size.height, 300, accuracy: 0.0001)
+    }
+
     func testProfileHeaderWidthUsesFiniteProposal() {
         XCTAssertEqual(
             ProfileHeaderLayoutGuardrails.boundedWidth(
@@ -604,6 +617,15 @@ final class FlowLayoutGuardrailsTests: XCTestCase {
         XCTAssertFalse(source.contains("await viewModel.loadIfNeeded()\n            await viewModel.refreshFollowRelationship"))
     }
 
+    func testProfileFeedRowsUseHomeFeedDividerTint() throws {
+        let homeSource = try Self.sourceText(at: "Sources/Home/HomeFeedView.swift")
+        let profileSource = try Self.sourceText(at: "Sources/Profile/ProfileView.swift")
+
+        XCTAssertTrue(homeSource.contains(".fill(appSettings.themePalette.chromeBorder)"))
+        XCTAssertTrue(profileSource.contains(".listRowSeparatorTint(appSettings.themePalette.chromeBorder)"))
+        XCTAssertFalse(profileSource.contains(".listRowSeparatorTint(appSettings.themePalette.separator)"))
+    }
+
     func testProfileAvatarFullscreenViewerUsesThemeAwareBackdropAndToolbarChrome() throws {
         let source = try Self.sourceText(at: "Sources/Profile/ProfileMediaSupport.swift")
         let viewerStart = try XCTUnwrap(source.range(of: "struct ProfileAvatarFullscreenViewer: View {"))
@@ -726,6 +748,15 @@ final class FlowLayoutGuardrailsTests: XCTestCase {
         XCTAssertFalse(componentsSource.contains("Text(\"Post your reply\")"))
         XCTAssertFalse(componentsSource.contains("Tap below to post the first reply."))
         XCTAssertTrue(componentsSource.contains("Text(\"Replies will appear here.\")"))
+    }
+
+    func testHomeFeedFullWidthNoteRowsRemoveSeparatorLeadingInset() throws {
+        let source = try Self.sourceText(at: "Sources/Home/HomeFeedView.swift")
+        let feedRowRange = try XCTUnwrap(source.range(of: "private func feedRow(_ item: FeedItem, visibleReplyCounts: [String: Int]) -> some View {"))
+        let animateRange = try XCTUnwrap(source.range(of: "private func animateFeedInsertion", range: feedRowRange.upperBound..<source.endIndex))
+        let feedRowSource = source[feedRowRange.lowerBound..<animateRange.lowerBound]
+
+        XCTAssertTrue(feedRowSource.contains(".padding(.leading, appSettings.fullWidthNoteRows ? 0 : Self.feedHorizontalInset)"))
     }
 
     func testThreadDetailSpamNoticeUsesThemeBackgroundInsteadOfPrimaryChrome() throws {

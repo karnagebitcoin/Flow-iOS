@@ -200,6 +200,26 @@ final class FlowMediaCacheDiagnosticsTests: XCTestCase {
         XCTAssertEqual(snapshot.cacheHitCount, 0)
     }
 
+    func testRenderableImageBytesLoadEvenWhenContentTypeIsIncorrect() async {
+        let rootDirectoryURL = makeTemporaryDirectory()
+        let urlCache = makeURLCache()
+        let data = makePNGData()
+        let response = makeFetchedResponse(
+            data: data,
+            contentType: "text/plain"
+        )
+        let cache = FlowImageCache(
+            rootDirectoryURL: rootDirectoryURL,
+            urlCache: urlCache,
+            fetchImageData: { _, _ in response }
+        )
+        let url = URL(string: "https://example.com/mislabelled-image.png")!
+
+        let image = await cache.image(for: url)
+
+        XCTAssertNotNil(image)
+    }
+
     func testProfileImageDataRejectsOversizedResponsesAndBacksOff() async {
         let rootDirectoryURL = makeTemporaryDirectory()
         let urlCache = makeURLCache()
