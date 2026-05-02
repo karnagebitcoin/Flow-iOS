@@ -45,7 +45,6 @@ final class NostrFeedServiceTests: XCTestCase {
         defer { try? FileManager.default.removeItem(at: rootURL) }
 
         let fileManager = TestFileManager(rootURL: rootURL)
-        let nostrDatabase = FlowNostrDB(fileManager: fileManager)
         let firstRelayEvent = makeEvent(
             id: hex("c"),
             pubkey: hex("d"),
@@ -71,8 +70,7 @@ final class NostrFeedServiceTests: XCTestCase {
         )
         let service = makeFeedService(
             relayClient: relayClient,
-            fileManager: fileManager,
-            nostrDatabase: nostrDatabase
+            fileManager: fileManager
         )
 
         let items = try await service.fetchFeed(
@@ -98,7 +96,6 @@ final class NostrFeedServiceTests: XCTestCase {
         defer { try? FileManager.default.removeItem(at: rootURL) }
 
         let fileManager = TestFileManager(rootURL: rootURL)
-        let nostrDatabase = FlowNostrDB(fileManager: fileManager)
         let fastRelayEvent = makeEvent(
             id: hex("a"),
             pubkey: hex("b"),
@@ -126,8 +123,7 @@ final class NostrFeedServiceTests: XCTestCase {
         )
         let service = makeFeedService(
             relayClient: relayClient,
-            fileManager: fileManager,
-            nostrDatabase: nostrDatabase
+            fileManager: fileManager
         )
 
         let startedAt = Date()
@@ -153,7 +149,6 @@ final class NostrFeedServiceTests: XCTestCase {
         defer { try? FileManager.default.removeItem(at: rootURL) }
 
         let fileManager = TestFileManager(rootURL: rootURL)
-        let nostrDatabase = FlowNostrDB(fileManager: fileManager)
         let trendingNote = makeEvent(
             id: hex("a"),
             pubkey: hex("b"),
@@ -165,8 +160,7 @@ final class NostrFeedServiceTests: XCTestCase {
         let relayClient = SequencedRelayClient(responses: [[], [trendingNote]])
         let service = makeFeedService(
             relayClient: relayClient,
-            fileManager: fileManager,
-            nostrDatabase: nostrDatabase
+            fileManager: fileManager
         )
 
         let emptyItems = try await service.fetchTrendingNotes(
@@ -193,7 +187,6 @@ final class NostrFeedServiceTests: XCTestCase {
         defer { try? FileManager.default.removeItem(at: rootURL) }
 
         let fileManager = TestFileManager(rootURL: rootURL)
-        let nostrDatabase = FlowNostrDB(fileManager: fileManager)
         let seenEventStore = SeenEventStore(fileManager: fileManager)
         let pubkey = hex("a")
         let older = makeEvent(
@@ -228,53 +221,6 @@ final class NostrFeedServiceTests: XCTestCase {
         XCTAssertEqual(resolved[newer.id.lowercased()]?.content, newer.content)
     }
 
-    func testFetchProfilesBackfillsSnapshotOnlyProfilesIntoNostrDB() async throws {
-        throw XCTSkip("Relay-only Ditto feed overhaul no longer guarantees NostrDB profile backfills.")
-        let rootURL = FileManager.default.temporaryDirectory
-            .appendingPathComponent("FlowProfileBackfill-\(UUID().uuidString)", isDirectory: true)
-        try FileManager.default.createDirectory(at: rootURL, withIntermediateDirectories: true)
-        defer { try? FileManager.default.removeItem(at: rootURL) }
-
-        let fileManager = TestFileManager(rootURL: rootURL)
-        let profileSnapshotStore = ProfileSnapshotStore(fileManager: fileManager)
-        let nostrDatabase = FlowNostrDB(fileManager: fileManager)
-        let followListCache = FollowListSnapshotCache(fileManager: fileManager)
-        let seenEventStore = SeenEventStore(fileManager: fileManager)
-        let profileCache = ProfileCache(snapshotStore: profileSnapshotStore)
-        let pubkey = hex("d")
-        let cachedProfile = makeProfile(name: "cached", displayName: "Cached")
-        await profileSnapshotStore.putMany(entries: [
-            pubkey: PersistedProfileSnapshot(profile: cachedProfile, fetchedAt: Date())
-        ])
-
-        let freshProfileEvent = makeEvent(
-            id: hex("e"),
-            pubkey: pubkey,
-            kind: 0,
-            tags: [],
-            content: #"{"name":"fresh","display_name":"Fresh"}"#,
-            createdAt: 1_700_000_200
-        )
-        let relayClient = ProfileMetadataRelayClient(eventsByRelay: [
-            relayURL: [freshProfileEvent]
-        ])
-        let service = NostrFeedService(
-            relayClient: relayClient,
-            timelineCache: TimelineEventCache(),
-            profileCache: profileCache,
-            relayHintCache: ProfileRelayHintCache(),
-            followListCache: followListCache,
-            seenEventStore: seenEventStore,
-            nostrDatabase: nostrDatabase
-        )
-
-        let profiles = await service.fetchProfiles(relayURLs: [relayURL], pubkeys: [pubkey])
-
-        XCTAssertEqual(profiles[pubkey]?.name, "fresh")
-        let cached = await service.cachedProfile(pubkey: pubkey)
-        XCTAssertEqual(cached?.name, "fresh")
-    }
-
     func testOutboxRelayPlanStoresFetchedRelayDirectoryEntryAndPrefersReadRelays() async throws {
         let rootURL = FileManager.default.temporaryDirectory
             .appendingPathComponent("FlowOutboxRelayPlan-\(UUID().uuidString)", isDirectory: true)
@@ -282,7 +228,6 @@ final class NostrFeedServiceTests: XCTestCase {
         defer { try? FileManager.default.removeItem(at: rootURL) }
 
         let fileManager = TestFileManager(rootURL: rootURL)
-        let nostrDatabase = FlowNostrDB(fileManager: fileManager)
         let relayHintCache = ProfileRelayHintCache()
         let authorPubkey = hex("1")
         let authorReadRelayURL = URL(string: "wss://author-read.example")!
@@ -312,7 +257,6 @@ final class NostrFeedServiceTests: XCTestCase {
             relayHintCache: relayHintCache,
             followListCache: FollowListSnapshotCache(fileManager: fileManager),
             seenEventStore: SeenEventStore(fileManager: fileManager),
-            nostrDatabase: nostrDatabase,
             presentationCache: FeedPresentationCache()
         )
 
@@ -349,7 +293,6 @@ final class NostrFeedServiceTests: XCTestCase {
         defer { try? FileManager.default.removeItem(at: rootURL) }
 
         let fileManager = TestFileManager(rootURL: rootURL)
-        let nostrDatabase = FlowNostrDB(fileManager: fileManager)
         let relayHintCache = ProfileRelayHintCache()
         let authorPubkey = hex("3")
         let authorReadRelayURL = URL(string: "wss://author-feed-read.example")!
@@ -386,7 +329,6 @@ final class NostrFeedServiceTests: XCTestCase {
             relayHintCache: relayHintCache,
             followListCache: FollowListSnapshotCache(fileManager: fileManager),
             seenEventStore: seenEventStore,
-            nostrDatabase: nostrDatabase,
             presentationCache: FeedPresentationCache()
         )
 
@@ -414,7 +356,6 @@ final class NostrFeedServiceTests: XCTestCase {
         defer { try? FileManager.default.removeItem(at: rootURL) }
 
         let fileManager = TestFileManager(rootURL: rootURL)
-        let nostrDatabase = FlowNostrDB(fileManager: fileManager)
         let authorPubkey = hex("9")
         let fastStaleRelayURL = URL(string: "wss://author-stale.example/")!
         let slowFreshRelayURL = URL(string: "wss://author-fresh.example/")!
@@ -458,8 +399,7 @@ final class NostrFeedServiceTests: XCTestCase {
         )
         let service = makeFeedService(
             relayClient: relayClient,
-            fileManager: fileManager,
-            nostrDatabase: nostrDatabase
+            fileManager: fileManager
         )
 
         let items = try await service.fetchOutboxBackedAuthorFeed(
@@ -483,7 +423,6 @@ final class NostrFeedServiceTests: XCTestCase {
         defer { try? FileManager.default.removeItem(at: rootURL) }
 
         let fileManager = TestFileManager(rootURL: rootURL)
-        let nostrDatabase = FlowNostrDB(fileManager: fileManager)
         let relayHintCache = ProfileRelayHintCache()
         let authorPubkey = hex("6")
         let authorWriteRelayURL = URL(string: "wss://author-reference-write.example")!
@@ -521,7 +460,6 @@ final class NostrFeedServiceTests: XCTestCase {
             relayHintCache: relayHintCache,
             followListCache: FollowListSnapshotCache(fileManager: fileManager),
             seenEventStore: seenEventStore,
-            nostrDatabase: nostrDatabase,
             presentationCache: FeedPresentationCache()
         )
         let reference = NostrEventReferencePointer(
@@ -551,7 +489,6 @@ final class NostrFeedServiceTests: XCTestCase {
         defer { try? FileManager.default.removeItem(at: rootURL) }
 
         let fileManager = TestFileManager(rootURL: rootURL)
-        let nostrDatabase = FlowNostrDB(fileManager: fileManager)
         let relayHintCache = ProfileRelayHintCache()
         let authorPubkey = hex("6")
         let authorWriteRelayURL = URL(string: "wss://author-reference-write.example")!
@@ -586,7 +523,6 @@ final class NostrFeedServiceTests: XCTestCase {
             relayHintCache: relayHintCache,
             followListCache: FollowListSnapshotCache(fileManager: fileManager),
             seenEventStore: seenEventStore,
-            nostrDatabase: nostrDatabase,
             presentationCache: FeedPresentationCache()
         )
         let reference = NostrEventReferencePointer(
@@ -617,7 +553,6 @@ final class NostrFeedServiceTests: XCTestCase {
         defer { try? FileManager.default.removeItem(at: rootURL) }
 
         let fileManager = TestFileManager(rootURL: rootURL)
-        let database = FlowNostrDB(fileManager: fileManager)
 
         let activeAuthor = hex("a")
         let delayedAuthor = hex("b")
@@ -642,7 +577,6 @@ final class NostrFeedServiceTests: XCTestCase {
         let service = makeFeedService(
             relayClient: relayClient,
             fileManager: fileManager,
-            nostrDatabase: database,
             presentationCache: FeedPresentationCache()
         )
 
@@ -670,7 +604,6 @@ final class NostrFeedServiceTests: XCTestCase {
         defer { try? FileManager.default.removeItem(at: rootURL) }
 
         let fileManager = TestFileManager(rootURL: rootURL)
-        let database = FlowNostrDB(fileManager: fileManager)
         let author = hex("e")
         let relayClient = DelayedRelayClient(
             eventsByRelay: [
@@ -683,8 +616,7 @@ final class NostrFeedServiceTests: XCTestCase {
         )
         let service = makeFeedService(
             relayClient: relayClient,
-            fileManager: fileManager,
-            nostrDatabase: database
+            fileManager: fileManager
         )
 
         let startedAt = Date()
@@ -702,142 +634,6 @@ final class NostrFeedServiceTests: XCTestCase {
 
         XCTAssertTrue(items.isEmpty)
         XCTAssertLessThan(elapsed, 0.35)
-    }
-
-    func testSearchProfilesReturnsLocalMatchWithoutRelayFetchWhenLimitSatisfied() async throws {
-        throw XCTSkip("Relay-only Ditto profile search removed local NostrDB shortcutting.")
-        let rootURL = FileManager.default.temporaryDirectory
-            .appendingPathComponent("FlowLocalProfileSearch-\(UUID().uuidString)", isDirectory: true)
-        try FileManager.default.createDirectory(at: rootURL, withIntermediateDirectories: true)
-        defer { try? FileManager.default.removeItem(at: rootURL) }
-
-        let fileManager = TestFileManager(rootURL: rootURL)
-        let nostrDatabase = FlowNostrDB(fileManager: fileManager)
-        let relayClient = SpyRelayClient()
-        let service = NostrFeedService(
-            relayClient: relayClient,
-            timelineCache: TimelineEventCache(),
-            profileCache: ProfileCache(snapshotStore: ProfileSnapshotStore(fileManager: fileManager)),
-            relayHintCache: ProfileRelayHintCache(),
-            followListCache: FollowListSnapshotCache(fileManager: fileManager),
-            seenEventStore: SeenEventStore(fileManager: fileManager),
-            nostrDatabase: nostrDatabase
-        )
-
-        let pubkey = hex("a")
-        let event = makeEvent(
-            id: hex("b"),
-            pubkey: pubkey,
-            kind: 0,
-            tags: [],
-            content: #"{"name":"holokat","display_name":"Holo Kat"}"#,
-            createdAt: 1_700_000_300
-        )
-
-        XCTAssertTrue(nostrDatabase.ingest(events: [event]))
-
-        let results = try await service.searchProfiles(
-            relayURLs: [relayURL],
-            query: "holokat",
-            limit: 1,
-            fetchTimeout: 0.01,
-            relayFetchMode: .firstNonEmptyRelay
-        )
-
-        let fetchCount = await relayClient.fetchCount()
-
-        XCTAssertEqual(results.map(\.pubkey), [pubkey])
-        XCTAssertEqual(results.first?.profile?.name, "holokat")
-        XCTAssertEqual(fetchCount, 0)
-    }
-
-    func testLocalProfileSearchScansFullLocalMetadataSetForNormalizedHandleMatches() async throws {
-        throw XCTSkip("Relay-only Ditto profile search removed local NostrDB indexing.")
-        let rootURL = FileManager.default.temporaryDirectory
-            .appendingPathComponent("FlowFullLocalProfileSearch-\(UUID().uuidString)", isDirectory: true)
-        try FileManager.default.createDirectory(at: rootURL, withIntermediateDirectories: true)
-        defer { try? FileManager.default.removeItem(at: rootURL) }
-
-        let fileManager = TestFileManager(rootURL: rootURL)
-        let nostrDatabase = FlowNostrDB(fileManager: fileManager)
-        let service = makeFeedService(
-            relayClient: SpyRelayClient(),
-            fileManager: fileManager,
-            nostrDatabase: nostrDatabase
-        )
-
-        func paddedHex(_ value: Int) -> String {
-            String(format: "%064x", value)
-        }
-
-        let targetPubkey = paddedHex(1)
-        let targetEvent = makeEvent(
-            id: paddedHex(10_001),
-            pubkey: targetPubkey,
-            kind: 0,
-            tags: [],
-            content: #"{"name":"Fiat Jaf","display_name":"Fiat Jaf"}"#,
-            createdAt: 1_700_000_000
-        )
-
-        var metadataEvents = [targetEvent]
-        metadataEvents.reserveCapacity(1_702)
-
-        for index in 0..<1_700 {
-            metadataEvents.append(
-                makeEvent(
-                    id: paddedHex(20_000 + index),
-                    pubkey: paddedHex(30_000 + index),
-                    kind: 0,
-                    tags: [],
-                    content: #"{"name":"user\#(index)","display_name":"User \#(index)"}"#,
-                    createdAt: 1_700_000_100 + index
-                )
-            )
-        }
-
-        XCTAssertTrue(nostrDatabase.ingest(events: metadataEvents))
-
-        let compactResults = await service.searchProfiles(query: "fiatjaf", limit: 8)
-        let spacedResults = await service.searchProfiles(query: "fiat jaf", limit: 8)
-
-        XCTAssertEqual(compactResults.first?.pubkey, targetPubkey)
-        XCTAssertEqual(compactResults.first?.profile?.displayName, "Fiat Jaf")
-        XCTAssertEqual(spacedResults.first?.pubkey, targetPubkey)
-        XCTAssertEqual(spacedResults.first?.profile?.displayName, "Fiat Jaf")
-    }
-
-    func testLocalProfileSearchMatchesTokenizedDisplayNames() async throws {
-        throw XCTSkip("Relay-only Ditto profile search removed local NostrDB indexing.")
-        let rootURL = FileManager.default.temporaryDirectory
-            .appendingPathComponent("FlowTokenizedLocalProfileSearch-\(UUID().uuidString)", isDirectory: true)
-        try FileManager.default.createDirectory(at: rootURL, withIntermediateDirectories: true)
-        defer { try? FileManager.default.removeItem(at: rootURL) }
-
-        let fileManager = TestFileManager(rootURL: rootURL)
-        let nostrDatabase = FlowNostrDB(fileManager: fileManager)
-        let service = makeFeedService(
-            relayClient: SpyRelayClient(),
-            fileManager: fileManager,
-            nostrDatabase: nostrDatabase
-        )
-
-        let targetPubkey = String(format: "%064x", 4_242)
-        let targetEvent = makeEvent(
-            id: String(format: "%064x", 9_999),
-            pubkey: targetPubkey,
-            kind: 0,
-            tags: [],
-            content: #"{"name":"Michael J. Saylor","display_name":"Michael J. Saylor"}"#,
-            createdAt: 1_700_000_500
-        )
-
-        XCTAssertTrue(nostrDatabase.ingest(events: [targetEvent]))
-
-        let results = await service.searchProfiles(query: "michael saylor", limit: 8)
-
-        XCTAssertEqual(results.first?.pubkey, targetPubkey)
-        XCTAssertEqual(results.first?.profile?.displayName, "Michael J. Saylor")
     }
 
     func testSearchProfilesMatchesSingleCharacterPrefixesFromCachedProfiles() async throws {
@@ -884,91 +680,6 @@ final class NostrFeedServiceTests: XCTestCase {
         XCTAssertEqual(boostedResults.first?.pubkey, followedPubkey)
     }
 
-    func testLocalProfileSearchUsesNostrDBProfileIndexBeyondGenericQueryCapacity() async throws {
-        throw XCTSkip("Relay-only Ditto profile search removed local NostrDB indexing.")
-        let rootURL = FileManager.default.temporaryDirectory
-            .appendingPathComponent("FlowIndexedLocalProfileSearch-\(UUID().uuidString)", isDirectory: true)
-        try FileManager.default.createDirectory(at: rootURL, withIntermediateDirectories: true)
-        defer { try? FileManager.default.removeItem(at: rootURL) }
-
-        let fileManager = TestFileManager(rootURL: rootURL)
-        let nostrDatabase = FlowNostrDB(fileManager: fileManager)
-        let service = makeFeedService(
-            relayClient: SpyRelayClient(),
-            fileManager: fileManager,
-            nostrDatabase: nostrDatabase
-        )
-
-        let targetPubkey = String(format: "%064x", 42)
-        var metadataEvents = [
-            makeEvent(
-                id: String(format: "%064x", 42_000),
-                pubkey: targetPubkey,
-                kind: 0,
-                tags: [],
-                content: #"{"name":"needlefriend","display_name":"Needle Friend"}"#,
-                createdAt: 1_600_000_000
-            )
-        ]
-        metadataEvents.reserveCapacity(2_602)
-
-        for index in 0..<2_600 {
-            metadataEvents.append(
-                makeEvent(
-                    id: String(format: "%064x", 50_000 + index),
-                    pubkey: String(format: "%064x", 60_000 + index),
-                    kind: 0,
-                    tags: [],
-                    content: #"{"name":"other\#(index)","display_name":"Other \#(index)"}"#,
-                    createdAt: 1_700_000_000 + index
-                )
-            )
-        }
-
-        XCTAssertTrue(nostrDatabase.ingest(events: metadataEvents))
-
-        let results = await service.searchProfiles(query: "needle", limit: 8)
-
-        XCTAssertEqual(results.first?.pubkey, targetPubkey)
-        XCTAssertEqual(results.first?.profile?.displayName, "Needle Friend")
-    }
-
-    func testLocalProfileSearchRefreshesAfterNewMetadataIngest() async throws {
-        throw XCTSkip("Relay-only Ditto profile search removed local NostrDB indexing.")
-        let rootURL = FileManager.default.temporaryDirectory
-            .appendingPathComponent("FlowRefreshingLocalProfileSearch-\(UUID().uuidString)", isDirectory: true)
-        try FileManager.default.createDirectory(at: rootURL, withIntermediateDirectories: true)
-        defer { try? FileManager.default.removeItem(at: rootURL) }
-
-        let fileManager = TestFileManager(rootURL: rootURL)
-        let nostrDatabase = FlowNostrDB(fileManager: fileManager)
-        let service = makeFeedService(
-            relayClient: SpyRelayClient(),
-            fileManager: fileManager,
-            nostrDatabase: nostrDatabase
-        )
-
-        let initialResults = await service.searchProfiles(query: "hal", limit: 8)
-        XCTAssertTrue(initialResults.isEmpty)
-
-        let targetPubkey = String(format: "%064x", 7_777)
-        let targetEvent = makeEvent(
-            id: String(format: "%064x", 8_888),
-            pubkey: targetPubkey,
-            kind: 0,
-            tags: [],
-            content: #"{"name":"hal","display_name":"Hal Finney"}"#,
-            createdAt: 1_700_000_700
-        )
-
-        XCTAssertTrue(nostrDatabase.ingest(events: [targetEvent]))
-
-        let refreshedResults = await service.searchProfiles(query: "hal", limit: 8)
-
-        XCTAssertEqual(refreshedResults.first?.pubkey, targetPubkey)
-        XCTAssertEqual(refreshedResults.first?.profile?.displayName, "Hal Finney")
-    }
-
     func testStoreFollowListSnapshotLocallyCachesSnapshot() async throws {
         let rootURL = FileManager.default.temporaryDirectory
             .appendingPathComponent("FlowFollowSnapshotStore-\(UUID().uuidString)", isDirectory: true)
@@ -976,7 +687,6 @@ final class NostrFeedServiceTests: XCTestCase {
         defer { try? FileManager.default.removeItem(at: rootURL) }
 
         let fileManager = TestFileManager(rootURL: rootURL)
-        let nostrDatabase = FlowNostrDB(fileManager: fileManager)
         let followListCache = FollowListSnapshotCache(fileManager: fileManager)
         let service = NostrFeedService(
             relayClient: SpyRelayClient(),
@@ -984,8 +694,7 @@ final class NostrFeedServiceTests: XCTestCase {
             profileCache: ProfileCache(snapshotStore: ProfileSnapshotStore(fileManager: fileManager)),
             relayHintCache: ProfileRelayHintCache(),
             followListCache: followListCache,
-            seenEventStore: SeenEventStore(fileManager: fileManager),
-            nostrDatabase: nostrDatabase
+            seenEventStore: SeenEventStore(fileManager: fileManager)
         )
 
         let authorPubkey = hex("1")
@@ -1008,7 +717,6 @@ final class NostrFeedServiceTests: XCTestCase {
         defer { try? FileManager.default.removeItem(at: rootURL) }
 
         let fileManager = TestFileManager(rootURL: rootURL)
-        let nostrDatabase = FlowNostrDB(fileManager: fileManager)
         let followListCache = FollowListSnapshotCache(fileManager: fileManager)
         let relayClient = SpyRelayClient()
         let service = NostrFeedService(
@@ -1017,8 +725,7 @@ final class NostrFeedServiceTests: XCTestCase {
             profileCache: ProfileCache(snapshotStore: ProfileSnapshotStore(fileManager: fileManager)),
             relayHintCache: ProfileRelayHintCache(),
             followListCache: followListCache,
-            seenEventStore: SeenEventStore(fileManager: fileManager),
-            nostrDatabase: nostrDatabase
+            seenEventStore: SeenEventStore(fileManager: fileManager)
         )
 
         let profilePubkey = hex("1")
@@ -1065,7 +772,6 @@ final class NostrFeedServiceTests: XCTestCase {
         }
 
         let fileManager = TestFileManager(rootURL: rootURL)
-        let nostrDatabase = FlowNostrDB(fileManager: fileManager)
         let followListCache = FollowListSnapshotCache(fileManager: fileManager)
         let relayClient = FollowPublishRelayClient(publishDelayNanoseconds: 150_000_000)
         let service = NostrFeedService(
@@ -1074,8 +780,7 @@ final class NostrFeedServiceTests: XCTestCase {
             profileCache: ProfileCache(snapshotStore: ProfileSnapshotStore(fileManager: fileManager)),
             relayHintCache: ProfileRelayHintCache(),
             followListCache: followListCache,
-            seenEventStore: SeenEventStore(fileManager: fileManager),
-            nostrDatabase: nostrDatabase
+            seenEventStore: SeenEventStore(fileManager: fileManager)
         )
         let followStore = FollowStore(
             defaults: defaults,
@@ -1127,7 +832,6 @@ final class NostrFeedServiceTests: XCTestCase {
         }
 
         let fileManager = TestFileManager(rootURL: rootURL)
-        let nostrDatabase = FlowNostrDB(fileManager: fileManager)
         let followListCache = FollowListSnapshotCache(fileManager: fileManager)
         let accountKeypair = try XCTUnwrap(Keypair())
         let existingKeypairA = try XCTUnwrap(Keypair())
@@ -1156,8 +860,7 @@ final class NostrFeedServiceTests: XCTestCase {
             profileCache: ProfileCache(snapshotStore: ProfileSnapshotStore(fileManager: fileManager)),
             relayHintCache: ProfileRelayHintCache(),
             followListCache: followListCache,
-            seenEventStore: SeenEventStore(fileManager: fileManager),
-            nostrDatabase: nostrDatabase
+            seenEventStore: SeenEventStore(fileManager: fileManager)
         )
         defaults.set(
             [existingPubkeyA, existingPubkeyB],
@@ -1214,7 +917,6 @@ final class NostrFeedServiceTests: XCTestCase {
         }
 
         let fileManager = TestFileManager(rootURL: rootURL)
-        let nostrDatabase = FlowNostrDB(fileManager: fileManager)
         let followListCache = FollowListSnapshotCache(fileManager: fileManager)
         let accountKeypair = try XCTUnwrap(Keypair())
         let followedKeypairA = try XCTUnwrap(Keypair())
@@ -1240,8 +942,7 @@ final class NostrFeedServiceTests: XCTestCase {
             profileCache: ProfileCache(snapshotStore: ProfileSnapshotStore(fileManager: fileManager)),
             relayHintCache: ProfileRelayHintCache(),
             followListCache: followListCache,
-            seenEventStore: SeenEventStore(fileManager: fileManager),
-            nostrDatabase: nostrDatabase
+            seenEventStore: SeenEventStore(fileManager: fileManager)
         )
         defaults.set(
             [followedPubkeyA, followedPubkeyB],
@@ -1370,11 +1071,9 @@ final class NostrFeedServiceTests: XCTestCase {
             quoteMention: quoteMention
         )
         let fileManager = TestFileManager(rootURL: rootURL)
-        let nostrDatabase = FlowNostrDB(fileManager: fileManager)
         let service = makeFeedService(
             relayClient: relayClient,
-            fileManager: fileManager,
-            nostrDatabase: nostrDatabase
+            fileManager: fileManager
         )
 
         let fastReplies = try await service.fetchThreadReplies(
@@ -1626,171 +1325,14 @@ final class NostrFeedServiceTests: XCTestCase {
         XCTAssertEqual(fetchCount, 0)
     }
 
-    func testFetchAuthorFeedUsesNostrDBForPaginatedQueriesWithoutRelayFetch() async throws {
-        throw XCTSkip("Relay-only Ditto feeds no longer read author pages from local NostrDB.")
-        let rootURL = FileManager.default.temporaryDirectory
-            .appendingPathComponent("FlowAuthorFeedLocal-\(UUID().uuidString)", isDirectory: true)
-        try FileManager.default.createDirectory(at: rootURL, withIntermediateDirectories: true)
-        defer { try? FileManager.default.removeItem(at: rootURL) }
-
-        let fileManager = TestFileManager(rootURL: rootURL)
-        let database = FlowNostrDB(fileManager: fileManager)
-        let relayClient = SpyRelayClient()
-        let service = makeFeedService(
-            relayClient: relayClient,
-            fileManager: fileManager,
-            nostrDatabase: database
-        )
-        let authorPubkey = hex("a")
-        let newest = makeEvent(
-            id: hex("b"),
-            pubkey: authorPubkey,
-            kind: 1,
-            tags: [],
-            content: "newest",
-            createdAt: 1_700_000_300
-        )
-        let middle = makeEvent(
-            id: hex("c"),
-            pubkey: authorPubkey,
-            kind: 1,
-            tags: [],
-            content: "middle",
-            createdAt: 1_700_000_200
-        )
-        let oldest = makeEvent(
-            id: hex("d"),
-            pubkey: authorPubkey,
-            kind: 1,
-            tags: [],
-            content: "oldest",
-            createdAt: 1_700_000_100
-        )
-
-        XCTAssertTrue(database.ingest(events: [newest, middle, oldest]))
-
-        let items = try await service.fetchAuthorFeed(
-            relayURLs: [relayURL],
-            authorPubkey: authorPubkey,
-            kinds: [1],
-            limit: 2,
-            until: newest.createdAt - 1,
-            hydrationMode: .cachedProfilesOnly,
-            fetchTimeout: 0.01,
-            relayFetchMode: .firstNonEmptyRelay
-        )
-
-        let fetchCount = await relayClient.fetchCount()
-
-        XCTAssertEqual(items.map(\.id), [middle.id, oldest.id])
-        XCTAssertEqual(fetchCount, 0)
-    }
-
-    func testFetchAuthorFeedReturnsLocalNostrDBResultsWhenRelayRefreshFails() async throws {
-        throw XCTSkip("Relay-only Ditto feeds no longer fall back to local NostrDB when author relay fetches fail.")
-        let rootURL = FileManager.default.temporaryDirectory
-            .appendingPathComponent("FlowAuthorFeedFallback-\(UUID().uuidString)", isDirectory: true)
-        try FileManager.default.createDirectory(at: rootURL, withIntermediateDirectories: true)
-        defer { try? FileManager.default.removeItem(at: rootURL) }
-
-        let fileManager = TestFileManager(rootURL: rootURL)
-        let database = FlowNostrDB(fileManager: fileManager)
-        let relayClient = FailingRelayClient()
-        let service = makeFeedService(
-            relayClient: relayClient,
-            fileManager: fileManager,
-            nostrDatabase: database
-        )
-        let authorPubkey = hex("e")
-        let localEvent = makeEvent(
-            id: hex("f"),
-            pubkey: authorPubkey,
-            kind: 1,
-            tags: [],
-            content: "local only",
-            createdAt: 1_700_000_500
-        )
-
-        XCTAssertTrue(database.ingest(events: [localEvent]))
-
-        let items = try await service.fetchAuthorFeed(
-            relayURLs: [relayURL],
-            authorPubkey: authorPubkey,
-            kinds: [1],
-            limit: 1,
-            until: nil,
-            hydrationMode: .cachedProfilesOnly,
-            fetchTimeout: 0.01,
-            relayFetchMode: .firstNonEmptyRelay
-        )
-
-        let fetchCount = await relayClient.fetchCount()
-
-        XCTAssertEqual(items.map(\.id), [localEvent.id])
-        XCTAssertEqual(fetchCount, 1)
-    }
-
-    func testFetchAuthorFeedSkipsLocalNostrDBFallbackWhenLocalFeedReadsDisabled() async throws {
-        throw XCTSkip("Relay-only Ditto feeds removed local fallback toggles.")
-        let rootURL = FileManager.default.temporaryDirectory
-            .appendingPathComponent("FlowAuthorFeedRelayOnly-\(UUID().uuidString)", isDirectory: true)
-        try FileManager.default.createDirectory(at: rootURL, withIntermediateDirectories: true)
-        defer { try? FileManager.default.removeItem(at: rootURL) }
-
-        let fileManager = TestFileManager(rootURL: rootURL)
-        let database = FlowNostrDB(fileManager: fileManager)
-        let relayClient = FailingRelayClient()
-        let service = makeFeedService(
-            relayClient: relayClient,
-            fileManager: fileManager,
-            nostrDatabase: database,
-            localFeedReadsEnabled: false
-        )
-        let authorPubkey = hex("1")
-        let localEvent = makeEvent(
-            id: hex("2"),
-            pubkey: authorPubkey,
-            kind: 1,
-            tags: [],
-            content: "local only",
-            createdAt: 1_700_000_510
-        )
-
-        XCTAssertTrue(database.ingest(events: [localEvent]))
-
-        let items = try await service.fetchAuthorFeed(
-            relayURLs: [relayURL],
-            authorPubkey: authorPubkey,
-            kinds: [1],
-            limit: 1,
-            until: nil,
-            hydrationMode: .cachedProfilesOnly,
-            fetchTimeout: 0.01,
-            relayFetchMode: .firstNonEmptyRelay
-        )
-
-        let fetchCount = await relayClient.fetchCount()
-        XCTAssertTrue(items.isEmpty)
-        XCTAssertEqual(fetchCount, 1)
-    }
-
-    func testFetchAuthorFeedRelayOnlyBypassesLocalNostrDBWhenLocalReadsRemainEnabled() async throws {
+    func testFetchAuthorFeedRelayOnlyReturnsRelayResults() async throws {
         let rootURL = FileManager.default.temporaryDirectory
             .appendingPathComponent("FlowAuthorFeedDittoRelayOnly-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: rootURL, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: rootURL) }
 
         let fileManager = TestFileManager(rootURL: rootURL)
-        let database = FlowNostrDB(fileManager: fileManager)
         let authorPubkey = hex("a")
-        let localEvent = makeEvent(
-            id: hex("b"),
-            pubkey: authorPubkey,
-            kind: 1,
-            tags: [],
-            content: "local event",
-            createdAt: 1_700_000_500
-        )
         let relayEvent = makeEvent(
             id: hex("c"),
             pubkey: authorPubkey,
@@ -1799,15 +1341,13 @@ final class NostrFeedServiceTests: XCTestCase {
             content: "relay event",
             createdAt: 1_700_000_600
         )
-        XCTAssertTrue(database.ingest(events: [localEvent]))
 
         let relayClient = RecordingOutboxRelayClient(eventsByRelay: [
             relayURL: [relayEvent]
         ])
         let service = makeFeedService(
             relayClient: relayClient,
-            fileManager: fileManager,
-            nostrDatabase: database
+            fileManager: fileManager
         )
 
         let items = try await service.fetchAuthorFeed(
@@ -1828,50 +1368,6 @@ final class NostrFeedServiceTests: XCTestCase {
         XCTAssertEqual(fetchCount, 1)
     }
 
-    func testFetchFollowingFeedSkipsLocalNostrDBFallbackWhenLocalFeedReadsDisabled() async throws {
-        throw XCTSkip("Relay-only Ditto feeds removed local fallback toggles.")
-        let rootURL = FileManager.default.temporaryDirectory
-            .appendingPathComponent("FlowFollowingFeedRelayOnly-\(UUID().uuidString)", isDirectory: true)
-        try FileManager.default.createDirectory(at: rootURL, withIntermediateDirectories: true)
-        defer { try? FileManager.default.removeItem(at: rootURL) }
-
-        let fileManager = TestFileManager(rootURL: rootURL)
-        let database = FlowNostrDB(fileManager: fileManager)
-        let relayClient = FailingRelayClient()
-        let service = makeFeedService(
-            relayClient: relayClient,
-            fileManager: fileManager,
-            nostrDatabase: database,
-            localFeedReadsEnabled: false
-        )
-        let authorPubkey = hex("3")
-        let localEvent = makeEvent(
-            id: hex("4"),
-            pubkey: authorPubkey,
-            kind: 1,
-            tags: [],
-            content: "local following row",
-            createdAt: 1_700_000_520
-        )
-
-        XCTAssertTrue(database.ingest(events: [localEvent]))
-
-        let items = try await service.fetchFollowingFeed(
-            relayURLs: [relayURL],
-            authors: [authorPubkey],
-            kinds: [1],
-            limit: 1,
-            until: nil,
-            hydrationMode: .cachedProfilesOnly,
-            fetchTimeout: 0.01,
-            relayFetchMode: .firstNonEmptyRelay
-        )
-
-        let fetchCount = await relayClient.fetchCount()
-        XCTAssertTrue(items.isEmpty)
-        XCTAssertEqual(fetchCount, 1)
-    }
-
     func testFetchFollowingsRelayOnlyIgnoresCachedFollowListSnapshot() async throws {
         let rootURL = FileManager.default.temporaryDirectory
             .appendingPathComponent("FlowFollowingsDittoRelayOnly-\(UUID().uuidString)", isDirectory: true)
@@ -1879,7 +1375,6 @@ final class NostrFeedServiceTests: XCTestCase {
         defer { try? FileManager.default.removeItem(at: rootURL) }
 
         let fileManager = TestFileManager(rootURL: rootURL)
-        let database = FlowNostrDB(fileManager: fileManager)
         let relayClient = RecordingOutboxRelayClient(eventsByRelay: [
             relayURL: [
                 makeEvent(
@@ -1894,8 +1389,7 @@ final class NostrFeedServiceTests: XCTestCase {
         ])
         let service = makeFeedService(
             relayClient: relayClient,
-            fileManager: fileManager,
-            nostrDatabase: database
+            fileManager: fileManager
         )
 
         await service.storeFollowListSnapshotLocally(
@@ -1924,7 +1418,6 @@ final class NostrFeedServiceTests: XCTestCase {
         defer { try? FileManager.default.removeItem(at: rootURL) }
 
         let fileManager = TestFileManager(rootURL: rootURL)
-        let nostrDatabase = FlowNostrDB(fileManager: fileManager)
         let rootAuthorPubkey = hex("1")
         let replyAuthorPubkey = hex("2")
         let authorReadRelayURL = URL(string: "wss://thread-root-read.example")!
@@ -1961,8 +1454,7 @@ final class NostrFeedServiceTests: XCTestCase {
         ])
         let service = makeFeedService(
             relayClient: relayClient,
-            fileManager: fileManager,
-            nostrDatabase: nostrDatabase
+            fileManager: fileManager
         )
 
         let items = try await service.fetchThreadReplies(
@@ -1984,7 +1476,6 @@ final class NostrFeedServiceTests: XCTestCase {
         defer { try? FileManager.default.removeItem(at: rootURL) }
 
         let fileManager = TestFileManager(rootURL: rootURL)
-        let nostrDatabase = FlowNostrDB(fileManager: fileManager)
         let rootAuthorPubkey = hex("6")
         let reactorPubkey = hex("7")
         let authorReadRelayURL = URL(string: "wss://thread-activity-read.example")!
@@ -2017,8 +1508,7 @@ final class NostrFeedServiceTests: XCTestCase {
                 relayURL: [relayListEvent, reactionEvent],
                 authorReadRelayURL: [rootEvent]
             ]),
-            fileManager: fileManager,
-            nostrDatabase: nostrDatabase
+            fileManager: fileManager
         )
 
         let rows = try await service.fetchThreadNoteActivityRows(
@@ -2039,7 +1529,6 @@ final class NostrFeedServiceTests: XCTestCase {
         defer { try? FileManager.default.removeItem(at: rootURL) }
 
         let fileManager = TestFileManager(rootURL: rootURL)
-        let nostrDatabase = FlowNostrDB(fileManager: fileManager)
         let authorPubkey = hex("b")
         let writeOnlyRelayURL = URL(string: "wss://author-write-only.example")!
         let writeOnlyRelayList = makeEvent(
@@ -2054,8 +1543,7 @@ final class NostrFeedServiceTests: XCTestCase {
             relayClient: RecordingOutboxRelayClient(eventsByRelay: [
                 relayURL: [writeOnlyRelayList]
             ]),
-            fileManager: fileManager,
-            nostrDatabase: nostrDatabase
+            fileManager: fileManager
         )
 
         _ = try await service.fetchOutboxBackedAuthorFeed(
@@ -2080,7 +1568,6 @@ final class NostrFeedServiceTests: XCTestCase {
         defer { try? FileManager.default.removeItem(at: rootURL) }
 
         let fileManager = TestFileManager(rootURL: rootURL)
-        let database = FlowNostrDB(fileManager: fileManager)
         let authorPubkey = hex("a")
         let event = makeEvent(
             id: hex("1"),
@@ -2101,8 +1588,7 @@ final class NostrFeedServiceTests: XCTestCase {
         )
         let service = makeFeedService(
             relayClient: relayClient,
-            fileManager: fileManager,
-            nostrDatabase: database
+            fileManager: fileManager
         )
 
         let startedAt = Date()
@@ -2145,7 +1631,6 @@ final class NostrFeedServiceTests: XCTestCase {
         defer { try? FileManager.default.removeItem(at: rootURL) }
 
         let fileManager = TestFileManager(rootURL: rootURL)
-        let database = FlowNostrDB(fileManager: fileManager)
         let authorPubkey = hex("d")
         let note = makeEvent(
             id: hex("e"),
@@ -2167,8 +1652,7 @@ final class NostrFeedServiceTests: XCTestCase {
         ])
         let service = makeFeedService(
             relayClient: relayClient,
-            fileManager: fileManager,
-            nostrDatabase: database
+            fileManager: fileManager
         )
 
         let firstItems = await service.buildFeedItems(
@@ -2274,7 +1758,6 @@ final class NostrFeedServiceTests: XCTestCase {
         defer { try? FileManager.default.removeItem(at: rootURL) }
 
         let fileManager = TestFileManager(rootURL: rootURL)
-        let database = FlowNostrDB(fileManager: fileManager)
         let note = makeEvent(
             id: hex("6"),
             pubkey: hex("7"),
@@ -2294,7 +1777,6 @@ final class NostrFeedServiceTests: XCTestCase {
         let service = makeFeedService(
             relayClient: relayClient,
             fileManager: fileManager,
-            nostrDatabase: database,
             presentationCache: FeedPresentationCache()
         )
 
@@ -2323,7 +1805,6 @@ final class NostrFeedServiceTests: XCTestCase {
         defer { try? FileManager.default.removeItem(at: rootURL) }
 
         let fileManager = TestFileManager(rootURL: rootURL)
-        let database = FlowNostrDB(fileManager: fileManager)
         let seenEventStore = SeenEventStore(fileManager: fileManager)
         let parentEvent = makeEvent(
             id: hex("9"),
@@ -2354,7 +1835,6 @@ final class NostrFeedServiceTests: XCTestCase {
         let service = makeFeedService(
             relayClient: relayClient,
             fileManager: fileManager,
-            nostrDatabase: database,
             seenEventStore: seenEventStore,
             presentationCache: FeedPresentationCache()
         )
@@ -2855,7 +2335,6 @@ private final class TestHarness {
     let relayClient: SpyRelayClient
     let profileCache: ProfileCache
     let seenEventStore: SeenEventStore
-    let nostrDatabase: FlowNostrDB
     let service: NostrFeedService
 
     init() throws {
@@ -2866,7 +2345,6 @@ private final class TestHarness {
         let fileManager = TestFileManager(rootURL: rootURL)
         let profileSnapshotStore = ProfileSnapshotStore(fileManager: fileManager)
         let relayHintCache = ProfileRelayHintCache()
-        nostrDatabase = FlowNostrDB(fileManager: fileManager)
         let followListCache = FollowListSnapshotCache(fileManager: fileManager)
 
         relayClient = SpyRelayClient()
@@ -2879,7 +2357,6 @@ private final class TestHarness {
             relayHintCache: relayHintCache,
             followListCache: followListCache,
             seenEventStore: seenEventStore,
-            nostrDatabase: nostrDatabase,
             presentationCache: FeedPresentationCache()
         )
     }
@@ -2888,10 +2365,8 @@ private final class TestHarness {
 private func makeFeedService(
     relayClient: any NostrRelayEventFetching,
     fileManager: TestFileManager,
-    nostrDatabase: FlowNostrDB,
     seenEventStore customSeenEventStore: SeenEventStore? = nil,
-    presentationCache: FeedPresentationCache = .shared,
-    localFeedReadsEnabled: Bool? = nil
+    presentationCache: FeedPresentationCache = .shared
 ) -> NostrFeedService {
     let profileSnapshotStore = ProfileSnapshotStore(fileManager: fileManager)
     let profileCache = ProfileCache(snapshotStore: profileSnapshotStore)
@@ -2905,9 +2380,7 @@ private func makeFeedService(
         relayHintCache: ProfileRelayHintCache(),
         followListCache: followListCache,
         seenEventStore: seenEventStore,
-        nostrDatabase: nostrDatabase,
-        presentationCache: presentationCache,
-        localFeedReadsEnabled: localFeedReadsEnabled
+        presentationCache: presentationCache
     )
 }
 
@@ -2966,32 +2439,4 @@ private func originalEventJSON(for event: Flow.NostrEvent) -> String {
 
 private func hex(_ character: Character) -> String {
     String(Array(repeating: character, count: 64))
-}
-
-extension NostrFeedService {
-    init(
-        relayClient: any NostrRelayEventFetching = NostrRelayClient(),
-        timelineCache: any TimelineEventCaching = TimelineEventCache.shared,
-        profileCache: any ProfileCaching = ProfileCache.shared,
-        relayHintCache: any ProfileRelayHintCaching = ProfileRelayHintCache.shared,
-        followListCache: any FollowListSnapshotStoring = FollowListSnapshotCache.shared,
-        seenEventStore: any SeenEventStoring = SeenEventStore.shared,
-        nostrDatabase: FlowNostrDB,
-        presentationCache: FeedPresentationCache = .shared,
-        outboxDiagnosticsStore: OutboxRecoveryDiagnosticsStore = .shared,
-        localFeedReadsEnabled: Bool? = nil
-    ) {
-        let _ = nostrDatabase
-        let _ = localFeedReadsEnabled
-        self.init(
-            relayClient: relayClient,
-            timelineCache: timelineCache,
-            profileCache: profileCache,
-            relayHintCache: relayHintCache,
-            followListCache: followListCache,
-            seenEventStore: seenEventStore,
-            presentationCache: presentationCache,
-            outboxDiagnosticsStore: outboxDiagnosticsStore
-        )
-    }
 }
