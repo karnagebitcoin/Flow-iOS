@@ -257,7 +257,8 @@ final class NostrFeedServiceTests: XCTestCase {
             relayHintCache: relayHintCache,
             followListCache: FollowListSnapshotCache(fileManager: fileManager),
             eventRepository: EventRepository(fileManager: fileManager),
-            presentationCache: FeedPresentationCache()
+            presentationCache: FeedPresentationCache(),
+            metadataRequestCoordinator: MetadataRequestCoordinator()
         )
 
         let plan = await service.outboxBackedRelayPlan(
@@ -329,7 +330,8 @@ final class NostrFeedServiceTests: XCTestCase {
             relayHintCache: relayHintCache,
             followListCache: FollowListSnapshotCache(fileManager: fileManager),
             eventRepository: eventRepository,
-            presentationCache: FeedPresentationCache()
+            presentationCache: FeedPresentationCache(),
+            metadataRequestCoordinator: MetadataRequestCoordinator()
         )
 
         let items = try await service.fetchOutboxBackedAuthorFeed(
@@ -508,7 +510,8 @@ final class NostrFeedServiceTests: XCTestCase {
             relayHintCache: relayHintCache,
             followListCache: FollowListSnapshotCache(fileManager: fileManager),
             eventRepository: eventRepository,
-            presentationCache: FeedPresentationCache()
+            presentationCache: FeedPresentationCache(),
+            metadataRequestCoordinator: MetadataRequestCoordinator()
         )
         let reference = NostrEventReferencePointer(
             normalizedIdentifier: referencedEvent.id.lowercased(),
@@ -571,7 +574,8 @@ final class NostrFeedServiceTests: XCTestCase {
             relayHintCache: relayHintCache,
             followListCache: FollowListSnapshotCache(fileManager: fileManager),
             eventRepository: eventRepository,
-            presentationCache: FeedPresentationCache()
+            presentationCache: FeedPresentationCache(),
+            metadataRequestCoordinator: MetadataRequestCoordinator()
         )
         let reference = NostrEventReferencePointer(
             normalizedIdentifier: referencedEvent.id.lowercased(),
@@ -742,7 +746,8 @@ final class NostrFeedServiceTests: XCTestCase {
             profileCache: ProfileCache(snapshotStore: ProfileSnapshotStore(fileManager: fileManager)),
             relayHintCache: ProfileRelayHintCache(),
             followListCache: followListCache,
-            eventRepository: EventRepository(fileManager: fileManager)
+            eventRepository: EventRepository(fileManager: fileManager),
+            metadataRequestCoordinator: MetadataRequestCoordinator()
         )
 
         let authorPubkey = hex("1")
@@ -773,7 +778,8 @@ final class NostrFeedServiceTests: XCTestCase {
             profileCache: ProfileCache(snapshotStore: ProfileSnapshotStore(fileManager: fileManager)),
             relayHintCache: ProfileRelayHintCache(),
             followListCache: followListCache,
-            eventRepository: EventRepository(fileManager: fileManager)
+            eventRepository: EventRepository(fileManager: fileManager),
+            metadataRequestCoordinator: MetadataRequestCoordinator()
         )
 
         let profilePubkey = hex("1")
@@ -828,7 +834,8 @@ final class NostrFeedServiceTests: XCTestCase {
             profileCache: ProfileCache(snapshotStore: ProfileSnapshotStore(fileManager: fileManager)),
             relayHintCache: ProfileRelayHintCache(),
             followListCache: followListCache,
-            eventRepository: EventRepository(fileManager: fileManager)
+            eventRepository: EventRepository(fileManager: fileManager),
+            metadataRequestCoordinator: MetadataRequestCoordinator()
         )
         let followStore = FollowStore(
             defaults: defaults,
@@ -908,7 +915,8 @@ final class NostrFeedServiceTests: XCTestCase {
             profileCache: ProfileCache(snapshotStore: ProfileSnapshotStore(fileManager: fileManager)),
             relayHintCache: ProfileRelayHintCache(),
             followListCache: followListCache,
-            eventRepository: EventRepository(fileManager: fileManager)
+            eventRepository: EventRepository(fileManager: fileManager),
+            metadataRequestCoordinator: MetadataRequestCoordinator()
         )
         defaults.set(
             [existingPubkeyA, existingPubkeyB],
@@ -990,7 +998,8 @@ final class NostrFeedServiceTests: XCTestCase {
             profileCache: ProfileCache(snapshotStore: ProfileSnapshotStore(fileManager: fileManager)),
             relayHintCache: ProfileRelayHintCache(),
             followListCache: followListCache,
-            eventRepository: EventRepository(fileManager: fileManager)
+            eventRepository: EventRepository(fileManager: fileManager),
+            metadataRequestCoordinator: MetadataRequestCoordinator()
         )
         defaults.set(
             [followedPubkeyA, followedPubkeyB],
@@ -1711,6 +1720,77 @@ final class NostrFeedServiceTests: XCTestCase {
         XCTAssertEqual(Set(second.pubkeysToFetch), Set([hex("a"), hex("b")]))
     }
 
+    func testProfileFetchRereadsRequestedProfilesAfterOwningMixedBatch() async throws {
+        let rootURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("FlowMixedProfileBatch-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: rootURL, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: rootURL) }
+
+        let authorA = hex("a")
+        let authorB = hex("b")
+        let authorC = hex("c")
+        let profileA = makeEvent(
+            id: hex("1"),
+            pubkey: authorA,
+            kind: 0,
+            tags: [],
+            content: #"{"name":"alice","display_name":"Alice"}"#
+        )
+        let profileB = makeEvent(
+            id: hex("2"),
+            pubkey: authorB,
+            kind: 0,
+            tags: [],
+            content: #"{"name":"bob","display_name":"Bob"}"#
+        )
+        let profileC = makeEvent(
+            id: hex("3"),
+            pubkey: authorC,
+            kind: 0,
+            tags: [],
+            content: #"{"name":"carol","display_name":"Carol"}"#
+        )
+        let relayClient = DelayedRelayClient(
+            eventsByRelay: [relayURL: [profileA, profileB, profileC]],
+            delaysByRelay: [relayURL: 250_000_000]
+        )
+        let coordinator = MetadataRequestCoordinator(
+            profileBatchLimit: 2,
+            profileFlushDelayNanoseconds: 100_000_000
+        )
+        let service = makeFeedService(
+            relayClient: relayClient,
+            fileManager: TestFileManager(rootURL: rootURL),
+            metadataRequestCoordinator: coordinator
+        )
+
+        async let firstProfiles = service.fetchProfiles(
+            relayURLs: [relayURL],
+            pubkeys: [authorA],
+            fetchTimeout: 1
+        )
+        try await Task.sleep(nanoseconds: 10_000_000)
+        async let ownerProfiles = service.fetchProfiles(
+            relayURLs: [relayURL],
+            pubkeys: [authorB],
+            fetchTimeout: 1
+        )
+        try await Task.sleep(nanoseconds: 20_000_000)
+
+        let mixedProfiles = await service.fetchProfiles(
+            relayURLs: [relayURL],
+            pubkeys: [authorA, authorC],
+            fetchTimeout: 1
+        )
+        let firstResult = await firstProfiles
+        let ownerResult = await ownerProfiles
+
+        XCTAssertEqual(firstResult[authorA]?.displayName, "Alice")
+        XCTAssertEqual(ownerResult[authorB]?.displayName, "Bob")
+        XCTAssertEqual(mixedProfiles[authorA]?.displayName, "Alice")
+        XCTAssertEqual(mixedProfiles[authorC]?.displayName, "Carol")
+    }
+
     func testWispParityDiagnosticsCountsDuplicateRelayEvents() async throws {
         await WispParityDiagnosticsStore.shared.reset()
         let rootURL = FileManager.default.temporaryDirectory
@@ -1957,7 +2037,8 @@ final class NostrFeedServiceTests: XCTestCase {
             relayClient: relayClient,
             fileManager: fileManager,
             eventRepository: eventRepository,
-            presentationCache: FeedPresentationCache()
+            presentationCache: FeedPresentationCache(),
+            metadataRequestCoordinator: MetadataRequestCoordinator()
         )
 
         await eventRepository.store(events: [parentEvent])
@@ -2478,7 +2559,8 @@ private final class TestHarness {
             relayHintCache: relayHintCache,
             followListCache: followListCache,
             eventRepository: eventRepository,
-            presentationCache: FeedPresentationCache()
+            presentationCache: FeedPresentationCache(),
+            metadataRequestCoordinator: MetadataRequestCoordinator()
         )
     }
 }
@@ -2487,7 +2569,8 @@ private func makeFeedService(
     relayClient: any NostrRelayEventFetching,
     fileManager: TestFileManager,
     eventRepository customEventRepository: EventRepository? = nil,
-    presentationCache: FeedPresentationCache = .shared
+    presentationCache: FeedPresentationCache = .shared,
+    metadataRequestCoordinator: MetadataRequestCoordinator = MetadataRequestCoordinator()
 ) -> NostrFeedService {
     let profileSnapshotStore = ProfileSnapshotStore(fileManager: fileManager)
     let profileCache = ProfileCache(snapshotStore: profileSnapshotStore)
@@ -2501,7 +2584,8 @@ private func makeFeedService(
         relayHintCache: ProfileRelayHintCache(),
         followListCache: followListCache,
         eventRepository: eventRepository,
-        presentationCache: presentationCache
+        presentationCache: presentationCache,
+        metadataRequestCoordinator: metadataRequestCoordinator
     )
 }
 

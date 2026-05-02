@@ -81,6 +81,10 @@ struct HomeFeedPageFetching {
         var lastBatchCount = 0
         var roundsCompleted = 0
         var nextPageCursor: Int?
+        let relayPlan = await service.outboxBackedRelayPlan(
+            authors: authors,
+            baseReadRelayURLs: relayURLs
+        )
 
         while roundsCompleted < maxBackfillRounds {
             let qualifiedCount = mode.map { HomeFeedViewModel.visibleItemCount(collected, mode: $0) } ?? collected.count
@@ -91,6 +95,7 @@ struct HomeFeedPageFetching {
             let fetched = try await service.fetchFollowingFeedRecoveringWithOutbox(
                 baseReadRelayURLs: relayURLs,
                 authors: authors,
+                relayPlan: relayPlan,
                 kinds: kinds,
                 limit: probeLimit,
                 until: cursor,

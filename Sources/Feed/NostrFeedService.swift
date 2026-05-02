@@ -9,6 +9,7 @@ struct NostrFeedService: Sendable {
     private let eventRepository: any EventRepositoryStoring
     private let presentationCache: FeedPresentationCache
     private let outboxDiagnosticsStore: OutboxRecoveryDiagnosticsStore
+    private let metadataRequestCoordinator: MetadataRequestCoordinator
     private let relayTimelineFetcher: RelayTimelineFetcher
     nonisolated static let nostrArchivesSearchRelayURL = URL(string: "wss://search.nostrarchives.com")!
     nonisolated static let nostrArchivesTrendingRelayURL = URL(string: "wss://feeds.nostrarchives.com/notes/trending/reactions/today")!
@@ -32,7 +33,8 @@ struct NostrFeedService: Sendable {
         followListCache: any FollowListSnapshotStoring = FollowListSnapshotCache.shared,
         eventRepository: any EventRepositoryStoring = EventRepository.shared,
         presentationCache: FeedPresentationCache = .shared,
-        outboxDiagnosticsStore: OutboxRecoveryDiagnosticsStore = .shared
+        outboxDiagnosticsStore: OutboxRecoveryDiagnosticsStore = .shared,
+        metadataRequestCoordinator: MetadataRequestCoordinator = .shared
     ) {
         self.relayClient = relayClient
         self.timelineCache = timelineCache
@@ -42,6 +44,7 @@ struct NostrFeedService: Sendable {
         self.eventRepository = eventRepository
         self.presentationCache = presentationCache
         self.outboxDiagnosticsStore = outboxDiagnosticsStore
+        self.metadataRequestCoordinator = metadataRequestCoordinator
         self.relayTimelineFetcher = RelayTimelineFetcher(
             relayClient: relayClient,
             timelineCache: timelineCache,
@@ -89,7 +92,8 @@ struct NostrFeedService: Sendable {
             relayHintCache: relayHintCache,
             relayTimelineFetcher: relayTimelineFetcher,
             nostrArchivesSearchRelayURL: Self.nostrArchivesSearchRelayURL,
-            metadataFallbackRelayURLs: Self.metadataFallbackRelayURLs
+            metadataFallbackRelayURLs: Self.metadataFallbackRelayURLs,
+            metadataRequestCoordinator: metadataRequestCoordinator
         )
     }
 
@@ -395,6 +399,7 @@ struct NostrFeedService: Sendable {
     func fetchFollowingFeedRecoveringWithOutbox(
         baseReadRelayURLs: [URL],
         authors: [String],
+        relayPlan: AuthorRelayPlan? = nil,
         kinds: [Int],
         limit: Int,
         until: Int?,
@@ -406,6 +411,7 @@ struct NostrFeedService: Sendable {
         try await fetchOutboxBackedFollowingFeed(
             baseReadRelayURLs: baseReadRelayURLs,
             authors: authors,
+            relayPlan: relayPlan,
             kinds: kinds,
             limit: limit,
             until: until,
@@ -723,6 +729,7 @@ struct NostrFeedService: Sendable {
     func fetchOutboxBackedFollowingFeed(
         baseReadRelayURLs: [URL],
         authors: [String],
+        relayPlan: AuthorRelayPlan? = nil,
         kinds: [Int],
         limit: Int,
         until: Int?,
@@ -736,15 +743,20 @@ struct NostrFeedService: Sendable {
         let normalizedAuthors = normalizedUniquePubkeys(authors)
         guard !normalizedAuthors.isEmpty else { return [] }
 
-        let relayPlan = await outboxBackedRelayPlan(
-            authors: normalizedAuthors,
-            baseReadRelayURLs: baseReadRelayURLs
-        )
+        let effectiveRelayPlan: AuthorRelayPlan
+        if let providedRelayPlan = relayPlan {
+            effectiveRelayPlan = providedRelayPlan
+        } else {
+            effectiveRelayPlan = await outboxBackedRelayPlan(
+                authors: normalizedAuthors,
+                baseReadRelayURLs: baseReadRelayURLs
+            )
+        }
         let effectiveRelayFetchMode: RelayFetchMode =
             relayFetchMode == .firstRelayWithEvents ? .firstNonEmptyRelay : relayFetchMode
 
         let groupedAuthors = Dictionary(grouping: normalizedAuthors) { author in
-            relayGroupKey(for: relayPlan.relayURLs(for: author))
+            relayGroupKey(for: effectiveRelayPlan.relayURLs(for: author))
         }
 
         let groupResults: (results: [(items: [FeedItem], relayURLs: [URL])], firstError: Error?) = await withTaskGroup(

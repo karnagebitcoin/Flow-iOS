@@ -73,6 +73,7 @@ final class HomeFeedViewModel: ObservableObject {
     private var liveCatchUpTask: Task<Void, Never>?
     private var pendingLiveEventsByID: [String: NostrEvent] = [:]
     private var liveEventFlushTask: Task<Void, Never>?
+    private var hydrationUpgradeTasks: [UUID: Task<Void, Never>] = [:]
     private var liveEventGeneration = 0
     private var liveCatchUpToken = 0
     private var lastLiveCatchUpBySignature: [String: Date] = [:]
@@ -113,6 +114,7 @@ final class HomeFeedViewModel: ObservableObject {
         liveUpdatesTask?.cancel()
         liveCatchUpTask?.cancel()
         liveEventFlushTask?.cancel()
+        hydrationUpgradeTasks.values.forEach { $0.cancel() }
         liveEventGeneration &+= 1
         resetFeedTask?.cancel()
         trendingEmptyRetryTask?.cancel()
@@ -822,43 +824,14 @@ final class HomeFeedViewModel: ObservableObject {
                 fastHydrationMode: fastHydrationMode
             ),
                !stagedHydrationEvents.isEmpty {
-                let upgradedItems = await service.buildFeedItems(
+                scheduleHydrationUpgrade(
                     relayURLs: requestRelayURLs,
                     events: stagedHydrationEvents,
                     hydrationMode: requestHydrationMode,
-                    moderationSnapshot: muteFilterSnapshot
-                )
-                guard !Task.isCancelled else { return }
-
-                if requestSource != feedSource || requestUserPubkey != currentUserPubkey {
-                    guard latestRefreshRequestID == refreshRequestID else { return }
-                    needsRefreshAfterCurrentRequest = true
-                    return
-                }
-
-                if requestSource != .news,
-                   requestSource != .trending,
-                   requestSource != .articles,
-                   requestSource != .polls,
-                   !FeedKindFilters.isSameSelection(requestKinds, showKinds) {
-                    guard latestRefreshRequestID == refreshRequestID else { return }
-                    needsRefreshAfterCurrentRequest = true
-                    return
-                }
-
-                guard latestRefreshRequestID == refreshRequestID else { return }
-                applyRefreshResults(
-                    fetched: upgradedItems,
                     requestSource: requestSource,
-                    sourcePageResult: sourcePageResult,
-                    publishFetchedItems: publishFetchedItems,
-                    startedWithEmptyItems: startedWithEmptyItems
-                )
-                scheduleTrendingRetryAfterEmptyInitialLoadIfNeeded(
-                    fetched: upgradedItems,
-                    requestSource: requestSource,
-                    publishFetchedItems: publishFetchedItems,
-                    startedWithEmptyItems: startedWithEmptyItems
+                    requestUserPubkey: requestUserPubkey,
+                    requestKinds: requestKinds,
+                    requestID: refreshRequestID
                 )
             }
 
@@ -1173,26 +1146,15 @@ final class HomeFeedViewModel: ObservableObject {
                 fastHydrationMode: fastHydrationMode
             ),
                !stagedHydrationEvents.isEmpty {
-                let upgradedItems = await service.buildFeedItems(
+                scheduleHydrationUpgrade(
                     relayURLs: requestRelayURLs,
                     events: stagedHydrationEvents,
                     hydrationMode: requestHydrationMode,
-                    moderationSnapshot: muteFilterSnapshot
+                    requestSource: requestSource,
+                    requestUserPubkey: currentUserPubkey,
+                    requestKinds: requestKinds,
+                    requestID: requestRefreshID
                 )
-                guard !Task.isCancelled else { return }
-                guard requestRefreshID == latestRefreshRequestID, requestSource == feedSource else {
-                    return
-                }
-
-                if requestSource != .news,
-                   requestSource != .trending,
-                   requestSource != .articles,
-                   requestSource != .polls,
-                   !FeedKindFilters.isSameSelection(requestKinds, showKinds) {
-                    return
-                }
-
-                mergeKeepingNewest(itemsToMerge: upgradedItems)
             }
         } catch {
             errorMessage = "Couldn't load more posts."
@@ -1253,6 +1215,8 @@ final class HomeFeedViewModel: ObservableObject {
         liveUpdatesTask = nil
         liveCatchUpTask?.cancel()
         liveCatchUpTask = nil
+        hydrationUpgradeTasks.values.forEach { $0.cancel() }
+        hydrationUpgradeTasks.removeAll()
         clearPendingLiveEvents()
         lastLiveCatchUpBySignature.removeAll()
         liveSubscriptionKinds = []
@@ -1338,6 +1302,52 @@ final class HomeFeedViewModel: ObservableObject {
         }
 
         scheduleLiveCatchUp(for: targets, force: true)
+    }
+
+    private func scheduleHydrationUpgrade(
+        relayURLs: [URL],
+        events: [NostrEvent],
+        hydrationMode: FeedItemHydrationMode,
+        requestSource: HomePrimaryFeedSource,
+        requestUserPubkey: String?,
+        requestKinds: [Int],
+        requestID: Int
+    ) {
+        let taskID = UUID()
+        let service = service
+        let moderationSnapshot = muteFilterSnapshot
+
+        hydrationUpgradeTasks[taskID] = Task(priority: .utility) { [weak self] in
+            let upgradedItems = await service.buildFeedItems(
+                relayURLs: relayURLs,
+                events: events,
+                hydrationMode: hydrationMode,
+                moderationSnapshot: moderationSnapshot
+            )
+            guard !Task.isCancelled else { return }
+
+            await MainActor.run { [weak self] in
+                guard let self else { return }
+                defer { self.hydrationUpgradeTasks[taskID] = nil }
+
+                guard self.latestRefreshRequestID == requestID,
+                      self.feedSource == requestSource,
+                      self.currentUserPubkey == requestUserPubkey else { return }
+
+                if requestSource != .news,
+                   requestSource != .trending,
+                   requestSource != .articles,
+                   requestSource != .polls,
+                   !FeedKindFilters.isSameSelection(requestKinds, self.showKinds) {
+                    return
+                }
+
+                self.applyHydrationUpgrade(
+                    fetched: upgradedItems,
+                    requestSource: requestSource
+                )
+            }
+        }
     }
 
     private func handleLiveStatus(target: HomeFeedLiveSubscriptionTarget) async {
@@ -1537,6 +1547,80 @@ final class HomeFeedViewModel: ObservableObject {
 
         knownEventIDs = currentlyVisibleIDs
         knownEventIDs.formUnion(bufferedNewItems.map(\.id))
+    }
+
+    private func applyHydrationUpgrade(
+        fetched: [FeedItem],
+        requestSource: HomePrimaryFeedSource
+    ) {
+        guard !fetched.isEmpty else { return }
+
+        LocalPublicationStore.shared.mergeFetchedItems(fetched)
+        let normalizedFetched = mergeItemArrays(
+            primary: fetched,
+            secondary: [],
+            feedSource: requestSource
+        )
+
+        let existingVisibleItems = items
+        let existingVisibleIDs = Set(existingVisibleItems.map(\.id))
+        let existingVisibleArticleReplacementKeys = Self.articleReplacementKeys(in: existingVisibleItems)
+        let refreshedVisibleCandidates = normalizedFetched.filter { item in
+            existingVisibleIDs.contains(item.id) ||
+                (requestSource == .articles &&
+                    Self.containsArticleReplacement(
+                        for: item,
+                        in: existingVisibleArticleReplacementKeys
+                    ))
+        }
+        let refreshedVisibleItems = pruneItemsForSource(
+            pruneMutedItems(
+                mergeItemArrays(
+                    primary: refreshedVisibleCandidates,
+                    secondary: existingVisibleItems,
+                    feedSource: requestSource
+                )
+            ),
+            feedSource: requestSource,
+            followingPubkeys: sourceUsesFollowingAuthors(requestSource) ? followingPubkeys : nil
+        )
+        let didUpdateVisibleItems = refreshedVisibleItems != existingVisibleItems
+        if didUpdateVisibleItems {
+            items = refreshedVisibleItems
+        }
+
+        let visibleItemIDs = Set(refreshedVisibleItems.map(\.id))
+        let refreshedVisibleArticleReplacementKeys = Self.articleReplacementKeys(in: refreshedVisibleItems)
+        let existingBufferedItems = bufferedNewItems
+        let existingBufferedIDs = Set(existingBufferedItems.map(\.id))
+        let existingBufferedArticleReplacementKeys = Self.articleReplacementKeys(in: existingBufferedItems)
+        let refreshedBufferedCandidates = normalizedFetched.filter { item in
+            existingBufferedIDs.contains(item.id) ||
+                (requestSource == .articles &&
+                    Self.containsArticleReplacement(
+                        for: item,
+                        in: existingBufferedArticleReplacementKeys
+                    ))
+        }
+        bufferedNewItems = mergeItemArrays(
+            primary: refreshedBufferedCandidates,
+            secondary: existingBufferedItems,
+            feedSource: requestSource
+        ).filter {
+            !visibleItemIDs.contains($0.id) &&
+                !(requestSource == .articles &&
+                    Self.containsArticleReplacement(
+                        for: $0,
+                        in: refreshedVisibleArticleReplacementKeys
+                    ))
+        }
+
+        knownEventIDs = visibleItemIDs
+        knownEventIDs.formUnion(bufferedNewItems.map(\.id))
+        let prefetchedVisibleItems = didUpdateVisibleItems
+            ? refreshedVisibleItems.filter { existingVisibleIDs.contains($0.id) }
+            : []
+        scheduleAssetPrefetch(for: prefetchedVisibleItems + refreshedBufferedCandidates)
     }
 
     private func applyRefreshResults(

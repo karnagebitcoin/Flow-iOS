@@ -882,21 +882,22 @@ final class HomeFeedViewModelTests: XCTestCase {
         harness.selectFollowingFeed(for: currentUserPubkey)
 
         let deadline = Date().addingTimeInterval(1)
-        var sawFastPaintWhileLoading = false
+        var sawFastPaintBeforeProfile = false
         while Date() < deadline {
             if harness.viewModel.visibleItems.contains(where: { $0.id == remoteNote.id }),
-               harness.viewModel.isLoading {
-                sawFastPaintWhileLoading = true
+               harness.viewModel.visibleItems.first?.profile == nil {
+                sawFastPaintBeforeProfile = true
                 break
             }
             try await Task.sleep(nanoseconds: 25_000_000)
         }
 
-        XCTAssertTrue(sawFastPaintWhileLoading)
+        XCTAssertTrue(sawFastPaintBeforeProfile)
         XCTAssertNil(harness.viewModel.visibleItems.first?.profile)
 
         try await harness.waitUntilIdle(timeout: 4)
         XCTAssertEqual(harness.viewModel.visibleItems.map(\.id), [remoteNote.id])
+        try await harness.waitForVisibleProfile(id: remoteNote.id, displayName: "Bob", timeout: 4)
         XCTAssertEqual(harness.viewModel.visibleItems.first?.profile?.displayName, "Bob")
         XCTAssertGreaterThanOrEqual(harness.itemCommitCount, 2)
     }
@@ -1411,6 +1412,7 @@ private final class HomeFeedViewModelHarness {
         let profileSnapshotStore = ProfileSnapshotStore(fileManager: fileManager)
         let relayHintCache = ProfileRelayHintCache()
         let followListCache = FollowListSnapshotCache(fileManager: fileManager)
+        let metadataRequestCoordinator = MetadataRequestCoordinator()
         eventRepository = EventRepository(fileManager: fileManager)
         let profileCache = ProfileCache(snapshotStore: profileSnapshotStore)
 
@@ -1440,7 +1442,8 @@ private final class HomeFeedViewModelHarness {
             profileCache: profileCache,
             relayHintCache: relayHintCache,
             followListCache: followListCache,
-            eventRepository: eventRepository
+            eventRepository: eventRepository,
+            metadataRequestCoordinator: metadataRequestCoordinator
         )
 
         viewModel = HomeFeedViewModel(
@@ -1548,6 +1551,23 @@ private final class HomeFeedViewModelHarness {
         }
 
         XCTFail("Timed out waiting for visible item \(id)")
+    }
+
+    func waitForVisibleProfile(
+        id: String,
+        displayName: String,
+        timeout: TimeInterval = 2
+    ) async throws {
+        let deadline = Date().addingTimeInterval(timeout)
+        while Date() < deadline {
+            let item = viewModel.visibleItems.first(where: { $0.id == id })
+            if item?.profile?.displayName == displayName {
+                return
+            }
+            try await Task.sleep(nanoseconds: 50_000_000)
+        }
+
+        XCTFail("Timed out waiting for profile \(displayName) on visible item \(id)")
     }
 
     func waitUntilIdle(timeout: TimeInterval = 2) async throws {

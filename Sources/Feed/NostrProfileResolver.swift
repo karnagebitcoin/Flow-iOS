@@ -6,19 +6,22 @@ struct NostrProfileResolver: Sendable {
     private let relayTimelineFetcher: RelayTimelineFetcher
     private let nostrArchivesSearchRelayURL: URL
     private let metadataFallbackRelayURLs: [URL]
+    private let metadataRequestCoordinator: MetadataRequestCoordinator
 
     init(
         profileCache: any ProfileCaching,
         relayHintCache: any ProfileRelayHintCaching,
         relayTimelineFetcher: RelayTimelineFetcher,
         nostrArchivesSearchRelayURL: URL,
-        metadataFallbackRelayURLs: [URL]
+        metadataFallbackRelayURLs: [URL],
+        metadataRequestCoordinator: MetadataRequestCoordinator = .shared
     ) {
         self.profileCache = profileCache
         self.relayHintCache = relayHintCache
         self.relayTimelineFetcher = relayTimelineFetcher
         self.nostrArchivesSearchRelayURL = nostrArchivesSearchRelayURL
         self.metadataFallbackRelayURLs = metadataFallbackRelayURLs
+        self.metadataRequestCoordinator = metadataRequestCoordinator
     }
 
     func searchProfiles(
@@ -230,14 +233,14 @@ struct NostrProfileResolver: Sendable {
             return profilesByPubkey
         }
 
-        let profileRequest = await MetadataRequestCoordinator.shared.collectProfiles(Array(unresolvedPubkeys))
+        let profileRequest = await metadataRequestCoordinator.collectProfiles(Array(unresolvedPubkeys))
         unresolvedPubkeys = Set(
             profileRequest.pubkeysToFetch
                 .map(normalizePubkey)
                 .filter { !$0.isEmpty }
         )
         guard !unresolvedPubkeys.isEmpty else {
-            await MetadataRequestCoordinator.shared.waitForProfiles(profileRequest.requestedPubkeys)
+            await metadataRequestCoordinator.waitForProfiles(profileRequest.requestedPubkeys)
             let refreshed = await profileCache.resolve(
                 pubkeys: profileRequest.requestedPubkeys,
                 ignoringKnownMisses: true
@@ -283,7 +286,13 @@ struct NostrProfileResolver: Sendable {
                 missed: Array(unresolvedPubkeys)
             )
         }
-        await MetadataRequestCoordinator.shared.completeProfiles(profileRequest.pubkeysToFetch)
+        await metadataRequestCoordinator.completeProfiles(profileRequest.pubkeysToFetch)
+        await metadataRequestCoordinator.waitForProfiles(profileRequest.requestedPubkeys)
+        let refreshed = await profileCache.resolve(
+            pubkeys: profileRequest.requestedPubkeys,
+            ignoringKnownMisses: true
+        )
+        profilesByPubkey.merge(refreshed.hits, uniquingKeysWith: { _, new in new })
 
         return profilesByPubkey
     }
