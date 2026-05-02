@@ -62,6 +62,7 @@ actor EventPersistence {
         }
 
         guard !pendingByID.isEmpty else { return }
+        await WispParityDiagnosticsStore.shared.recordPersistedQueued(pendingByID.count)
 
         if pendingByID.count >= batchLimit {
             await flush()

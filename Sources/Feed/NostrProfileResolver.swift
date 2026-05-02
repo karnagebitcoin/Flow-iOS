@@ -230,13 +230,19 @@ struct NostrProfileResolver: Sendable {
             return profilesByPubkey
         }
 
-        let requestedPubkeys = await MetadataRequestCoordinator.shared.collectProfiles(Array(unresolvedPubkeys))
+        let profileRequest = await MetadataRequestCoordinator.shared.collectProfiles(Array(unresolvedPubkeys))
         unresolvedPubkeys = Set(
-            requestedPubkeys
+            profileRequest.pubkeysToFetch
                 .map(normalizePubkey)
                 .filter { !$0.isEmpty }
         )
         guard !unresolvedPubkeys.isEmpty else {
+            await MetadataRequestCoordinator.shared.waitForProfiles(profileRequest.requestedPubkeys)
+            let refreshed = await profileCache.resolve(
+                pubkeys: profileRequest.requestedPubkeys,
+                ignoringKnownMisses: true
+            )
+            profilesByPubkey.merge(refreshed.hits, uniquingKeysWith: { _, new in new })
             return profilesByPubkey
         }
 
@@ -277,6 +283,7 @@ struct NostrProfileResolver: Sendable {
                 missed: Array(unresolvedPubkeys)
             )
         }
+        await MetadataRequestCoordinator.shared.completeProfiles(profileRequest.pubkeysToFetch)
 
         return profilesByPubkey
     }

@@ -26,7 +26,8 @@ struct RelayTimelineFetcher: Sendable {
     ) async throws -> [NostrEvent] {
         let events: [NostrEvent]
         let fetchOperation = {
-            try await fetchEventsEnforcingTimeout(
+            await WispParityDiagnosticsStore.shared.recordRelayRequest()
+            return try await fetchEventsEnforcingTimeout(
                 relayURL: relayURL,
                 filter: filter,
                 timeout: timeout
@@ -380,11 +381,18 @@ struct RelayTimelineFetcher: Sendable {
     }
 
     private func mergedTimelineEvents(_ events: [NostrEvent], filter: NostrFilter) -> [NostrEvent] {
+        let receivedCount = events.count
         let merged = deduplicateEvents(events).sorted { lhs, rhs in
             if lhs.createdAt == rhs.createdAt {
                 return lhs.id > rhs.id
             }
             return lhs.createdAt > rhs.createdAt
+        }
+        Task {
+            await WispParityDiagnosticsStore.shared.recordRelayEvents(
+                received: receivedCount,
+                duplicatesDropped: max(receivedCount - merged.count, 0)
+            )
         }
 
         if let limit = filter.limit {

@@ -1683,7 +1683,66 @@ final class NostrFeedServiceTests: XCTestCase {
         let second = await coordinator.collectProfiles([hex("b")])
         let firstResult = await first
 
-        XCTAssertEqual(Set(firstResult + second), Set([hex("a"), hex("b")]))
+        XCTAssertEqual(Set(firstResult.requestedPubkeys), Set([hex("a")]))
+        XCTAssertEqual(Set(second.requestedPubkeys), Set([hex("b")]))
+        XCTAssertEqual(
+            Set(firstResult.pubkeysToFetch + second.pubkeysToFetch),
+            Set([hex("a"), hex("b")])
+        )
+    }
+
+    func testMetadataRequestCoordinatorWaitsForDrainedProfileCompletion() async {
+        let coordinator = MetadataRequestCoordinator(
+            profileBatchLimit: 2,
+            profileFlushDelayNanoseconds: 1_000_000_000
+        )
+
+        async let first = coordinator.collectProfiles([hex("a")])
+        try? await Task.sleep(nanoseconds: 10_000_000)
+        let second = await coordinator.collectProfiles([hex("b")])
+        let firstResult = await first
+
+        async let wait: Void = coordinator.waitForProfiles(firstResult.requestedPubkeys)
+        try? await Task.sleep(nanoseconds: 10_000_000)
+        await coordinator.completeProfiles(second.pubkeysToFetch)
+        await wait
+
+        XCTAssertTrue(firstResult.pubkeysToFetch.isEmpty)
+        XCTAssertEqual(Set(second.pubkeysToFetch), Set([hex("a"), hex("b")]))
+    }
+
+    func testWispParityDiagnosticsCountsDuplicateRelayEvents() async throws {
+        await WispParityDiagnosticsStore.shared.reset()
+        let rootURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("FlowWispDiagnostics-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: rootURL, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: rootURL) }
+
+        let fileManager = TestFileManager(rootURL: rootURL)
+        let event = makeEvent(id: hex("a"), pubkey: hex("b"), kind: 1, tags: [], content: "dup")
+        let relayClient = DelayedRelayClient(
+            eventsByRelay: [
+                relayURL: [event],
+                relayURL2: [event]
+            ],
+            delaysByRelay: [:]
+        )
+        let service = makeFeedService(relayClient: relayClient, fileManager: fileManager)
+
+        _ = try await service.fetchFeed(
+            relayURLs: [relayURL, relayURL2],
+            kinds: [1],
+            limit: 10,
+            until: nil,
+            hydrationMode: .cachedProfilesOnly,
+            fetchTimeout: 0.1,
+            relayFetchMode: .allRelays
+        )
+
+        try await Task.sleep(nanoseconds: 50_000_000)
+        let snapshot = await WispParityDiagnosticsStore.shared.currentSnapshot()
+        XCTAssertEqual(snapshot.relayRequests, 2)
+        XCTAssertGreaterThanOrEqual(snapshot.duplicateRelayEventsDropped, 1)
     }
 
     func testBuildFeedItemsReusesPresentationCacheForRepeatedFullHydration() async throws {

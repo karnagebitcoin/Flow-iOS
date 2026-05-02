@@ -1427,6 +1427,9 @@ final class HomeFeedViewModel: ObservableObject {
         pendingLiveEventsByID.removeAll()
         liveEventFlushTask = nil
         guard !events.isEmpty else { return }
+        Task {
+            await WispParityDiagnosticsStore.shared.recordLiveBatchFlushed()
+        }
 
         let service = service
         let relayURLs = hydrationRelayURLs(for: feedSource)
