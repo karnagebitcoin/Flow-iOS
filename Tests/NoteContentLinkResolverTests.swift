@@ -193,6 +193,52 @@ final class NoteContentLinkResolverTests: XCTestCase {
         )
     }
 
+    func testYouTubeEmbedNavigationCancelsWrapperBaseURLNewWindow() throws {
+        let embedURL = try XCTUnwrap(URL(string: "https://www.youtube.com/embed/dQw4w9WgXcQ?playsinline=1&rel=0"))
+        let wrapperBaseURL = try XCTUnwrap(URL(string: "https://com.21media.haloapp"))
+
+        XCTAssertEqual(
+            YouTubeEmbedNavigationPolicy.decision(
+                for: wrapperBaseURL,
+                embedURL: embedURL,
+                isNewWindow: true,
+                wrapperBaseURL: wrapperBaseURL
+            ),
+            .cancel
+        )
+    }
+
+    func testYouTubeEmbedNavigationAllowsWrapperBaseURLMainFrameLoad() throws {
+        let embedURL = try XCTUnwrap(URL(string: "https://www.youtube.com/embed/dQw4w9WgXcQ?playsinline=1&rel=0"))
+        let wrapperBaseURL = try XCTUnwrap(URL(string: "https://com.21media.haloapp/"))
+
+        XCTAssertEqual(
+            YouTubeEmbedNavigationPolicy.decision(
+                for: wrapperBaseURL,
+                embedURL: embedURL,
+                isNewWindow: false,
+                isUserInitiated: false,
+                wrapperBaseURL: wrapperBaseURL
+            ),
+            .allowInWebView
+        )
+    }
+
+    func testYouTubeEmbedNavigationCancelsAutomaticExternalURL() throws {
+        let embedURL = try XCTUnwrap(URL(string: "https://www.youtube.com/embed/dQw4w9WgXcQ?playsinline=1&rel=0"))
+        let watchURL = try XCTUnwrap(URL(string: "https://www.youtube.com/watch?v=dQw4w9WgXcQ"))
+
+        XCTAssertEqual(
+            YouTubeEmbedNavigationPolicy.decision(
+                for: watchURL,
+                embedURL: embedURL,
+                isNewWindow: true,
+                isUserInitiated: false
+            ),
+            .cancel
+        )
+    }
+
     func testYouTubeEmbedNavigationOpensNewWindowURLExternally() throws {
         let embedURL = try XCTUnwrap(URL(string: "https://www.youtube.com/embed/dQw4w9WgXcQ?playsinline=1&rel=0"))
         let watchURL = try XCTUnwrap(URL(string: "https://www.youtube.com/watch?v=dQw4w9WgXcQ"))

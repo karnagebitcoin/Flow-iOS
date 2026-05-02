@@ -43,14 +43,15 @@ struct MainTabShellView: View {
     @State private var isShowingAuthSheet = false
     @State private var authSheetInitialTab: AuthSheetTab = .signIn
     @State private var authSheetPresentationID = UUID()
+    @State private var isHomeRootVisible = true
     @State private var isActivityRootVisible = true
     @State private var isDMRootVisible = true
     @State private var isHomeSideMenuPresented = false
     @State private var bottomTabBarHeight: CGFloat = FloatingComposeButtonLayout.defaultBottomTabBarHeight
     @State private var homeScrollChrome = ScrollChromeOffsets()
 
-    private static let bottomTabBarIconBottomPadding: CGFloat = 14
-    private static let bottomTabBarIconTopPadding: CGFloat = 4
+    private static let bottomTabBarIconBottomPadding: CGFloat = 15
+    private static let bottomTabBarIconTopPadding: CGFloat = 5
 
     @StateObject private var homeViewModel = HomeFeedViewModel(
         relayURL: URL(string: RelaySettingsStore.defaultReadRelayURLs.first ?? "wss://relay.damus.io/")!
@@ -71,6 +72,7 @@ struct MainTabShellView: View {
                 HomeFeedView(
                     viewModel: homeViewModel,
                     isShowingSideMenu: $isHomeSideMenuPresented,
+                    isRootVisible: $isHomeRootVisible,
                     scrollChromeOffsets: $homeScrollChrome,
                     bottomTabBarHeight: bottomTabBarHeight
                 )
@@ -406,7 +408,7 @@ struct MainTabShellView: View {
     }
 
     private func bottomTabBarOffset(safeAreaBottom: CGFloat) -> CGFloat {
-        guard selectedTab == .home else { return 0 }
+        guard selectedTab == .home, isHomeRootVisible else { return 0 }
 
         let hiddenOffset = ScrollChromeLayout.bottomHiddenOffset(
             bottomBarHeight: bottomTabBarHeight,
@@ -428,6 +430,7 @@ struct MainTabShellView: View {
 
     private func bottomTabBarVisibleFraction(safeAreaBottom: CGFloat) -> CGFloat {
         guard isBottomTabBarVisible else { return 0 }
+        guard selectedTab == .home, isHomeRootVisible else { return 1 }
         guard shouldOverlayBottomTabBar else { return 1 }
 
         return ScrollChromeLayout.bottomContentVisibleFraction(
@@ -639,7 +642,7 @@ private struct ActivityUnreadBadgeView: View {
 }
 
 struct FloatingComposeButtonLayout {
-    static let defaultBottomTabBarHeight: CGFloat = 65
+    static let defaultBottomTabBarHeight: CGFloat = 67
     private static let visibleBottomBarGap: CGFloat = 14
     private static let hiddenBottomGap: CGFloat = 10
     private static let requestedVerticalDrop: CGFloat = 12

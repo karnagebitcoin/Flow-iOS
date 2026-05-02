@@ -1573,34 +1573,32 @@ struct ComposeMultilineTextView: UIViewRepresentable {
                 forEditIn: range,
                 replacementText: allowedReplacement
             )
-            if updatedMentions != mentions {
-                mentions = updatedMentions
-            }
+            reportMentions(updatedMentions)
             return true
         }
 
         func textViewDidChange(_ textView: UITextView) {
             guard !isApplyingProgrammaticUpdate else { return }
-            text = textView.text
-            selectedRange = textView.selectedRange
+            reportText(textView.text)
+            reportSelectedRange(textView.selectedRange)
             updateMentionQuery(for: textView)
         }
 
         func textViewDidChangeSelection(_ textView: UITextView) {
             guard !isApplyingProgrammaticUpdate else { return }
-            selectedRange = textView.selectedRange
+            guard reportSelectedRange(textView.selectedRange) else { return }
             updateMentionQuery(for: textView)
         }
 
         func textViewDidBeginEditing(_ textView: UITextView) {
-            isFocused = true
-            selectedRange = textView.selectedRange
+            reportFocus(true)
+            reportSelectedRange(textView.selectedRange)
             updateMentionQuery(for: textView)
         }
 
         func textViewDidEndEditing(_ textView: UITextView) {
-            isFocused = false
-            selectedRange = textView.selectedRange
+            reportFocus(false)
+            reportSelectedRange(textView.selectedRange)
             lastReportedMentionQuery = nil
             onMentionQueryChange(nil)
         }
@@ -1629,9 +1627,7 @@ struct ComposeMultilineTextView: UIViewRepresentable {
                 forEditIn: range,
                 replacementText: replacementText
             )
-            if updatedMentions != mentions {
-                mentions = updatedMentions
-            }
+            reportMentions(updatedMentions)
 
             let updatedSelection = NSRange(
                 location: range.location + (replacementText as NSString).length,
@@ -1642,21 +1638,56 @@ struct ComposeMultilineTextView: UIViewRepresentable {
             textView.selectedRange = updatedSelection
             isApplyingProgrammaticUpdate = false
 
-            text = updatedText
-            selectedRange = updatedSelection
+            reportText(updatedText)
+            reportSelectedRange(updatedSelection)
             updateMentionQuery(for: textView)
         }
 
         private func updateMentionAnchor(for textView: UITextView, hasActiveQuery: Bool) {
             guard hasActiveQuery, let caretPosition = textView.selectedTextRange?.end else {
-                mentionAnchorY = 44
+                reportMentionAnchorY(44)
                 return
             }
 
             let caretRect = textView.caretRect(for: caretPosition)
             let visibleCaretBottom = caretRect.maxY - textView.contentOffset.y
             let clampedAnchorY = min(max(visibleCaretBottom, 32), max(textView.bounds.height - 44, 44))
-            mentionAnchorY = clampedAnchorY
+            reportMentionAnchorY(clampedAnchorY)
+        }
+
+        @discardableResult
+        private func reportText(_ newValue: String) -> Bool {
+            guard text != newValue else { return false }
+            text = newValue
+            return true
+        }
+
+        @discardableResult
+        private func reportFocus(_ newValue: Bool) -> Bool {
+            guard isFocused != newValue else { return false }
+            isFocused = newValue
+            return true
+        }
+
+        @discardableResult
+        private func reportSelectedRange(_ newValue: NSRange) -> Bool {
+            guard selectedRange != newValue else { return false }
+            selectedRange = newValue
+            return true
+        }
+
+        @discardableResult
+        private func reportMentions(_ newValue: [ComposeSelectedMention]) -> Bool {
+            guard mentions != newValue else { return false }
+            mentions = newValue
+            return true
+        }
+
+        @discardableResult
+        private func reportMentionAnchorY(_ newValue: CGFloat) -> Bool {
+            guard abs(mentionAnchorY - newValue) >= 0.5 else { return false }
+            mentionAnchorY = newValue
+            return true
         }
     }
 }

@@ -726,24 +726,26 @@ final class AppThemeOptionTests: XCTestCase {
     }
 
     func testFloatingComposePaddingClearsVisibleBottomBar() {
+        let bottomTabBarHeight = FloatingComposeButtonLayout.defaultBottomTabBarHeight
         let padding = FloatingComposeButtonLayout.bottomPadding(
             safeAreaBottom: 34,
-            bottomTabBarHeight: 65,
+            bottomTabBarHeight: bottomTabBarHeight,
             isBottomTabBarVisible: true
         )
 
-        XCTAssertEqual(padding, 101)
+        XCTAssertEqual(padding, 103)
     }
 
     func testFloatingComposePaddingSitsCloserWhenBottomBarIsHidden() {
+        let bottomTabBarHeight = FloatingComposeButtonLayout.defaultBottomTabBarHeight
         let hiddenPadding = FloatingComposeButtonLayout.bottomPadding(
             safeAreaBottom: 34,
-            bottomTabBarHeight: 65,
+            bottomTabBarHeight: bottomTabBarHeight,
             isBottomTabBarVisible: false
         )
         let visiblePadding = FloatingComposeButtonLayout.bottomPadding(
             safeAreaBottom: 34,
-            bottomTabBarHeight: 65,
+            bottomTabBarHeight: bottomTabBarHeight,
             isBottomTabBarVisible: true
         )
 
@@ -752,19 +754,20 @@ final class AppThemeOptionTests: XCTestCase {
     }
 
     func testFloatingComposePaddingMovesContinuouslyWithBottomBarOffset() {
+        let bottomTabBarHeight = FloatingComposeButtonLayout.defaultBottomTabBarHeight
         let hiddenPadding = FloatingComposeButtonLayout.bottomPadding(
             safeAreaBottom: 34,
-            bottomTabBarHeight: 65,
+            bottomTabBarHeight: bottomTabBarHeight,
             visibleFraction: 0
         )
         let visiblePadding = FloatingComposeButtonLayout.bottomPadding(
             safeAreaBottom: 34,
-            bottomTabBarHeight: 65,
+            bottomTabBarHeight: bottomTabBarHeight,
             visibleFraction: 1
         )
         let halfwayPadding = FloatingComposeButtonLayout.bottomPadding(
             safeAreaBottom: 34,
-            bottomTabBarHeight: 65,
+            bottomTabBarHeight: bottomTabBarHeight,
             visibleFraction: 0.5
         )
 
@@ -1228,12 +1231,15 @@ final class AppThemeOptionTests: XCTestCase {
         XCTAssertFalse(source.contains("bottomTabBarBackground\n                    .ignoresSafeArea(edges: .bottom)"))
     }
 
-    func testBottomTabBarUsesFixedInternalBottomPaddingForTapComfort() throws {
+    func testBottomTabBarUsesFixedInternalVerticalPaddingForTapComfort() throws {
         let source = try sourceText(at: "Sources/App/MainTabShellView.swift")
         let barRange = try XCTUnwrap(source.range(of: "private var bottomTabBar: some View"))
         let barSource = source[barRange.lowerBound...]
 
-        XCTAssertTrue(source.contains("private static let bottomTabBarIconBottomPadding: CGFloat = 14"))
+        XCTAssertTrue(source.contains("private static let bottomTabBarIconBottomPadding: CGFloat = 15"))
+        XCTAssertTrue(source.contains("private static let bottomTabBarIconTopPadding: CGFloat = 5"))
+        XCTAssertTrue(source.contains("static let defaultBottomTabBarHeight: CGFloat = 67"))
+        XCTAssertTrue(barSource.contains(".padding(.top, Self.bottomTabBarIconTopPadding)"))
         XCTAssertTrue(barSource.contains(".padding(.bottom, Self.bottomTabBarIconBottomPadding)"))
         XCTAssertFalse(barSource.contains("safeAreaBottom + Self.bottomTabBarIconBottomPadding"))
     }
@@ -1255,6 +1261,17 @@ final class AppThemeOptionTests: XCTestCase {
         XCTAssertTrue(source.contains("ScrollChromeLayout.bottomHiddenOffset"))
         XCTAssertTrue(visibleFractionSource.contains("ScrollChromeLayout.bottomContentVisibleFraction"))
         XCTAssertFalse(visibleFractionSource.contains("hiddenOffset: hiddenOffset"))
+    }
+
+    func testHomeNestedRoutesForceBottomTabBarVisible() throws {
+        let shellSource = try sourceText(at: "Sources/App/MainTabShellView.swift")
+        let homeSource = try sourceText(at: "Sources/Home/HomeFeedView.swift")
+
+        XCTAssertTrue(shellSource.contains("@State private var isHomeRootVisible = true"))
+        XCTAssertTrue(shellSource.contains("isRootVisible: $isHomeRootVisible"))
+        XCTAssertTrue(homeSource.contains("@Binding var isRootVisible: Bool"))
+        XCTAssertTrue(shellSource.contains("guard selectedTab == .home, isHomeRootVisible else { return 0 }"))
+        XCTAssertTrue(shellSource.contains("guard selectedTab == .home, isHomeRootVisible else { return 1 }"))
     }
 
     func testReservedBottomInsetDoesNotRenderSecondTabBar() throws {
@@ -1289,10 +1306,11 @@ final class AppThemeOptionTests: XCTestCase {
         XCTAssertTrue(source.contains(".ignoresSafeArea(edges: [.top, .bottom])"))
     }
 
-    func testSideMenuUsesWhiteLightSurfaceAndTintedIconCircles() throws {
+    func testSideMenuUsesWhiteLightSurfaceDarkerDarkSurfaceAndTintedIconCircles() throws {
         let source = try sourceText(at: "Sources/Home/HomeSlideoutMenuView.swift")
 
-        XCTAssertTrue(source.contains("effectiveMenuColorScheme == .light ? .white : appSettings.themePalette.sheetBackground"))
+        XCTAssertTrue(source.contains("private static let darkMenuBackground = Color(red: 17.0 / 255.0, green: 17.0 / 255.0, blue: 17.0 / 255.0)"))
+        XCTAssertTrue(source.contains("effectiveMenuColorScheme == .light ? .white : Self.darkMenuBackground"))
         XCTAssertTrue(source.contains("let iconTint = tint ?? appSettings.themePalette.foreground.opacity(0.86)"))
         XCTAssertTrue(source.contains("let textTint = tint ?? appSettings.themePalette.foreground"))
         XCTAssertTrue(source.contains(".foregroundStyle(iconTint)"))
