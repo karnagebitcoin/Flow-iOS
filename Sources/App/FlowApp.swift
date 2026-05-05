@@ -161,10 +161,16 @@ struct FlowApp: App {
             .foregroundColor: navigationTitleColor
         ]
 
+        // Scope to UINavigationBar only. UIBarButtonItem.appearance() unscoped
+        // applies the custom font to every UIBarButtonItem in the process,
+        // including the prediction chips iOS renders inside the keyboard's
+        // QuickType bar. Custom fonts without emoji glyphs (and most do not)
+        // can cause the keyboard to suppress emoji predictions.
         let barButtonFont = appSettings.appUIFont(.body, weight: .semibold)
-        UIBarButtonItem.appearance().setTitleTextAttributes([.font: barButtonFont], for: .normal)
-        UIBarButtonItem.appearance().setTitleTextAttributes([.font: barButtonFont], for: .highlighted)
-        UIBarButtonItem.appearance().setTitleTextAttributes([.font: barButtonFont], for: .disabled)
+        let scopedBarButton = UIBarButtonItem.appearance(whenContainedInInstancesOf: [UINavigationBar.self])
+        scopedBarButton.setTitleTextAttributes([.font: barButtonFont], for: .normal)
+        scopedBarButton.setTitleTextAttributes([.font: barButtonFont], for: .highlighted)
+        scopedBarButton.setTitleTextAttributes([.font: barButtonFont], for: .disabled)
     }
 
     private func updateBreakReminderMonitoring() {
