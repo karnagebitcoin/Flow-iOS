@@ -8,7 +8,6 @@ enum AppBrand {
 
 @main
 struct FlowApp: App {
-    @UIApplicationDelegateAdaptor(FlowAppDelegate.self) private var appDelegate
     @Environment(\.scenePhase) private var scenePhase
     @StateObject private var authManager = AuthManager()
     @StateObject private var appSettings = AppSettingsStore.shared
@@ -808,14 +807,5 @@ private struct AppToastBanner: View {
         }
         .shadow(color: .black.opacity(0.1), radius: 10, x: 0, y: 4)
         .accessibilityElement(children: .combine)
-    }
-}
-
-final class FlowAppDelegate: NSObject, UIApplicationDelegate {
-    func application(
-        _ application: UIApplication,
-        didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil
-    ) -> Bool {
-        true
     }
 }
