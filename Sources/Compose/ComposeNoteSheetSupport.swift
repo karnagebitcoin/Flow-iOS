@@ -1427,7 +1427,10 @@ struct ComposeMultilineTextView: UIViewRepresentable {
         let textView = Self.makeComposerTextView()
         textView.delegate = context.coordinator
         textView.backgroundColor = .clear
-        textView.font = appSettings.appUIFont(.body)
+        // A/B test: use system body font to verify whether the app's custom
+        // font is suppressing QuickType emoji predictions. Revert to
+        // appSettings.appUIFont(.body) once we know.
+        textView.font = UIFont.preferredFont(forTextStyle: .body)
         textView.adjustsFontForContentSizeCategory = false
         textView.textColor = UIColor(appSettings.themePalette.foreground)
         textView.tintColor = UIColor(appSettings.themePalette.foreground)
@@ -1438,7 +1441,7 @@ struct ComposeMultilineTextView: UIViewRepresentable {
     }
 
     func updateUIView(_ uiView: UITextView, context: Context) {
-        let preferredFont = appSettings.appUIFont(.body)
+        let preferredFont = UIFont.preferredFont(forTextStyle: .body)
         let preferredTextColor = UIColor(appSettings.themePalette.foreground)
         let fontChanged = uiView.font != preferredFont
         if fontChanged {
