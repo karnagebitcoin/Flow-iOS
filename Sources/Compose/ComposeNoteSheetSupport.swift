@@ -1424,19 +1424,16 @@ struct ComposeMultilineTextView: UIViewRepresentable {
     }
 
     func makeUIView(context: Context) -> UITextView {
-        let textView = UITextView()
+        let textView = Self.makeComposerTextView()
         textView.delegate = context.coordinator
         textView.backgroundColor = .clear
         textView.font = appSettings.appUIFont(.body)
         textView.adjustsFontForContentSizeCategory = false
         textView.textColor = UIColor(appSettings.themePalette.foreground)
         textView.tintColor = UIColor(appSettings.themePalette.foreground)
-        Self.configureNaturalLanguageInputTraits(for: textView)
         textView.textContainerInset = UIEdgeInsets(top: 8, left: 4, bottom: 8, right: 4)
         textView.textContainer.lineFragmentPadding = 0
-        textView.isScrollEnabled = true
-        textView.alwaysBounceVertical = true
-        textView.keyboardDismissMode = .interactive
+        textView.bounces = false
         return textView
     }
 
@@ -1453,7 +1450,6 @@ struct ComposeMultilineTextView: UIViewRepresentable {
             uiView.textColor = preferredTextColor
             uiView.tintColor = preferredTextColor
         }
-        Self.configureNaturalLanguageInputTraits(for: uiView)
 
         if uiView.text != text, uiView.markedTextRange == nil {
             context.coordinator.isApplyingProgrammaticUpdate = true
@@ -1461,10 +1457,7 @@ struct ComposeMultilineTextView: UIViewRepresentable {
             context.coordinator.isApplyingProgrammaticUpdate = false
         }
 
-        let clampedRange = Self.clampedRange(selectedRange, maxLength: uiView.text.utf16.count)
-        if uiView.selectedRange != clampedRange {
-            uiView.selectedRange = clampedRange
-        }
+        Self.applyExternalSelectionIfNeeded(to: uiView, selectedRange: selectedRange)
 
         if isFocused {
             guard uiView.window != nil, !uiView.isFirstResponder else { return }
@@ -1478,39 +1471,16 @@ struct ComposeMultilineTextView: UIViewRepresentable {
         }
     }
 
-    private static func configureNaturalLanguageInputTraits(for textView: UITextView) {
-        if textView.autocapitalizationType != .sentences {
-            textView.autocapitalizationType = .sentences
-        }
-        if textView.autocorrectionType != .yes {
-            textView.autocorrectionType = .yes
-        }
-        if textView.spellCheckingType != .yes {
-            textView.spellCheckingType = .yes
-        }
-        if textView.smartQuotesType != .yes {
-            textView.smartQuotesType = .yes
-        }
-        if textView.smartDashesType != .yes {
-            textView.smartDashesType = .yes
-        }
-        if textView.smartInsertDeleteType != .yes {
-            textView.smartInsertDeleteType = .yes
-        }
-        if textView.keyboardType != .default {
-            textView.keyboardType = .default
-        }
-        if textView.returnKeyType != .default {
-            textView.returnKeyType = .default
-        }
-        if textView.textContentType != nil {
-            textView.textContentType = nil
-        }
+    static func makeComposerTextView() -> UITextView {
+        UITextView(usingTextLayoutManager: false)
+    }
 
-        if #available(iOS 17.0, *) {
-            if textView.inlinePredictionType != .yes {
-                textView.inlinePredictionType = .yes
-            }
+    static func applyExternalSelectionIfNeeded(to textView: UITextView, selectedRange: NSRange) {
+        guard textView.markedTextRange == nil else { return }
+
+        let clampedRange = Self.clampedRange(selectedRange, maxLength: textView.text.utf16.count)
+        if textView.selectedRange != clampedRange {
+            textView.selectedRange = clampedRange
         }
     }
 
@@ -1579,8 +1549,8 @@ struct ComposeMultilineTextView: UIViewRepresentable {
 
         func textViewDidChange(_ textView: UITextView) {
             guard !isApplyingProgrammaticUpdate else { return }
-            reportText(textView.text)
             reportSelectedRange(textView.selectedRange)
+            reportText(textView.text)
             updateMentionQuery(for: textView)
         }
 
