@@ -1434,14 +1434,6 @@ struct ComposeMultilineTextView: UIViewRepresentable {
         textView.textContainerInset = UIEdgeInsets(top: 8, left: 4, bottom: 8, right: 4)
         textView.textContainer.lineFragmentPadding = 0
         textView.bounces = false
-        // Opt in to iOS 18+ adaptive image glyphs. Without this the QuickType
-        // emoji prediction slot is suppressed (typing "pizza" never surfaces
-        // 🍕). Pair with allowsEditingTextAttributes so the system's edit menu
-        // can paste/copy adaptive glyphs alongside text.
-        textView.allowsEditingTextAttributes = true
-        if #available(iOS 18.0, *) {
-            textView.supportsAdaptiveImageGlyph = true
-        }
         return textView
     }
 
