@@ -950,6 +950,7 @@ private struct MinimalComposeSheet: View {
     var body: some View {
         NavigationStack {
             TextEditor(text: $text)
+                .font(.body)
                 .focused($isFocused)
                 .padding(12)
                 .navigationTitle("Minimal note")
