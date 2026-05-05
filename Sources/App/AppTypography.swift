@@ -84,7 +84,16 @@ private enum AppFontRegistry {
     private static let lock = NSLock()
     private static var registeredResourceNames = Set<String>()
 
+    // EXPERIMENT (2026-05-05): skip custom font registration entirely so all
+    // appUIFont calls fall through to UIFont.systemFont. We're testing whether
+    // a process-registered custom font without an emoji glyph table is what's
+    // suppressing QuickType emoji predictions app-wide. The registration code
+    // path stays intact below — flip skipRegistration back to false to restore
+    // custom fonts. Remove this block once the test concludes.
+    private static let skipRegistration = true
+
     static func registerIfNeeded(for option: AppFontOption, bundle: Bundle = .main) {
+        guard !skipRegistration else { return }
         for resourceFileName in option.resourceFileNames {
             register(resourceFileName: resourceFileName, bundle: bundle)
         }
