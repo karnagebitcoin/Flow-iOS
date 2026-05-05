@@ -1472,7 +1472,7 @@ struct ComposeMultilineTextView: UIViewRepresentable {
     }
 
     static func makeComposerTextView() -> UITextView {
-        UITextView()
+        UITextView(usingTextLayoutManager: false)
     }
 
     static func applyExternalSelectionIfNeeded(to textView: UITextView, selectedRange: NSRange) {
