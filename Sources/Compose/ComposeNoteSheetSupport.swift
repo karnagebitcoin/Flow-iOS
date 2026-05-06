@@ -1457,7 +1457,7 @@ struct ComposeMultilineTextView: UIViewRepresentable {
             context.coordinator.isApplyingProgrammaticUpdate = false
         }
 
-        Self.applyExternalSelectionIfNeeded(to: uiView, selectedRange: selectedRange)
+        context.coordinator.applyExternalSelectionIfNeeded(to: uiView, selectedRange: selectedRange)
 
         if isFocused {
             guard uiView.window != nil, !uiView.isFirstResponder else { return }
@@ -1473,15 +1473,6 @@ struct ComposeMultilineTextView: UIViewRepresentable {
 
     static func makeComposerTextView() -> UITextView {
         UITextView(usingTextLayoutManager: false)
-    }
-
-    static func applyExternalSelectionIfNeeded(to textView: UITextView, selectedRange: NSRange) {
-        guard textView.markedTextRange == nil else { return }
-
-        let clampedRange = Self.clampedRange(selectedRange, maxLength: textView.text.utf16.count)
-        if textView.selectedRange != clampedRange {
-            textView.selectedRange = clampedRange
-        }
     }
 
     private static func clampedRange(_ range: NSRange, maxLength: Int) -> NSRange {
@@ -1501,6 +1492,8 @@ struct ComposeMultilineTextView: UIViewRepresentable {
         private let onMentionQueryChange: (ComposeMentionQuery?) -> Void
         var isApplyingProgrammaticUpdate = false
         private var lastReportedMentionQuery: ComposeMentionQuery?
+        private var pendingTextViewSelectionReport: NSRange?
+        private var staleSelectionEchoes: [NSRange] = []
 
         init(
             text: Binding<String>,
@@ -1573,6 +1566,31 @@ struct ComposeMultilineTextView: UIViewRepresentable {
             onMentionQueryChange(nil)
         }
 
+        func applyExternalSelectionIfNeeded(to textView: UITextView, selectedRange: NSRange) {
+            guard textView.markedTextRange == nil else { return }
+
+            let clampedRange = ComposeMultilineTextView.clampedRange(
+                selectedRange,
+                maxLength: textView.text.utf16.count
+            )
+
+            if let pendingTextViewSelectionReport {
+                if clampedRange == pendingTextViewSelectionReport {
+                    self.pendingTextViewSelectionReport = nil
+                    staleSelectionEchoes.removeAll()
+                } else if staleSelectionEchoes.contains(clampedRange) {
+                    return
+                } else {
+                    self.pendingTextViewSelectionReport = nil
+                    staleSelectionEchoes.removeAll()
+                }
+            }
+
+            if textView.selectedRange != clampedRange {
+                textView.selectedRange = clampedRange
+            }
+        }
+
         private func updateMentionQuery(for textView: UITextView) {
             let query = ComposeMentionSupport.activeQuery(
                 in: textView.text,
@@ -1642,6 +1660,11 @@ struct ComposeMultilineTextView: UIViewRepresentable {
         @discardableResult
         private func reportSelectedRange(_ newValue: NSRange) -> Bool {
             guard selectedRange != newValue else { return false }
+            staleSelectionEchoes.append(selectedRange)
+            if staleSelectionEchoes.count > 4 {
+                staleSelectionEchoes.removeFirst(staleSelectionEchoes.count - 4)
+            }
+            pendingTextViewSelectionReport = newValue
             selectedRange = newValue
             return true
         }

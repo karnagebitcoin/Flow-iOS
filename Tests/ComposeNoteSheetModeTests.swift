@@ -195,6 +195,52 @@ final class ComposeNoteSheetModeTests: XCTestCase {
     }
 
     @MainActor
+    func testComposeTextViewCoordinatorIgnoresStaleSelectionEchoAfterTyping() {
+        var textValue = ""
+        var isFocusedValue = true
+        var selectedRangeValue = NSRange(location: 5, length: 0)
+        var mentionsValue: [ComposeSelectedMention] = []
+        var mentionAnchorYValue: CGFloat = 44
+
+        let coordinator = ComposeMultilineTextView.Coordinator(
+            text: Binding(
+                get: { textValue },
+                set: { textValue = $0 }
+            ),
+            isFocused: Binding(
+                get: { isFocusedValue },
+                set: { isFocusedValue = $0 }
+            ),
+            selectedRange: Binding(
+                get: { selectedRangeValue },
+                set: { selectedRangeValue = $0 }
+            ),
+            mentions: Binding(
+                get: { mentionsValue },
+                set: { mentionsValue = $0 }
+            ),
+            mentionAnchorY: Binding(
+                get: { mentionAnchorYValue },
+                set: { mentionAnchorYValue = $0 }
+            ),
+            characterLimit: ComposeNoteTextLimit.maxCharacterCount,
+            onMentionQueryChange: { _ in }
+        )
+        let textView = UITextView()
+        textView.text = "hello!"
+        textView.selectedRange = NSRange(location: 6, length: 0)
+
+        coordinator.textViewDidChange(textView)
+        coordinator.applyExternalSelectionIfNeeded(
+            to: textView,
+            selectedRange: NSRange(location: 5, length: 0)
+        )
+
+        XCTAssertEqual(textView.selectedRange, NSRange(location: 6, length: 0))
+        XCTAssertEqual(selectedRangeValue, NSRange(location: 6, length: 0))
+    }
+
+    @MainActor
     func testDraftStoreDoesNotPersistEmptyReplyDraftButKeepsQuoteContext() {
         let defaults = makeDraftStoreDefaults()
         let store = AppComposeDraftStore(defaults: defaults)
