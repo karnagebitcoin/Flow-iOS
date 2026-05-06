@@ -762,20 +762,41 @@ final class AppThemeOptionTests: XCTestCase {
         let hiddenPadding = FloatingComposeButtonLayout.bottomPadding(
             safeAreaBottom: 34,
             bottomTabBarHeight: bottomTabBarHeight,
-            visibleFraction: 0
+            hiddenProgress: 1
         )
         let visiblePadding = FloatingComposeButtonLayout.bottomPadding(
             safeAreaBottom: 34,
             bottomTabBarHeight: bottomTabBarHeight,
-            visibleFraction: 1
+            hiddenProgress: 0
         )
         let halfwayPadding = FloatingComposeButtonLayout.bottomPadding(
             safeAreaBottom: 34,
             bottomTabBarHeight: bottomTabBarHeight,
-            visibleFraction: 0.5
+            hiddenProgress: 0.5
         )
 
         XCTAssertEqual(halfwayPadding, (hiddenPadding + visiblePadding) / 2, accuracy: 0.0001)
+    }
+
+    func testFloatingComposeButtonAnimatesAgainstNumericBottomPadding() throws {
+        let source = try sourceText(at: "Sources/App/MainTabShellView.swift")
+        let overlayRange = try XCTUnwrap(source.range(of: "private var floatingComposeButtonOverlay: some View"))
+        let buttonRange = try XCTUnwrap(source.range(of: "private var composeFloatingButton: some View"))
+        let overlaySource = source[overlayRange.lowerBound..<buttonRange.lowerBound]
+
+        XCTAssertTrue(overlaySource.contains("let bottomPadding = floatingComposeBottomPadding"))
+        XCTAssertTrue(overlaySource.contains("FloatingComposeButtonLayout.movementAnimation"))
+        XCTAssertTrue(overlaySource.contains("value: bottomPadding"))
+    }
+
+    func testFloatingComposeButtonTracksFullBottomBarHiddenProgress() throws {
+        let source = try sourceText(at: "Sources/App/MainTabShellView.swift")
+        let progressRange = try XCTUnwrap(source.range(of: "private func bottomTabBarHiddenProgress"))
+        let visibleRange = try XCTUnwrap(source.range(of: "private var composeSheetDraftBinding"))
+        let progressSource = source[progressRange.lowerBound..<visibleRange.lowerBound]
+
+        XCTAssertTrue(progressSource.contains("ScrollChromeLayout.bottomHiddenOffset"))
+        XCTAssertTrue(progressSource.contains("ScrollChromeLayout.hiddenProgress"))
     }
 
     func testBottomTabBarStaysVisibleOnHomeRoot() {

@@ -343,11 +343,16 @@ struct MainTabShellView: View {
 
     private var floatingComposeButtonOverlay: some View {
         GeometryReader { proxy in
+            let bottomPadding = floatingComposeBottomPadding(safeAreaBottom: proxy.safeAreaInsets.bottom)
+
             composeFloatingButton
                 .padding(.trailing, FloatingComposeButtonLayout.trailingPadding)
-                .padding(.bottom, floatingComposeBottomPadding(safeAreaBottom: proxy.safeAreaInsets.bottom))
+                .padding(.bottom, bottomPadding)
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
-                .animation(.interactiveSpring(response: 0.18, dampingFraction: 0.9), value: isBottomTabBarVisible)
+                .animation(
+                    FloatingComposeButtonLayout.movementAnimation(reduceMotion: accessibilityReduceMotion),
+                    value: bottomPadding
+                )
         }
     }
 
@@ -370,7 +375,7 @@ struct MainTabShellView: View {
         FloatingComposeButtonLayout.bottomPadding(
             safeAreaBottom: safeAreaBottom,
             bottomTabBarHeight: bottomTabBarHeight,
-            visibleFraction: bottomTabBarVisibleFraction(safeAreaBottom: safeAreaBottom)
+            hiddenProgress: bottomTabBarHiddenProgress(safeAreaBottom: safeAreaBottom)
         )
     }
 
@@ -436,6 +441,21 @@ struct MainTabShellView: View {
         return ScrollChromeLayout.bottomContentVisibleFraction(
             offset: bottomTabBarOffset(safeAreaBottom: safeAreaBottom),
             bottomBarHeight: bottomTabBarHeight
+        )
+    }
+
+    private func bottomTabBarHiddenProgress(safeAreaBottom: CGFloat) -> CGFloat {
+        guard isBottomTabBarVisible else { return 1 }
+        guard selectedTab == .home, isHomeRootVisible else { return 0 }
+        guard shouldOverlayBottomTabBar else { return 0 }
+
+        let hiddenOffset = ScrollChromeLayout.bottomHiddenOffset(
+            bottomBarHeight: bottomTabBarHeight,
+            safeAreaBottom: safeAreaBottom
+        )
+        return ScrollChromeLayout.hiddenProgress(
+            offset: bottomTabBarOffset(safeAreaBottom: safeAreaBottom),
+            hiddenOffset: hiddenOffset
         )
     }
 
@@ -648,6 +668,8 @@ struct FloatingComposeButtonLayout {
     private static let hiddenBottomGap: CGFloat = 10
     private static let hiddenVerticalDrop: CGFloat = 12
     private static let visibleVerticalDrop: CGFloat = 60
+    private static let movementAnimationResponse: Double = 0.24
+    private static let movementAnimationDampingFraction: Double = 0.88
 
     static func bottomPadding(
         safeAreaBottom: CGFloat,
@@ -657,22 +679,30 @@ struct FloatingComposeButtonLayout {
         bottomPadding(
             safeAreaBottom: safeAreaBottom,
             bottomTabBarHeight: bottomTabBarHeight,
-            visibleFraction: isBottomTabBarVisible ? 1 : 0
+            hiddenProgress: isBottomTabBarVisible ? 0 : 1
         )
     }
 
     static func bottomPadding(
         safeAreaBottom: CGFloat,
         bottomTabBarHeight: CGFloat,
-        visibleFraction: CGFloat
+        hiddenProgress: CGFloat
     ) -> CGFloat {
         let safeAreaBottom = max(0, safeAreaBottom)
-        let visibleFraction = clamp(visibleFraction, min: 0, max: 1)
+        let hiddenProgress = clamp(hiddenProgress, min: 0, max: 1)
         let hiddenPadding = max(0, safeAreaBottom + hiddenBottomGap - hiddenVerticalDrop)
         let visibleBottomBarHeight = max(bottomTabBarHeight, defaultBottomTabBarHeight)
         let visiblePadding = max(0, safeAreaBottom + visibleBottomBarHeight + visibleBottomBarGap - visibleVerticalDrop)
 
-        return hiddenPadding + ((visiblePadding - hiddenPadding) * visibleFraction)
+        return visiblePadding + ((hiddenPadding - visiblePadding) * hiddenProgress)
+    }
+
+    static func movementAnimation(reduceMotion: Bool) -> Animation? {
+        guard !reduceMotion else { return nil }
+        return .interactiveSpring(
+            response: movementAnimationResponse,
+            dampingFraction: movementAnimationDampingFraction
+        )
     }
 
     private static func clamp(_ value: CGFloat, min minimum: CGFloat, max maximum: CGFloat) -> CGFloat {
@@ -921,10 +951,17 @@ struct ScrollChromeLayout {
         offset: CGFloat,
         hiddenOffset: CGFloat
     ) -> CGFloat {
-        let hiddenOffset = max(0, hiddenOffset)
-        guard hiddenOffset > 0 else { return 1 }
+        1 - hiddenProgress(offset: offset, hiddenOffset: hiddenOffset)
+    }
 
-        return 1 - clamp(offset / hiddenOffset, min: 0, max: 1)
+    static func hiddenProgress(
+        offset: CGFloat,
+        hiddenOffset: CGFloat
+    ) -> CGFloat {
+        let hiddenOffset = max(0, hiddenOffset)
+        guard hiddenOffset > 0 else { return 0 }
+
+        return clamp(offset / hiddenOffset, min: 0, max: 1)
     }
 
     static func newNotesIslandTopPadding(
