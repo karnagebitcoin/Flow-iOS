@@ -8,6 +8,7 @@
   - `{exact error or user-visible symptom} causes`
   - `{feature} works in some apps not others {platform}`
 - Prefer primary sources for technical facts when available, then corroborate with developer reports for undocumented platform behavior.
+- For any Nostr-related work, load and reference the local Shakespeare Skills bundle (`/Users/k/.codex/skills/shakespeare-skills`) in addition to any narrower Codex Nostr/Shakespeare skill that is available.
 - Keep debug probes temporary. Remove launch flags, diagnostic views, and standalone probe apps before handing work back unless the user asks to keep them.
 - After code changes, build immediately. For attached-device keyboard or system UI behavior, install and launch the fresh build on the physical device; simulator-only verification is not enough.
 - The project owner prefers frequent commits on `main`; commit completed changes promptly after a successful build.
