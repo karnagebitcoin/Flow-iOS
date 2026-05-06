@@ -1088,7 +1088,12 @@ final class AppThemeOptionTests: XCTestCase {
         let source = try sourceText(at: "Sources/Home/HomeFeedView.swift")
 
         XCTAssertTrue(source.contains("let list = List {"))
-        XCTAssertTrue(source.contains(".refreshable {\n            await refreshFeed(scrollProxy: scrollProxy)\n        }"))
+        XCTAssertTrue(source.contains(".refreshable {\n            await refreshFeed()\n        }"))
+        let refreshFunctionRange = try XCTUnwrap(source.range(of: "private func refreshFeed() async"))
+        let revealFunctionRange = try XCTUnwrap(source.range(of: "private func revealBufferedNewItems", range: refreshFunctionRange.upperBound..<source.endIndex))
+        let refreshFunctionSource = source[refreshFunctionRange.lowerBound..<revealFunctionRange.lowerBound]
+        XCTAssertTrue(refreshFunctionSource.contains("await viewModel.refresh()"))
+        XCTAssertFalse(refreshFunctionSource.contains("visibleBufferedNewItemsCount"))
         XCTAssertFalse(source.contains("ScrollView(.vertical"))
         XCTAssertFalse(source.contains("pullToRefreshIndicator"))
         XCTAssertFalse(source.contains("pullToRefreshDistance"))

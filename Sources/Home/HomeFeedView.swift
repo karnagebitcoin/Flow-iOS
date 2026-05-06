@@ -292,9 +292,6 @@ struct HomeFeedView: View {
         safeAreaBottom: CGFloat
     ) -> some View {
         let list = List {
-            feedTopPadding(height: topContentPadding)
-                .homeFeedListRow()
-
             feedModeHeaderRow
                 .homeFeedListRow()
 
@@ -309,7 +306,10 @@ struct HomeFeedView: View {
         .listStyle(.plain)
         .scrollContentBackground(.hidden)
         .background(Color.clear)
-        .ignoresSafeArea(edges: [.top, .bottom])
+        .safeAreaInset(edge: .top, spacing: 0) {
+            feedTopPadding(height: topContentPadding)
+        }
+        .ignoresSafeArea(edges: .bottom)
         .coordinateSpace(name: Self.feedScrollCoordinateSpace)
         .overlay(alignment: .top) {
             newNotesOverlay(
@@ -321,7 +321,7 @@ struct HomeFeedView: View {
             autoShowBufferedItemsIfNeeded()
         }
         .refreshable {
-            await refreshFeed(scrollProxy: scrollProxy)
+            await refreshFeed()
         }
         .task {
             await configureFeedDependenciesAndLoad()
@@ -492,12 +492,8 @@ struct HomeFeedView: View {
         }
     }
 
-    private func refreshFeed(scrollProxy: ScrollViewProxy) async {
-        if viewModel.visibleBufferedNewItemsCount > 0 {
-            self.revealBufferedNewItems(scrollProxy: scrollProxy)
-        } else {
-            await viewModel.refresh()
-        }
+    private func refreshFeed() async {
+        await viewModel.refresh()
     }
 
     private func revealBufferedNewItems(scrollProxy: ScrollViewProxy) {
@@ -1484,7 +1480,7 @@ private struct HomeFeedRootContent: View {
                         safeAreaBottom
                     )
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .ignoresSafeArea(edges: [.top, .bottom])
+                    .ignoresSafeArea(edges: .bottom)
 
                     topNavigationBar()
                         .background(topNavigationBarHeightReader)
