@@ -1474,8 +1474,11 @@ struct ComposeMultilineTextView: UIViewRepresentable {
     static func makeComposerTextView() -> UITextView {
         // Keep the composer on UIKit's plain native text-input path. Emoji
         // QuickType suggestions do not have a public opt-in API; they depend on
-        // default UITextInputTraits and the system text stack, so avoid TextKit
-        // opt-outs or forced prediction traits without device-verifying them.
+        // default UITextInputTraits, the system text stack, and iOS's per-app
+        // keyboard learning. Physical-device testing showed a bare UITextField
+        // in a separate dev app learned to suggest 🍕 only after pizza emoji
+        // were inserted there, so avoid TextKit/input-trait churn unless a
+        // device test proves the specific change affects QuickType.
         UITextView()
     }
 
