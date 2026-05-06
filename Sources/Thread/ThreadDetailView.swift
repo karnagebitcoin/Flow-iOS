@@ -196,6 +196,8 @@ struct ThreadDetailView: View {
                         animateFeedInsertion {
                             viewModel.appendLocalReply(item)
                         }
+                        selectedContentTab = .replies
+                        pendingReplyScrollTargetID = item.id
                     }
                 },
                 onPublished: {
@@ -218,6 +220,8 @@ struct ThreadDetailView: View {
                     animateFeedInsertion {
                         viewModel.appendLocalReply(item)
                     }
+                    selectedContentTab = .replies
+                    pendingReplyScrollTargetID = item.id
                 },
                 onPublished: {
                     Task {

@@ -231,9 +231,9 @@ enum LongFormArticleReaderLayout {
     static let contentHorizontalPadding: CGFloat = 20
     static let contentMaxWidth: CGFloat = 760
     static let heroHeaderOverlap: CGFloat = 56
+    static let heroFadeHeight: CGFloat = 220
     static let heroImageOpacity = 0.82
-    static let heroBaseFadeOpacity = 0.12
-    static let heroTopFadeOpacity = 0.02
+    static let heroTopFadeOpacity = 0.0
     static let heroMiddleFadeOpacity = 0.24
     static let heroBottomFadeOpacity = 1.0
     static let authorFallbackBlurRadius: CGFloat = 22
@@ -434,8 +434,8 @@ struct LongFormArticleReaderView: View {
 
     private var heroFade: some View {
         let fadeColor = appSettings.themePalette.background
-        return ZStack {
-            fadeColor.opacity(LongFormArticleReaderLayout.heroBaseFadeOpacity)
+        return VStack(spacing: 0) {
+            Spacer(minLength: 0)
             LinearGradient(
                 colors: [
                     fadeColor.opacity(LongFormArticleReaderLayout.heroTopFadeOpacity),
@@ -445,7 +445,9 @@ struct LongFormArticleReaderView: View {
                 startPoint: .top,
                 endPoint: .bottom
             )
+            .frame(height: LongFormArticleReaderLayout.heroFadeHeight)
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
     }
 
     private var articleMetaBadges: some View {
@@ -464,7 +466,14 @@ struct LongFormArticleReaderView: View {
                     width: LongFormArticleReaderLayout.shareButtonDiameter,
                     height: LongFormArticleReaderLayout.shareButtonDiameter
                 )
-                .background(appSettings.themePalette.secondaryBackground, in: Circle())
+                .background {
+                    Circle()
+                        .fill(.ultraThinMaterial)
+                        .overlay {
+                            Circle()
+                                .fill(appSettings.themePalette.background.opacity(0.24))
+                        }
+                }
                 .overlay {
                     Circle()
                         .stroke(appSettings.themeSeparator(defaultOpacity: 0.8), lineWidth: 0.8)
@@ -743,7 +752,14 @@ struct LongFormArticleReaderView: View {
         .foregroundStyle(appSettings.themePalette.secondaryForeground)
         .padding(.horizontal, 10)
         .padding(.vertical, 6)
-        .background(appSettings.themePalette.secondaryBackground.opacity(0.82), in: Capsule())
+        .background {
+            Capsule()
+                .fill(.ultraThinMaterial)
+                .overlay {
+                    Capsule()
+                        .fill(appSettings.themePalette.background.opacity(0.24))
+                }
+        }
         .overlay {
             Capsule()
                 .stroke(appSettings.themeSeparator(defaultOpacity: 0.8), lineWidth: 0.7)

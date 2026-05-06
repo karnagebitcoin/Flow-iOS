@@ -1246,6 +1246,67 @@ final class HomeFeedLoadingRegressionTests: XCTestCase {
     }
 }
 
+@MainActor
+final class ThreadDetailViewModelTests: XCTestCase {
+    func testRefreshKeepsLocalReplyWhenConnectedSourcesHaveNotEchoedIt() async {
+        LocalPublicationStore.shared.clearForTesting()
+        defer {
+            LocalPublicationStore.shared.clearForTesting()
+        }
+
+        let rootEvent = makeEvent(
+            id: hex("1"),
+            pubkey: hex("a"),
+            kind: FeedKindFilters.shortTextNote,
+            tags: [],
+            content: "Root note",
+            createdAt: 1_700_000_000
+        )
+        let replyEvent = makeEvent(
+            id: hex("2"),
+            pubkey: hex("b"),
+            kind: FeedKindFilters.shortTextNote,
+            tags: [
+                ["e", rootEvent.id, "", "root"],
+                ["e", rootEvent.id, "", "reply"]
+            ],
+            content: "Instant reply",
+            createdAt: 1_700_000_001
+        )
+        let viewModel = ThreadDetailViewModel(
+            rootItem: FeedItem(event: rootEvent, profile: nil),
+            relayURL: defaultHomeRelayURL,
+            service: NostrFeedService(relayClient: HomeFeedTestRelayClient(eventsByRelay: [:]))
+        )
+
+        viewModel.configureSpamFilter(currentUserPubkey: replyEvent.pubkey, followedPubkeys: [])
+        viewModel.appendLocalReply(FeedItem(event: replyEvent, profile: nil))
+        await waitForReply(id: replyEvent.id, in: viewModel)
+
+        await viewModel.refresh()
+
+        XCTAssertTrue(
+            viewModel.replies.contains { $0.id == replyEvent.id },
+            "A locally appended reply must remain visible when refresh returns no fetched copy yet."
+        )
+    }
+
+    private func waitForReply(
+        id: String,
+        in viewModel: ThreadDetailViewModel,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) async {
+        for _ in 0..<20 {
+            if viewModel.replies.contains(where: { $0.id == id }) {
+                return
+            }
+            try? await Task.sleep(nanoseconds: 20_000_000)
+        }
+        XCTFail("Timed out waiting for local reply to appear.", file: file, line: line)
+    }
+}
+
 private let defaultHomeRelayURL = URL(string: "wss://relay.example.com")!
 private let secondaryHomeRelayURL = URL(string: "wss://relay-two.example.com")!
 

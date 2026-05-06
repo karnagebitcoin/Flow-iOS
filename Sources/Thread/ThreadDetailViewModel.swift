@@ -204,6 +204,8 @@ final class ThreadDetailViewModel: ObservableObject {
         guard !pruneMutedItems([item]).isEmpty else { return }
         guard item.event.id.lowercased() != rootItem.displayEventID.lowercased() else { return }
         guard !rawReplies.contains(where: { $0.id.lowercased() == item.id.lowercased() }) else { return }
+        // Keep optimistic replies durable across stale thread refreshes until sources echo them back.
+        LocalPublicationStore.shared.registerPublishing(item: item)
         rawReplies.append(item)
         rawReplies = Self.sortedReplies(rawReplies)
         Task { [weak self] in
