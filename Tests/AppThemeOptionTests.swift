@@ -244,6 +244,31 @@ final class AppThemeOptionTests: XCTestCase {
     }
 
     @MainActor
+    func testClickSoundEffectDefaultsToNoneAndPersistsSelection() throws {
+        let defaults = UserDefaults(suiteName: #function)!
+        defaults.removePersistentDomain(forName: #function)
+        let authStore = AuthStore(defaults: defaults)
+        let pubkey = String(repeating: "2", count: 64)
+        let settings = AppSettingsStore(defaults: defaults, authStore: authStore)
+
+        settings.configure(accountPubkey: pubkey)
+
+        XCTAssertEqual(settings.clickSoundEffect, .none)
+        XCTAssertEqual(AppClickSoundEffect.audibleCases.count, 6)
+        for effect in AppClickSoundEffect.audibleCases {
+            let assetName = try XCTUnwrap(effect.dataAssetName)
+            XCTAssertNotNil(NSDataAsset(name: assetName), "Missing click sound asset \(assetName)")
+        }
+
+        settings.clickSoundEffect = .glassTap
+
+        let reloaded = AppSettingsStore(defaults: defaults, authStore: authStore)
+        reloaded.configure(accountPubkey: pubkey)
+
+        XCTAssertEqual(reloaded.clickSoundEffect, .glassTap)
+    }
+
+    @MainActor
     func testThemeIconAccentMatchesReactionChromeForVisibleThemes() {
         let defaults = UserDefaults(suiteName: #function)!
         defaults.removePersistentDomain(forName: #function)

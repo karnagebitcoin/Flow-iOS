@@ -293,6 +293,7 @@ struct MainTabShellView: View {
         let showsUnreadBadge = tab == .activity && activityViewModel.hasUnread && !isActivityListVisible
 
         return Button {
+            AppClickSoundPlayer.play(appSettings.clickSoundEffect)
             handleTabSelection(tab)
         } label: {
             Image(systemName: tab.symbolName)
@@ -325,6 +326,7 @@ struct MainTabShellView: View {
 
     private var composeTabButton: some View {
         Button {
+            AppClickSoundPlayer.play(appSettings.clickSoundEffect)
             handleComposeTap()
         } label: {
             Image(systemName: "plus")
@@ -355,6 +357,7 @@ struct MainTabShellView: View {
 
     private var composeFloatingButton: some View {
         Button {
+            AppClickSoundPlayer.play(appSettings.clickSoundEffect)
             handleComposeTap()
         } label: {
             Image(systemName: "plus")

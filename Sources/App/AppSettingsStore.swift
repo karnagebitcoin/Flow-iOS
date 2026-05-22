@@ -837,6 +837,60 @@ enum ExpressiveGradientOption: String, CaseIterable, Codable, Identifiable, Hash
     }
 }
 
+enum AppClickSoundEffect: String, CaseIterable, Codable, Identifiable, Sendable {
+    case none
+    case softTap
+    case lightTick
+    case mutedClick
+    case tinyPop
+    case glassTap
+    case warmBlip
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .none:
+            return "None"
+        case .softTap:
+            return "Soft Tap"
+        case .lightTick:
+            return "Light Tick"
+        case .mutedClick:
+            return "Muted Click"
+        case .tinyPop:
+            return "Tiny Pop"
+        case .glassTap:
+            return "Glass Tap"
+        case .warmBlip:
+            return "Warm Blip"
+        }
+    }
+
+    var dataAssetName: String? {
+        switch self {
+        case .none:
+            return nil
+        case .softTap:
+            return "AppClickSoftTap"
+        case .lightTick:
+            return "AppClickLightTick"
+        case .mutedClick:
+            return "AppClickMutedClick"
+        case .tinyPop:
+            return "AppClickTinyPop"
+        case .glassTap:
+            return "AppClickGlassTap"
+        case .warmBlip:
+            return "AppClickWarmBlip"
+        }
+    }
+
+    static var audibleCases: [AppClickSoundEffect] {
+        allCases.filter { $0 != .none }
+    }
+}
+
 struct StoredColor: Codable, Hashable, Sendable {
     let archivedData: Data
 
@@ -1302,6 +1356,7 @@ final class AppSettingsStore: ObservableObject {
             case holographicDarkGradientOption
             case fontOption
             case fontSize
+            case clickSoundEffect
             case breakReminderInterval
             case liveReactsEnabled
             case hideNSFWContent
@@ -1349,6 +1404,7 @@ final class AppSettingsStore: ObservableObject {
         var buttonTextColor: StoredColor?
         var fontOption: AppFontOption = .system
         var fontSize: AppFontSize = .medium
+        var clickSoundEffect: AppClickSoundEffect = .none
         var breakReminderInterval: BreakReminderInterval = .fortyMinutes
         var liveReactsEnabled: Bool = true
         var hideNSFWContent: Bool = true
@@ -1457,6 +1513,7 @@ final class AppSettingsStore: ObservableObject {
             buttonTextColor = nil
             fontOption = (try? container.decode(AppFontOption.self, forKey: .fontOption)) ?? .system
             fontSize = (try? container.decode(AppFontSize.self, forKey: .fontSize)) ?? .medium
+            clickSoundEffect = (try? container.decode(AppClickSoundEffect.self, forKey: .clickSoundEffect)) ?? .none
             breakReminderInterval = (try? container.decode(BreakReminderInterval.self, forKey: .breakReminderInterval)) ?? .fortyMinutes
             liveReactsEnabled = try container.decodeIfPresent(Bool.self, forKey: .liveReactsEnabled) ?? true
             hideNSFWContent = try container.decodeIfPresent(Bool.self, forKey: .hideNSFWContent) ?? true
@@ -1532,6 +1589,7 @@ final class AppSettingsStore: ObservableObject {
             try container.encodeIfPresent(buttonTextColor, forKey: .buttonTextColor)
             try container.encode(fontOption, forKey: .fontOption)
             try container.encode(fontSize, forKey: .fontSize)
+            try container.encode(clickSoundEffect, forKey: .clickSoundEffect)
             try container.encode(breakReminderInterval, forKey: .breakReminderInterval)
             try container.encode(liveReactsEnabled, forKey: .liveReactsEnabled)
             try container.encode(hideNSFWContent, forKey: .hideNSFWContent)
@@ -1659,6 +1717,14 @@ final class AppSettingsStore: ObservableObject {
 
     var linkColor: Color {
         primaryColor
+    }
+
+    var clickSoundEffect: AppClickSoundEffect {
+        get { persistedSettings.clickSoundEffect }
+        set {
+            persistedSettings.clickSoundEffect = newValue
+            persist()
+        }
     }
 
     var visualAccentMode: AppVisualAccentMode {

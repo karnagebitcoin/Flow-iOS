@@ -42,6 +42,11 @@ struct SettingsAppearanceView: View {
                 .padding(.vertical, 2)
             }
 
+            Section("Click Sound") {
+                clickSoundSection
+                    .padding(.vertical, 2)
+            }
+
             Section("Customize") {
                 SettingsNavigationRow(
                     title: "Typography",
@@ -174,6 +179,7 @@ struct SettingsAppearanceView: View {
 
         return Button {
             guard option.isEnabled else { return }
+            AppClickSoundPlayer.play(appSettings.clickSoundEffect)
             appSettings.theme = option
         } label: {
             VStack(alignment: .leading, spacing: 10) {
@@ -265,10 +271,44 @@ struct SettingsAppearanceView: View {
         )
     }
 
+    private var clickSoundSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 8) {
+                Image(systemName: "speaker.wave.1")
+                    .font(.footnote.weight(.semibold))
+                    .foregroundStyle(appSettings.primaryColor)
+                Text("Interface Clicks")
+                    .font(.footnote.weight(.semibold))
+                    .foregroundStyle(.secondary)
+            }
+
+            FlowCapsuleTabBar(
+                selection: clickSoundBinding,
+                items: AppClickSoundEffect.allCases,
+                title: { $0.title }
+            )
+
+            Text("Adds a quiet tap sound to common buttons and controls. None keeps the app silent.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    private var clickSoundBinding: Binding<AppClickSoundEffect> {
+        Binding(
+            get: { appSettings.clickSoundEffect },
+            set: { newValue in
+                appSettings.clickSoundEffect = newValue
+                AppClickSoundPlayer.play(newValue)
+            }
+        )
+    }
+
     private func primaryColorOptionCard(for option: AppPrimaryColorOption) -> some View {
         let isSelected = appSettings.selectedPrimaryColorOption == option
 
         return Button {
+            AppClickSoundPlayer.play(appSettings.clickSoundEffect)
             appSettings.primaryColor = option.color
         } label: {
             Circle()

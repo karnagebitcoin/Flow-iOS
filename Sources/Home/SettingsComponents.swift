@@ -47,6 +47,9 @@ struct SettingsNavigationRow<Destination: View>: View {
                 Spacer(minLength: 8)
             }
         }
+        .simultaneousGesture(TapGesture().onEnded {
+            AppClickSoundPlayer.play(appSettings.clickSoundEffect)
+        })
     }
 }
 
@@ -93,6 +96,9 @@ struct SettingsValueNavigationRow: View {
                 Spacer(minLength: 8)
             }
         }
+        .simultaneousGesture(TapGesture().onEnded {
+            AppClickSoundPlayer.play(appSettings.clickSoundEffect)
+        })
     }
 }
 
@@ -135,6 +141,9 @@ struct SettingsToggleRow: View {
             }
         }
         .padding(.vertical, 4)
+        .onChange(of: isOn) { _, _ in
+            AppClickSoundPlayer.play(appSettings.clickSoundEffect)
+        }
     }
 }
 
@@ -146,6 +155,7 @@ struct SettingsInfoButton: View {
 
     var body: some View {
         Button {
+            AppClickSoundPlayer.play(AppSettingsStore.shared.clickSoundEffect)
             isPresented = true
         } label: {
             Image(systemName: "info.circle")
@@ -467,7 +477,10 @@ struct ThemedToolbarDoneButton: View {
     let action: () -> Void
 
     var body: some View {
-        Button(action: action) {
+        Button {
+            AppClickSoundPlayer.play(appSettings.clickSoundEffect)
+            action()
+        } label: {
             Image(systemName: "xmark")
                 .font(appSettings.appFont(.footnote, weight: .semibold))
                 .foregroundStyle(appSettings.themePalette.foreground)
