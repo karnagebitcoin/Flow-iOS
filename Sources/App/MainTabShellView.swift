@@ -52,6 +52,8 @@ struct MainTabShellView: View {
 
     private static let bottomTabBarIconBottomPadding: CGFloat = 15
     private static let bottomTabBarIconTopPadding: CGFloat = 5
+    private static let bottomTabBarIconFrameSize: CGFloat = 46
+    private static let activityUnreadBadgeOffset = CGSize(width: -7, height: 8)
 
     @StateObject private var homeViewModel = HomeFeedViewModel(
         relayURL: URL(string: RelaySettingsStore.defaultReadRelayURLs.first ?? "wss://relay.damus.io/")!
@@ -293,25 +295,27 @@ struct MainTabShellView: View {
         return Button {
             handleTabSelection(tab)
         } label: {
-            ZStack(alignment: .topTrailing) {
-                Image(systemName: tab.symbolName)
-                    .font(.system(size: 21, weight: .regular))
-                    .foregroundStyle(
-                        isHighlighted
-                            ? appSettings.primaryColor
-                            : appSettings.themePalette.iconMutedForeground
-                    )
-                    .frame(maxWidth: .infinity)
-                    .frame(height: 46)
-                    .contentShape(Rectangle())
-
-                if showsUnreadBadge {
-                    ActivityUnreadBadgeView()
-                        .offset(x: -20, y: 8)
-                        .transition(FlowTransitionMotion.notificationBadgeTransition(reduceMotion: accessibilityReduceMotion))
-                        .accessibilityHidden(true)
+            Image(systemName: tab.symbolName)
+                .font(.system(size: 21, weight: .regular))
+                .foregroundStyle(
+                    isHighlighted
+                        ? appSettings.primaryColor
+                        : appSettings.themePalette.iconMutedForeground
+                )
+                .frame(
+                    width: Self.bottomTabBarIconFrameSize,
+                    height: Self.bottomTabBarIconFrameSize
+                )
+                .overlay(alignment: .topTrailing) {
+                    if showsUnreadBadge {
+                        ActivityUnreadBadgeView()
+                            .offset(Self.activityUnreadBadgeOffset)
+                            .transition(FlowTransitionMotion.notificationBadgeTransition(reduceMotion: accessibilityReduceMotion))
+                            .accessibilityHidden(true)
+                    }
                 }
-            }
+                .frame(maxWidth: .infinity)
+                .contentShape(Rectangle())
             .animation(FlowTransitionMotion.badgeAnimation(reduceMotion: accessibilityReduceMotion), value: showsUnreadBadge)
         }
         .buttonStyle(.plain)
