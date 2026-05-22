@@ -47,9 +47,6 @@ struct SettingsNavigationRow<Destination: View>: View {
                 Spacer(minLength: 8)
             }
         }
-        .simultaneousGesture(TapGesture().onEnded {
-            AppClickSoundPlayer.play(appSettings.clickSoundEffect)
-        })
     }
 }
 
@@ -96,9 +93,6 @@ struct SettingsValueNavigationRow: View {
                 Spacer(minLength: 8)
             }
         }
-        .simultaneousGesture(TapGesture().onEnded {
-            AppClickSoundPlayer.play(appSettings.clickSoundEffect)
-        })
     }
 }
 
@@ -260,6 +254,8 @@ struct SettingsDetailNavigationHost<Content: View>: View {
     @Environment(\.dismiss) private var dismiss
     @EnvironmentObject private var appSettings: AppSettingsStore
 
+    @State private var didPlayEntrySound = false
+
     private let title: String
     private let onBack: (() -> Void)?
     private let content: Content
@@ -285,6 +281,7 @@ struct SettingsDetailNavigationHost<Content: View>: View {
         .navigationBarTitleDisplayMode(.inline)
         .navigationBarBackButtonHidden(true)
         .toolbar(SettingsNavigationChrome.navigationBarVisibility(isShowingDetail: true), for: .navigationBar)
+        .onAppear(perform: playEntrySoundOnce)
     }
 
     private var surfaceStyle: SettingsFormSurfaceStyle {
@@ -293,11 +290,18 @@ struct SettingsDetailNavigationHost<Content: View>: View {
     }
 
     private func goBack() {
+        AppClickSoundPlayer.play(appSettings.clickSoundEffect)
         if let onBack {
             onBack()
         } else {
             dismiss()
         }
+    }
+
+    private func playEntrySoundOnce() {
+        guard !didPlayEntrySound else { return }
+        didPlayEntrySound = true
+        AppClickSoundPlayer.play(appSettings.clickSoundEffect)
     }
 }
 

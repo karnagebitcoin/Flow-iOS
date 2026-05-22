@@ -770,6 +770,16 @@ final class FlowLayoutGuardrailsTests: XCTestCase {
         XCTAssertFalse(groupSource.contains("appSettings.primaryColor"))
     }
 
+    func testSettingsNavigationRowsDoNotLayerTapGesturesOntoNavigationLinks() throws {
+        let source = try Self.sourceText(at: "Sources/Home/SettingsComponents.swift")
+        let navigationRowStart = try XCTUnwrap(source.range(of: "struct SettingsNavigationRow"))
+        let toggleRowStart = try XCTUnwrap(source.range(of: "struct SettingsToggleRow"))
+        let navigationRowsSource = String(source[navigationRowStart.lowerBound..<toggleRowStart.lowerBound])
+
+        XCTAssertFalse(navigationRowsSource.contains(".simultaneousGesture(TapGesture"))
+        XCTAssertFalse(navigationRowsSource.contains(".onTapGesture"))
+    }
+
 }
 
 private extension FlowLayoutGuardrailsTests {
