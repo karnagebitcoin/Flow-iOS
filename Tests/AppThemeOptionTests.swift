@@ -211,6 +211,39 @@ final class AppThemeOptionTests: XCTestCase {
     }
 
     @MainActor
+    func testCustomPrimaryColorPersistsWithoutSnappingToPreset() {
+        let defaults = UserDefaults(suiteName: #function)!
+        defaults.removePersistentDomain(forName: #function)
+        let authStore = AuthStore(defaults: defaults)
+        let pubkey = String(repeating: "1", count: 64)
+        let settings = AppSettingsStore(defaults: defaults, authStore: authStore)
+        let customColor = Color(red: 0.18, green: 0.42, blue: 0.73)
+
+        settings.configure(accountPubkey: pubkey)
+        settings.primaryColor = customColor
+
+        let reloaded = AppSettingsStore(defaults: defaults, authStore: authStore)
+        reloaded.configure(accountPubkey: pubkey)
+
+        assertColor(
+            reloaded.primaryColor,
+            matches: UIColor(red: 0.18, green: 0.42, blue: 0.73, alpha: 1)
+        )
+        assertColor(
+            reloaded.linkColor,
+            matches: UIColor(red: 0.18, green: 0.42, blue: 0.73, alpha: 1)
+        )
+        XCTAssertNil(reloaded.selectedPrimaryColorOption)
+
+        reloaded.primaryColor = AppSettingsStore.availablePrimaryColorOptions[0].color
+
+        XCTAssertEqual(
+            reloaded.selectedPrimaryColorOption,
+            AppSettingsStore.availablePrimaryColorOptions[0]
+        )
+    }
+
+    @MainActor
     func testThemeIconAccentMatchesReactionChromeForVisibleThemes() {
         let defaults = UserDefaults(suiteName: #function)!
         defaults.removePersistentDomain(forName: #function)

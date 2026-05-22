@@ -230,6 +230,21 @@ struct SettingsAppearanceView: View {
 
     private var primaryColorSection: some View {
         VStack(alignment: .leading, spacing: 12) {
+            ColorPicker(
+                selection: primaryColorBinding,
+                supportsOpacity: false
+            ) {
+                HStack(spacing: 10) {
+                    Image(systemName: "eyedropper.halffull")
+                        .font(.footnote.weight(.semibold))
+                        .foregroundStyle(appSettings.primaryColor)
+
+                    Text("Custom Color")
+                        .font(.subheadline.weight(.semibold))
+                }
+            }
+            .tint(appSettings.primaryColor)
+
             HStack(spacing: 10) {
                 ForEach(AppSettingsStore.availablePrimaryColorOptions) { option in
                     primaryColorOptionCard(for: option)
@@ -243,8 +258,15 @@ struct SettingsAppearanceView: View {
         }
     }
 
+    private var primaryColorBinding: Binding<Color> {
+        Binding(
+            get: { appSettings.primaryColor },
+            set: { appSettings.primaryColor = $0 }
+        )
+    }
+
     private func primaryColorOptionCard(for option: AppPrimaryColorOption) -> some View {
-        let isSelected = appSettings.primaryColorOption == option
+        let isSelected = appSettings.selectedPrimaryColorOption == option
 
         return Button {
             appSettings.primaryColor = option.color

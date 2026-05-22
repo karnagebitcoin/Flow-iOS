@@ -224,6 +224,17 @@ struct AppPrimaryColorOption: Identifiable, Hashable, Sendable {
         } ?? defaultOption
     }
 
+    static func matching(_ color: Color) -> AppPrimaryColorOption? {
+        let source = rgbaComponents(for: color)
+        return all.first { option in
+            let target = rgbaComponents(for: option.color)
+            return abs(source.0 - target.0) < 0.001
+                && abs(source.1 - target.1) < 0.001
+                && abs(source.2 - target.2) < 0.001
+                && abs(source.3 - target.3) < 0.001
+        }
+    }
+
     private static func color(from hexCode: String) -> Color {
         let value = UInt32(hexCode, radix: 16) ?? 0
         let red = Double((value >> 16) & 0xFF) / 255.0
@@ -1423,17 +1434,21 @@ final class AppSettingsStore: ObservableObject {
             )
             let decodedVisualAccentMode = try container.decodeIfPresent(AppVisualAccentMode.self, forKey: .visualAccentMode)
 
-            let migratedPrimaryColor = decodedPrimaryColor?.color
-                ?? AppSettingsStore.legacyPrimaryColor(
-                    buttonGradientOption: buttonGradientOption,
-                    generatedButtonGradient: generatedButtonGradient,
-                    expressiveGradientOption: expressiveGradientOption,
-                    expressiveLinkColorIndex: expressiveLinkColorIndex,
-                    visualAccentMode: decodedVisualAccentMode
-                )
-                ?? AppSettingsStore.defaultPrimaryColor
-            let normalizedPrimaryColor = AppSettingsStore.normalizedPrimaryColorOption(for: migratedPrimaryColor).color
-            let storedPrimaryColor = StoredColor(color: normalizedPrimaryColor)
+            let migratedPrimaryColor: Color
+            if let decodedPrimaryColor {
+                migratedPrimaryColor = decodedPrimaryColor.color
+            } else if let legacyPrimaryColor = AppSettingsStore.legacyPrimaryColor(
+                buttonGradientOption: buttonGradientOption,
+                generatedButtonGradient: generatedButtonGradient,
+                expressiveGradientOption: expressiveGradientOption,
+                expressiveLinkColorIndex: expressiveLinkColorIndex,
+                visualAccentMode: decodedVisualAccentMode
+            ) {
+                migratedPrimaryColor = AppSettingsStore.normalizedPrimaryColorOption(for: legacyPrimaryColor).color
+            } else {
+                migratedPrimaryColor = AppSettingsStore.defaultPrimaryColor
+            }
+            let storedPrimaryColor = StoredColor(color: AppSettingsStore.opaquePrimaryColor(from: migratedPrimaryColor))
             primaryColor = storedPrimaryColor
             minimalPrimaryColor = storedPrimaryColor
             visualAccentMode = .minimal
@@ -1625,7 +1640,7 @@ final class AppSettingsStore: ObservableObject {
             persistedSettings.minimalPrimaryColor?.color ?? persistedSettings.primaryColor?.color ?? Self.defaultPrimaryColor
         }
         set {
-            let storedColor = StoredColor(color: Self.normalizedPrimaryColorOption(for: newValue).color)
+            let storedColor = StoredColor(color: Self.opaquePrimaryColor(from: newValue))
             persistedSettings.visualAccentMode = .minimal
             persistedSettings.primaryColor = storedColor
             persistedSettings.minimalPrimaryColor = storedColor
@@ -1636,6 +1651,10 @@ final class AppSettingsStore: ObservableObject {
 
     var primaryColorOption: AppPrimaryColorOption {
         Self.normalizedPrimaryColorOption(for: primaryColor)
+    }
+
+    var selectedPrimaryColorOption: AppPrimaryColorOption? {
+        Self.matchingPrimaryColorOption(for: primaryColor)
     }
 
     var linkColor: Color {
@@ -1691,7 +1710,7 @@ final class AppSettingsStore: ObservableObject {
         set {
             if let newValue {
                 persistedSettings.expressiveGradientOption = ExpressiveGradientOption.mapped(from: newValue)
-                primaryColor = newValue.defaultLinkColor
+                primaryColor = Self.normalizedPrimaryColorOption(for: newValue.defaultLinkColor).color
             } else {
                 persistedSettings.visualAccentMode = .minimal
                 persistedSettings.buttonGradientOption = nil
@@ -1706,7 +1725,7 @@ final class AppSettingsStore: ObservableObject {
         get { nil }
         set {
             if let newValue {
-                primaryColor = Self.averageColor(from: newValue.gradientColors)
+                primaryColor = Self.normalizedPrimaryColorOption(for: Self.averageColor(from: newValue.gradientColors)).color
             }
             persistedSettings.generatedButtonGradient = nil
             persist()
@@ -2494,6 +2513,24 @@ final class AppSettingsStore: ObservableObject {
 
     nonisolated static func normalizedPrimaryColorOption(for color: Color) -> AppPrimaryColorOption {
         AppPrimaryColorOption.nearest(to: color)
+    }
+
+    nonisolated static func matchingPrimaryColorOption(for color: Color) -> AppPrimaryColorOption? {
+        AppPrimaryColorOption.matching(color)
+    }
+
+    nonisolated static func opaquePrimaryColor(from color: Color) -> Color {
+        let resolved = UIColor(color).resolvedColor(with: UITraitCollection(userInterfaceStyle: .light))
+        var red: CGFloat = 0
+        var green: CGFloat = 0
+        var blue: CGFloat = 0
+        var alpha: CGFloat = 0
+
+        guard resolved.getRed(&red, green: &green, blue: &blue, alpha: &alpha) else {
+            return defaultPrimaryColor
+        }
+
+        return Color(.sRGB, red: Double(red), green: Double(green), blue: Double(blue), opacity: 1)
     }
 
     nonisolated static func legacyPrimaryColor(
