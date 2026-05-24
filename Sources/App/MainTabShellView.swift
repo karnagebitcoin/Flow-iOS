@@ -271,8 +271,10 @@ struct MainTabShellView: View {
 
     @available(iOS 26.0, *)
     private var bottomTabBarNativeGlass: some View {
-        bottomTabBarContents
-            .glassEffect(.regular.interactive(), in: Capsule())
+        GlassEffectContainer {
+            bottomTabBarContents
+                .glassEffect(.regular.interactive(), in: Capsule())
+        }
     }
 
     private var bottomTabBarContents: some View {
@@ -702,11 +704,12 @@ private struct BottomTabBarChromeOverlay: View {
                 offset: offset,
                 safeAreaBottom: safeAreaBottom
             )
+            let visibleFraction = bottomTabBarVisibleFraction(offset: offset)
 
             bottomTabBar(safeAreaBottom)
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
                 .offset(y: offset)
-                .opacity(bottomTabBarVisibleFraction(offset: offset))
+                .modifier(ConditionalOpacityModifier(opacity: visibleFraction))
                 .allowsHitTesting(hitTestingEnabled)
                 .accessibilityHidden(!hitTestingEnabled)
         }
@@ -1129,5 +1132,17 @@ private struct BottomTabBarHeightPreferenceKey: PreferenceKey {
 
     static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
         value = max(value, nextValue())
+    }
+}
+
+private struct ConditionalOpacityModifier: ViewModifier {
+    let opacity: CGFloat
+
+    func body(content: Content) -> some View {
+        if opacity >= 0.999 {
+            content
+        } else {
+            content.opacity(opacity)
+        }
     }
 }
