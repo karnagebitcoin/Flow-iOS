@@ -265,6 +265,33 @@ struct ComposeNoteSheet: View {
             .padding(.vertical, 16)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            composeAttachmentToolbar
+        }
+    }
+
+    private var composeAttachmentToolbar: some View {
+        ComposeAttachmentToolbarBar(
+            viewModel: viewModel,
+            speechTranscriber: speechTranscriber,
+            selectedMediaItems: $selectedMediaItems,
+            pollDraft: $pollDraft,
+            isUploadingMedia: isUploadingMedia,
+            isRequestingCaptureAccess: isRequestingCaptureAccess,
+            canAttachPoll: canAttachPoll,
+            currentNsec: currentNsec,
+            writeRelayURLs: writeRelayURLs,
+            onCameraTap: handleCameraButtonTap,
+            onGIFTap: {
+                isShowingKlipyGIFPicker = true
+            },
+            onSpeechToggle: {
+                Task {
+                    await handleSpeechToggle()
+                }
+            },
+            onTogglePoll: togglePollDraft
+        )
     }
 
     private var publishToolbarButton: some View {

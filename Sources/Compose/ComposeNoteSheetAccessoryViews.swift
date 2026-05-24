@@ -133,109 +133,8 @@ struct ComposeComposerCardView: View {
                     }
                 )
             }
-
-            attachmentToolbar
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-    }
-
-    private var attachmentToolbar: some View {
-        HStack {
-            PhotosPicker(
-                selection: $selectedMediaItems,
-                selectionBehavior: .ordered,
-                matching: .any(of: [.images, .videos])
-            ) {
-                toolbarCircle {
-                    if isUploadingMedia {
-                        ProgressView()
-                            .controlSize(.small)
-                    } else {
-                        Image(systemName: "photo")
-                            .font(.system(size: 18, weight: .medium))
-                    }
-                }
-            }
-            .buttonStyle(.plain)
-            .foregroundStyle(appSettings.primaryColor)
-            .disabled(isUploadingMedia || viewModel.isPublishing)
-
-            cameraAttachmentButton(symbolFont: .system(size: 18, weight: .medium))
-
-            Button(action: onGIFTap) {
-                Text("GIF")
-                    .font(.footnote.weight(.semibold))
-                    .padding(.horizontal, 9)
-                    .padding(.vertical, 5)
-                    .background(appSettings.themePalette.tertiaryFill)
-                    .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
-            }
-            .buttonStyle(.plain)
-            .foregroundStyle(appSettings.primaryColor)
-            .disabled(isUploadingMedia || viewModel.isPublishing)
-
-            Button(action: onSpeechToggle) {
-                toolbarCircle(isActive: speechTranscriber.isRecording) {
-                    if speechTranscriber.isRecording {
-                        Image(systemName: "stop.fill")
-                            .font(.system(size: 15, weight: .semibold))
-                    } else if speechTranscriber.isTranscribing {
-                        ProgressView()
-                            .controlSize(.small)
-                    } else {
-                        Image(systemName: "waveform")
-                            .font(.system(size: 17, weight: .medium))
-                    }
-                }
-            }
-            .buttonStyle(.plain)
-            .disabled(viewModel.isPublishing || isUploadingMedia)
-
-            if canAttachPoll {
-                pollToolbarButton
-            }
-
-            if speechTranscriber.isRecording {
-                Text(formatVoiceDuration(milliseconds: speechTranscriber.elapsedMs))
-                    .font(.footnote.monospacedDigit())
-                    .foregroundStyle(appSettings.themePalette.secondaryForeground)
-            }
-
-            Spacer()
-
-            ComposeCharacterCountRing(
-                characterCount: viewModel.characterCount,
-                characterLimit: viewModel.characterLimit
-            )
-
-            if currentNsec == nil {
-                Label("nsec required", systemImage: "lock.fill")
-                    .font(.footnote.weight(.semibold))
-                    .foregroundStyle(appSettings.themePalette.secondaryForeground)
-            } else if writeRelayURLs.isEmpty {
-                Label("No connected sources", systemImage: "wifi.slash")
-                    .font(.footnote.weight(.semibold))
-                    .foregroundStyle(appSettings.themePalette.secondaryForeground)
-            }
-        }
-    }
-
-    private var pollToolbarButton: some View {
-        Button(action: onTogglePoll) {
-            toolbarCircle(isActive: pollDraft != nil) {
-                Image(systemName: pollDraft == nil ? "chart.bar.xaxis" : "chart.bar.fill")
-                    .font(.system(size: 17, weight: .medium))
-                    .id(pollDraft != nil)
-                    .transition(FlowTransitionMotion.iconSwapTransition(reduceMotion: accessibilityReduceMotion))
-            }
-        }
-        .animation(
-            FlowTransitionMotion.iconSwapAnimation(reduceMotion: accessibilityReduceMotion),
-            value: pollDraft != nil
-        )
-        .buttonStyle(.plain)
-        .disabled(viewModel.isPublishing || isUploadingMedia)
-        .accessibilityLabel(pollDraft == nil ? "Add poll" : "Edit poll")
     }
 
     private var composeEditor: some View {
@@ -317,6 +216,135 @@ struct ComposeComposerCardView: View {
             onPreview: onPreviewMedia,
             onRemove: onRemoveMedia
         )
+    }
+
+}
+
+struct ComposeAttachmentToolbarBar: View {
+    @Environment(\.accessibilityReduceMotion) private var accessibilityReduceMotion
+    @EnvironmentObject private var appSettings: AppSettingsStore
+
+    @ObservedObject var viewModel: ComposeNoteViewModel
+    @ObservedObject var speechTranscriber: ComposeSpeechTranscriber
+
+    @Binding var selectedMediaItems: [PhotosPickerItem]
+    @Binding var pollDraft: ComposePollDraft?
+    let isUploadingMedia: Bool
+    let isRequestingCaptureAccess: Bool
+    let canAttachPoll: Bool
+    let currentNsec: String?
+    let writeRelayURLs: [URL]
+    let onCameraTap: () -> Void
+    let onGIFTap: () -> Void
+    let onSpeechToggle: () -> Void
+    let onTogglePoll: () -> Void
+
+    var body: some View {
+        VStack(spacing: 0) {
+            Rectangle()
+                .fill(appSettings.themePalette.separator.opacity(0.22))
+                .frame(height: 0.5)
+
+            HStack(spacing: 12) {
+                PhotosPicker(
+                    selection: $selectedMediaItems,
+                    selectionBehavior: .ordered,
+                    matching: .any(of: [.images, .videos])
+                ) {
+                    toolbarCircle {
+                        if isUploadingMedia {
+                            ProgressView()
+                                .controlSize(.small)
+                        } else {
+                            Image(systemName: "photo")
+                                .font(.system(size: 18, weight: .medium))
+                        }
+                    }
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(appSettings.primaryColor)
+                .disabled(isUploadingMedia || viewModel.isPublishing)
+
+                cameraAttachmentButton(symbolFont: .system(size: 18, weight: .medium))
+
+                Button(action: onGIFTap) {
+                    Text("GIF")
+                        .font(.footnote.weight(.semibold))
+                        .padding(.horizontal, 9)
+                        .padding(.vertical, 5)
+                        .background(appSettings.themePalette.tertiaryFill)
+                        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(appSettings.primaryColor)
+                .disabled(isUploadingMedia || viewModel.isPublishing)
+
+                Button(action: onSpeechToggle) {
+                    toolbarCircle(isActive: speechTranscriber.isRecording) {
+                        if speechTranscriber.isRecording {
+                            Image(systemName: "stop.fill")
+                                .font(.system(size: 15, weight: .semibold))
+                        } else if speechTranscriber.isTranscribing {
+                            ProgressView()
+                                .controlSize(.small)
+                        } else {
+                            Image(systemName: "waveform")
+                                .font(.system(size: 17, weight: .medium))
+                        }
+                    }
+                }
+                .buttonStyle(.plain)
+                .disabled(viewModel.isPublishing || isUploadingMedia)
+
+                if canAttachPoll {
+                    pollToolbarButton
+                }
+
+                if speechTranscriber.isRecording {
+                    Text(formatVoiceDuration(milliseconds: speechTranscriber.elapsedMs))
+                        .font(.footnote.monospacedDigit())
+                        .foregroundStyle(appSettings.themePalette.secondaryForeground)
+                }
+
+                Spacer(minLength: 8)
+
+                ComposeCharacterCountRing(
+                    characterCount: viewModel.characterCount,
+                    characterLimit: viewModel.characterLimit
+                )
+
+                if currentNsec == nil {
+                    Label("nsec required", systemImage: "lock.fill")
+                        .font(.footnote.weight(.semibold))
+                        .foregroundStyle(appSettings.themePalette.secondaryForeground)
+                } else if writeRelayURLs.isEmpty {
+                    Label("No connected sources", systemImage: "wifi.slash")
+                        .font(.footnote.weight(.semibold))
+                        .foregroundStyle(appSettings.themePalette.secondaryForeground)
+                }
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 10)
+        }
+        .background(appSettings.themePalette.background)
+    }
+
+    private var pollToolbarButton: some View {
+        Button(action: onTogglePoll) {
+            toolbarCircle(isActive: pollDraft != nil) {
+                Image(systemName: pollDraft == nil ? "chart.bar.xaxis" : "chart.bar.fill")
+                    .font(.system(size: 17, weight: .medium))
+                    .id(pollDraft != nil)
+                    .transition(FlowTransitionMotion.iconSwapTransition(reduceMotion: accessibilityReduceMotion))
+            }
+        }
+        .animation(
+            FlowTransitionMotion.iconSwapAnimation(reduceMotion: accessibilityReduceMotion),
+            value: pollDraft != nil
+        )
+        .buttonStyle(.plain)
+        .disabled(viewModel.isPublishing || isUploadingMedia)
+        .accessibilityLabel(pollDraft == nil ? "Add poll" : "Edit poll")
     }
 
     private func toolbarCircle<Content: View>(
