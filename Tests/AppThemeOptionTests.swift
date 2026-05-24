@@ -1231,6 +1231,27 @@ final class AppThemeOptionTests: XCTestCase {
         )
     }
 
+    func testNativeTabBarHidesOnlyAfterHomeScrollChromeIsMostlyHidden() {
+        XCTAssertFalse(
+            ScrollChromeLayout.shouldHideNativeTabBar(
+                bottomBarOffset: 0,
+                hiddenOffset: 100
+            )
+        )
+        XCTAssertFalse(
+            ScrollChromeLayout.shouldHideNativeTabBar(
+                bottomBarOffset: 80,
+                hiddenOffset: 100
+            )
+        )
+        XCTAssertTrue(
+            ScrollChromeLayout.shouldHideNativeTabBar(
+                bottomBarOffset: 92,
+                hiddenOffset: 100
+            )
+        )
+    }
+
     func testScrollChromeBottomContentPaddingIgnoresSafeAreaSpacer() {
         XCTAssertEqual(
             ScrollChromeLayout.bottomContentVisibleFraction(
@@ -1320,8 +1341,10 @@ final class AppThemeOptionTests: XCTestCase {
         XCTAssertTrue(source.contains(".tabItem { tabBarLabel(for: .compose) }"))
         XCTAssertTrue(source.contains(".tabItem { tabBarLabel(for: .dms) }"))
         XCTAssertTrue(source.contains(".tabItem { tabBarLabel(for: .activity) }"))
-        XCTAssertTrue(source.contains(".toolbar(nativeTabBarVisibility, for: .tabBar)"))
+        XCTAssertTrue(source.contains(".toolbar(nativeTabBarVisibility(safeAreaBottom: proxy.safeAreaInsets.bottom), for: .tabBar)"))
         XCTAssertTrue(source.contains(".flowNativeTabBarBehavior()"))
+        XCTAssertTrue(source.contains("private func shouldHideNativeTabBarForHomeScroll"))
+        XCTAssertTrue(source.contains("ScrollChromeLayout.shouldHideNativeTabBar"))
         XCTAssertFalse(source.contains(".toolbar(.hidden, for: .tabBar)"))
         XCTAssertFalse(source.contains("GlassEffectContainer"))
         XCTAssertFalse(source.contains(".glassEffect("))
@@ -1330,11 +1353,12 @@ final class AppThemeOptionTests: XCTestCase {
     func testComposeTabUsesNativeItemAsActionWithoutSelectingPlaceholder() throws {
         let source = try sourceText(at: "Sources/App/MainTabShellView.swift")
         let selectionRange = try XCTUnwrap(source.range(of: "private var tabSelection: Binding<Tab>"))
-        let visibilityRange = try XCTUnwrap(source.range(of: "private var nativeTabBarVisibility"))
+        let visibilityRange = try XCTUnwrap(source.range(of: "private func nativeTabBarVisibility"))
         let selectionSource = source[selectionRange.lowerBound..<visibilityRange.lowerBound]
 
         XCTAssertTrue(source.contains("case compose"))
-        XCTAssertTrue(source.contains("Color.clear\n                        .tag(Tab.compose)"))
+        XCTAssertTrue(source.contains("Color.clear"))
+        XCTAssertTrue(source.contains(".tag(Tab.compose)"))
         XCTAssertTrue(selectionSource.contains("guard newValue != .compose else"))
         XCTAssertTrue(selectionSource.contains("handleComposeTap()"))
         XCTAssertFalse(selectionSource.contains("selectedTab = .compose"))

@@ -77,50 +77,52 @@ struct MainTabShellView: View {
             AppThemeBackgroundView()
                 .ignoresSafeArea()
 
-            TabView(selection: tabSelection) {
-                HomeFeedView(
-                    viewModel: homeViewModel,
-                    isShowingSideMenu: $isHomeSideMenuPresented,
-                    isRootVisible: $isHomeRootVisible,
-                    scrollChromeStore: homeScrollChromeStore,
-                    bottomTabBarHeight: bottomTabBarHeight
-                )
-                    .environment(\.flowScrollChromeStore, homeScrollChromeStore)
-                    .environment(\.flowBottomTabBarHeight, bottomTabBarHeight)
-                    .id(homeRootResetID)
-                    .tag(Tab.home)
-                    .tabItem { tabBarLabel(for: .home) }
+            GeometryReader { proxy in
+                TabView(selection: tabSelection) {
+                    HomeFeedView(
+                        viewModel: homeViewModel,
+                        isShowingSideMenu: $isHomeSideMenuPresented,
+                        isRootVisible: $isHomeRootVisible,
+                        scrollChromeStore: homeScrollChromeStore,
+                        bottomTabBarHeight: bottomTabBarHeight
+                    )
+                        .environment(\.flowScrollChromeStore, homeScrollChromeStore)
+                        .environment(\.flowBottomTabBarHeight, bottomTabBarHeight)
+                        .id(homeRootResetID)
+                        .tag(Tab.home)
+                        .tabItem { tabBarLabel(for: .home) }
 
-                SearchView(
-                    viewModel: searchViewModel,
-                    isActive: selectedTab == .search
-                )
-                    .id(searchRootResetID)
-                    .tag(Tab.search)
-                    .tabItem { tabBarLabel(for: .search) }
+                    SearchView(
+                        viewModel: searchViewModel,
+                        isActive: selectedTab == .search
+                    )
+                        .id(searchRootResetID)
+                        .tag(Tab.search)
+                        .tabItem { tabBarLabel(for: .search) }
 
-                if !appSettings.floatingComposeButtonEnabled {
-                    Color.clear
-                        .tag(Tab.compose)
-                        .tabItem { tabBarLabel(for: .compose) }
+                    if !appSettings.floatingComposeButtonEnabled {
+                        Color.clear
+                            .tag(Tab.compose)
+                            .tabItem { tabBarLabel(for: .compose) }
+                    }
+
+                    DMsView(isRootVisible: $isDMRootVisible)
+                        .tag(Tab.dms)
+                        .tabItem { tabBarLabel(for: .dms) }
+
+                    ActivityView(
+                        viewModel: activityViewModel,
+                        isRootVisible: $isActivityRootVisible,
+                        isTabActive: selectedTab == .activity
+                    )
+                        .id(activityRootResetID)
+                        .tag(Tab.activity)
+                        .tabItem { tabBarLabel(for: .activity) }
+                        .modifier(ActivityTabUnreadBadgeModifier(isVisible: activityViewModel.hasUnread && !isActivityListVisible))
                 }
-
-                DMsView(isRootVisible: $isDMRootVisible)
-                    .tag(Tab.dms)
-                    .tabItem { tabBarLabel(for: .dms) }
-
-                ActivityView(
-                    viewModel: activityViewModel,
-                    isRootVisible: $isActivityRootVisible,
-                    isTabActive: selectedTab == .activity
-                )
-                    .id(activityRootResetID)
-                    .tag(Tab.activity)
-                    .tabItem { tabBarLabel(for: .activity) }
-                    .modifier(ActivityTabUnreadBadgeModifier(isVisible: activityViewModel.hasUnread && !isActivityListVisible))
+                .toolbar(nativeTabBarVisibility(safeAreaBottom: proxy.safeAreaInsets.bottom), for: .tabBar)
+                .flowNativeTabBarBehavior()
             }
-            .toolbar(nativeTabBarVisibility, for: .tabBar)
-            .flowNativeTabBarBehavior()
         }
         .overlay(alignment: .bottomTrailing) {
             if appSettings.floatingComposeButtonEnabled {
@@ -252,8 +254,29 @@ struct MainTabShellView: View {
         )
     }
 
-    private var nativeTabBarVisibility: Visibility {
-        isBottomTabBarVisible ? .visible : .hidden
+    private func nativeTabBarVisibility(safeAreaBottom: CGFloat) -> Visibility {
+        guard isBottomTabBarVisible else { return .hidden }
+        return shouldHideNativeTabBarForHomeScroll(safeAreaBottom: safeAreaBottom) ? .hidden : .visible
+    }
+
+    private func shouldHideNativeTabBarForHomeScroll(safeAreaBottom: CGFloat) -> Bool {
+        guard selectedTab == .home, isHomeRootVisible else { return false }
+
+        let hiddenOffset = ScrollChromeLayout.bottomHiddenOffset(
+            bottomBarHeight: bottomTabBarHeight,
+            safeAreaBottom: safeAreaBottom
+        )
+        let bottomBarOffset = ScrollChromeLayout.bottomBarOffset(
+            from: homeScrollChromeStore.offsets,
+            selectedTabIsHome: selectedTab == .home,
+            isHomeRootVisible: isHomeRootVisible,
+            bottomBarHeight: bottomTabBarHeight,
+            safeAreaBottom: safeAreaBottom
+        )
+        return ScrollChromeLayout.shouldHideNativeTabBar(
+            bottomBarOffset: bottomBarOffset,
+            hiddenOffset: hiddenOffset
+        )
     }
 
     private var floatingComposeButtonOverlay: some View {
@@ -895,6 +918,14 @@ struct ScrollChromeLayout {
         guard hiddenOffset > 0 else { return 0 }
 
         return clamp(offset / hiddenOffset, min: 0, max: 1)
+    }
+
+    static func shouldHideNativeTabBar(
+        bottomBarOffset: CGFloat,
+        hiddenOffset: CGFloat,
+        hiddenThreshold: CGFloat = 0.92
+    ) -> Bool {
+        hiddenProgress(offset: bottomBarOffset, hiddenOffset: hiddenOffset) >= hiddenThreshold
     }
 
     static func newNotesIslandTopPadding(
