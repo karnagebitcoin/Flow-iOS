@@ -37,6 +37,7 @@ struct MainTabShellView: View {
     @ObservedObject private var followStore = FollowStore.shared
 
     @State private var selectedTab: Tab = .home
+    @Namespace private var bottomTabGlassNamespace
     @State private var homeRootResetID = UUID()
     @State private var searchRootResetID = UUID()
     @State private var activityRootResetID = UUID()
@@ -247,6 +248,63 @@ struct MainTabShellView: View {
     }
 
     private func bottomTabBar(safeAreaBottom: CGFloat) -> some View {
+        bottomTabBarPill
+            .padding(.bottom, max(safeAreaBottom + Self.bottomTabBarFloatingGap, Self.bottomTabBarFallbackBottomPadding))
+            .overlay {
+                GeometryReader { proxy in
+                    Color.clear
+                        .preference(key: BottomTabBarHeightPreferenceKey.self, value: proxy.size.height)
+                }
+            }
+    }
+
+    @ViewBuilder
+    private var bottomTabBarPill: some View {
+        if #available(iOS 26.0, *) {
+            bottomTabBarNativeGlass
+        } else {
+            bottomTabBarContents
+                .background(bottomTabBarGlassBackground)
+                .overlay(bottomTabBarGlassBorder)
+                .shadow(color: bottomTabBarShadowColor, radius: 18, x: 0, y: 8)
+        }
+    }
+
+    @available(iOS 26.0, *)
+    private var bottomTabBarNativeGlass: some View {
+        GlassEffectContainer(spacing: Self.bottomTabBarCapsuleItemSpacing) {
+            HStack(spacing: Self.bottomTabBarCapsuleItemSpacing) {
+                tabBarButton(for: .home)
+                    .glassEffect(bottomTabGlass(for: .home), in: Circle())
+                    .glassEffectID(Tab.home, in: bottomTabGlassNamespace)
+                tabBarButton(for: .search)
+                    .glassEffect(bottomTabGlass(for: .search), in: Circle())
+                    .glassEffectID(Tab.search, in: bottomTabGlassNamespace)
+                if !appSettings.floatingComposeButtonEnabled {
+                    composeTabButton
+                        .glassEffect(.regular.interactive(), in: Circle())
+                }
+                tabBarButton(for: .dms)
+                    .glassEffect(bottomTabGlass(for: .dms), in: Circle())
+                    .glassEffectID(Tab.dms, in: bottomTabGlassNamespace)
+                tabBarButton(for: .activity)
+                    .glassEffect(bottomTabGlass(for: .activity), in: Circle())
+                    .glassEffectID(Tab.activity, in: bottomTabGlassNamespace)
+            }
+            .padding(.horizontal, Self.bottomTabBarCapsuleHorizontalPadding)
+            .padding(.vertical, Self.bottomTabBarCapsuleVerticalPadding)
+        }
+        .animation(FlowTransitionMotion.iconSwapAnimation(reduceMotion: accessibilityReduceMotion), value: selectedTab)
+    }
+
+    @available(iOS 26.0, *)
+    private func bottomTabGlass(for tab: Tab) -> Glass {
+        isTabHighlighted(tab)
+            ? .regular.tint(appSettings.primaryColor.opacity(0.55)).interactive()
+            : .regular.interactive()
+    }
+
+    private var bottomTabBarContents: some View {
         HStack(spacing: Self.bottomTabBarCapsuleItemSpacing) {
             tabBarButton(for: .home)
             tabBarButton(for: .search)
@@ -258,16 +316,6 @@ struct MainTabShellView: View {
         }
         .padding(.horizontal, Self.bottomTabBarCapsuleHorizontalPadding)
         .padding(.vertical, Self.bottomTabBarCapsuleVerticalPadding)
-        .background(bottomTabBarGlassBackground)
-        .overlay(bottomTabBarGlassBorder)
-        .shadow(color: bottomTabBarShadowColor, radius: 18, x: 0, y: 8)
-        .padding(.bottom, max(safeAreaBottom + Self.bottomTabBarFloatingGap, Self.bottomTabBarFallbackBottomPadding))
-        .overlay {
-            GeometryReader { proxy in
-                Color.clear
-                    .preference(key: BottomTabBarHeightPreferenceKey.self, value: proxy.size.height)
-            }
-        }
     }
 
     private var bottomTabBarGlassBackground: some View {
