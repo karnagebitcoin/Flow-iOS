@@ -274,34 +274,38 @@ struct MainTabShellView: View {
     private var bottomTabBarNativeGlass: some View {
         GlassEffectContainer(spacing: Self.bottomTabBarCapsuleItemSpacing) {
             HStack(spacing: Self.bottomTabBarCapsuleItemSpacing) {
-                tabBarButton(for: .home)
-                    .glassEffect(bottomTabGlass(for: .home), in: Circle())
-                    .glassEffectID(Tab.home, in: bottomTabGlassNamespace)
-                tabBarButton(for: .search)
-                    .glassEffect(bottomTabGlass(for: .search), in: Circle())
-                    .glassEffectID(Tab.search, in: bottomTabGlassNamespace)
+                glassTabBarButton(for: .home)
+                glassTabBarButton(for: .search)
                 if !appSettings.floatingComposeButtonEnabled {
                     composeTabButton
-                        .glassEffect(.regular.interactive(), in: Circle())
                 }
-                tabBarButton(for: .dms)
-                    .glassEffect(bottomTabGlass(for: .dms), in: Circle())
-                    .glassEffectID(Tab.dms, in: bottomTabGlassNamespace)
-                tabBarButton(for: .activity)
-                    .glassEffect(bottomTabGlass(for: .activity), in: Circle())
-                    .glassEffectID(Tab.activity, in: bottomTabGlassNamespace)
+                glassTabBarButton(for: .dms)
+                glassTabBarButton(for: .activity)
             }
             .padding(.horizontal, Self.bottomTabBarCapsuleHorizontalPadding)
             .padding(.vertical, Self.bottomTabBarCapsuleVerticalPadding)
+            .glassEffect(.regular, in: Capsule())
         }
         .animation(FlowTransitionMotion.iconSwapAnimation(reduceMotion: accessibilityReduceMotion), value: selectedTab)
     }
 
     @available(iOS 26.0, *)
-    private func bottomTabGlass(for tab: Tab) -> Glass {
-        isTabHighlighted(tab)
-            ? .regular.tint(appSettings.primaryColor.opacity(0.55)).interactive()
-            : .regular.interactive()
+    @ViewBuilder
+    private func glassTabBarButton(for tab: Tab) -> some View {
+        tabBarButton(for: tab)
+            .background {
+                if isTabHighlighted(tab) {
+                    Circle()
+                        .fill(Color.clear)
+                        .glassEffect(
+                            .regular
+                                .tint(appSettings.primaryColor.opacity(0.55))
+                                .interactive(),
+                            in: Circle()
+                        )
+                        .glassEffectID("selectedBottomTab", in: bottomTabGlassNamespace)
+                }
+            }
     }
 
     private var bottomTabBarContents: some View {
