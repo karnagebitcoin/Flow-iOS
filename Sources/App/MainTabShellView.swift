@@ -37,6 +37,7 @@ struct MainTabShellView: View {
     @ObservedObject private var followStore = FollowStore.shared
 
     @State private var selectedTab: Tab = .home
+    @Namespace private var selectedTabIndicatorNamespace
     @State private var homeRootResetID = UUID()
     @State private var searchRootResetID = UUID()
     @State private var activityRootResetID = UUID()
@@ -273,8 +274,20 @@ struct MainTabShellView: View {
     private var bottomTabBarNativeGlass: some View {
         GlassEffectContainer {
             bottomTabBarContents
-                .glassEffect(.regular.interactive(), in: Capsule())
+                .glassEffect(
+                    .regular
+                        .tint(bottomTabBarGlassTint)
+                        .interactive(),
+                    in: Capsule()
+                )
         }
+    }
+
+    @available(iOS 26.0, *)
+    private var bottomTabBarGlassTint: Color {
+        effectiveChromeColorScheme == .dark
+            ? Color.white.opacity(0.14)
+            : Color.black.opacity(0.08)
     }
 
     private var bottomTabBarContents: some View {
@@ -289,6 +302,7 @@ struct MainTabShellView: View {
         }
         .padding(.horizontal, Self.bottomTabBarCapsuleHorizontalPadding)
         .padding(.vertical, Self.bottomTabBarCapsuleVerticalPadding)
+        .animation(.spring(response: 0.35, dampingFraction: 0.78), value: selectedTab)
     }
 
     private var bottomTabBarGlassBackground: some View {
@@ -354,6 +368,13 @@ struct MainTabShellView: View {
                     width: Self.bottomTabBarIconFrameSize,
                     height: Self.bottomTabBarIconFrameSize
                 )
+                .background {
+                    if isHighlighted {
+                        Circle()
+                            .fill(appSettings.primaryColor.opacity(0.18))
+                            .matchedGeometryEffect(id: "selectedTabIndicator", in: selectedTabIndicatorNamespace)
+                    }
+                }
                 .overlay(alignment: .topTrailing) {
                     if showsUnreadBadge {
                         ActivityUnreadBadgeView()
