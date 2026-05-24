@@ -1327,14 +1327,14 @@ struct SignupOnboardingView: View {
                     endPoint: .bottom
                 )
             }
-            .overlay(alignment: .topTrailing) {
-                bannerUploadButton
-                    .padding(.top, 28)
-                    .padding(.trailing, 14)
-            }
             .frame(maxWidth: .infinity)
             .frame(height: Self.bannerHeight)
             .clipped()
+            .overlay(alignment: .topTrailing) {
+                bannerUploadButton
+                    .padding(.top, 48)
+                    .padding(.trailing, 14)
+            }
         }
 
         @ViewBuilder
@@ -1343,6 +1343,8 @@ struct SignupOnboardingView: View {
                 Image(uiImage: bannerPreviewImage)
                     .resizable()
                     .scaledToFill()
+                    .frame(maxWidth: .infinity, maxHeight: Self.bannerHeight)
+                    .clipped()
                     .saturation(0.92)
                     .opacity(0.70)
             } else {
