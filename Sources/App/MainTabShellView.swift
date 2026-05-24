@@ -37,7 +37,6 @@ struct MainTabShellView: View {
     @ObservedObject private var followStore = FollowStore.shared
 
     @State private var selectedTab: Tab = .home
-    @Namespace private var bottomTabGlassNamespace
     @State private var homeRootResetID = UUID()
     @State private var searchRootResetID = UUID()
     @State private var activityRootResetID = UUID()
@@ -272,40 +271,8 @@ struct MainTabShellView: View {
 
     @available(iOS 26.0, *)
     private var bottomTabBarNativeGlass: some View {
-        GlassEffectContainer(spacing: Self.bottomTabBarCapsuleItemSpacing) {
-            HStack(spacing: Self.bottomTabBarCapsuleItemSpacing) {
-                glassTabBarButton(for: .home)
-                glassTabBarButton(for: .search)
-                if !appSettings.floatingComposeButtonEnabled {
-                    composeTabButton
-                }
-                glassTabBarButton(for: .dms)
-                glassTabBarButton(for: .activity)
-            }
-            .padding(.horizontal, Self.bottomTabBarCapsuleHorizontalPadding)
-            .padding(.vertical, Self.bottomTabBarCapsuleVerticalPadding)
-            .glassEffect(.regular, in: Capsule())
-        }
-        .animation(FlowTransitionMotion.iconSwapAnimation(reduceMotion: accessibilityReduceMotion), value: selectedTab)
-    }
-
-    @available(iOS 26.0, *)
-    @ViewBuilder
-    private func glassTabBarButton(for tab: Tab) -> some View {
-        tabBarButton(for: tab)
-            .background {
-                if isTabHighlighted(tab) {
-                    Circle()
-                        .fill(Color.clear)
-                        .glassEffect(
-                            .regular
-                                .tint(appSettings.primaryColor.opacity(0.55))
-                                .interactive(),
-                            in: Circle()
-                        )
-                        .glassEffectID("selectedBottomTab", in: bottomTabGlassNamespace)
-                }
-            }
+        bottomTabBarContents
+            .glassEffect(.regular.interactive(), in: Capsule())
     }
 
     private var bottomTabBarContents: some View {
