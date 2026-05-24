@@ -437,7 +437,7 @@ struct SignupOnboardingView: View {
                             .foregroundStyle(previewThemePalette.foreground)
                     }
 
-                    Text("When this finishes, we’ll open your Interests feed instead of dropping you into the broader network.")
+                    Text("We’ll drop you into the Trending feed first — you can switch to your Interests feed any time from the feed picker at the top of the home screen.")
                         .font(.footnote)
                         .foregroundStyle(previewThemePalette.secondaryForeground)
                         .fixedSize(horizontal: false, vertical: true)
@@ -1035,7 +1035,7 @@ struct SignupOnboardingView: View {
             }
 
             UserDefaults.standard.set(
-                HomePrimaryFeedSource.interests.storageValue,
+                HomePrimaryFeedSource.trending.storageValue,
                 forKey: HomeFeedViewModel.persistedFeedSourceKey(pubkey: account.pubkey.lowercased())
             )
 
