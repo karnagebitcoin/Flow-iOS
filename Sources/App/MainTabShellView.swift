@@ -50,9 +50,9 @@ struct MainTabShellView: View {
     @State private var bottomTabBarHeight: CGFloat = FloatingComposeButtonLayout.defaultBottomTabBarHeight
     @State private var homeScrollChromeStore = ScrollChromeStore()
 
-    private static let bottomTabBarCapsuleVerticalPadding: CGFloat = 6
-    private static let bottomTabBarCapsuleHorizontalPadding: CGFloat = 6
-    private static let bottomTabBarOuterHorizontalPadding: CGFloat = 18
+    private static let bottomTabBarCapsuleVerticalPadding: CGFloat = 5
+    private static let bottomTabBarCapsuleHorizontalPadding: CGFloat = 8
+    private static let bottomTabBarCapsuleItemSpacing: CGFloat = 4
     private static let bottomTabBarFloatingGap: CGFloat = 4
     private static let bottomTabBarFallbackBottomPadding: CGFloat = 12
     private static let bottomTabBarIconFrameSize: CGFloat = 46
@@ -247,7 +247,7 @@ struct MainTabShellView: View {
     }
 
     private func bottomTabBar(safeAreaBottom: CGFloat) -> some View {
-        HStack(spacing: 0) {
+        HStack(spacing: Self.bottomTabBarCapsuleItemSpacing) {
             tabBarButton(for: .home)
             tabBarButton(for: .search)
             if !appSettings.floatingComposeButtonEnabled {
@@ -261,7 +261,6 @@ struct MainTabShellView: View {
         .background(bottomTabBarGlassBackground)
         .overlay(bottomTabBarGlassBorder)
         .shadow(color: bottomTabBarShadowColor, radius: 18, x: 0, y: 8)
-        .padding(.horizontal, Self.bottomTabBarOuterHorizontalPadding)
         .padding(.bottom, max(safeAreaBottom + Self.bottomTabBarFloatingGap, Self.bottomTabBarFallbackBottomPadding))
         .overlay {
             GeometryReader { proxy in
@@ -342,7 +341,6 @@ struct MainTabShellView: View {
                             .accessibilityHidden(true)
                     }
                 }
-                .frame(maxWidth: .infinity)
                 .contentShape(Rectangle())
             .animation(FlowTransitionMotion.badgeAnimation(reduceMotion: accessibilityReduceMotion), value: showsUnreadBadge)
         }
@@ -364,7 +362,6 @@ struct MainTabShellView: View {
                 .shadow(color: .black.opacity(0.18), radius: 6, x: 0, y: 2)
         }
         .buttonStyle(.plain)
-        .frame(maxWidth: .infinity)
         .accessibilityLabel("Compose note")
     }
 
