@@ -993,12 +993,11 @@ final class AppThemeOptionTests: XCTestCase {
         XCTAssertFalse(paddingSource.contains("topBarOffset:"))
     }
 
-    func testHomeFeedLeavesBottomSafeAreaAvailableForNativeTabMinimization() throws {
+    func testHomeFeedScrollsUnderBottomSafeAreaForNativeTabMinimization() throws {
         let source = try sourceText(at: "Sources/Home/HomeFeedView.swift")
 
-        XCTAssertTrue(source.contains(".ignoresSafeArea(edges: .top)"))
-        XCTAssertFalse(source.contains(".ignoresSafeArea(edges: [.top, .bottom])"))
-        XCTAssertFalse(source.contains(".ignoresSafeArea(edges: .bottom)"))
+        XCTAssertTrue(source.contains(".ignoresSafeArea(edges: .bottom)"))
+        XCTAssertTrue(source.contains(".ignoresSafeArea(edges: [.top, .bottom])"))
     }
 
     func testScrollChromeContentPaddingStaysStableWhileTopChromeMoves() {
@@ -1083,12 +1082,11 @@ final class AppThemeOptionTests: XCTestCase {
         XCTAssertTrue(source.contains("let bottomSafeAreaInset: CGFloat"))
     }
 
-    func testHomeFeedRootSpansTopEdgeWhilePreservingBottomTabEdge() throws {
+    func testHomeFeedRootSpansSystemEdgesForNativeTabMinimization() throws {
         let source = try sourceText(at: "Sources/Home/HomeFeedView.swift")
 
         XCTAssertTrue(source.contains("GeometryReader { geometry in"))
-        XCTAssertTrue(source.contains("}\n        .ignoresSafeArea(edges: .top)\n        .toolbar(.hidden, for: .navigationBar)"))
-        XCTAssertFalse(source.contains("}\n        .ignoresSafeArea(edges: [.top, .bottom])\n        .toolbar(.hidden, for: .navigationBar)"))
+        XCTAssertTrue(source.contains("}\n        .ignoresSafeArea(edges: [.top, .bottom])\n        .toolbar(.hidden, for: .navigationBar)"))
     }
 
     func testHomeTopChromeBackgroundMovesAndFadesWithVisibleChrome() throws {

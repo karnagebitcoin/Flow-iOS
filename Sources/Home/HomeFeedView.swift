@@ -309,6 +309,7 @@ struct HomeFeedView: View {
         .safeAreaInset(edge: .top, spacing: 0) {
             feedTopPadding(height: topContentPadding)
         }
+        .ignoresSafeArea(edges: .bottom)
         .coordinateSpace(name: Self.feedScrollCoordinateSpace)
         .overlay(alignment: .top) {
             newNotesOverlay(
@@ -1488,7 +1489,7 @@ private struct HomeFeedRootContent: View {
                 topBarHeight = newValue
             }
         }
-        .ignoresSafeArea(edges: .top)
+        .ignoresSafeArea(edges: [.top, .bottom])
         .toolbar(.hidden, for: .navigationBar)
     }
 }
