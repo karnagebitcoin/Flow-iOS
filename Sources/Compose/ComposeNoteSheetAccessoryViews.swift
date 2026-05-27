@@ -165,7 +165,6 @@ struct ComposeComposerCardView: View {
             mentions: $selectedMentions,
             mentionAnchorY: $mentionSuggestionAnchorY,
             mentionColor: UIColor(appSettings.primaryColor),
-            characterLimit: ComposeNoteTextLimit.maxCharacterCount,
             onMentionQueryChange: onMentionQueryChange
         )
         .padding(.horizontal, horizontalPadding)
@@ -420,11 +419,17 @@ struct ComposeCharacterCountRing: View {
         return min(1, CGFloat(characterCount) / CGFloat(characterLimit))
     }
 
+    private var overLimitCount: Int {
+        max(0, characterCount - characterLimit)
+    }
+
+    private var counterText: String {
+        guard overLimitCount > 0 else { return "\(characterCount)" }
+        return "+\(overLimitCount)"
+    }
+
     private var ringColor: Color {
-        if characterCount >= characterLimit {
-            return .red
-        }
-        if progress >= 0.9 {
+        if progress >= 0.9 || overLimitCount > 0 {
             return .orange
         }
         return appSettings.primaryColor
@@ -443,9 +448,9 @@ struct ComposeCharacterCountRing: View {
                 )
                 .rotationEffect(.degrees(-90))
 
-            Text("\(characterCount)")
+            Text(counterText)
                 .font(.system(size: 10, weight: .semibold, design: .rounded).monospacedDigit())
-                .foregroundStyle(appSettings.themePalette.secondaryForeground)
+                .foregroundStyle(overLimitCount > 0 ? .orange : appSettings.themePalette.secondaryForeground)
                 .lineLimit(1)
                 .minimumScaleFactor(0.72)
         }

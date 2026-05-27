@@ -352,32 +352,6 @@ private let mentionSearchTerminatorCharacters = CharacterSet(charactersIn: ",;:!
 
 enum ComposeNoteTextLimit {
     static let maxCharacterCount = 240
-
-    static func limited(_ text: String, limit: Int = maxCharacterCount) -> String {
-        guard limit >= 0, text.count > limit else { return text }
-        return String(text.prefix(limit))
-    }
-
-    static func allowedReplacement(
-        in currentText: String,
-        range: NSRange,
-        replacementText: String,
-        limit: Int = maxCharacterCount
-    ) -> String {
-        guard limit >= 0,
-              let stringRange = Range(range, in: currentText) else {
-            return ""
-        }
-
-        var textAfterRemovingSelection = currentText
-        textAfterRemovingSelection.removeSubrange(stringRange)
-        let availableCharacterCount = max(0, limit - textAfterRemovingSelection.count)
-        guard replacementText.count > availableCharacterCount else {
-            return replacementText
-        }
-
-        return String(replacementText.prefix(availableCharacterCount))
-    }
 }
 
 enum ComposePreparedPublication: Sendable {
@@ -411,14 +385,7 @@ enum ComposePreparedPublication: Sendable {
 
 @MainActor
 final class ComposeNoteViewModel: ObservableObject {
-    @Published var text: String = "" {
-        didSet {
-            let limitedText = ComposeNoteTextLimit.limited(text)
-            if limitedText != text {
-                text = limitedText
-            }
-        }
-    }
+    @Published var text: String = ""
     @Published private(set) var isPublishing = false
     @Published var feedbackMessage: String?
     @Published var feedbackIsError = false
@@ -1408,7 +1375,6 @@ struct ComposeMultilineTextView: UIViewRepresentable {
     @Binding var mentions: [ComposeSelectedMention]
     @Binding var mentionAnchorY: CGFloat
     let mentionColor: UIColor
-    let characterLimit: Int
     let onMentionQueryChange: (ComposeMentionQuery?) -> Void
 
     func makeCoordinator() -> Coordinator {
@@ -1418,7 +1384,6 @@ struct ComposeMultilineTextView: UIViewRepresentable {
             selectedRange: $selectedRange,
             mentions: $mentions,
             mentionAnchorY: $mentionAnchorY,
-            characterLimit: characterLimit,
             onMentionQueryChange: onMentionQueryChange
         )
     }
@@ -1495,7 +1460,6 @@ struct ComposeMultilineTextView: UIViewRepresentable {
         @Binding private var selectedRange: NSRange
         @Binding private var mentions: [ComposeSelectedMention]
         @Binding private var mentionAnchorY: CGFloat
-        private let characterLimit: Int
         private let onMentionQueryChange: (ComposeMentionQuery?) -> Void
         var isApplyingProgrammaticUpdate = false
         private var lastReportedMentionQuery: ComposeMentionQuery?
@@ -1513,7 +1477,6 @@ struct ComposeMultilineTextView: UIViewRepresentable {
             selectedRange: Binding<NSRange>,
             mentions: Binding<[ComposeSelectedMention]>,
             mentionAnchorY: Binding<CGFloat>,
-            characterLimit: Int,
             onMentionQueryChange: @escaping (ComposeMentionQuery?) -> Void
         ) {
             _text = text
@@ -1521,7 +1484,6 @@ struct ComposeMultilineTextView: UIViewRepresentable {
             _selectedRange = selectedRange
             _mentions = mentions
             _mentionAnchorY = mentionAnchorY
-            self.characterLimit = characterLimit
             self.onMentionQueryChange = onMentionQueryChange
         }
 
@@ -1530,23 +1492,10 @@ struct ComposeMultilineTextView: UIViewRepresentable {
             shouldChangeTextIn range: NSRange,
             replacementText text: String
         ) -> Bool {
-            let allowedReplacement = ComposeNoteTextLimit.allowedReplacement(
-                in: textView.text ?? "",
-                range: range,
-                replacementText: text,
-                limit: characterLimit
-            )
-
-            guard allowedReplacement == text else {
-                guard !allowedReplacement.isEmpty else { return false }
-                applyReplacement(allowedReplacement, to: textView, in: range)
-                return false
-            }
-
             let updatedMentions = ComposeMentionSupport.updatedMentions(
                 mentions,
                 forEditIn: range,
-                replacementText: allowedReplacement
+                replacementText: text
             )
             reportMentions(updatedMentions)
             return true
@@ -1616,34 +1565,6 @@ struct ComposeMultilineTextView: UIViewRepresentable {
             guard query != lastReportedMentionQuery else { return }
             lastReportedMentionQuery = query
             onMentionQueryChange(query)
-        }
-
-        private func applyReplacement(
-            _ replacementText: String,
-            to textView: UITextView,
-            in range: NSRange
-        ) {
-            let updatedText = ((textView.text ?? "") as NSString)
-                .replacingCharacters(in: range, with: replacementText)
-            let updatedMentions = ComposeMentionSupport.updatedMentions(
-                mentions,
-                forEditIn: range,
-                replacementText: replacementText
-            )
-            reportMentions(updatedMentions)
-
-            let updatedSelection = NSRange(
-                location: range.location + (replacementText as NSString).length,
-                length: 0
-            )
-            isApplyingProgrammaticUpdate = true
-            textView.text = updatedText
-            textView.selectedRange = updatedSelection
-            isApplyingProgrammaticUpdate = false
-
-            reportText(updatedText)
-            reportSelectedRange(updatedSelection)
-            updateMentionQuery(for: textView)
         }
 
         private func updateMentionAnchor(for textView: UITextView, hasActiveQuery: Bool) {

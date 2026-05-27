@@ -41,27 +41,67 @@ final class ComposeNoteSheetModeTests: XCTestCase {
     }
 
     @MainActor
-    func testComposeTextIsLimitedToTwoHundredFortyCharacters() {
+    func testComposeTextKeepsSoftLimitOverage() {
         let viewModel = ComposeNoteViewModel()
         let overLimitText = String(repeating: "a", count: 241)
 
         viewModel.text = overLimitText
 
-        XCTAssertEqual(viewModel.text.count, 240)
-        XCTAssertEqual(viewModel.characterCount, 240)
+        XCTAssertEqual(viewModel.text, overLimitText)
+        XCTAssertEqual(viewModel.characterCount, 241)
+        XCTAssertEqual(viewModel.remainingCharacterCount, 0)
     }
 
-    func testComposeTextLimitTruncatesInsertedTextToAvailableSpace() {
-        let currentText = String(repeating: "a", count: 238)
-        let insertionRange = NSRange(location: (currentText as NSString).length, length: 0)
+    @MainActor
+    func testComposeTextViewCoordinatorAllowsTypingPastSoftLimit() {
+        var textValue = String(repeating: "a", count: 238)
+        var isFocusedValue = true
+        var selectedRangeValue = NSRange(location: (textValue as NSString).length, length: 0)
+        var mentionsValue: [ComposeSelectedMention] = []
+        var mentionAnchorYValue: CGFloat = 44
+        let coordinator = ComposeMultilineTextView.Coordinator(
+            text: Binding(
+                get: { textValue },
+                set: { textValue = $0 }
+            ),
+            isFocused: Binding(
+                get: { isFocusedValue },
+                set: { isFocusedValue = $0 }
+            ),
+            selectedRange: Binding(
+                get: { selectedRangeValue },
+                set: { selectedRangeValue = $0 }
+            ),
+            mentions: Binding(
+                get: { mentionsValue },
+                set: { mentionsValue = $0 }
+            ),
+            mentionAnchorY: Binding(
+                get: { mentionAnchorYValue },
+                set: { mentionAnchorYValue = $0 }
+            ),
+            onMentionQueryChange: { _ in }
+        )
+        let textView = UITextView()
+        textView.text = textValue
+        let insertionRange = NSRange(location: (textValue as NSString).length, length: 0)
 
-        let replacement = ComposeNoteTextLimit.allowedReplacement(
-            in: currentText,
-            range: insertionRange,
+        let shouldAllowChange = coordinator.textView(
+            textView,
+            shouldChangeTextIn: insertionRange,
             replacementText: "bcde"
         )
 
-        XCTAssertEqual(replacement, "bc")
+        XCTAssertTrue(shouldAllowChange)
+        XCTAssertEqual(textView.text, textValue)
+    }
+
+    func testComposerCharacterCounterShowsSoftLimitOverageAsWarning() throws {
+        let source = try Self.sourceText(at: "Sources/Compose/ComposeNoteSheetAccessoryViews.swift")
+
+        XCTAssertTrue(source.contains("private var overLimitCount: Int"))
+        XCTAssertTrue(source.contains("return \"+\\(overLimitCount)\""))
+        XCTAssertFalse(source.contains("return .red"))
     }
 
     func testActiveMentionQuerySupportsFreeformLocalSearchWithSpaces() {
@@ -176,7 +216,6 @@ final class ComposeNoteSheetModeTests: XCTestCase {
                     mentionAnchorYSetCount += 1
                 }
             ),
-            characterLimit: ComposeNoteTextLimit.maxCharacterCount,
             onMentionQueryChange: { _ in
                 mentionQueryChangeCount += 1
             }
@@ -237,7 +276,6 @@ final class ComposeNoteSheetModeTests: XCTestCase {
                 get: { mentionAnchorYValue },
                 set: { mentionAnchorYValue = $0 }
             ),
-            characterLimit: ComposeNoteTextLimit.maxCharacterCount,
             onMentionQueryChange: { _ in }
         )
         let textView = UITextView()
@@ -386,4 +424,13 @@ private func makeDraftEvent(idSuffix: String) -> NostrEvent {
         content: "Draft target",
         sig: String(repeating: "d", count: 128)
     )
+}
+
+private extension ComposeNoteSheetModeTests {
+    static func sourceText(at relativePath: String) throws -> String {
+        let testFileURL = URL(fileURLWithPath: #filePath)
+        let repositoryRootURL = testFileURL.deletingLastPathComponent().deletingLastPathComponent()
+        let sourceURL = repositoryRootURL.appendingPathComponent(relativePath)
+        return try String(contentsOf: sourceURL, encoding: .utf8)
+    }
 }
