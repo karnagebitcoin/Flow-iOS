@@ -50,7 +50,7 @@ struct MainTabShellView: View {
     @State private var isDMRootVisible = true
     @State private var isHomeSideMenuPresented = false
     private let bottomTabBarHeight: CGFloat = ScrollChromeLayout.defaultBottomTabBarHeight
-    @StateObject private var homeScrollChromeStore = ScrollChromeStore()
+    @State private var homeScrollChromeStore = ScrollChromeStore()
 
     @StateObject private var homeViewModel = HomeFeedViewModel(
         relayURL: URL(string: RelaySettingsStore.defaultReadRelayURLs.first ?? "wss://relay.damus.io/")!
@@ -68,9 +68,6 @@ struct MainTabShellView: View {
                 .ignoresSafeArea()
 
             nativeTabView
-        }
-        .overlay(alignment: .bottomLeading) {
-            homeCollapsedTabAffordance
         }
         .overlay(alignment: .bottomTrailing) {
             GeometryReader { proxy in
@@ -171,7 +168,6 @@ struct MainTabShellView: View {
         }
         .animation(FlowTransitionMotion.sidePanelAnimation(reduceMotion: accessibilityReduceMotion), value: isHomeSideMenuPresented)
         .animation(.easeInOut(duration: 0.2), value: isDMRootVisible)
-        .animation(.easeInOut(duration: 0.18), value: isHomeCollapsedTabAffordanceVisible)
         .tint(appSettings.primaryColor)
         .statusBarHidden(false)
     }
@@ -272,10 +268,7 @@ struct MainTabShellView: View {
         )
         .environment(\.flowScrollChromeStore, homeScrollChromeStore)
         .environment(\.flowBottomTabBarHeight, bottomTabBarHeight)
-        .toolbar(
-            isHomeCollapsedTabAffordanceVisible ? .hidden : nativeTabBarVisibility,
-            for: .tabBar
-        )
+        .flowNativeTabBarBehavior()
         .id(homeRootResetID)
     }
 
@@ -334,7 +327,7 @@ struct MainTabShellView: View {
     }
 
     private var nativeTabBarVisibility: Visibility {
-        isBottomTabBarVisible && !isHomeCollapsedTabAffordanceVisible ? .visible : .hidden
+        isBottomTabBarVisible ? .automatic : .hidden
     }
 
     private var effectiveWriteRelayURLs: [URL] {
@@ -354,50 +347,6 @@ struct MainTabShellView: View {
             selectedTabIsDirectMessages: selectedTab == .dms,
             isDirectMessagesRootVisible: isDMRootVisible
         )
-    }
-
-    private var isHomeCollapsedTabAffordanceVisible: Bool {
-        guard selectedTab == .home, isHomeRootVisible, isBottomTabBarVisible else { return false }
-        guard supportsCompactHomeTabAffordance else { return false }
-        return ScrollChromeLayout.shouldShowCollapsedHomeTabAffordance(
-            offsets: homeScrollChromeStore.offsets,
-            bottomBarHeight: bottomTabBarHeight
-        )
-    }
-
-    private var supportsCompactHomeTabAffordance: Bool {
-        if #available(iOS 26.0, *) {
-            return true
-        }
-        return false
-    }
-
-    @ViewBuilder
-    private var homeCollapsedTabAffordance: some View {
-        if isHomeCollapsedTabAffordanceVisible {
-            Button {
-                homeScrollChromeStore.resetVisualOffsets()
-            } label: {
-                Image(systemName: Tab.home.symbolName)
-                    .font(.system(size: 24, weight: .medium))
-                    .symbolRenderingMode(.monochrome)
-                    .environment(\.symbolVariants, .none)
-                    .foregroundStyle(appSettings.primaryColor)
-                    .frame(width: 68, height: 58)
-                    .background(.regularMaterial, in: Capsule(style: .continuous))
-                    .overlay(
-                        Capsule(style: .continuous)
-                            .stroke(appSettings.themeSeparator(defaultOpacity: 0.28), lineWidth: 0.8)
-                    )
-                    .contentShape(Capsule(style: .continuous))
-            }
-            .buttonStyle(.plain)
-            .padding(.leading, 20)
-            .padding(.bottom, 16)
-            .zIndex(20)
-            .transition(.move(edge: .bottom).combined(with: .opacity))
-            .accessibilityLabel("Show tab bar")
-        }
     }
 
     private var composeSheetDraftBinding: Binding<AppComposeSheetDraft?> {
@@ -617,9 +566,6 @@ final class ScrollChromeStore: ObservableObject {
         offsets = ScrollChromeLayout.publishedVisualOffsets(from: updated)
     }
 
-    func resetVisualOffsets() {
-        offsets = ScrollChromeOffsets()
-    }
 }
 
 final class ScrollChromeTracker {
@@ -813,14 +759,6 @@ struct ScrollChromeLayout {
             safeAreaBottom: safeAreaBottom
         )
         return clamp(offsets.bottomBarOffset, min: 0, max: hiddenOffset)
-    }
-
-    static func shouldShowCollapsedHomeTabAffordance(
-        offsets: ScrollChromeOffsets,
-        bottomBarHeight: CGFloat
-    ) -> Bool {
-        let threshold = max(12, max(0, bottomBarHeight) * 0.35)
-        return offsets.bottomBarOffset >= threshold
     }
 
     static func bottomContentVisibleFraction(

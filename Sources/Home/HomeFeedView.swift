@@ -309,7 +309,7 @@ struct HomeFeedView: View {
         .safeAreaInset(edge: .top, spacing: 0) {
             feedTopPadding(height: topContentPadding)
         }
-        .ignoresSafeArea(edges: .bottom)
+        .homeFeedNativeTabBarMinimizeBehavior()
         .scrollPosition(id: $feedScrollTarget, anchor: .top)
         .coordinateSpace(name: Self.feedScrollCoordinateSpace)
         .overlay(alignment: .top) {
@@ -1450,6 +1450,7 @@ private struct HomeFeedRootContent<
     let sideMenuContent: () -> SideMenuContent
 
     @State private var topBarHeight = ScrollChromeLayout.defaultTopBarHeight
+    private let topNavigationToTabsSpacing: CGFloat = 8
 
     var body: some View {
         GeometryReader { geometry in
@@ -1460,35 +1461,32 @@ private struct HomeFeedRootContent<
                 safeAreaTop: safeAreaTop
             )
             let contentPadding = ScrollChromeLayout.feedContentPadding(
-                topBarHeight: topBarHeight,
+                topBarHeight: topBarHeight + topNavigationToTabsSpacing,
                 bottomBarHeight: bottomTabBarHeight,
                 safeAreaBottom: safeAreaBottom
             )
-            SideMenuContainer(
-                isOpen: $isShowingSideMenu,
-                topSafeAreaInset: safeAreaTop
-            ) {
-                sideMenuContent()
-            } content: {
-                ZStack(alignment: .top) {
-                    AppThemeBackgroundView(holographicSpotlight: .feed)
-                        .ignoresSafeArea()
-
-                    feedContent(
-                        contentPadding.top,
-                        contentPadding.bottom,
-                        topHiddenOffset,
-                        safeAreaBottom
-                    )
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-
-                    HomeFeedTopNavigationChromeView(
-                        scrollChromeStore: scrollChromeStore,
-                        safeAreaTop: safeAreaTop,
+            Group {
+                if isShowingSideMenu {
+                    SideMenuContainer(
+                        isOpen: $isShowingSideMenu,
+                        topSafeAreaInset: safeAreaTop
+                    ) {
+                        sideMenuContent()
+                    } content: {
+                        primaryContent(
+                            contentPadding: contentPadding,
+                            topHiddenOffset: topHiddenOffset,
+                            safeAreaTop: safeAreaTop,
+                            safeAreaBottom: safeAreaBottom
+                        )
+                    }
+                } else {
+                    primaryContent(
+                        contentPadding: contentPadding,
                         topHiddenOffset: topHiddenOffset,
-                        topNavigationBar: topNavigationBar
+                        safeAreaTop: safeAreaTop,
+                        safeAreaBottom: safeAreaBottom
                     )
-                        .zIndex(1)
                 }
             }
             .onPreferenceChange(HomeFeedTopNavigationBarHeightPreferenceKey.self) { newValue in
@@ -1496,8 +1494,36 @@ private struct HomeFeedRootContent<
                 topBarHeight = newValue
             }
         }
-        .ignoresSafeArea(edges: [.top, .bottom])
+        .ignoresSafeArea(edges: .top)
         .toolbar(.hidden, for: .navigationBar)
+    }
+
+    private func primaryContent(
+        contentPadding: ScrollChromeContentPadding,
+        topHiddenOffset: CGFloat,
+        safeAreaTop: CGFloat,
+        safeAreaBottom: CGFloat
+    ) -> some View {
+        ZStack(alignment: .top) {
+            AppThemeBackgroundView(holographicSpotlight: .feed)
+                .ignoresSafeArea()
+
+            feedContent(
+                contentPadding.top,
+                contentPadding.bottom,
+                topHiddenOffset,
+                safeAreaBottom
+            )
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+
+            HomeFeedTopNavigationChromeView(
+                scrollChromeStore: scrollChromeStore,
+                safeAreaTop: safeAreaTop,
+                topHiddenOffset: topHiddenOffset,
+                topNavigationBar: topNavigationBar
+            )
+            .zIndex(1)
+        }
     }
 }
 
@@ -1742,6 +1768,15 @@ private struct HomeFeedSheets: ViewModifier {
 }
 
 private extension View {
+    @ViewBuilder
+    func homeFeedNativeTabBarMinimizeBehavior() -> some View {
+        if #available(iOS 26.0, *) {
+            self.tabBarMinimizeBehavior(.onScrollDown)
+        } else {
+            self
+        }
+    }
+
     func homeFeedListRow() -> some View {
         self
             .listRowInsets(EdgeInsets())
