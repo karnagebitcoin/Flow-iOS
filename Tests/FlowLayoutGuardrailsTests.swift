@@ -467,6 +467,17 @@ final class FlowLayoutGuardrailsTests: XCTestCase {
         )
     }
 
+    func testAuthSheetAccountHeaderUsesWhiteArtworkChrome() throws {
+        let source = try Self.sourceText(at: "Sources/Auth/AuthSheetView.swift")
+        let headerStart = try XCTUnwrap(source.range(of: "private var authSheetHeader: some View"))
+        let signInSectionStart = try XCTUnwrap(source.range(of: "private var signInSection: some View"))
+        let headerSource = String(source[headerStart.lowerBound..<signInSectionStart.lowerBound])
+
+        XCTAssertTrue(headerSource.contains("Text(\"Account\")"))
+        XCTAssertTrue(headerSource.contains(".foregroundStyle(authHeaderForeground)"))
+        XCTAssertFalse(headerSource.contains(".foregroundStyle(.primary)"))
+    }
+
     func testAuthSheetPresentationsUseFreshIdentityForRequestedInitialTab() throws {
         let sourceFiles = [
             "Sources/Home/HomeFeedView.swift",

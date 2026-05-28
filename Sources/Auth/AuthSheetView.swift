@@ -339,7 +339,7 @@ struct AuthSheetView: View {
         ZStack {
             Text("Account")
                 .font(.headline.weight(.semibold))
-                .foregroundStyle(.primary)
+                .foregroundStyle(authHeaderForeground)
 
             HStack {
                 Spacer()
@@ -922,6 +922,10 @@ struct AuthSheetView: View {
 
     private var signInPrimaryButtonBorder: Color {
         signInAccentColor.opacity(canSubmitSignIn ? 0.20 : 0.14)
+    }
+
+    private var authHeaderForeground: Color {
+        .white.opacity(0.96)
     }
 
     private var closeButtonForeground: Color {
