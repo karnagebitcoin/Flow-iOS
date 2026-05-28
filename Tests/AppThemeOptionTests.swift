@@ -1352,11 +1352,11 @@ final class AppThemeOptionTests: XCTestCase {
         XCTAssertTrue(source.contains(".ignoresSafeArea(edges: [.top, .bottom])"))
     }
 
-    func testSideMenuUsesWhiteLightSurfaceDarkerDarkSurfaceAndTintedIconCircles() throws {
+    func testSideMenuUsesThemePaletteBackgroundAndTintedIconCircles() throws {
         let source = try sourceText(at: "Sources/Home/HomeSlideoutMenuView.swift")
 
-        XCTAssertTrue(source.contains("private static let darkMenuBackground = Color(red: 17.0 / 255.0, green: 17.0 / 255.0, blue: 17.0 / 255.0)"))
-        XCTAssertTrue(source.contains("effectiveMenuColorScheme == .light ? .white : Self.darkMenuBackground"))
+        XCTAssertFalse(source.contains("private static let darkMenuBackground"))
+        XCTAssertTrue(source.contains("appSettings.themePalette.background"))
         XCTAssertTrue(source.contains("let iconTint = tint ?? appSettings.themePalette.foreground.opacity(0.86)"))
         XCTAssertTrue(source.contains("let textTint = tint ?? appSettings.themePalette.foreground"))
         XCTAssertTrue(source.contains(".foregroundStyle(iconTint)"))

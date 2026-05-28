@@ -1,8 +1,6 @@
 import SwiftUI
 
 struct HomeSlideoutMenuView: View {
-    private static let darkMenuBackground = Color(red: 17.0 / 255.0, green: 17.0 / 255.0, blue: 17.0 / 255.0)
-
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.accessibilityReduceMotion) private var accessibilityReduceMotion
     @Environment(\.sideMenuPresentationIsOpen) private var isMenuPresented
@@ -74,7 +72,7 @@ struct HomeSlideoutMenuView: View {
     }
 
     private var menuBackground: Color {
-        effectiveMenuColorScheme == .light ? .white : Self.darkMenuBackground
+        appSettings.themePalette.background
     }
 
     private var effectiveMenuColorScheme: ColorScheme {
