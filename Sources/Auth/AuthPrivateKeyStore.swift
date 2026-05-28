@@ -17,9 +17,9 @@ enum AuthPrivateKeyStoreError: LocalizedError {
     var errorDescription: String? {
         switch self {
         case .encodingFailed:
-            return "Couldn’t prepare the private key for secure storage."
+            return "Couldn’t prepare the account for secure storage."
         case .missingPrivateKey:
-            return "This account does not have a private key available to back up."
+            return "This account is not available to back up."
         case .keychainFailure(let status):
             return "Secure storage failed with status \(status)."
         }

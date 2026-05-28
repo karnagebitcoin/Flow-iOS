@@ -572,7 +572,7 @@ final class MuteStore: ObservableObject, NIP44v2Encrypting {
     func toggleMute(_ pubkey: String) {
         guard let session else { return }
         guard session.nsec != nil else {
-            lastPublishError = "Sign in with a private key to manage mutes."
+            lastPublishError = "Sign in to manage mutes."
             return
         }
 
@@ -619,7 +619,7 @@ final class MuteStore: ObservableObject, NIP44v2Encrypting {
     func setKeywordListEnabled(_ listID: String, isEnabled: Bool) {
         guard let session else { return }
         guard session.nsec != nil else {
-            lastPublishError = "Sign in with a private key to manage muted keywords."
+            lastPublishError = "Sign in to manage muted keywords."
             return
         }
         guard listID != Self.otherKeywordListID else { return }
@@ -671,7 +671,7 @@ final class MuteStore: ObservableObject, NIP44v2Encrypting {
     func addWord(_ word: String, to listID: String) {
         guard let session else { return }
         guard session.nsec != nil else {
-            lastPublishError = "Sign in with a private key to manage muted keywords."
+            lastPublishError = "Sign in to manage muted keywords."
             return
         }
         guard let normalizedWord = normalizedMutedWord(word), !normalizedWord.isEmpty else { return }
@@ -741,7 +741,7 @@ final class MuteStore: ObservableObject, NIP44v2Encrypting {
     func removeWord(_ word: String, from listID: String) {
         guard let session else { return }
         guard session.nsec != nil else {
-            lastPublishError = "Sign in with a private key to manage muted keywords."
+            lastPublishError = "Sign in to manage muted keywords."
             return
         }
         guard let normalizedWord = normalizedMutedWord(word), !normalizedWord.isEmpty else { return }

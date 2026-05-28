@@ -12,7 +12,7 @@ enum PollVotePublishError: LocalizedError {
         case .missingSelection:
             return "Choose an option before voting."
         case .missingPrivateKey:
-            return "Sign in with a private key to vote."
+            return "Sign in to vote."
         case .missingWriteRelays:
             return "No publish sources are configured for this vote."
         case .publishFailed:

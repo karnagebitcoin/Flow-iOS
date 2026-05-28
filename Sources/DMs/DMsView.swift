@@ -215,7 +215,7 @@ struct DMsView: View {
     private var noSignerState: some View {
         HaloLinkInfoState(
             iconName: "key.fill",
-            title: "A private key is required",
+            title: "Sign in required",
             message: "This account can browse, but Halo Link needs an `nsec` so it can decrypt and send NIP-17 messages."
         )
     }

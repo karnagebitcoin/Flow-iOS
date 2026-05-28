@@ -17,9 +17,9 @@ enum HaloLinkError: LocalizedError {
     var errorDescription: String? {
         switch self {
         case .missingPrivateKey:
-            return "Sign in with a private key to use Halo Link."
+            return "Sign in to use Halo Link."
         case .invalidPrivateKey:
-            return "The private key for this account is no longer valid."
+            return "This account is no longer valid."
         case .invalidRecipient:
             return "That conversation has an invalid participant."
         case .missingInboxRelays:

@@ -152,7 +152,7 @@ final class FollowStore: ObservableObject {
     private func setFollowing(_ pubkeys: [String], shouldFollow: Bool) {
         guard let session else { return }
         guard session.nsec != nil else {
-            lastPublishError = "Sign in with a private key to follow accounts."
+            lastPublishError = "Sign in to follow accounts."
             return
         }
 

@@ -17,7 +17,7 @@ enum NoteReactionPublishError: LocalizedError {
     var errorDescription: String? {
         switch self {
         case .missingPrivateKey:
-            return "Sign in with a private key to react to notes."
+            return "Sign in to react to notes."
         case .missingWriteRelays:
             return "No publish sources are configured."
         case .malformedTargetEvent:

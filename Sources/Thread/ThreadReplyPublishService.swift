@@ -13,7 +13,7 @@ enum ThreadReplyPublishError: LocalizedError {
         case .emptyContent:
             return "Write a reply or attach media before sending."
         case .missingPrivateKey:
-            return "Sign in with a private key to reply."
+            return "Sign in to reply."
         case .missingWriteRelays:
             return "No connected sources are configured."
         case .malformedEvent:

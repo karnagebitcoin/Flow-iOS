@@ -75,9 +75,9 @@ enum RelayAuthChallengeError: LocalizedError {
     var errorDescription: String? {
         switch self {
         case .missingPrivateKey:
-            return "A private key is required to authenticate with this relay."
+            return "Sign in to authenticate with this relay."
         case .invalidPrivateKey:
-            return "The current private key could not sign a relay authentication event."
+            return "This account could not sign a relay authentication event."
         case .serializationFailed:
             return "Couldn't serialize the relay authentication event."
         }

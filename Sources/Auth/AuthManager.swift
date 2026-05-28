@@ -11,15 +11,15 @@ enum AuthManagerError: LocalizedError {
     var errorDescription: String? {
         switch self {
         case .invalidNsecOrHex:
-            return "Invalid nsec or hex private key."
+            return "Invalid account access."
         case .invalidNpub:
-            return "Invalid npub public key."
+            return "Invalid public account ID."
         case .keyGenerationFailed:
-            return "Could not generate a new keypair right now."
+            return "Could not create a new account right now."
         case .iCloudBackupUnavailable:
-            return "We couldn’t find that iCloud-backed private key on this device yet."
+            return "We couldn’t find that iCloud-backed account on this device yet."
         case .storedPrivateKeyMismatch:
-            return "The stored private key didn’t match this account."
+            return "The stored account access didn’t match this account."
         }
     }
 }
@@ -75,10 +75,10 @@ final class AuthManager: ObservableObject {
         guard privateKeyNeedsSecureStorageRepair(for: currentAccount) else { return nil }
 
         if validatedPrivateKey(for: currentAccount.id, expectedPubkey: currentAccount.pubkey) != nil {
-            return "This private key is only available for this app session because secure storage failed previously. Sign in again with the key to save it securely."
+            return "This account is only available for this app session because secure storage failed previously. Sign in again to save it securely."
         }
 
-        return "This account’s private key is no longer stored securely on this device. Sign in again with the key to restore posting access."
+        return "This account is no longer stored securely on this device. Sign in again to restore posting access."
     }
 
     func iCloudRestoreCandidates() -> [AuthICloudRestoreCandidate] {

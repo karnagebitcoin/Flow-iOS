@@ -80,7 +80,7 @@ enum NoteReportPublishError: LocalizedError {
     var errorDescription: String? {
         switch self {
         case .missingPrivateKey:
-            return "Sign in with a private key to send a report."
+            return "Sign in to send a report."
         case .missingWriteRelays:
             return "No publish sources are configured."
         case .malformedTargetEvent:

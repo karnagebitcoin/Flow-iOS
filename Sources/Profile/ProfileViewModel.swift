@@ -543,7 +543,7 @@ final class ProfileViewModel: ObservableObject {
 
         guard let normalizedNsec = normalizeNsec(currentNsec),
               let keypair = Keypair(nsec: normalizedNsec.lowercased()) else {
-            profileSaveError = "Sign in with a private key to edit your profile."
+            profileSaveError = "Sign in to edit your profile."
             return false
         }
 
@@ -936,7 +936,7 @@ enum ProfileMediaUploadError: LocalizedError {
         case .notActiveAccount:
             return "Only the active account can edit this profile."
         case .invalidCredentials:
-            return "Sign in with a private key to upload profile media."
+            return "Sign in to upload profile media."
         case .invalidUploadService:
             return "Media upload service is unavailable right now."
         case .invalidUploadResponse:

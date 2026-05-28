@@ -17,7 +17,7 @@ struct KeysView: View {
             privateKeySection
             iCloudBackupSection
         }
-        .navigationTitle("Keys")
+        .navigationTitle("Account")
         .navigationBarTitleDisplayMode(.inline)
         .onChange(of: auth.currentAccount?.id) { _, _ in
             revealedPrivateKey = nil
@@ -36,12 +36,12 @@ struct KeysView: View {
     }
 
     private var publicKeySection: some View {
-        ThemedSettingsSection("Public Key") {
+        ThemedSettingsSection("Public Account ID") {
             if let account = auth.currentAccount {
                 keyValueRow(
                     title: nil,
                     value: account.npub,
-                    actionTitle: "Copy Public Key",
+                    actionTitle: "Copy Public Account ID",
                     action: {
                         UIPasteboard.general.string = account.npub
                     }
@@ -55,7 +55,7 @@ struct KeysView: View {
     }
 
     private var privateKeySection: some View {
-        ThemedSettingsSection("Private Key") {
+        ThemedSettingsSection("Account Access") {
             if auth.currentNsec != nil {
                 privateKeyRevealControl
 
@@ -63,7 +63,7 @@ struct KeysView: View {
                     keyValueRow(
                         title: "nsec",
                         value: revealedPrivateKey,
-                        actionTitle: "Copy Private Key",
+                        actionTitle: "Copy Account Access",
                         action: {
                             UIPasteboard.general.string = revealedPrivateKey
                         }
@@ -95,7 +95,7 @@ struct KeysView: View {
                         .foregroundStyle(.orange)
                         .fixedSize(horizontal: false, vertical: true)
                 } else {
-                    Text("This account was created with a public key only, so there is no private key to reveal or copy.")
+                    Text("This account was created for viewing only, so there is no account access secret to reveal or copy.")
                         .font(.footnote)
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
@@ -108,7 +108,7 @@ struct KeysView: View {
     private var iCloudBackupSection: some View {
         if let account = auth.currentAccount, account.signerType == .nsec {
             ThemedSettingsSection {
-                Toggle("Back Up Private Key to iCloud", isOn: privateKeyBackupBinding(for: account))
+                Toggle("Back Up Account to iCloud", isOn: privateKeyBackupBinding(for: account))
 
                 privateKeyBackupStatusCard(for: account)
 
@@ -122,8 +122,8 @@ struct KeysView: View {
             } footer: {
                 Text(
                     account.privateKeyBackupEnabled
-                        ? "This confirms the key was added to iCloud Keychain on this device. Apple does not expose the exact cross-device sync time. On another device, go to Sign In and choose Restore from iCloud."
-                        : "This private key stays only on this device until you turn on iCloud backup. New Halo-created accounts ask about iCloud backup during setup."
+                        ? "This confirms the account was added to iCloud Keychain on this device. Apple does not expose the exact cross-device sync time. On another device, go to Sign In and choose Restore from iCloud."
+                        : "This account stays only on this device until you turn on iCloud backup. New Halo-created accounts ask about iCloud backup during setup."
                 )
             }
         }
@@ -131,7 +131,7 @@ struct KeysView: View {
 
     private var maskedPrivateKeyPlaceholder: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("Keep your private key to yourself. It protects your account and can't be reset if it's exposed.")
+            Text("Keep your account access private. It protects your account and can't be reset if it's exposed.")
                 .font(.footnote)
                 .foregroundStyle(.secondary)
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -167,7 +167,7 @@ struct KeysView: View {
                         .foregroundStyle(.secondary)
                 }
 
-                Text(revealedPrivateKey != nil ? "Hide Private Key" : "Reveal Private Key")
+                Text(revealedPrivateKey != nil ? "Hide Account Access" : "Reveal Account Access")
                     .foregroundStyle(.primary)
 
                 Spacer()
@@ -220,7 +220,7 @@ struct KeysView: View {
 
                 return (
                     title: "Backup enabled",
-                    message: "This key is stored in iCloud Keychain on this device.",
+                    message: "This account is stored in iCloud Keychain on this device.",
                     iconName: "icloud.fill",
                     tint: .green
                 )
@@ -228,7 +228,7 @@ struct KeysView: View {
 
             return (
                 title: "Backup enabled",
-                message: "iCloud backup is turned on, but this key has not reported a local iCloud Keychain save yet.",
+                message: "iCloud backup is turned on, but this account has not reported a local iCloud Keychain save yet.",
                 iconName: "icloud.slash",
                 tint: .orange
             )
@@ -236,7 +236,7 @@ struct KeysView: View {
 
         return (
             title: "Device only",
-            message: "This private key is stored only on this device right now.",
+            message: "This account is stored only on this device right now.",
             iconName: "iphone",
             tint: Color.secondary
         )
@@ -295,7 +295,7 @@ struct KeysView: View {
     private func requestPrivateKeyReveal() {
         guard !isAuthenticatingPrivateKey else { return }
         guard let privateKeyToReveal = auth.currentNsec else {
-            privateKeyAccessError = "This account’s private key is no longer available on this device."
+            privateKeyAccessError = "This account is no longer available on this device."
             revealedPrivateKey = nil
             return
         }
@@ -307,7 +307,7 @@ struct KeysView: View {
 
             do {
                 try await DeviceOwnerAuthenticationGate.authenticate(
-                    reason: "Reveal your private key in Halo."
+                    reason: "Reveal your account access in Halo."
                 )
                 revealedPrivateKey = privateKeyToReveal
             } catch {

@@ -355,7 +355,7 @@ struct SignupOnboardingView: View {
         VStack(alignment: .leading, spacing: 18) {
             stepIntro(
                 title: "Protect your account",
-                subtitle: "Your Interests feed is ready. We’ll save your private key in Keychain. Keep iCloud backup on to restore it on your devices."
+                subtitle: "Your Interests feed is ready. We’ll save your account in Keychain. Keep iCloud backup on to restore it on your devices."
             )
 
             onboardingFieldCard {
@@ -376,7 +376,7 @@ struct SignupOnboardingView: View {
                         }
                     }
 
-                    Toggle("Back Up Private Key", isOn: privateKeyBackupBinding)
+                    Toggle("Back Up Account", isOn: privateKeyBackupBinding)
                         .tint(onboardingToggleTint)
 
                     Text(signupPrivateKeyBackupStatusDescription)
@@ -841,8 +841,8 @@ struct SignupOnboardingView: View {
 
     private var signupPrivateKeyBackupStatusDescription: String {
         signupPrivateKeyBackupEnabled
-            ? "On. Your private key will be saved to iCloud Keychain so you can restore it on your devices."
-            : "Off. Your private key will stay in this device’s Keychain and will not sync to iCloud."
+            ? "On. Your account will be saved to iCloud Keychain so you can restore it on your devices."
+            : "Off. Your account will stay in this device’s Keychain and will not sync to iCloud."
     }
 
     private var signupNotificationsStatusDescription: String {

@@ -38,7 +38,7 @@ enum MediaUploadError: LocalizedError {
     var errorDescription: String? {
         switch self {
         case .invalidCredentials:
-            return "Sign in with a private key to upload media."
+            return "Sign in to upload media."
         case .missingFileData:
             return "Couldn't read selected media."
         case .invalidUploadService:

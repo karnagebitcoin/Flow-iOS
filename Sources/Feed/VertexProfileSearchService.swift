@@ -13,7 +13,7 @@ enum VertexProfileSearchError: LocalizedError {
     var errorDescription: String? {
         switch self {
         case .invalidCredentials:
-            return "Search requires a signed-in private key right now."
+            return "Search requires sign-in right now."
         case .queryTooShort:
             return "Search terms must be longer than three characters."
         case .invalidRequest:

@@ -12,7 +12,7 @@ struct ICloudKeyRestoreView: View {
     var body: some View {
         Form {
             Section {
-                Text("Restore a private-key account that was previously backed up to iCloud Keychain.")
+                Text("Restore an account that was previously backed up to iCloud Keychain.")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
 
@@ -24,9 +24,9 @@ struct ICloudKeyRestoreView: View {
             Section("Available Accounts") {
                 if candidates.isEmpty {
                     VStack(alignment: .leading, spacing: 8) {
-                        Text("No iCloud-backed private keys are available yet.")
+                        Text("No iCloud-backed accounts are available yet.")
                             .font(.footnote.weight(.semibold))
-                        Text("If you backed up a key on another device, give iCloud Keychain a moment to sync, then refresh.")
+                        Text("If you backed up an account on another device, give iCloud Keychain a moment to sync, then refresh.")
                             .font(.footnote)
                             .foregroundStyle(.secondary)
 

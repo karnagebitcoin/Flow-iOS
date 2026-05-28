@@ -1140,7 +1140,7 @@ struct ImageRemixEditorView: View {
 
         guard let normalizedNsec = currentNsec?.trimmingCharacters(in: .whitespacesAndNewlines),
               !normalizedNsec.isEmpty else {
-            toastCenter.show("Sign in with a private key to post remixes.", style: .error, duration: 2.8)
+            toastCenter.show("Sign in to post remixes.", style: .error, duration: 2.8)
             return
         }
 

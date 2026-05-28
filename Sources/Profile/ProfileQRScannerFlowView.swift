@@ -245,7 +245,7 @@ struct ProfileQRScannerFlowView: View {
             .padding(.horizontal, 24)
 
             if auth.currentNsec == nil, profile.pubkey != auth.currentAccount?.pubkey {
-                Text("Sign in with a private key to follow people from a scan.")
+                Text("Sign in to follow people from a scan.")
                     .font(.footnote)
                     .foregroundStyle(.white.opacity(0.56))
                     .multilineTextAlignment(.center)

@@ -16,7 +16,7 @@ enum ComposeNotePublishError: LocalizedError {
         case .invalidPoll:
             return "Polls need a question and at least two options."
         case .missingPrivateKey:
-            return "This account can read posts, but it needs an nsec to publish."
+            return "This account can read posts, but it needs access to publish."
         case .missingWriteRelays:
             return "No connected sources are configured."
         case .malformedEvent:

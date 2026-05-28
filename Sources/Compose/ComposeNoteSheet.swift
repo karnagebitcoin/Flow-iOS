@@ -824,7 +824,7 @@ struct ComposeNoteSheet: View {
 
         guard let normalizedNsec = currentNsec?.trimmingCharacters(in: .whitespacesAndNewlines),
               !normalizedNsec.isEmpty else {
-            viewModel.feedbackMessage = "Sign in with a private key to upload media."
+            viewModel.feedbackMessage = "Sign in to upload media."
             viewModel.feedbackIsError = true
             return
         }
@@ -857,7 +857,7 @@ struct ComposeNoteSheet: View {
 
         guard let normalizedNsec = currentNsec?.trimmingCharacters(in: .whitespacesAndNewlines),
               !normalizedNsec.isEmpty else {
-            viewModel.feedbackMessage = "Sign in with a private key to upload media."
+            viewModel.feedbackMessage = "Sign in to upload media."
             viewModel.feedbackIsError = true
             return
         }
@@ -916,7 +916,7 @@ struct ComposeNoteSheet: View {
 
         guard let normalizedNsec = currentNsec?.trimmingCharacters(in: .whitespacesAndNewlines),
               !normalizedNsec.isEmpty else {
-            viewModel.feedbackMessage = "Sign in with a private key to upload media."
+            viewModel.feedbackMessage = "Sign in to upload media."
             viewModel.feedbackIsError = true
             return
         }
@@ -1003,14 +1003,14 @@ struct ComposeNoteSheet: View {
     private func publish() async {
         guard canPublish else {
             if currentNsec == nil {
-                viewModel.feedbackMessage = "This account needs an nsec to publish notes."
+                viewModel.feedbackMessage = "This account needs access to publish notes."
             } else if writeRelayURLs.isEmpty {
                 viewModel.feedbackMessage = "No connected sources are configured."
             } else if let pollValidationMessage {
                 viewModel.feedbackMessage = pollValidationMessage
             } else {
                 viewModel.feedbackMessage = currentNsec == nil
-                    ? "This account needs an nsec to publish notes."
+                    ? "This account needs access to publish notes."
                     : writeRelayURLs.isEmpty
                         ? "No connected sources are configured."
                         : "Write a note or attach media before posting."
@@ -1308,7 +1308,7 @@ struct ComposeNoteSheet: View {
 
         guard let normalizedNsec = currentNsec?.trimmingCharacters(in: .whitespacesAndNewlines),
               !normalizedNsec.isEmpty else {
-            viewModel.feedbackMessage = "Sign in with a private key to upload media."
+            viewModel.feedbackMessage = "Sign in to upload media."
             viewModel.feedbackIsError = true
             return
         }

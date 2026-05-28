@@ -342,11 +342,11 @@ struct AuthSheetView: View {
     private var signInSection: some View {
         Section {
             VStack(alignment: .leading, spacing: 14) {
-                Text("Sign in with your private key")
+                Text("Sign in to your account")
                     .font(.footnote.weight(.semibold))
                     .foregroundStyle(.secondary)
 
-                SecureField("Private key", text: $privateKeyInput)
+                SecureField("Account access", text: $privateKeyInput)
                     .textInputAutocapitalization(.never)
                     .autocorrectionDisabled()
                     .padding(.horizontal, 16)
@@ -402,7 +402,7 @@ struct AuthSheetView: View {
                             Text("Restore from iCloud")
                                 .font(.subheadline.weight(.semibold))
                                 .foregroundStyle(.primary)
-                            Text("Use a private key already backed up to iCloud Keychain.")
+                            Text("Use an account already backed up to iCloud Keychain.")
                                 .font(.footnote)
                                 .foregroundStyle(.secondary)
                         }
@@ -427,7 +427,7 @@ struct AuthSheetView: View {
     @available(iOS 26.0, *)
     private var signInGlassCard: some View {
         VStack(alignment: .leading, spacing: 14) {
-            Text("Sign in with your private key")
+            Text("Sign in to your account")
                 .font(.footnote.weight(.semibold))
                 .foregroundStyle(authInk)
 
@@ -566,7 +566,7 @@ struct AuthSheetView: View {
     }
 
     private var signInPrivateKeyField: some View {
-        SecureField("Private key", text: $privateKeyInput)
+        SecureField("Account access", text: $privateKeyInput)
             .textInputAutocapitalization(.never)
             .autocorrectionDisabled()
             .padding(.horizontal, 16)
@@ -661,7 +661,7 @@ struct AuthSheetView: View {
                 Text("Restore from iCloud")
                     .font(.subheadline.weight(.semibold))
                     .foregroundStyle(.primary)
-                Text("Use a private key already backed up to iCloud Keychain.")
+                Text("Use an account already backed up to iCloud Keychain.")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
             }
@@ -671,7 +671,7 @@ struct AuthSheetView: View {
 
     private var legacySignInCard: some View {
         VStack(alignment: .leading, spacing: 14) {
-            Text("Sign in with your private key")
+            Text("Sign in to your account")
                 .font(.footnote.weight(.semibold))
                 .foregroundStyle(authInk)
 

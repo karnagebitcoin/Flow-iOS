@@ -118,7 +118,7 @@ struct WelcomeOnboardingView: View {
             Button {
                 openAuth(tab: .signIn)
             } label: {
-                welcomeButtonLabel("I Already Have a Key")
+                welcomeButtonLabel("Sign In")
                     .foregroundStyle(.white)
                     .background(
                         Capsule(style: .continuous)

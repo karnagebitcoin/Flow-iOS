@@ -286,7 +286,7 @@ struct ComposeAttachmentToolbarBar: View {
                 )
 
                 if currentNsec == nil {
-                    Label("nsec required", systemImage: "lock.fill")
+                    Label("Sign in required", systemImage: "lock.fill")
                         .font(.footnote.weight(.semibold))
                         .foregroundStyle(appSettings.themePalette.secondaryForeground)
                 } else if writeRelayURLs.isEmpty {
@@ -508,7 +508,7 @@ struct ComposeStatusSectionView: View {
             } else if missingNsec {
                 ComposeInfoBannerView(
                     systemImage: "lock.fill",
-                    text: "This account can read feeds, but it needs an nsec to publish notes."
+                    text: "This account can read feeds, but it needs account access to publish notes."
                 )
             } else if missingPublishSources {
                 ComposeInfoBannerView(

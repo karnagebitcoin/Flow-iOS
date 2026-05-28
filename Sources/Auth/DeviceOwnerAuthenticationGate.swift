@@ -22,7 +22,7 @@ enum DeviceOwnerAuthenticationGate {
         var authError: NSError?
         guard context.canEvaluatePolicy(.deviceOwnerAuthentication, error: &authError) else {
             let message = authError?.localizedDescription
-                ?? "Set up Face ID, Touch ID, or a device passcode to reveal your private key."
+                ?? "Set up Face ID, Touch ID, or a device passcode to reveal your account access."
             throw DeviceOwnerAuthenticationError.unavailable(message)
         }
 

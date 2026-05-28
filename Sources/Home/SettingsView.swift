@@ -61,9 +61,9 @@ struct SettingsView: View {
                             )
 
                             SettingsValueNavigationRow(
-                                title: "Keys",
+                                title: "Account",
                                 systemImage: "key",
-                                value: .keys
+                                value: .account
                             )
 
                             SettingsValueNavigationRow(
@@ -138,7 +138,7 @@ struct SettingsView: View {
             SettingsMediaView()
         case .mutedContent:
             SettingsMutedContentView()
-        case .keys:
+        case .account:
             KeysView()
         case .connection:
             RelaySettingsView()
@@ -166,7 +166,7 @@ enum SettingsDestination: Hashable {
     case notifications
     case media
     case mutedContent
-    case keys
+    case account
     case connection
 
     var title: String {
@@ -183,8 +183,8 @@ enum SettingsDestination: Hashable {
             "Media"
         case .mutedContent:
             "Muted Content"
-        case .keys:
-            "Keys"
+        case .account:
+            "Account"
         case .connection:
             "Connection"
         }

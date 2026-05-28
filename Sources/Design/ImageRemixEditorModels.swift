@@ -381,7 +381,7 @@ struct ImageRemixEmojiEntry: Identifiable, Hashable {
         entry("🎞️", "film strip movie reel"),
         entry("🎧", "headphones music audio"),
         entry("🎤", "microphone sing karaoke"),
-        entry("🎹", "piano keys music"),
+        entry("🎹", "piano keyboard music"),
         entry("🎸", "guitar rock music"),
         entry("🥁", "drum beat music"),
         entry("💿", "disc cd music retro"),

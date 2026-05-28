@@ -21,7 +21,7 @@ enum ResharePublishError: LocalizedError {
     var errorDescription: String? {
         switch self {
         case .missingPrivateKey:
-            return "Sign in with a private key to repost."
+            return "Sign in to repost."
         case .missingWriteRelays:
             return "No connected sources are configured."
         case .malformedTargetEvent:
