@@ -118,7 +118,6 @@ struct ProfileHeaderContent {
     let bannerURL: URL?
     let websiteURL: URL?
     let websiteDisplayText: String?
-    let lightningAddress: String?
     let followsCurrentUser: Bool
     let followingCountText: String
     let followStatusIconName: String?
@@ -127,9 +126,6 @@ struct ProfileHeaderContent {
 
     var hasVisibleInfoRows: Bool {
         if websiteURL != nil {
-            return true
-        }
-        if let lightningAddress, !lightningAddress.isEmpty {
             return true
         }
         return false
@@ -852,9 +848,6 @@ private struct ProfileInfoRows: View {
                     )
                 }
                 .buttonStyle(.plain)
-            }
-            if let lightning = content.lightningAddress, !lightning.isEmpty {
-                ProfileInfoRow(text: lightning, systemImage: "bolt.fill")
             }
         }
     }

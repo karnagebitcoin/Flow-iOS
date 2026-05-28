@@ -57,7 +57,6 @@ struct ProfileView: View {
             bannerURL: viewModel.bannerURL,
             websiteURL: viewModel.websiteURL,
             websiteDisplayText: viewModel.websiteURL.map(websiteDisplayText(for:)),
-            lightningAddress: viewModel.lightningAddress,
             followsCurrentUser: viewModel.followsCurrentUser,
             followingCountText: profileFollowingCountText,
             followStatusIconName: profileFollowStatusIconName,

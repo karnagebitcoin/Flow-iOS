@@ -44,14 +44,11 @@ struct EditableProfileFields: Equatable, Sendable {
 
 enum EditableProfileFieldsError: LocalizedError {
     case invalidNostrAddress
-    case invalidLightningAddress
 
     var errorDescription: String? {
         switch self {
         case .invalidNostrAddress:
             return "Enter a valid NIP-05 address or leave it blank."
-        case .invalidLightningAddress:
-            return "Enter a valid lightning address/LNURL or leave it blank."
         }
     }
 }
@@ -60,17 +57,12 @@ enum ProfileMetadataEditing {
     static func mergedContent(fields: EditableProfileFields, baseJSON: [String: Any]) throws -> String {
         let normalizedDisplayName = fields.displayName.trimmed
         let normalizedHandle = normalizeHandle(fields.handle)
-        let normalizedLightning = normalizeLightningAddress(fields.lightningAddress)
         let normalizedNip05 = fields.nip05.trimmed
         let normalizedAvatarURL = fields.avatarURLString.trimmed
         let normalizedBannerURL = fields.bannerURLString.trimmed
 
         if !normalizedNip05.isEmpty, !isEmail(normalizedNip05) {
             throw EditableProfileFieldsError.invalidNostrAddress
-        }
-
-        if !normalizedLightning.isEmpty, !isEmail(normalizedLightning), !isLNURL(normalizedLightning) {
-            throw EditableProfileFieldsError.invalidLightningAddress
         }
 
         var updated = baseJSON
@@ -96,14 +88,6 @@ enum ProfileMetadataEditing {
         }
 
         updated.removeValue(forKey: "gallery")
-        updated.removeValue(forKey: "lud16")
-        updated.removeValue(forKey: "lud06")
-
-        if isEmail(normalizedLightning) {
-            updated["lud16"] = normalizedLightning
-        } else if isLNURL(normalizedLightning) {
-            updated["lud06"] = normalizedLightning
-        }
 
         let data = try JSONSerialization.data(withJSONObject: updated, options: [.sortedKeys])
         guard let content = String(data: data, encoding: .utf8) else {

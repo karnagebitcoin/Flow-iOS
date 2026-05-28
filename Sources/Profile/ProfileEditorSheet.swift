@@ -211,8 +211,8 @@ struct ProfileEditorSheet: View {
     private var linksSection: some View {
         VStack(alignment: .leading, spacing: 12) {
             sectionHeader(
-                title: "Links & Payments",
-                subtitle: "These appear underneath your bio when present."
+                title: "Links",
+                subtitle: "This appears underneath your bio when present."
             )
 
             editorCard {
@@ -224,12 +224,6 @@ struct ProfileEditorSheet: View {
                             .autocorrectionDisabled()
                     }
 
-                    labeledField("Payment Address", systemImage: "bolt.fill") {
-                        TextField("", text: $fields.lightningAddress)
-                            .textInputAutocapitalization(.never)
-                            .keyboardType(.emailAddress)
-                            .autocorrectionDisabled()
-                    }
                 }
             }
         }
@@ -886,9 +880,6 @@ private struct ProfileEditorPreviewCard: View {
                         previewInfoRow(text: website, systemImage: "link")
                     }
 
-                    if let lightning = normalizedValue(fields.lightningAddress) {
-                        previewInfoRow(text: lightning, systemImage: "bolt.fill")
-                    }
                 }
             }
             .padding(.horizontal, 18)
