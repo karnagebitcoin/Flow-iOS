@@ -1108,8 +1108,9 @@ final class AppThemeOptionTests: XCTestCase {
         XCTAssertFalse(feedsSource.contains("Choose what powers Interests and News."))
         XCTAssertTrue(customFeedsSource.contains("struct SettingsCustomFeedsSection"))
         XCTAssertTrue(customFeedsSource.contains("Label(\"Create Feed\", systemImage: \"plus.circle.fill\")"))
-        XCTAssertTrue(customFeedsSource.contains("ForEach(Array(appSettings.customFeeds.enumerated())"))
-        XCTAssertTrue(customFeedsSource.contains(".background(appSettings.themePalette.sheetCardBackground"))
+        XCTAssertTrue(customFeedsSource.contains("ForEach(appSettings.customFeeds)"))
+        XCTAssertFalse(customFeedsSource.contains(".background(appSettings.themePalette.sheetCardBackground"))
+        XCTAssertFalse(customFeedsSource.contains(".listRowBackground(Color.clear)"))
         XCTAssertFalse(customFeedsSource.contains("Text(\"Custom Feeds\")"))
         XCTAssertFalse(customFeedsSource.contains("Mix hashtags, people, and phrases into feeds"))
     }

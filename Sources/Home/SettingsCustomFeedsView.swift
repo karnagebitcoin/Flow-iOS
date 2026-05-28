@@ -18,20 +18,15 @@ struct SettingsCustomFeedsSection: View {
     @State private var draft: SettingsCustomFeedDraft?
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        Group {
             Button {
                 draft = SettingsCustomFeedDraft()
             } label: {
-                HStack(spacing: 10) {
-                    Label("Create Feed", systemImage: "plus.circle.fill")
-                        .font(.body.weight(.semibold))
-
-                    Spacer(minLength: 0)
-                }
-                .foregroundStyle(.white)
-                .padding(.horizontal, 14)
-                .padding(.vertical, 12)
-                .background(appSettings.primaryColor, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                Label("Create Feed", systemImage: "plus.circle.fill")
+                    .font(.body.weight(.semibold))
+                    .foregroundStyle(appSettings.primaryColor)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.vertical, 2)
             }
             .buttonStyle(.plain)
 
@@ -39,29 +34,12 @@ struct SettingsCustomFeedsSection: View {
                 Text("No custom feeds yet.")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.vertical, 4)
-            } else {
-                VStack(spacing: 0) {
-                    ForEach(Array(appSettings.customFeeds.enumerated()), id: \.element.id) { index, feed in
-                        customFeedRow(feed)
+            }
 
-                        if index < appSettings.customFeeds.count - 1 {
-                            Divider()
-                                .padding(.leading, 34)
-                        }
-                    }
-                }
+            ForEach(appSettings.customFeeds) { feed in
+                customFeedRow(feed)
             }
         }
-        .padding(14)
-        .background(appSettings.themePalette.sheetCardBackground, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-        .overlay {
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .stroke(appSettings.settingsCardBorder, lineWidth: 1)
-        }
-        .listRowInsets(EdgeInsets(top: 6, leading: 16, bottom: 6, trailing: 16))
-        .listRowBackground(Color.clear)
         .sheet(item: $draft) { currentDraft in
             SettingsCustomFeedEditorSheet(initialDraft: currentDraft)
         }
