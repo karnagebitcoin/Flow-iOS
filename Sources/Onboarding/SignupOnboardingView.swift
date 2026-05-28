@@ -992,6 +992,20 @@ struct SignupOnboardingView: View {
             relaySettings.configure(accountPubkey: account.pubkey, nsec: auth.currentNsec ?? pendingAccount.nsec)
             relaySettings.seedDefaultRelaysForCurrentAccount(publishToBootstrapRelays: true)
 
+            let interestTopics = InterestTopic.allCases.filter { selectedTopics.contains($0) }
+            let interestHashtags = InterestTopic.combinedHashtags(for: interestTopics)
+
+            InterestFeedStore.shared.configure(accountPubkey: account.pubkey)
+            InterestFeedStore.shared.seedFromOnboarding(interestTopics)
+            if interestHashtags.isEmpty {
+                InterestFeedStore.shared.setHashtags([])
+            }
+
+            UserDefaults.standard.set(
+                HomePrimaryFeedSource.trending.storageValue,
+                forKey: HomeFeedViewModel.persistedFeedSourceKey(pubkey: account.pubkey.lowercased())
+            )
+
             let avatarURL: String?
             do {
                 avatarURL = try await uploadAvatarIfNeeded(using: pendingAccount)
@@ -1006,9 +1020,6 @@ struct SignupOnboardingView: View {
                 bannerURL = nil
             }
 
-            let interestTopics = InterestTopic.allCases.filter { selectedTopics.contains($0) }
-            let interestHashtags = InterestTopic.combinedHashtags(for: interestTopics)
-
             try? await publishProfileMetadata(
                 account: pendingAccount,
                 displayName: normalizedDisplayName,
@@ -1016,17 +1027,6 @@ struct SignupOnboardingView: View {
                 about: about.trimmingCharacters(in: .whitespacesAndNewlines),
                 avatarURLString: avatarURL,
                 bannerURLString: bannerURL
-            )
-
-            InterestFeedStore.shared.configure(accountPubkey: account.pubkey)
-            InterestFeedStore.shared.seedFromOnboarding(interestTopics)
-            if interestHashtags.isEmpty {
-                InterestFeedStore.shared.setHashtags([])
-            }
-
-            UserDefaults.standard.set(
-                HomePrimaryFeedSource.trending.storageValue,
-                forKey: HomeFeedViewModel.persistedFeedSourceKey(pubkey: account.pubkey.lowercased())
             )
 
             appSettings.endThemePreview()
