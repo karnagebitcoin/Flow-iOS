@@ -1300,6 +1300,60 @@ final class HomeFeedLoadingRegressionTests: XCTestCase {
             [hashtagNewsNote.id, authorNewsNote.id, relayNewsNote.id]
         )
     }
+
+    @MainActor
+    func testBufferedRevealTargetsEarliestVisibleBufferedItem() async throws {
+        let initialNote = makeEvent(
+            id: hex("1"),
+            pubkey: hex("a"),
+            kind: FeedKindFilters.shortTextNote,
+            tags: [],
+            content: "Existing row",
+            createdAt: 1_700_000_100
+        )
+        let newestBufferedNote = makeEvent(
+            id: hex("2"),
+            pubkey: hex("b"),
+            kind: FeedKindFilters.shortTextNote,
+            tags: [],
+            content: "Newest buffered row",
+            createdAt: 1_700_000_300
+        )
+        let earliestBufferedNote = makeEvent(
+            id: hex("3"),
+            pubkey: hex("c"),
+            kind: FeedKindFilters.shortTextNote,
+            tags: [],
+            content: "Earliest buffered row",
+            createdAt: 1_700_000_200
+        )
+        let harness = try HomeFeedViewModelHarness(
+            initialRelayEvents: [
+                defaultHomeRelayURL: [initialNote]
+            ]
+        )
+
+        harness.viewModel.feedSource = .network
+        await harness.viewModel.loadIfNeeded()
+        XCTAssertEqual(harness.viewModel.visibleItems.map(\.id), [initialNote.id])
+
+        await harness.setRemoteEvents([newestBufferedNote, earliestBufferedNote, initialNote])
+        await harness.viewModel.refresh(silent: true, publishFetchedItems: false)
+
+        XCTAssertEqual(
+            harness.viewModel.visibleBufferedNewItems.map(\.id),
+            [newestBufferedNote.id, earliestBufferedNote.id]
+        )
+        XCTAssertEqual(harness.viewModel.bufferedRevealScrollTargetID, earliestBufferedNote.id)
+
+        let revealTargetID = harness.viewModel.showBufferedNewItems()
+
+        XCTAssertEqual(revealTargetID, earliestBufferedNote.id)
+        XCTAssertEqual(
+            harness.viewModel.visibleItems.map(\.id),
+            [newestBufferedNote.id, earliestBufferedNote.id, initialNote.id]
+        )
+    }
 }
 
 @MainActor

@@ -1210,14 +1210,14 @@ final class AppThemeOptionTests: XCTestCase {
 
         XCTAssertTrue(source.contains("Text(\"posted\")"))
         XCTAssertTrue(source.contains("private func revealBufferedNewItems()"))
-        XCTAssertTrue(source.contains("Self.bufferedRevealDelayNanoseconds"))
 
         let revealRange = try XCTUnwrap(source.range(of: "private func revealBufferedNewItems()"))
         let revealSource = source[revealRange.lowerBound...]
-        let scrollRange = try XCTUnwrap(revealSource.range(of: "feedScrollTarget = Self.feedTopAnchorID"))
         let showRange = try XCTUnwrap(revealSource.range(of: "viewModel.showBufferedNewItems()"))
+        let scrollRange = try XCTUnwrap(revealSource.range(of: "feedScrollTarget = revealTargetID"))
 
-        XCTAssertLessThan(scrollRange.lowerBound, showRange.lowerBound)
+        XCTAssertLessThan(showRange.lowerBound, scrollRange.lowerBound)
+        XCTAssertFalse(revealSource.contains("feedScrollTarget = Self.feedTopAnchorID"))
     }
 
     func testHomeFeedKeepsScrollChromeOffsetReaderOutsideLazyRows() throws {

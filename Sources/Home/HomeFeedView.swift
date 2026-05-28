@@ -6,7 +6,6 @@ struct HomeFeedView: View {
     private static let feedScrollCoordinateSpace = "home-feed-scroll"
     private static let feedHorizontalInset: CGFloat = 14
     private static let autoMergeTopThreshold: CGFloat = 56
-    private static let bufferedRevealDelayNanoseconds: UInt64 = 260_000_000
 
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.accessibilityReduceMotion) private var accessibilityReduceMotion
@@ -501,30 +500,33 @@ struct HomeFeedView: View {
         guard !isRevealingBufferedItems else { return }
 
         isRevealingBufferedItems = true
-        if let animation = FlowTransitionMotion.feedRevealScrollAnimation(reduceMotion: accessibilityReduceMotion) {
-            withAnimation(animation) {
-                feedScrollTarget = Self.feedTopAnchorID
-            }
-        } else {
-            feedScrollTarget = Self.feedTopAnchorID
-        }
+        feedScrollTarget = nil
 
         Task { @MainActor in
-            if !accessibilityReduceMotion {
-                try? await Task.sleep(nanoseconds: Self.bufferedRevealDelayNanoseconds)
-            }
-
             guard viewModel.visibleBufferedNewItemsCount > 0 else {
                 isRevealingBufferedItems = false
                 return
             }
 
+            var revealTargetID: String?
             if let animation = FlowTransitionMotion.feedInsertionAnimation(reduceMotion: accessibilityReduceMotion) {
                 withAnimation(animation) {
-                    viewModel.showBufferedNewItems()
+                    revealTargetID = viewModel.showBufferedNewItems()
                 }
             } else {
-                viewModel.showBufferedNewItems()
+                revealTargetID = viewModel.showBufferedNewItems()
+            }
+
+            await Task.yield()
+
+            if let revealTargetID {
+                if let animation = FlowTransitionMotion.feedRevealScrollAnimation(reduceMotion: accessibilityReduceMotion) {
+                    withAnimation(animation) {
+                        feedScrollTarget = revealTargetID
+                    }
+                } else {
+                    feedScrollTarget = revealTargetID
+                }
             }
             isRevealingBufferedItems = false
         }
@@ -1298,10 +1300,10 @@ struct HomeFeedView: View {
         guard viewModel.visibleBufferedNewItemsCount > 0 else { return }
         if let animation = FlowTransitionMotion.feedInsertionAnimation(reduceMotion: accessibilityReduceMotion) {
             withAnimation(animation) {
-                viewModel.showBufferedNewItems()
+                _ = viewModel.showBufferedNewItems()
             }
         } else {
-            viewModel.showBufferedNewItems()
+            _ = viewModel.showBufferedNewItems()
         }
     }
 
