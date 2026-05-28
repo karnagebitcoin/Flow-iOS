@@ -7,7 +7,6 @@ import UIKit
 @MainActor
 struct SignupOnboardingView: View {
     private static let onboardingProfilePublishTimeout: TimeInterval = 3.5
-    private static let onboardingFeedPreparationMinimumDuration: TimeInterval = 1.15
     private static let onboardingThemeOptions = AppThemeOption.onboardingOptions
 
     private enum Step: Int, CaseIterable {
@@ -422,7 +421,7 @@ struct SignupOnboardingView: View {
         VStack(alignment: .leading, spacing: 18) {
             stepIntro(
                 title: "Getting your space ready",
-                subtitle: "We’re putting together an Interests feed shaped around the topics you picked."
+                subtitle: "We’re saving your profile and getting your first feed ready."
             )
 
             onboardingFieldCard {
@@ -437,7 +436,7 @@ struct SignupOnboardingView: View {
                             .foregroundStyle(previewThemePalette.foreground)
                     }
 
-                    Text("We’ll drop you into the Trending feed first — you can switch to your Interests feed any time from the feed picker at the top of the home screen.")
+                    Text("We’ll drop you into Trending first and keep warming up your Interests feed in the background.")
                         .font(.footnote)
                         .foregroundStyle(previewThemePalette.secondaryForeground)
                         .fixedSize(horizontal: false, vertical: true)
@@ -987,7 +986,6 @@ struct SignupOnboardingView: View {
         guard !isFinishing, let pendingAccount else { return }
         isFinishing = true
         errorMessage = nil
-        let finishStartedAt = Date()
 
         do {
             let account = try auth.loginWithNsecOrHex(
@@ -1039,15 +1037,15 @@ struct SignupOnboardingView: View {
                 forKey: HomeFeedViewModel.persistedFeedSourceKey(pubkey: account.pubkey.lowercased())
             )
 
-            await warmInterestsFeed(for: account.pubkey, interestHashtags: interestHashtags)
-            await ensureMinimumFeedPreparationDuration(since: finishStartedAt)
-
             if signupNotificationsEnabled {
                 appSettings.notificationsEnabled = true
             }
 
             appSettings.endThemePreview()
             onComplete()
+            Task {
+                await warmInterestsFeed(for: account.pubkey, interestHashtags: interestHashtags)
+            }
             return
         } catch {
             errorMessage = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
@@ -1088,13 +1086,6 @@ struct SignupOnboardingView: View {
 
             try? await Task.sleep(nanoseconds: 80_000_000)
         }
-    }
-
-    @MainActor
-    private func ensureMinimumFeedPreparationDuration(since startDate: Date) async {
-        let remaining = Self.onboardingFeedPreparationMinimumDuration - Date().timeIntervalSince(startDate)
-        guard remaining > 0 else { return }
-        try? await Task.sleep(nanoseconds: UInt64(remaining * 1_000_000_000))
     }
 
     private func uploadAvatarIfNeeded(using account: GeneratedNostrAccount) async throws -> String? {

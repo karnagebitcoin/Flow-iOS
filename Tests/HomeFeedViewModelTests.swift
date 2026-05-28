@@ -76,6 +76,27 @@ final class HomeFeedViewModelTests: XCTestCase {
     }
 
     @MainActor
+    func testTrendingPreferenceSurvivesInterestHashtagsFromOnboarding() {
+        let currentUserPubkey = hex("e")
+        let preferenceKey = HomeFeedViewModel.persistedFeedSourceKey(pubkey: currentUserPubkey)
+        UserDefaults.standard.removeObject(forKey: preferenceKey)
+        defer {
+            UserDefaults.standard.removeObject(forKey: preferenceKey)
+        }
+
+        UserDefaults.standard.set(
+            HomePrimaryFeedSource.trending.storageValue,
+            forKey: preferenceKey
+        )
+
+        let viewModel = HomeFeedViewModel(relayURL: defaultHomeRelayURL)
+        viewModel.updateCurrentUserPubkey(currentUserPubkey)
+        viewModel.updateInterestHashtags(["technology", "ai"])
+
+        XCTAssertEqual(viewModel.feedSource, .trending)
+    }
+
+    @MainActor
     func testFeedSourceOptionsExcludeNetworkArticlesAndNewsAndStartWithFollowing() {
         let viewModel = HomeFeedViewModel(relayURL: defaultHomeRelayURL)
 
