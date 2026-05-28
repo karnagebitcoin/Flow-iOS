@@ -823,11 +823,11 @@ final class HomeFeedViewModel: ObservableObject {
                 fastHydrationMode: fastHydrationMode
             ),
                !stagedHydrationEvents.isEmpty {
-                let upgradedItems = await service.buildFeedItems(
-                    relayURLs: requestRelayURLs,
+                let upgradedItems = await upgradedHydrationItems(
+                    for: requestSource,
+                    fallbackRelayURLs: requestRelayURLs,
                     events: stagedHydrationEvents,
-                    hydrationMode: requestHydrationMode,
-                    moderationSnapshot: muteFilterSnapshot
+                    requestHydrationMode: requestHydrationMode
                 )
                 guard !Task.isCancelled else { return }
 
@@ -1177,11 +1177,11 @@ final class HomeFeedViewModel: ObservableObject {
                 fastHydrationMode: fastHydrationMode
             ),
                !stagedHydrationEvents.isEmpty {
-                let upgradedItems = await service.buildFeedItems(
-                    relayURLs: requestRelayURLs,
+                let upgradedItems = await upgradedHydrationItems(
+                    for: requestSource,
+                    fallbackRelayURLs: requestRelayURLs,
                     events: stagedHydrationEvents,
-                    hydrationMode: requestHydrationMode,
-                    moderationSnapshot: muteFilterSnapshot
+                    requestHydrationMode: requestHydrationMode
                 )
                 guard !Task.isCancelled else { return }
                 guard requestRefreshID == latestRefreshRequestID, requestSource == feedSource else {
@@ -1920,6 +1920,29 @@ final class HomeFeedViewModel: ObservableObject {
 
     private func sourceUsesModeAwareBackfill(_ source: HomePrimaryFeedSource) -> Bool {
         Self.supportsModeTabs(for: source)
+    }
+
+    private func upgradedHydrationItems(
+        for source: HomePrimaryFeedSource,
+        fallbackRelayURLs: [URL],
+        events: [NostrEvent],
+        requestHydrationMode: FeedItemHydrationMode
+    ) async -> [FeedItem] {
+        guard source == .trending else {
+            return await service.buildFeedItems(
+                relayURLs: fallbackRelayURLs,
+                events: events,
+                hydrationMode: requestHydrationMode,
+                moderationSnapshot: muteFilterSnapshot
+            )
+        }
+
+        return await service.buildAuthorHydratedFeedItems(
+            relayURLs: hydrationRelayURLs(for: source),
+            events: events,
+            relayFetchMode: .allRelays,
+            moderationSnapshot: muteFilterSnapshot
+        )
     }
 
     private func scheduleAssetPrefetch(for sourceItems: [FeedItem]) {

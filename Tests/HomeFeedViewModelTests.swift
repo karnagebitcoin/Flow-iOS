@@ -615,6 +615,8 @@ final class HomeFeedViewModelTests: XCTestCase {
 
         try await harness.waitForVisibleItem(id: trendingNote.id, timeout: 1.0)
         await refreshTask.value
+
+        XCTAssertEqual(harness.viewModel.visibleItems.first?.displayName, "Slow Profile")
     }
 
     @MainActor
