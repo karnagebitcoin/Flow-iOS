@@ -72,9 +72,6 @@ struct FlowApp: App {
                 await presentLaunchSplashIfNeeded()
                 updateGlobalNavigationAppearance()
                 updateBreakReminderMonitoring()
-                await MainActor.run {
-                    AppIconRotator.rotateWeeklyIfNeeded()
-                }
 
                 Task(priority: .utility) {
                     await appSettings.refreshNotificationAuthorizationStatus()
@@ -116,9 +113,6 @@ struct FlowApp: App {
             .onChange(of: scenePhase) { _, newValue in
                 updateBreakReminderMonitoring()
                 guard newValue == .active else { return }
-                Task { @MainActor in
-                    AppIconRotator.rotateWeeklyIfNeeded()
-                }
                 Task(priority: .utility) {
                     await presentPendingSharedComposeDraftIfPossible()
                 }

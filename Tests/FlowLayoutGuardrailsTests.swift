@@ -875,6 +875,14 @@ final class FlowLayoutGuardrailsTests: XCTestCase {
         XCTAssertFalse(navigationRowsSource.contains(".onTapGesture"))
     }
 
+    func testAppDoesNotRotateAlternateIconsAutomatically() throws {
+        let flowSource = try Self.sourceText(at: "Sources/App/FlowApp.swift")
+        let appSources = try Self.sourceTexts(under: "Sources/App")
+
+        XCTAssertFalse(flowSource.contains("AppIconRotator"))
+        XCTAssertFalse(appSources.contains("setAlternateIconName"))
+    }
+
 }
 
 private extension FlowLayoutGuardrailsTests {
@@ -883,5 +891,25 @@ private extension FlowLayoutGuardrailsTests {
         let repositoryRootURL = testFileURL.deletingLastPathComponent().deletingLastPathComponent()
         let sourceURL = repositoryRootURL.appendingPathComponent(relativePath)
         return try String(contentsOf: sourceURL, encoding: .utf8)
+    }
+
+    static func sourceTexts(under relativePath: String) throws -> String {
+        let testFileURL = URL(fileURLWithPath: #filePath)
+        let repositoryRootURL = testFileURL.deletingLastPathComponent().deletingLastPathComponent()
+        let directoryURL = repositoryRootURL.appendingPathComponent(relativePath)
+        let fileManager = FileManager.default
+        guard let enumerator = fileManager.enumerator(
+            at: directoryURL,
+            includingPropertiesForKeys: nil,
+            options: [.skipsHiddenFiles]
+        ) else {
+            return ""
+        }
+
+        var combinedSource = ""
+        for case let fileURL as URL in enumerator where fileURL.pathExtension == "swift" {
+            combinedSource += try String(contentsOf: fileURL, encoding: .utf8)
+        }
+        return combinedSource
     }
 }

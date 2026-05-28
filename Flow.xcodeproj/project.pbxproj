@@ -107,7 +107,6 @@
 		49A33778F8CC7699D01EA0C8 /* InterestFeedStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 21DF8275F493101456489799 /* InterestFeedStore.swift */; };
 		4BC2FFFAC8379D8E310409DF /* HaloLinkThreadView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 80377C2D08C763557460F183 /* HaloLinkThreadView.swift */; };
 		4C5B1231F1007DD4B5F0A634 /* ImageRemixEditorProcessing.swift in Sources */ = {isa = PBXBuildFile; fileRef = 419BE95AAE93709A1913E5F5 /* ImageRemixEditorProcessing.swift */; };
-		4DE483109FBEF1EBF7839014 /* AppIconRotator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 72B16F2A4EB630E35E4187D6 /* AppIconRotator.swift */; };
 		4E68B42AA7722487D13569A6 /* HomeFeedModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = EF4CE20A439FB46B16EB9DA7 /* HomeFeedModels.swift */; };
 		A1F3E0D55DAA4B7D9A100001 /* HomeFeedPageFetching.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1F3E0D55DAA4B7D9A100002 /* HomeFeedPageFetching.swift */; };
 		A1F3E0D55DAA4B7D9A100003 /* HomeFeedVisibilityFilter.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1F3E0D55DAA4B7D9A100004 /* HomeFeedVisibilityFilter.swift */; };
@@ -224,7 +223,6 @@
 		D8801A8154FE6B9B00D29793 /* AppTypography.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7CF25F42AF5E640A0958D88A /* AppTypography.swift */; };
 		D98B0DA60345F2C5664DA521 /* nostr_bech32.c in Sources */ = {isa = PBXBuildFile; fileRef = 627CF27D95376BB59328988A /* nostr_bech32.c */; };
 		DB8A3EE54A1AE0AC7FE565FE /* amount.c in Sources */ = {isa = PBXBuildFile; fileRef = D382CA88F2FB1877F74BD28E /* amount.c */; };
-		DBD2F9505024B99D1CA0131C /* AppIconRotatorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = FE5C1D90B3B680AC5BD80C0A /* AppIconRotatorTests.swift */; };
 		DC138907E4A8BE6E1DA26845 /* ImageRemixEditorModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = BD4A3A69CDBE8348D50E5A7D /* ImageRemixEditorModels.swift */; };
 		DC1A4FA02CA1493DFCB3871B /* sha256.c in Sources */ = {isa = PBXBuildFile; fileRef = F5E3D05EDE5E628D6BD6A2FB /* sha256.c */; };
 		DC2CED795AF182257A442232 /* MuteStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = D3152920AED2041FDC71354A /* MuteStore.swift */; };
@@ -418,7 +416,6 @@
 		6EA07E7BA1105A303737FC2A /* FollowingListView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FollowingListView.swift; sourceTree = "<group>"; };
 		71C6CD017B6EEEE4E003688E /* Nacelle-Regular.otf */ = {isa = PBXFileReference; lastKnownFileType = file; path = "Nacelle-Regular.otf"; sourceTree = "<group>"; };
 		7215D735EE8084586736A003 /* hash_u5.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = hash_u5.c; sourceTree = "<group>"; };
-		72B16F2A4EB630E35E4187D6 /* AppIconRotator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppIconRotator.swift; sourceTree = "<group>"; };
 		73207CDE546C3885AE73A5F9 /* Flow-Bridging-Header.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = "Flow-Bridging-Header.h"; sourceTree = "<group>"; };
 		73524C099B08853D1740EFED /* ComposeSpeechTranscriber.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ComposeSpeechTranscriber.swift; sourceTree = "<group>"; };
 		73A09E5C5DEB394F9F612B36 /* ThreadReplyPublishService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ThreadReplyPublishService.swift; sourceTree = "<group>"; };
@@ -567,7 +564,6 @@
 		FB8E0B2EBA2BA6A0BA1C44D8 /* ImageRemixEditorControls.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImageRemixEditorControls.swift; sourceTree = "<group>"; };
 		FDD34AFC463D6093EDDBD992 /* SearchViewComponents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SearchViewComponents.swift; sourceTree = "<group>"; };
 		FE1CA57053B9FBB868AB0B71 /* ComposeNotePublishServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ComposeNotePublishServiceTests.swift; sourceTree = "<group>"; };
-		FE5C1D90B3B680AC5BD80C0A /* AppIconRotatorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppIconRotatorTests.swift; sourceTree = "<group>"; };
 		FF3A46097B1D78C6E75A1E21 /* ComposeNoteSheetModeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ComposeNoteSheetModeTests.swift; sourceTree = "<group>"; };
 		FFE5B88D630B5518425AD6DA /* list.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = list.c; sourceTree = "<group>"; };
 /* End PBXFileReference section */
@@ -652,7 +648,6 @@
 			children = (
 				E3D6E2FE9C608FF26B59D358 /* AppFontOption.swift */,
 				925F46E0FC75C191103D09E9 /* AppHaptics.swift */,
-				72B16F2A4EB630E35E4187D6 /* AppIconRotator.swift */,
 				A1F8C4D82E9B4100C5D3E6F1 /* AppLaunchSplashOverlay.swift */,
 				D3535F42ABCFA81A554B26FE /* AppSettingsStore.swift */,
 				D50AC42A15DAA0E8634194B6 /* AppThemeBackgroundView.swift */,
@@ -731,7 +726,6 @@
 			isa = PBXGroup;
 			children = (
 				AFF76C308688241A3E60CE4D /* AppThemeOptionTests.swift */,
-				FE5C1D90B3B680AC5BD80C0A /* AppIconRotatorTests.swift */,
 				9C29217F6EE35F0342114248 /* AuthManagerTests.swift */,
 				A1B2C3D4E5F60718293A4B71 /* ActivityRowPreviewDisplayTests.swift */,
 				FE1CA57053B9FBB868AB0B71 /* ComposeNotePublishServiceTests.swift */,
@@ -1304,7 +1298,6 @@
 				13035ACC9DB792CC0923C3E1 /* ActivityViewModel.swift in Sources */,
 				331005DE6E26309362E77DBF /* AppFontOption.swift in Sources */,
 				0407D100155DCC5BB9C49A4E /* AppHaptics.swift in Sources */,
-				4DE483109FBEF1EBF7839014 /* AppIconRotator.swift in Sources */,
 				A1F8C4D72E9B4100C5D3E6F1 /* AppLaunchSplashOverlay.swift in Sources */,
 				7C06FF22A41B51DEC6AB475F /* AppSettingsStore.swift in Sources */,
 				E3D1F26341B4825C6652FE2C /* AppThemeBackgroundView.swift in Sources */,
@@ -1508,7 +1501,6 @@
 			buildActionMask = 2147483647;
 			files = (
 				E48CFDD7123D3D29314DBA5E /* AppThemeOptionTests.swift in Sources */,
-				DBD2F9505024B99D1CA0131C /* AppIconRotatorTests.swift in Sources */,
 				711BCE1CD02B6E003FC62C51 /* AuthManagerTests.swift in Sources */,
 				C7F69B0BD5793A7B7E83E9A6 /* ComposeNotePublishServiceTests.swift in Sources */,
 				FDEE4E11D51BA0548AB96A5A /* ComposeNoteSheetModeTests.swift in Sources */,
@@ -1646,7 +1638,6 @@
 		3891A116B2A789B1EF826D8B /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
-				ASSETCATALOG_COMPILER_ALTERNATE_APPICON_NAMES = "AppIcon-Weekly-01 AppIcon-Weekly-02 AppIcon-Weekly-03 AppIcon-Weekly-04 AppIcon-Weekly-05 AppIcon-Weekly-06 AppIcon-Weekly-07 AppIcon-Weekly-08 AppIcon-Weekly-09 AppIcon-Weekly-10 AppIcon-Weekly-11 AppIcon-Weekly-12 AppIcon-Weekly-13";
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_ENTITLEMENTS = Sources/App/Flow.entitlements;
@@ -1816,7 +1807,6 @@
 		CBFA6DECCA0D9979D5698794 /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
-				ASSETCATALOG_COMPILER_ALTERNATE_APPICON_NAMES = "AppIcon-Weekly-01 AppIcon-Weekly-02 AppIcon-Weekly-03 AppIcon-Weekly-04 AppIcon-Weekly-05 AppIcon-Weekly-06 AppIcon-Weekly-07 AppIcon-Weekly-08 AppIcon-Weekly-09 AppIcon-Weekly-10 AppIcon-Weekly-11 AppIcon-Weekly-12 AppIcon-Weekly-13";
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_ENTITLEMENTS = Sources/App/Flow.entitlements;
