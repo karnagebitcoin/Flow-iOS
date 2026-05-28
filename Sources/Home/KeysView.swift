@@ -36,12 +36,12 @@ struct KeysView: View {
     }
 
     private var publicKeySection: some View {
-        ThemedSettingsSection("Public Account ID") {
+        ThemedSettingsSection("Account ID") {
             if let account = auth.currentAccount {
                 keyValueRow(
                     title: nil,
                     value: account.npub,
-                    actionTitle: "Copy Public Account ID",
+                    actionTitle: "Copy Account ID",
                     action: {
                         UIPasteboard.general.string = account.npub
                     }
@@ -55,7 +55,7 @@ struct KeysView: View {
     }
 
     private var privateKeySection: some View {
-        ThemedSettingsSection("Account Access") {
+        ThemedSettingsSection("Secret Access Code") {
             if auth.currentNsec != nil {
                 privateKeyRevealControl
 
@@ -63,7 +63,7 @@ struct KeysView: View {
                     keyValueRow(
                         title: "nsec",
                         value: revealedPrivateKey,
-                        actionTitle: "Copy Account Access",
+                        actionTitle: "Copy Secret Access Code",
                         action: {
                             UIPasteboard.general.string = revealedPrivateKey
                         }
@@ -95,7 +95,7 @@ struct KeysView: View {
                         .foregroundStyle(.orange)
                         .fixedSize(horizontal: false, vertical: true)
                 } else {
-                    Text("This account was created for viewing only, so there is no account access secret to reveal or copy.")
+                    Text("This account was created for viewing only, so there is no secret access code to reveal or copy.")
                         .font(.footnote)
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
@@ -108,7 +108,7 @@ struct KeysView: View {
     private var iCloudBackupSection: some View {
         if let account = auth.currentAccount, account.signerType == .nsec {
             ThemedSettingsSection {
-                Toggle("Back Up Account to iCloud", isOn: privateKeyBackupBinding(for: account))
+                Toggle("Back Up Access Code to iCloud", isOn: privateKeyBackupBinding(for: account))
 
                 privateKeyBackupStatusCard(for: account)
 
@@ -120,18 +120,16 @@ struct KeysView: View {
             } header: {
                 Text("iCloud Backup")
             } footer: {
-                Text(
-                    account.privateKeyBackupEnabled
-                        ? "This confirms the account was added to iCloud Keychain on this device. Apple does not expose the exact cross-device sync time. On another device, go to Sign In and choose Restore from iCloud."
-                        : "This account stays only on this device until you turn on iCloud backup. New Halo-created accounts ask about iCloud backup during setup."
-                )
+                if !account.privateKeyBackupEnabled {
+                    Text("This access code stays only on this device until you turn on iCloud backup. New Halo-created accounts ask about iCloud backup during setup.")
+                }
             }
         }
     }
 
     private var maskedPrivateKeyPlaceholder: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("Keep your account access private. It protects your account and can't be reset if it's exposed.")
+            Text("Keep your secret access code private to yourself. It protects your account and can't be reset if it's exposed.")
                 .font(.footnote)
                 .foregroundStyle(.secondary)
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -167,7 +165,7 @@ struct KeysView: View {
                         .foregroundStyle(.secondary)
                 }
 
-                Text(revealedPrivateKey != nil ? "Hide Account Access" : "Reveal Account Access")
+                Text(revealedPrivateKey != nil ? "Hide Secret Access Code" : "Reveal Secret Access Code")
                     .foregroundStyle(.primary)
 
                 Spacer()

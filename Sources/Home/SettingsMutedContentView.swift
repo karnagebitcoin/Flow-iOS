@@ -71,14 +71,12 @@ struct SettingsMutedContentView: View {
     @ViewBuilder
     private var filterSections: some View {
         Section {
-            Toggle("Spam replies", isOn: spamReplyFilterBinding)
+            Toggle("Hide spam replies", isOn: spamReplyFilterBinding)
 
-            Text("Uses an on-device model to hide likely-bot replies in threads and Pulse from people you don't follow.")
+            Text("Halo uses an on-device large language model to learn which replies are spam. This only applies to replies and not to any feeds.")
                 .font(.footnote)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
-        } footer: {
-            Text("Model scoring stays on this device. Marked spam is shared across your local accounts.")
         }
 
         Section {
