@@ -964,6 +964,16 @@ final class AppThemeOptionTests: XCTestCase {
         XCTAssertTrue(source.contains("let bottomSafeAreaInset: CGFloat"))
     }
 
+    func testHomeFeedDestinationsStayOutsideImmersiveRootChrome() throws {
+        let source = try sourceText(at: "Sources/Home/HomeFeedView.swift")
+        let rootStart = try XCTUnwrap(source.range(of: "private var navigationRoot: some View {"))
+        let feedContentStart = try XCTUnwrap(source.range(of: "private func feedContent", range: rootStart.upperBound..<source.endIndex))
+        let rootSource = String(source[rootStart.lowerBound..<feedContentStart.lowerBound])
+
+        XCTAssertTrue(rootSource.contains("        .modifier(navigationDestinationsModifier)"))
+        XCTAssertFalse(rootSource.contains("                .modifier(navigationDestinationsModifier)"))
+    }
+
     func testHomeFeedRootSpansTopEdgeForCustomTopChrome() throws {
         let source = try sourceText(at: "Sources/Home/HomeFeedView.swift")
 

@@ -252,9 +252,9 @@ struct HomeFeedView: View {
                     },
                     sideMenuContent: { sideMenuContent }
                 )
-                .modifier(navigationDestinationsModifier)
             }
         }
+        .modifier(navigationDestinationsModifier)
     }
 
     private func feedContent(
