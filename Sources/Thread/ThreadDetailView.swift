@@ -19,6 +19,10 @@ enum ThreadDetailViewLayout {
         minimumPadding + max(0, safeAreaInset)
     }
 
+    static func noteTopContentSafeAreaCompensation(safeAreaInset: CGFloat) -> CGFloat {
+        max(0, safeAreaInset)
+    }
+
     static func noteBottomContentPadding(
         bottomTabBarHeight: CGFloat,
         safeAreaBottom: CGFloat,
@@ -360,6 +364,12 @@ struct ThreadDetailView: View {
                             }
                         )
                     }
+                    .padding(
+                        .top,
+                        ThreadDetailViewLayout.noteTopContentSafeAreaCompensation(
+                            safeAreaInset: geometry.safeAreaInsets.top
+                        )
+                    )
                     .padding(
                         .bottom,
                         ThreadDetailViewLayout.noteBottomContentPadding(

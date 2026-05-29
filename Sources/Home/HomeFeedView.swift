@@ -234,28 +234,26 @@ struct HomeFeedView: View {
 
     private var navigationRoot: some View {
         NavigationStack {
-            Group {
-                GeometryReader { navigationGeometry in
-                    HomeFeedRootContent(
-                        isShowingSideMenu: $isShowingSideMenu,
-                        scrollChromeStore: scrollChromeStore,
-                        bottomTabBarHeight: bottomTabBarHeight,
-                        topSafeAreaInset: max(0, navigationGeometry.safeAreaInsets.top),
-                        bottomSafeAreaInset: max(0, navigationGeometry.safeAreaInsets.bottom),
-                        topNavigationBar: { topNavigationBar },
-                        feedContent: { topPadding, bottomPadding, topBarHeight, safeAreaBottom in
-                            feedContent(
-                                topContentPadding: topPadding,
-                                bottomContentPadding: bottomPadding,
-                                topBarHeight: topBarHeight,
-                                safeAreaBottom: safeAreaBottom
-                            )
-                        },
-                        sideMenuContent: { sideMenuContent }
-                    )
-                }
+            GeometryReader { navigationGeometry in
+                HomeFeedRootContent(
+                    isShowingSideMenu: $isShowingSideMenu,
+                    scrollChromeStore: scrollChromeStore,
+                    bottomTabBarHeight: bottomTabBarHeight,
+                    topSafeAreaInset: max(0, navigationGeometry.safeAreaInsets.top),
+                    bottomSafeAreaInset: max(0, navigationGeometry.safeAreaInsets.bottom),
+                    topNavigationBar: { topNavigationBar },
+                    feedContent: { topPadding, bottomPadding, topBarHeight, safeAreaBottom in
+                        feedContent(
+                            topContentPadding: topPadding,
+                            bottomContentPadding: bottomPadding,
+                            topBarHeight: topBarHeight,
+                            safeAreaBottom: safeAreaBottom
+                        )
+                    },
+                    sideMenuContent: { sideMenuContent }
+                )
+                .modifier(navigationDestinationsModifier)
             }
-            .modifier(navigationDestinationsModifier)
         }
     }
 
