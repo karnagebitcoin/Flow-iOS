@@ -23,6 +23,17 @@ struct FlowApp: App {
 
     init() {
         FlowMediaCache.configureSharedURLCache()
+        Self.configureTabBarBadgeAppearance()
+    }
+
+    // The activity tab uses an empty-string badge to show a dot. The system
+    // default renders that dot quite large; shrinking the badge font scales the
+    // dot down to a subtler indicator without touching the tab bar background.
+    private static func configureTabBarBadgeAppearance() {
+        UITabBarItem.appearance().setBadgeTextAttributes(
+            [.font: UIFont.systemFont(ofSize: 6, weight: .semibold)],
+            for: .normal
+        )
     }
 
     var body: some Scene {
