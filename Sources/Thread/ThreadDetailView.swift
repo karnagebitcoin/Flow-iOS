@@ -360,6 +360,13 @@ struct ThreadDetailView: View {
                             }
                         )
                     }
+                    // Do NOT add a manual `.padding(.top, ...)` here to clear the
+                    // navigation bar. With the standard (visible) navbar this view
+                    // declares, the navbar already reserves its own space, so the
+                    // content sits below it correctly. Adding manual top padding
+                    // double-counts and produces a large gap. (This depends on
+                    // HomeFeedView keeping navigationDestinationsModifier attached to
+                    // HomeFeedRootContent — see the note there.)
                     .padding(
                         .bottom,
                         ThreadDetailViewLayout.noteBottomContentPadding(

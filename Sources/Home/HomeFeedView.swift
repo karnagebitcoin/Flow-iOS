@@ -235,6 +235,15 @@ struct HomeFeedView: View {
     private var navigationRoot: some View {
         NavigationStack {
             GeometryReader { navigationGeometry in
+                // The `.modifier(navigationDestinationsModifier)` below MUST stay
+                // attached to HomeFeedRootContent (which carries
+                // `.ignoresSafeArea(edges: .top)` + `.toolbar(.hidden,...)`), not to a
+                // wrapping Group/GeometryReader. Pushed destinations inherit their
+                // toolbar/safe-area baseline from the view that declares the
+                // destination. Moving it up the tree breaks immersive inheritance:
+                // the profile banner stops reaching the top edge AND ThreadDetailView's
+                // note body loses proper navbar space reservation (forcing redundant
+                // manual top padding, which then double-counts into a large gap).
                 HomeFeedRootContent(
                     isShowingSideMenu: $isShowingSideMenu,
                     scrollChromeStore: scrollChromeStore,
