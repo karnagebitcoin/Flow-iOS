@@ -211,6 +211,7 @@ struct MainTabShellView: View {
             }
         }
         .toolbar(nativeTabBarVisibility, for: .tabBar)
+        .flowHiddenTabBarBackground()
         .flowNativeTabBarBehavior()
     }
 
@@ -257,6 +258,7 @@ struct MainTabShellView: View {
                 .tabItem { tabBarIcon(for: .compose) }
         }
         .toolbar(nativeTabBarVisibility, for: .tabBar)
+        .flowHiddenTabBarBackground()
         .flowNativeTabBarBehavior()
     }
 
@@ -555,6 +557,14 @@ private extension View {
         } else {
             self
         }
+    }
+
+    // Controlled test: drop the tab bar's background material so the feed scrolls
+    // fully behind the floating Liquid Glass buttons instead of sitting over an
+    // opaque platter.
+    @ViewBuilder
+    func flowHiddenTabBarBackground() -> some View {
+        self.toolbarBackground(.hidden, for: .tabBar)
     }
 }
 
