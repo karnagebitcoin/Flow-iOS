@@ -73,6 +73,13 @@ struct SettingsView: View {
                                 value: .connection
                             )
                         }
+
+                        Text(appVersionText)
+                            .font(.footnote)
+                            .foregroundStyle(appSettings.themePalette.mutedForeground)
+                            .frame(maxWidth: .infinity, alignment: .center)
+                            .padding(.top, 12)
+                            .accessibilityIdentifier("settings-app-version")
                     }
                     .padding(.top, -4)
                 }
@@ -109,6 +116,13 @@ struct SettingsView: View {
     private var connectionSummaryText: String {
         let count = Set(relaySettings.readRelays + relaySettings.writeRelays).count
         return "Connected to \(count) \(count == 1 ? "source" : "sources")"
+    }
+
+    private var appVersionText: String {
+        let info = Bundle.main.infoDictionary
+        let version = info?["CFBundleShortVersionString"] as? String ?? "—"
+        let build = info?["CFBundleVersion"] as? String ?? "—"
+        return "\(AppBrand.displayName) \(version) (\(build))"
     }
 
     private var navigationPathBinding: Binding<[SettingsDestination]> {
