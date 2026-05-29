@@ -486,7 +486,7 @@ struct NostrProfileResolver: Sendable {
             )
         )
         guard !normalizedTargets.isEmpty else { return [:] }
-        let targetRelayURLs = normalizedRelayURLs(relayURLs)
+        let targetRelayURLs = metadataFetchRelayURLs(relayURLs)
         guard !targetRelayURLs.isEmpty else { return [:] }
 
         // Fan out into small concurrent batches and store each batch's profiles as
@@ -556,6 +556,19 @@ struct NostrProfileResolver: Sendable {
         }
 
         return ordered
+    }
+
+    // Relays for the kind-0 (profile metadata) author fetch. Discovery/feed relays
+    // such as the nostrarchives.com trending and search endpoints ignore the author
+    // filter, stream kind-1 indefinitely without sending EOSE, and never carry kind-0,
+    // so leaving them in only burns the fetch timeout. Strip them here.
+    private func metadataFetchRelayURLs(_ relayURLs: [URL]) -> [URL] {
+        normalizedRelayURLs(relayURLs).filter { !isNonMetadataFeedRelay($0) }
+    }
+
+    private func isNonMetadataFeedRelay(_ relayURL: URL) -> Bool {
+        guard let host = relayURL.host?.lowercased() else { return false }
+        return host == "nostrarchives.com" || host.hasSuffix(".nostrarchives.com")
     }
 
     private func normalizePubkey(_ value: String?) -> String {

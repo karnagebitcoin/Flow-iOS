@@ -15,13 +15,18 @@ struct NostrFeedService: Sendable {
     private static let trendingRelayURL = nostrArchivesTrendingRelayURL
     private static let followListFreshCacheAge: TimeInterval = 60 * 5
     private static let profileBackfillBatchSize = 24
+    // Ordered by observed kind-0 (profile metadata) coverage, strongest first.
+    // purplepag.es is the canonical metadata/outbox relay (kind 0 + kind 10002);
+    // nos.lol and primal carry broad coverage. damus.io serves kind-0 unreliably
+    // (it answered only ~30% of trending authors in testing) so it sits last.
     private static let metadataFallbackRelayURLs: [URL] = [
-        URL(string: "wss://relay.damus.io/")!,
+        URL(string: "wss://purplepag.es/")!,
+        URL(string: "wss://nos.lol/")!,
         URL(string: "wss://relay.primal.net/")!,
         URL(string: "wss://relay.nostr.band/")!,
         URL(string: "wss://relay.snort.social/")!,
         URL(string: "wss://nostr.wine/")!,
-        URL(string: "wss://nos.lol/")!
+        URL(string: "wss://relay.damus.io/")!
     ]
 
     init(
