@@ -451,6 +451,29 @@ final class AppThemeOptionTests: XCTestCase {
             AppThemeOption.black.palette.articlePreviewBorder,
             matches: UIColor.white.withAlphaComponent(0.15)
         )
+        XCTAssertNotNil(AppThemeOption.black.palette.capsuleTabStyle)
+        XCTAssertNotNil(AppThemeOption.black.palette.profileActionStyle)
+        XCTAssertNotNil(AppThemeOption.black.palette.pollStyle)
+        assertColor(
+            AppThemeOption.black.palette.capsuleTabStyle!.background,
+            matches: UIColor(red: 0.137, green: 0.137, blue: 0.137, alpha: 1)
+        )
+        assertColor(
+            AppThemeOption.black.palette.capsuleTabStyle!.selectedBackground,
+            matches: UIColor.systemBlue.withAlphaComponent(0.20)
+        )
+        assertColor(
+            AppThemeOption.black.palette.profileActionStyle!.background,
+            matches: UIColor(red: 0.137, green: 0.137, blue: 0.137, alpha: 1)
+        )
+        assertColor(
+            AppThemeOption.black.palette.pollStyle!.cardBackground,
+            matches: UIColor(red: 0.137, green: 0.137, blue: 0.137, alpha: 1)
+        )
+        assertColor(
+            AppThemeOption.black.palette.pollStyle!.optionBackground,
+            matches: UIColor(red: 0.082, green: 0.082, blue: 0.082, alpha: 1)
+        )
     }
 
     @MainActor
@@ -497,9 +520,13 @@ final class AppThemeOptionTests: XCTestCase {
             AppThemeOption.dark.palette.background,
             matches: .black
         )
-        XCTAssertNil(AppThemeOption.dark.palette.capsuleTabStyle)
-        XCTAssertNil(AppThemeOption.dark.palette.profileActionStyle)
-        XCTAssertNil(AppThemeOption.dark.palette.pollStyle)
+        XCTAssertNotNil(AppThemeOption.dark.palette.capsuleTabStyle)
+        XCTAssertNotNil(AppThemeOption.dark.palette.profileActionStyle)
+        XCTAssertNotNil(AppThemeOption.dark.palette.pollStyle)
+        assertColor(
+            AppThemeOption.dark.palette.pollStyle!.cardBackground,
+            matches: UIColor(red: 0.137, green: 0.137, blue: 0.137, alpha: 1)
+        )
     }
 
     @MainActor
@@ -547,6 +574,16 @@ final class AppThemeOptionTests: XCTestCase {
         assertColor(
             AppThemeOption.system.palette.sheetCardBorder,
             matches: UIColor(red: 0.235, green: 0.235, blue: 0.235, alpha: 1),
+            style: .dark
+        )
+        assertColor(
+            AppThemeOption.system.palette.capsuleTabStyle!.background,
+            matches: UIColor(red: 0.137, green: 0.137, blue: 0.137, alpha: 1),
+            style: .dark
+        )
+        assertColor(
+            AppThemeOption.system.palette.pollStyle!.cardBackground,
+            matches: UIColor(red: 0.137, green: 0.137, blue: 0.137, alpha: 1),
             style: .dark
         )
     }

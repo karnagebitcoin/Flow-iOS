@@ -644,9 +644,43 @@ struct AppThemePalette {
         articlePreviewBackgroundTop: Color(red: 0.11, green: 0.11, blue: 0.13),
         articlePreviewBackgroundBottom: .black,
         articlePreviewBorder: Color.white.opacity(0.15),
-        capsuleTabStyle: nil,
-        profileActionStyle: nil,
-        pollStyle: nil
+        capsuleTabStyle: AppThemeCapsuleTabStyle(
+            background: Self.blackSheetCard,
+            border: Self.blackSheetCardBorder,
+            foreground: Color.white.opacity(0.58),
+            selectedBackground: Color.accentColor.opacity(0.20),
+            selectedBorder: Color.accentColor.opacity(0.54),
+            selectedForeground: Color.accentColor
+        ),
+        profileActionStyle: AppThemeProfileActionStyle(
+            background: Self.blackSheetCard,
+            border: Self.blackSheetCardBorder,
+            foreground: Color.white.opacity(0.95),
+            primaryBackground: Color.accentColor,
+            primaryBorder: Color.accentColor,
+            primaryForeground: .white,
+            bannerBackground: Self.blackSheetCard,
+            bannerBorder: Self.blackSheetCardBorder,
+            bannerForeground: Color.white.opacity(0.95)
+        ),
+        pollStyle: AppThemePollStyle(
+            cardBackground: Self.blackSheetCard,
+            cardBorder: Self.blackSheetCardBorder,
+            metadataForeground: Color.white.opacity(0.58),
+            optionBackground: Self.blackSheet,
+            optionResultBackground: Color.white.opacity(0.08),
+            optionBorder: Self.blackSheetCardBorder,
+            optionSelectedBackground: Color.accentColor.opacity(0.20),
+            optionSelectedBorder: Color.accentColor.opacity(0.54),
+            optionWinningBackground: Color.accentColor.opacity(0.20),
+            optionWinningBorder: Color.accentColor.opacity(0.54),
+            imagePlaceholderBackground: Self.blackSheet,
+            imagePlaceholderForeground: Color.white.opacity(0.58),
+            neutralBadgeBackground: Self.blackSheet,
+            neutralBadgeForeground: Color.white.opacity(0.72),
+            refreshButtonBackground: Self.blackSheet,
+            refreshButtonForeground: Color.white.opacity(0.72)
+        )
     )
 
     static let white = AppThemePalette(
