@@ -54,4 +54,5 @@ protocol ProfileCaching: Actor, Sendable {
     func recentProfilePubkeys(limit: Int) async -> [String]
     func store(profiles newProfiles: [String: NostrProfile], missed: [String]) async
     func setPriorityPubkeys(_ pubkeys: Set<String>)
+    nonisolated func profileUpdates() -> AsyncStream<[String: NostrProfile]>
 }

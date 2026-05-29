@@ -602,11 +602,40 @@ actor ProfileCache: ProfileCaching {
     private var knownMisses: [String: Date] = [:]
     private var recency: [String] = []
     private var priorityPubkeys: Set<String> = []
+    private var updateContinuations: [UUID: AsyncStream<[String: NostrProfile]>.Continuation] = [:]
 
     init(
         snapshotStore: ProfileSnapshotStore = .shared
     ) {
         self.snapshotStore = snapshotStore
+    }
+
+    nonisolated func profileUpdates() -> AsyncStream<[String: NostrProfile]> {
+        AsyncStream { continuation in
+            let id = UUID()
+            Task { await self.registerUpdateContinuation(continuation, id: id) }
+            continuation.onTermination = { _ in
+                Task { await self.removeUpdateContinuation(id: id) }
+            }
+        }
+    }
+
+    private func registerUpdateContinuation(
+        _ continuation: AsyncStream<[String: NostrProfile]>.Continuation,
+        id: UUID
+    ) {
+        updateContinuations[id] = continuation
+    }
+
+    private func removeUpdateContinuation(id: UUID) {
+        updateContinuations.removeValue(forKey: id)
+    }
+
+    private func broadcast(_ profiles: [String: NostrProfile]) {
+        guard !profiles.isEmpty, !updateContinuations.isEmpty else { return }
+        for continuation in updateContinuations.values {
+            continuation.yield(profiles)
+        }
     }
 
     func resolve(
@@ -696,6 +725,7 @@ actor ProfileCache: ProfileCaching {
         pruneOverflowIfNeeded()
 
         if !persisted.isEmpty {
+            broadcast(persisted.mapValues { $0.profile })
             await snapshotStore.putMany(entries: persisted)
         }
     }

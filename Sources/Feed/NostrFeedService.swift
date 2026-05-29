@@ -83,6 +83,10 @@ struct NostrFeedService: Sendable {
         )
     }
 
+    func profileUpdates() -> AsyncStream<[String: NostrProfile]> {
+        profileCache.profileUpdates()
+    }
+
     private var profileResolver: NostrProfileResolver {
         NostrProfileResolver(
             profileCache: profileCache,

@@ -638,6 +638,46 @@ struct FeedItem: Identifiable, Hashable, Sendable {
         return ordered
     }
 
+    // Fills in any still-missing author/display/reply-target profiles from a freshly
+    // resolved batch. Returns nil when nothing changed, so callers can skip rebuilds.
+    func applyingResolvedProfiles(_ profilesByPubkey: [String: NostrProfile]) -> FeedItem? {
+        guard !profilesByPubkey.isEmpty else { return nil }
+        var didChange = false
+
+        var updatedProfile = profile
+        if updatedProfile == nil, let resolved = profilesByPubkey[event.pubkey.lowercased()] {
+            updatedProfile = resolved
+            didChange = true
+        }
+
+        var updatedDisplayProfile = displayProfileOverride
+        if updatedDisplayProfile == nil,
+           let displayPubkey = displayEventOverride?.pubkey.lowercased(),
+           let resolved = profilesByPubkey[displayPubkey] {
+            updatedDisplayProfile = resolved
+            didChange = true
+        }
+
+        var updatedReplyTargetProfile = replyTargetProfile
+        if updatedReplyTargetProfile == nil,
+           let replyPubkey = replyTargetEvent?.pubkey.lowercased(),
+           let resolved = profilesByPubkey[replyPubkey] {
+            updatedReplyTargetProfile = resolved
+            didChange = true
+        }
+
+        guard didChange else { return nil }
+
+        return FeedItem(
+            event: event,
+            profile: updatedProfile,
+            displayEventOverride: displayEventOverride,
+            displayProfileOverride: updatedDisplayProfile,
+            replyTargetEvent: replyTargetEvent,
+            replyTargetProfile: updatedReplyTargetProfile
+        )
+    }
+
     func merged(with incoming: FeedItem) -> FeedItem {
         let mergedDisplayEvent = incoming.displayEventOverride ?? displayEventOverride
         let mergedReplyTargetEvent = incoming.replyTargetEvent ?? replyTargetEvent

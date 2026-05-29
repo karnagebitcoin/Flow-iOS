@@ -489,31 +489,44 @@ struct NostrProfileResolver: Sendable {
         let targetRelayURLs = normalizedRelayURLs(relayURLs)
         guard !targetRelayURLs.isEmpty else { return [:] }
 
-        var collectedProfiles: [String: NostrProfile] = [:]
+        // Fan out into small concurrent batches and store each batch's profiles as
+        // soon as it resolves. Storing per batch lets ProfileCache broadcast updates
+        // progressively, so feed rows fill in names/avatars in waves instead of all
+        // at once when the whole request completes.
+        let batches = chunks(normalizedTargets, size: 24)
 
-        for chunk in chunks(normalizedTargets, size: 100) {
-            let metadataFilter = NostrFilter(
-                authors: chunk,
-                kinds: [0],
-                limit: max(chunk.count * 2, 100)
-            )
+        return await withTaskGroup(of: [String: NostrProfile].self) { group in
+            for chunk in batches {
+                group.addTask {
+                    let metadataFilter = NostrFilter(
+                        authors: chunk,
+                        kinds: [0],
+                        limit: max(chunk.count * 2, 100)
+                    )
 
-            guard let metadataEvents = try? await relayTimelineFetcher.fetchTimelineEvents(
-                relayURLs: targetRelayURLs,
-                filter: metadataFilter,
-                timeout: timeout,
-                useCache: false,
-                relayFetchMode: relayFetchMode
-            ) else {
-                continue
+                    guard let metadataEvents = try? await relayTimelineFetcher.fetchTimelineEvents(
+                        relayURLs: targetRelayURLs,
+                        filter: metadataFilter,
+                        timeout: timeout,
+                        useCache: false,
+                        relayFetchMode: relayFetchMode
+                    ) else {
+                        return [:]
+                    }
+
+                    let decoded = decodeNewestProfiles(from: metadataEvents)
+                    guard !decoded.isEmpty else { return [:] }
+                    await profileCache.store(profiles: decoded, missed: [])
+                    return decoded
+                }
             }
 
-            let decoded = decodeNewestProfiles(from: metadataEvents)
-            guard !decoded.isEmpty else { continue }
-            collectedProfiles.merge(decoded, uniquingKeysWith: { existing, _ in existing })
+            var collectedProfiles: [String: NostrProfile] = [:]
+            for await decoded in group {
+                collectedProfiles.merge(decoded, uniquingKeysWith: { existing, _ in existing })
+            }
+            return collectedProfiles
         }
-
-        return collectedProfiles
     }
 
     private func metadataRelayURLs(primaryRelayURLs: [URL]) -> [URL] {

@@ -74,6 +74,7 @@ final class HomeFeedViewModel: ObservableObject {
     private var liveCatchUpToken = 0
     private var lastLiveCatchUpBySignature: [String: Date] = [:]
     private var resetFeedTask: Task<Void, Never>?
+    private var profileUpdatesTask: Task<Void, Never>?
     private var isPrefetchingMore = false
     private var latestRefreshRequestID = 0
     private var trendingPaginationState: TrendingPaginationState?
@@ -103,6 +104,8 @@ final class HomeFeedViewModel: ObservableObject {
         self.filterStore = filterStore
         self.showKinds = defaults.showKinds
         self.mediaOnly = defaults.mediaOnly
+
+        startObservingProfileUpdates()
     }
 
     deinit {
@@ -110,6 +113,41 @@ final class HomeFeedViewModel: ObservableObject {
         liveCatchUpTask?.cancel()
         resetFeedTask?.cancel()
         trendingEmptyRetryTask?.cancel()
+        profileUpdatesTask?.cancel()
+    }
+
+    private func startObservingProfileUpdates() {
+        let stream = service.profileUpdates()
+        profileUpdatesTask = Task { [weak self] in
+            for await resolved in stream {
+                guard let self else { return }
+                await self.applyResolvedProfiles(resolved)
+            }
+        }
+    }
+
+    private func applyResolvedProfiles(_ resolved: [String: NostrProfile]) {
+        guard !resolved.isEmpty else { return }
+
+        var itemsChanged = false
+        let patchedItems = items.map { item -> FeedItem in
+            guard let updated = item.applyingResolvedProfiles(resolved) else { return item }
+            itemsChanged = true
+            return updated
+        }
+        if itemsChanged {
+            items = patchedItems
+        }
+
+        var bufferedChanged = false
+        let patchedBuffered = bufferedNewItems.map { item -> FeedItem in
+            guard let updated = item.applyingResolvedProfiles(resolved) else { return item }
+            bufferedChanged = true
+            return updated
+        }
+        if bufferedChanged {
+            bufferedNewItems = patchedBuffered
+        }
     }
 
     var feedSourceOptions: [HomePrimaryFeedSource] {
