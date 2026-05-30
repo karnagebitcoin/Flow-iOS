@@ -328,12 +328,13 @@ final class NostrFeedServiceTests: XCTestCase {
                 "wss://author-read.example",
                 "wss://hinted.example",
                 "wss://relay.example.com",
-                "wss://relay.damus.io",
+                "wss://purplepag.es",
+                "wss://nos.lol",
                 "wss://relay.primal.net",
                 "wss://relay.nostr.band",
                 "wss://relay.snort.social",
                 "wss://nostr.wine",
-                "wss://nos.lol"
+                "wss://relay.damus.io"
             ]
         )
         XCTAssertEqual(canonicalRelayStrings(storedEntry?.readRelayURLs ?? []), ["wss://author-read.example"])
@@ -542,6 +543,72 @@ final class NostrFeedServiceTests: XCTestCase {
         XCTAssertNil(resolved[reference])
         XCTAssertEqual(requestedRelayURLStrings, ["wss://relay.example.com"])
         XCTAssertNil(storedEvent[referencedEvent.id.lowercased()])
+    }
+
+    func testFetchOutboxBackedReferencedEventsUsesAuthorRelayDirectoryForBatch() async throws {
+        let rootURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("FlowOutboxBackedReferences-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: rootURL, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: rootURL) }
+
+        let fileManager = TestFileManager(rootURL: rootURL)
+        let nostrDatabase = FlowNostrDB(fileManager: fileManager)
+        let relayHintCache = ProfileRelayHintCache()
+        let authorPubkey = hex("6")
+        let authorWriteRelayURL = URL(string: "wss://author-reference-write.example")!
+        let referencedEvent = makeEvent(
+            id: hex("7"),
+            pubkey: authorPubkey,
+            kind: 1,
+            tags: [],
+            content: "referenced event from write relay",
+            createdAt: 1_700_000_600
+        )
+        let relayListEvent = makeEvent(
+            id: hex("8"),
+            pubkey: authorPubkey,
+            kind: 10_002,
+            tags: [
+                ["r", authorWriteRelayURL.absoluteString, "write"]
+            ],
+            content: "",
+            createdAt: 1_700_000_550
+        )
+
+        let relayClient = RecordingOutboxRelayClient(eventsByRelay: [
+            relayURL: [relayListEvent],
+            authorWriteRelayURL: [referencedEvent]
+        ])
+        let seenEventStore = SeenEventStore(fileManager: fileManager)
+        let service = NostrFeedService(
+            relayClient: relayClient,
+            timelineCache: TimelineEventCache(),
+            profileCache: ProfileCache(snapshotStore: ProfileSnapshotStore(fileManager: fileManager)),
+            relayHintCache: relayHintCache,
+            followListCache: FollowListSnapshotCache(fileManager: fileManager),
+            seenEventStore: seenEventStore,
+            nostrDatabase: nostrDatabase,
+            presentationCache: FeedPresentationCache()
+        )
+        let reference = NostrEventReferencePointer(
+            normalizedIdentifier: referencedEvent.id.lowercased(),
+            target: .eventID(referencedEvent.id.lowercased()),
+            relayHints: [],
+            authorPubkey: authorPubkey
+        )
+
+        let resolved = await service.fetchOutboxBackedReferencedEvents(
+            references: [reference],
+            baseReadRelayURLs: [relayURL],
+            fetchTimeout: 0.4,
+            relayFetchMode: .firstNonEmptyRelay
+        )
+        let requestedRelayURLStrings = canonicalRelayStrings(await relayClient.requestedRelayURLs())
+        let storedEvent = await seenEventStore.events(ids: [referencedEvent.id])
+
+        XCTAssertEqual(resolved[reference]?.id, referencedEvent.id)
+        XCTAssertTrue(requestedRelayURLStrings.contains("wss://author-reference-write.example"))
+        XCTAssertEqual(storedEvent[referencedEvent.id.lowercased()]?.content, referencedEvent.content)
     }
 
     func testFetchReferencedFeedItemUsesAuthorRelayDirectoryWhenReferenceIncludesAuthor() async throws {

@@ -906,6 +906,44 @@ struct NostrFeedService: Sendable {
         )
     }
 
+    func fetchReferencedFeedItems(
+        references: [NostrEventReferencePointer],
+        baseReadRelayURLs: [URL],
+        hydrationMode: FeedItemHydrationMode = .full,
+        fetchTimeout: TimeInterval = 8,
+        relayFetchMode: RelayFetchMode = .allRelays,
+        moderationSnapshot: MuteFilterSnapshot? = nil
+    ) async -> [NostrEventReferencePointer: FeedItem] {
+        let resolvedEvents = await referenceResolver.fetchOutboxBackedReferencedEvents(
+            references: references,
+            baseReadRelayURLs: baseReadRelayURLs,
+            fetchTimeout: fetchTimeout,
+            relayFetchMode: relayFetchMode
+        )
+        guard !resolvedEvents.isEmpty else { return [:] }
+
+        let relayURLs = RelayURLSupport.normalizedRelayURLs(
+            baseReadRelayURLs + references.flatMap(\.relayHints)
+        )
+        let items = await buildFeedItems(
+            relayURLs: relayURLs,
+            events: Array(resolvedEvents.values),
+            hydrationMode: hydrationMode,
+            moderationSnapshot: moderationSnapshot
+        )
+        var itemsByEventID: [String: FeedItem] = [:]
+        for item in items {
+            itemsByEventID[item.id.lowercased()] = item
+        }
+
+        var itemsByReference: [NostrEventReferencePointer: FeedItem] = [:]
+        for (reference, event) in resolvedEvents {
+            guard let item = itemsByEventID[event.id.lowercased()] else { continue }
+            itemsByReference[reference] = item
+        }
+        return itemsByReference
+    }
+
     func searchProfiles(
         query: String,
         limit: Int,

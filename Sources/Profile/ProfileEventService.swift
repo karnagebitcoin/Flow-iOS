@@ -57,7 +57,7 @@ struct ProfileRelayConnectionsSnapshot: Sendable, Equatable {
     }
 }
 
-struct ProfileEventService {
+struct ProfileEventService: Sendable {
     private let relayClient: any NostrRelayEventFetching
     private let seenEventStore: any SeenEventStoring
 
@@ -109,19 +109,22 @@ struct ProfileEventService {
 
     func fetchRelayConnectionsSnapshot(
         relayURLs: [URL],
-        pubkey: String
+        pubkey: String,
+        fetchTimeout: TimeInterval = 10
     ) async -> ProfileRelayConnectionsSnapshot {
         async let relayListEvent = fetchOptionalLatestReplaceableEvent(
             relayURLs: relayURLs,
             authorPubkey: pubkey,
             kind: 10_002,
-            limit: 20
+            limit: 20,
+            fetchTimeout: fetchTimeout
         )
         async let inboxRelayEvent = fetchOptionalLatestReplaceableEvent(
             relayURLs: relayURLs,
             authorPubkey: pubkey,
             kind: 10_050,
-            limit: 20
+            limit: 20,
+            fetchTimeout: fetchTimeout
         )
 
         let relayList = await relayListEvent
@@ -139,13 +142,15 @@ struct ProfileEventService {
         relayURLs: [URL],
         authorPubkey: String,
         kind: Int,
-        limit: Int
+        limit: Int,
+        fetchTimeout: TimeInterval = 10
     ) async -> NostrEvent? {
         try? await fetchLatestReplaceableEvent(
             relayURLs: relayURLs,
             authorPubkey: authorPubkey,
             kind: kind,
-            limit: limit
+            limit: limit,
+            fetchTimeout: fetchTimeout
         )
     }
 
@@ -153,7 +158,8 @@ struct ProfileEventService {
         relayURLs: [URL],
         authorPubkey: String,
         kind: Int,
-        limit: Int
+        limit: Int,
+        fetchTimeout: TimeInterval = 10
     ) async throws -> NostrEvent? {
         let targets = normalizedRelayURLs(relayURLs)
         guard !targets.isEmpty else { return nil }
@@ -174,7 +180,7 @@ struct ProfileEventService {
                         let events = try await relayClient.fetchEvents(
                             relayURL: relayURL,
                             filter: filter,
-                            timeout: 10
+                            timeout: fetchTimeout
                         )
                         return (events: events, error: nil)
                     } catch {

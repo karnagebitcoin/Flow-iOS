@@ -141,6 +141,10 @@ struct NostrReferenceResolver: Sendable {
                 var eventIDs: Set<String>
                 var referencesByEventID: [String: [NostrEventReferencePointer]]
             }
+            struct EventReferenceGroupResult {
+                let fetchedEvents: [NostrEvent]
+                let resolved: [NostrEventReferencePointer: NostrEvent]
+            }
 
             var groups: [String: EventReferenceGroup] = [:]
             for reference in unresolvedEventReferences {
@@ -160,43 +164,69 @@ struct NostrReferenceResolver: Sendable {
                 groups[signature] = group
             }
 
-            for group in groups.values {
-                let eventIDs = Array(group.eventIDs)
-                guard !group.relayURLs.isEmpty, !eventIDs.isEmpty else { continue }
+            let groupResults = await withTaskGroup(
+                of: EventReferenceGroupResult.self,
+                returning: [EventReferenceGroupResult].self
+            ) { taskGroup in
+                for group in groups.values {
+                    taskGroup.addTask { [self] in
+                        let eventIDs = Array(group.eventIDs)
+                        guard !group.relayURLs.isEmpty, !eventIDs.isEmpty else {
+                            return EventReferenceGroupResult(fetchedEvents: [], resolved: [:])
+                        }
 
-                let filter = NostrFilter(
-                    ids: eventIDs,
-                    limit: max(eventIDs.count * 2, eventIDs.count)
-                )
+                        let filter = NostrFilter(
+                            ids: eventIDs,
+                            limit: max(eventIDs.count * 2, eventIDs.count)
+                        )
 
-                guard let events = try? await relayTimelineFetcher.fetchTimelineEventsFromRelaysOnly(
-                    relayURLs: group.relayURLs,
-                    filter: filter,
-                    timeout: fetchTimeout,
-                    useCache: false,
-                    relayFetchMode: relayFetchMode
-                ) else {
-                    continue
-                }
+                        guard let events = try? await relayTimelineFetcher.fetchTimelineEventsFromRelaysOnly(
+                            relayURLs: group.relayURLs,
+                            filter: filter,
+                            timeout: fetchTimeout,
+                            useCache: false,
+                            relayFetchMode: relayFetchMode
+                        ) else {
+                            return EventReferenceGroupResult(fetchedEvents: [], resolved: [:])
+                        }
 
-                let newestByID = Dictionary(
-                    uniqueKeysWithValues: deduplicateEvents(events)
-                        .sorted(by: { lhs, rhs in
-                            if lhs.createdAt == rhs.createdAt {
-                                return lhs.id > rhs.id
+                        let newestByID = Dictionary(
+                            uniqueKeysWithValues: deduplicateEvents(events)
+                                .sorted(by: { lhs, rhs in
+                                    if lhs.createdAt == rhs.createdAt {
+                                        return lhs.id > rhs.id
+                                    }
+                                    return lhs.createdAt > rhs.createdAt
+                                })
+                                .map { ($0.id.lowercased(), $0) }
+                        )
+
+                        var fetchedEvents: [NostrEvent] = []
+                        var resolved: [NostrEventReferencePointer: NostrEvent] = [:]
+                        for (eventID, referencesForEventID) in group.referencesByEventID {
+                            guard let event = newestByID[eventID] else { continue }
+                            fetchedEvents.append(event)
+                            for reference in referencesForEventID {
+                                resolved[reference] = event
                             }
-                            return lhs.createdAt > rhs.createdAt
-                        })
-                        .map { ($0.id.lowercased(), $0) }
-                )
-
-                for (eventID, referencesForEventID) in group.referencesByEventID {
-                    guard let event = newestByID[eventID] else { continue }
-                    fetchedEvents.append(event)
-                    for reference in referencesForEventID {
-                        resolved[reference] = event
+                        }
+                        return EventReferenceGroupResult(
+                            fetchedEvents: fetchedEvents,
+                            resolved: resolved
+                        )
                     }
                 }
+
+                var results: [EventReferenceGroupResult] = []
+                for await result in taskGroup {
+                    results.append(result)
+                }
+                return results
+            }
+
+            for result in groupResults {
+                fetchedEvents.append(contentsOf: result.fetchedEvents)
+                resolved.merge(result.resolved, uniquingKeysWith: { _, new in new })
             }
         }
 
@@ -205,6 +235,10 @@ struct NostrReferenceResolver: Sendable {
                 var relayURLs: [URL]
                 var addresses: Set<ActivityAddress>
                 var referencesByAddress: [ActivityAddress: [NostrEventReferencePointer]]
+            }
+            struct AddressReferenceGroupResult {
+                let fetchedEvents: [NostrEvent]
+                let resolved: [NostrEventReferencePointer: NostrEvent]
             }
 
             var groups: [String: AddressReferenceGroup] = [:]
@@ -225,40 +259,64 @@ struct NostrReferenceResolver: Sendable {
                 groups[key] = group
             }
 
-            for group in groups.values {
-                guard let sample = group.addresses.first,
-                      !group.relayURLs.isEmpty else {
-                    continue
-                }
+            let groupResults = await withTaskGroup(
+                of: AddressReferenceGroupResult.self,
+                returning: [AddressReferenceGroupResult].self
+            ) { taskGroup in
+                for group in groups.values {
+                    taskGroup.addTask { [self] in
+                        guard let sample = group.addresses.first,
+                              !group.relayURLs.isEmpty else {
+                            return AddressReferenceGroupResult(fetchedEvents: [], resolved: [:])
+                        }
 
-                let identifiers = Array(Set(group.addresses.map(\.identifier)))
-                let filter = NostrFilter(
-                    authors: [sample.pubkey],
-                    kinds: [sample.kind],
-                    limit: max(identifiers.count * 4, 20),
-                    tagFilters: ["d": identifiers]
-                )
+                        let identifiers = Array(Set(group.addresses.map(\.identifier)))
+                        let filter = NostrFilter(
+                            authors: [sample.pubkey],
+                            kinds: [sample.kind],
+                            limit: max(identifiers.count * 4, 20),
+                            tagFilters: ["d": identifiers]
+                        )
 
-                guard let events = try? await relayTimelineFetcher.fetchTimelineEventsFromRelaysOnly(
-                    relayURLs: group.relayURLs,
-                    filter: filter,
-                    timeout: fetchTimeout,
-                    useCache: false,
-                    relayFetchMode: relayFetchMode
-                ) else {
-                    continue
-                }
+                        guard let events = try? await relayTimelineFetcher.fetchTimelineEventsFromRelaysOnly(
+                            relayURLs: group.relayURLs,
+                            filter: filter,
+                            timeout: fetchTimeout,
+                            useCache: false,
+                            relayFetchMode: relayFetchMode
+                        ) else {
+                            return AddressReferenceGroupResult(fetchedEvents: [], resolved: [:])
+                        }
 
-                let newestByAddress = newestAddressEvents(
-                    from: events,
-                    addresses: group.addresses
-                )
-                for (address, event) in newestByAddress {
-                    fetchedEvents.append(event)
-                    for reference in group.referencesByAddress[address] ?? [] {
-                        resolved[reference] = event
+                        let newestByAddress = newestAddressEvents(
+                            from: events,
+                            addresses: group.addresses
+                        )
+                        var fetchedEvents: [NostrEvent] = []
+                        var resolved: [NostrEventReferencePointer: NostrEvent] = [:]
+                        for (address, event) in newestByAddress {
+                            fetchedEvents.append(event)
+                            for reference in group.referencesByAddress[address] ?? [] {
+                                resolved[reference] = event
+                            }
+                        }
+                        return AddressReferenceGroupResult(
+                            fetchedEvents: fetchedEvents,
+                            resolved: resolved
+                        )
                     }
                 }
+
+                var results: [AddressReferenceGroupResult] = []
+                for await result in taskGroup {
+                    results.append(result)
+                }
+                return results
+            }
+
+            for result in groupResults {
+                fetchedEvents.append(contentsOf: result.fetchedEvents)
+                resolved.merge(result.resolved, uniquingKeysWith: { _, new in new })
             }
         }
 
@@ -276,12 +334,46 @@ struct NostrReferenceResolver: Sendable {
         fetchTimeout: TimeInterval = 8,
         relayFetchMode: RelayFetchMode = .allRelays
     ) async -> [NostrEventReferencePointer: NostrEvent] {
-        await fetchReferencedEvents(
-            references: references,
-            baseRelayURLs: baseReadRelayURLs,
+        let uniqueReferences = Array(Set(references))
+        guard !uniqueReferences.isEmpty else { return [:] }
+
+        let targetPubkeys = normalizedUniquePubkeys(
+            uniqueReferences.compactMap(\.targetPubkey)
+        )
+        let seedHintRelayURLsByPubkey = relayHintsByTargetPubkey(from: uniqueReferences)
+        let relayPlan = targetPubkeys.isEmpty
+            ? nil
+            : await resolveOutboxRelayPlan(
+                targetPubkeys,
+                baseReadRelayURLs,
+                seedHintRelayURLsByPubkey
+            )
+
+        var enrichedToOriginals: [NostrEventReferencePointer: [NostrEventReferencePointer]] = [:]
+        let enrichedReferences = uniqueReferences.map { reference in
+            let enriched = outboxEnrichedReference(
+                reference,
+                baseReadRelayURLs: baseReadRelayURLs,
+                relayPlan: relayPlan
+            )
+            enrichedToOriginals[enriched, default: []].append(reference)
+            return enriched
+        }
+
+        let resolvedByEnrichedReference = await fetchReferencedEvents(
+            references: enrichedReferences,
+            baseRelayURLs: [],
             fetchTimeout: fetchTimeout,
             relayFetchMode: relayFetchMode
         )
+
+        var resolved: [NostrEventReferencePointer: NostrEvent] = [:]
+        for (enrichedReference, event) in resolvedByEnrichedReference {
+            for originalReference in enrichedToOriginals[enrichedReference] ?? [] {
+                resolved[originalReference] = event
+            }
+        }
+        return resolved
     }
 
     func fetchResolvedReferenceEvents<Key: Hashable>(
@@ -292,9 +384,9 @@ struct NostrReferenceResolver: Sendable {
     ) async -> [Key: NostrEvent] {
         guard !pointersByKey.isEmpty else { return [:] }
 
-        let resolvedByPointer = await fetchReferencedEvents(
+        let resolvedByPointer = await fetchOutboxBackedReferencedEvents(
             references: Array(pointersByKey.values),
-            baseRelayURLs: baseReadRelayURLs,
+            baseReadRelayURLs: baseReadRelayURLs,
             fetchTimeout: fetchTimeout,
             relayFetchMode: relayFetchMode
         )
@@ -305,6 +397,40 @@ struct NostrReferenceResolver: Sendable {
             resolvedByKey[key] = event
         }
         return resolvedByKey
+    }
+
+    private func outboxEnrichedReference(
+        _ reference: NostrEventReferencePointer,
+        baseReadRelayURLs: [URL],
+        relayPlan: AuthorRelayPlan?
+    ) -> NostrEventReferencePointer {
+        let relayURLs: [URL]
+        if let targetPubkey = reference.targetPubkey,
+           let relayPlan {
+            relayURLs = relayPlan.relayURLs(for: targetPubkey) + reference.relayHints
+        } else {
+            relayURLs = reference.relayHints + baseReadRelayURLs
+        }
+
+        return NostrEventReferencePointer(
+            normalizedIdentifier: reference.normalizedIdentifier,
+            target: reference.target,
+            relayHints: normalizedRelayURLs(relayURLs),
+            authorPubkey: reference.authorPubkey
+        )
+    }
+
+    private func relayHintsByTargetPubkey(
+        from references: [NostrEventReferencePointer]
+    ) -> [String: [URL]] {
+        var hintsByPubkey: [String: [URL]] = [:]
+        for reference in references {
+            guard let targetPubkey = reference.targetPubkey else { continue }
+            let normalizedPubkey = normalizePubkey(targetPubkey)
+            guard !normalizedPubkey.isEmpty, !reference.relayHints.isEmpty else { continue }
+            hintsByPubkey[normalizedPubkey, default: []].append(contentsOf: reference.relayHints)
+        }
+        return hintsByPubkey.mapValues { normalizedRelayURLs($0) }
     }
 
     func referencePointerForRepostTarget(
@@ -554,6 +680,18 @@ struct NostrReferenceResolver: Sendable {
             ordered.append(relayURL)
         }
 
+        return ordered
+    }
+
+    private func normalizedUniquePubkeys(_ pubkeys: [String]) -> [String] {
+        var seen = Set<String>()
+        var ordered: [String] = []
+        for pubkey in pubkeys {
+            let normalized = normalizePubkey(pubkey)
+            guard normalized.range(of: "^[0-9a-f]{64}$", options: .regularExpression) != nil else { continue }
+            guard seen.insert(normalized).inserted else { continue }
+            ordered.append(normalized)
+        }
         return ordered
     }
 

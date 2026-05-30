@@ -132,6 +132,59 @@ private actor EmbeddedReferencedNoteCache {
 }
 
 private enum EmbeddedReferencedNoteResolver {
+    private actor BatchResolver {
+        private struct PendingRequest {
+            let reference: NostrEventReferencePointer
+            var continuations: [CheckedContinuation<FeedItem?, Never>]
+        }
+
+        private let flushDelayNanoseconds: UInt64 = 35_000_000
+        private var pendingRequests: [String: PendingRequest] = [:]
+        private var flushTask: Task<Void, Never>?
+
+        func resolve(identifier: String, reference: NostrEventReferencePointer) async -> FeedItem? {
+            await withCheckedContinuation { continuation in
+                if var pending = pendingRequests[identifier] {
+                    pending.continuations.append(continuation)
+                    pendingRequests[identifier] = pending
+                } else {
+                    pendingRequests[identifier] = PendingRequest(
+                        reference: reference,
+                        continuations: [continuation]
+                    )
+                }
+                scheduleFlushIfNeeded()
+            }
+        }
+
+        private func scheduleFlushIfNeeded() {
+            guard flushTask == nil else { return }
+            flushTask = Task {
+                try? await Task.sleep(nanoseconds: flushDelayNanoseconds)
+                await flush()
+            }
+        }
+
+        private func flush() async {
+            let requests = pendingRequests
+            pendingRequests = [:]
+            flushTask = nil
+            guard !requests.isEmpty else { return }
+
+            let referencesByKey = requests.mapValues(\.reference)
+            let itemsByKey = await EmbeddedReferencedNoteResolver.fetchReferencedFeedItems(
+                referencesByKey: referencesByKey
+            )
+
+            for (key, request) in requests {
+                let item = itemsByKey[key]
+                for continuation in request.continuations {
+                    continuation.resume(returning: item)
+                }
+            }
+        }
+    }
+
     private enum ReferenceTarget {
         case eventID(String)
         case replaceable(kind: Int, pubkey: String, identifier: String)
@@ -146,6 +199,7 @@ private enum EmbeddedReferencedNoteResolver {
 
     private static let relayClient = NostrRelayClient()
     private static let feedService = NostrFeedService()
+    private static let batchResolver = BatchResolver()
 
     static func normalizedIdentifier(from nostrURI: String) -> String {
         NoteContentParser.normalizedNostrReferenceIdentifier(from: nostrURI)
@@ -170,14 +224,40 @@ private enum EmbeddedReferencedNoteResolver {
             return await inFlight.value
         }
 
+        guard let reference = NoteContentParser.eventReferencePointer(from: key) else {
+            return nil
+        }
+
         let task = Task {
-            await fetchReferencedFeedItem(identifier: key)
+            await batchResolver.resolve(identifier: key, reference: reference)
         }
         await cache.storeInFlightTask(task, for: key)
 
         let item = await task.value
         await cache.storeResolvedValue(item, for: key)
         return item
+    }
+
+    private static func fetchReferencedFeedItems(
+        referencesByKey: [String: NostrEventReferencePointer]
+    ) async -> [String: FeedItem] {
+        let relayURLs = await effectiveRelayURLs(with: [])
+        guard !relayURLs.isEmpty, !referencesByKey.isEmpty else { return [:] }
+
+        let itemsByReference = await feedService.fetchReferencedFeedItems(
+            references: Array(referencesByKey.values),
+            baseReadRelayURLs: relayURLs,
+            hydrationMode: .cachedProfilesOnly,
+            fetchTimeout: 4,
+            relayFetchMode: .firstNonEmptyRelay
+        )
+
+        var itemsByKey: [String: FeedItem] = [:]
+        for (key, reference) in referencesByKey {
+            guard let item = itemsByReference[reference] else { continue }
+            itemsByKey[key] = item
+        }
+        return itemsByKey
     }
 
     private static func fetchReferencedFeedItem(identifier: String) async -> FeedItem? {

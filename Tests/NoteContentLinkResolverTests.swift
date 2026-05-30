@@ -299,6 +299,40 @@ final class NoteContentLinkResolverTests: XCTestCase {
         XCTAssertEqual(decoded.relays, [relayURL.absoluteString])
     }
 
+    func testInlineEventReferenceUpgradesToTaggedRelayAndAuthorHints() throws {
+        let relayURL = try XCTUnwrap(URL(string: "wss://relay.example.com"))
+        let eventID = String(repeating: "2", count: 64)
+        let authorPubkey = String(repeating: "b", count: 64)
+        let referencedEvent = NostrEvent(
+            id: eventID,
+            pubkey: authorPubkey,
+            createdAt: 1_700_000_000,
+            kind: 1,
+            tags: [],
+            content: "quoted note",
+            sig: String(repeating: "f", count: 128)
+        )
+        let inlineIdentifier = try XCTUnwrap(NoteContentParser.neventIdentifier(for: referencedEvent))
+        let event = NostrEvent(
+            id: String(repeating: "1", count: 64),
+            pubkey: String(repeating: "a", count: 64),
+            createdAt: 1_700_000_001,
+            kind: 1,
+            tags: [["q", eventID, relayURL.absoluteString, authorPubkey]],
+            content: "nostr:\(inlineIdentifier)",
+            sig: String(repeating: "f", count: 128)
+        )
+
+        let eventTokens = NoteContentParser.tokenize(event: event).filter { $0.type == .nostrEvent }
+        let token = try XCTUnwrap(eventTokens.first)
+        let decoded = try ReferenceMetadataDecoder().decodedMetadata(from: token.value)
+
+        XCTAssertEqual(eventTokens.count, 1)
+        XCTAssertEqual(decoded.eventId?.lowercased(), eventID)
+        XCTAssertEqual(decoded.pubkey?.lowercased(), authorPubkey)
+        XCTAssertEqual(decoded.relays, [relayURL.absoluteString])
+    }
+
     func testMentionEventTagCarriesRelayAndAuthorHintsForReferenceLookup() throws {
         let relayURL = try XCTUnwrap(URL(string: "wss://relay.example.com"))
         let eventID = String(repeating: "2", count: 64)

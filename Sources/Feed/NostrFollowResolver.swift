@@ -419,25 +419,44 @@ struct NostrFollowResolver: Sendable {
         let normalizedBaseReadRelayURLs = normalizedRelayURLs(baseReadRelayURLs)
 
         var fetchedEntries: [String: AuthorRelayDirectoryEntry] = [:]
-        for pubkey in normalizedPubkeys {
-            let existingEntry = existingEntries[pubkey]
-            let discoveryRelayURLs = normalizedRelayURLs(
-                (existingEntry?.hintRelayURLs ?? [])
-                    + normalizedBaseReadRelayURLs
-                    + metadataFallbackRelayURLs
-            )
-            guard !discoveryRelayURLs.isEmpty else { continue }
+        for batch in chunks(normalizedPubkeys, size: 8) {
+            let batchEntries = await withTaskGroup(
+                of: (String, AuthorRelayDirectoryEntry?).self,
+                returning: [String: AuthorRelayDirectoryEntry].self
+            ) { group in
+                for pubkey in batch {
+                    let existingEntry = existingEntries[pubkey]
+                    let discoveryRelayURLs = normalizedRelayURLs(
+                        (existingEntry?.hintRelayURLs ?? [])
+                            + normalizedBaseReadRelayURLs
+                            + metadataFallbackRelayURLs
+                    )
+                    guard !discoveryRelayURLs.isEmpty else { continue }
 
-            let snapshot = await profileEventService.fetchRelayConnectionsSnapshot(
-                relayURLs: discoveryRelayURLs,
-                pubkey: pubkey
-            )
-            guard !snapshot.isEmpty else { continue }
+                    group.addTask {
+                        let snapshot = await profileEventService.fetchRelayConnectionsSnapshot(
+                            relayURLs: discoveryRelayURLs,
+                            pubkey: pubkey,
+                            fetchTimeout: 3
+                        )
+                        guard !snapshot.isEmpty else {
+                            return (pubkey, nil)
+                        }
+                        let entry = snapshot.authorRelayDirectoryEntry(
+                            hintRelayURLs: existingEntry?.hintRelayURLs ?? []
+                        )
+                        return (pubkey, entry)
+                    }
+                }
 
-            let entry = snapshot.authorRelayDirectoryEntry(
-                hintRelayURLs: existingEntry?.hintRelayURLs ?? []
-            )
-            fetchedEntries[pubkey] = entry
+                var entries: [String: AuthorRelayDirectoryEntry] = [:]
+                for await (pubkey, entry) in group {
+                    guard let entry else { continue }
+                    entries[pubkey] = entry
+                }
+                return entries
+            }
+            fetchedEntries.merge(batchEntries, uniquingKeysWith: { _, new in new })
         }
 
         if let directoryCache = relayHintCache as? any AuthorRelayDirectoryCaching {

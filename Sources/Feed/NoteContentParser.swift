@@ -661,12 +661,12 @@ enum NoteContentParser {
         tags: [[String]]
     ) -> [NoteContentToken] {
         var result = tokens
-        var existingReferences = Set(
-            tokens
-                .filter { $0.type == .nostrEvent }
-                .map { referenceDeduplicationKey(for: $0.value) }
-                .filter { !$0.isEmpty }
-        )
+        var existingReferenceIndices: [String: Int] = [:]
+        for (index, token) in tokens.enumerated() where token.type == .nostrEvent {
+            let key = referenceDeduplicationKey(for: token.value)
+            guard !key.isEmpty, existingReferenceIndices[key] == nil else { continue }
+            existingReferenceIndices[key] = index
+        }
 
         for tag in tags {
             guard tag.count > 1 else { continue }
@@ -699,15 +699,61 @@ enum NoteContentParser {
 
             guard isRenderableReference(normalized) else { continue }
             let deduplicationKey = referenceDeduplicationKey(for: normalized)
-            guard existingReferences.insert(deduplicationKey).inserted else { continue }
+            if let existingIndex = existingReferenceIndices[deduplicationKey] {
+                if let upgraded = upgradedReferenceValue(
+                    existing: result[existingIndex].value,
+                    candidate: normalized
+                ) {
+                    result[existingIndex] = NoteContentToken(type: .nostrEvent, value: upgraded)
+                }
+                continue
+            }
 
             if let last = result.last, last.type != .text {
                 result.append(NoteContentToken(type: .text, value: "\n"))
             }
             result.append(NoteContentToken(type: .nostrEvent, value: normalized))
+            existingReferenceIndices[deduplicationKey] = result.count - 1
         }
 
         return mergeConsecutiveTextTokens(result)
+    }
+
+    private static func upgradedReferenceValue(existing: String, candidate: String) -> String? {
+        guard let existingPointer = eventReferencePointer(from: existing),
+              let candidatePointer = eventReferencePointer(from: candidate),
+              existingPointer.eventID == candidatePointer.eventID else {
+            return nil
+        }
+
+        let existingRelayHints = deduplicatedRelayHintsPreservingInputURLs(existingPointer.relayHints)
+        let mergedRelayHints = deduplicatedRelayHintsPreservingInputURLs(
+            existingRelayHints + candidatePointer.relayHints
+        )
+        let mergedAuthorPubkey = candidatePointer.authorPubkey ?? existingPointer.authorPubkey
+        let addsRelayHint = mergedRelayHints.count > existingRelayHints.count
+        let addsAuthorHint = existingPointer.authorPubkey == nil && mergedAuthorPubkey != nil
+        guard addsRelayHint || addsAuthorHint else { return nil }
+        guard let eventID = candidatePointer.eventID else { return nil }
+
+        return encodedNeventIdentifier(
+            forEventID: eventID,
+            authorPubkey: mergedAuthorPubkey,
+            relayHints: mergedRelayHints
+        )
+    }
+
+    private static func deduplicatedRelayHintsPreservingInputURLs(_ relayHints: [URL]) -> [URL] {
+        var seen = Set<String>()
+        var ordered: [URL] = []
+
+        for relayHint in relayHints {
+            guard let key = RelayURLSupport.normalizedRelayURLString(relayHint) else { continue }
+            guard seen.insert(key).inserted else { continue }
+            ordered.append(relayHint)
+        }
+
+        return ordered
     }
 
     private static func normalizeReferenceValue(_ raw: String) -> String {
