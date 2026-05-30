@@ -23,26 +23,52 @@ struct HomeFeedPageFetching {
             )
         }
 
-        guard paginationState == nil else {
+        let archiveRangeCount = NostrFeedService.nostrArchivesTrendingBackfillRelayURLs.count
+        guard archiveRangeCount > 0 else {
             return HomeFeedViewModel.TrendingPageFetchResult(
                 page: HomeFeedPageResult(items: [], hadMoreAvailable: false),
                 nextState: nil
             )
         }
 
-        let pageItems = try await service.fetchTrendingNotes(
-            limit: limit,
-            hydrationRelayURLs: hydrationRelayURLs,
-            hydrationMode: hydrationMode,
-            fetchTimeout: fetchTimeout,
-            relayFetchMode: relayFetchMode,
-            moderationSnapshot: moderationSnapshot
-        )
+        var archiveRangeIndex = paginationState?.archiveRangeIndex ?? 0
+        let cursor = paginationState?.until
+
+        while archiveRangeIndex < archiveRangeCount {
+            let pageItems = try await service.fetchTrendingNotes(
+                limit: limit,
+                until: cursor,
+                archiveRangeIndex: archiveRangeIndex,
+                hydrationRelayURLs: hydrationRelayURLs,
+                hydrationMode: hydrationMode,
+                fetchTimeout: fetchTimeout,
+                relayFetchMode: relayFetchMode,
+                moderationSnapshot: moderationSnapshot
+            )
+
+            if let oldestCreatedAt = pageItems.last?.event.createdAt {
+                let nextCursor = max(oldestCreatedAt - 1, 0)
+                let nextState = nextCursor > 0
+                    ? HomeFeedViewModel.TrendingPaginationState(
+                        archiveRangeIndex: archiveRangeIndex,
+                        until: nextCursor
+                    )
+                    : nil
+                return HomeFeedViewModel.TrendingPageFetchResult(
+                    page: HomeFeedPageResult(
+                        items: pageItems,
+                        hadMoreAvailable: nextState != nil,
+                        paginationCursor: oldestCreatedAt
+                    ),
+                    nextState: nextState
+                )
+            }
+
+            archiveRangeIndex += 1
+        }
+
         return HomeFeedViewModel.TrendingPageFetchResult(
-            page: HomeFeedPageResult(
-                items: pageItems,
-                hadMoreAvailable: false
-            ),
+            page: HomeFeedPageResult(items: [], hadMoreAvailable: false),
             nextState: nil
         )
     }

@@ -6,7 +6,10 @@ extension HomeFeedViewModel {
         let relayFetchMode: RelayFetchMode
     }
 
-    struct TrendingPaginationState {}
+    struct TrendingPaginationState: Equatable {
+        let archiveRangeIndex: Int
+        let until: Int?
+    }
 
     struct TrendingPageFetchResult {
         let page: HomeFeedPageResult
@@ -44,8 +47,7 @@ extension HomeFeedViewModel {
     }
 
     nonisolated static func trendingWindowTraversalLimitForTesting(isInitialPage: Bool) -> Int {
-        let _ = isInitialPage
-        return 1
+        isInitialPage ? 1 : NostrFeedService.nostrArchivesTrendingBackfillRelayURLs.count
     }
 
     nonisolated static func initialVisibleTargetForTesting(

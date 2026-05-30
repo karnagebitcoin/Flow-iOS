@@ -3,7 +3,7 @@ import Foundation
 struct NostrDiscoveryFeedResolver: Sendable {
     private let relayTimelineFetcher: RelayTimelineFetcher
     private let nostrArchivesSearchRelayURL: URL
-    private let trendingRelayURL: URL
+    private let trendingRelayURLs: [URL]
     private let metadataFallbackRelayURLs: [URL]
     private let buildFeedItems: @Sendable ([URL], [NostrEvent], FeedItemHydrationMode, MuteFilterSnapshot?) async -> [FeedItem]
     private let buildCachedFeedItems: @Sendable ([NostrEvent], MuteFilterSnapshot?) async -> [FeedItem]
@@ -12,7 +12,7 @@ struct NostrDiscoveryFeedResolver: Sendable {
     init(
         relayTimelineFetcher: RelayTimelineFetcher,
         nostrArchivesSearchRelayURL: URL,
-        trendingRelayURL: URL,
+        trendingRelayURLs: [URL],
         metadataFallbackRelayURLs: [URL],
         buildFeedItems: @escaping @Sendable ([URL], [NostrEvent], FeedItemHydrationMode, MuteFilterSnapshot?) async -> [FeedItem],
         buildCachedFeedItems: @escaping @Sendable ([NostrEvent], MuteFilterSnapshot?) async -> [FeedItem],
@@ -20,7 +20,7 @@ struct NostrDiscoveryFeedResolver: Sendable {
     ) {
         self.relayTimelineFetcher = relayTimelineFetcher
         self.nostrArchivesSearchRelayURL = nostrArchivesSearchRelayURL
-        self.trendingRelayURL = trendingRelayURL
+        self.trendingRelayURLs = trendingRelayURLs
         self.metadataFallbackRelayURLs = metadataFallbackRelayURLs
         self.buildFeedItems = buildFeedItems
         self.buildCachedFeedItems = buildCachedFeedItems
@@ -167,6 +167,7 @@ struct NostrDiscoveryFeedResolver: Sendable {
         limit: Int = 100,
         since: Int? = nil,
         until: Int? = nil,
+        archiveRangeIndex: Int = 0,
         hydrationRelayURLs: [URL]? = nil,
         hydrationMode: FeedItemHydrationMode = .full,
         fetchTimeout: TimeInterval = 12,
@@ -175,15 +176,18 @@ struct NostrDiscoveryFeedResolver: Sendable {
     ) async throws -> [FeedItem] {
         guard limit > 0 else { return [] }
         let cappedLimit = min(limit, 100)
-        let _ = since
-        let _ = until
+        guard let trendingRelayURL = trendingRelayURL(at: archiveRangeIndex) else {
+            return []
+        }
         let fetchLimit = min(
             expandedTimelineLimit(for: cappedLimit, moderationSnapshot: moderationSnapshot),
             240
         )
         let filter = NostrFilter(
             kinds: [1],
-            limit: fetchLimit
+            limit: fetchLimit,
+            since: since,
+            until: until
         )
 
         let fetchedEvents = try await relayTimelineFetcher.fetchTimelineEvents(
@@ -193,7 +197,16 @@ struct NostrDiscoveryFeedResolver: Sendable {
             useCache: false,
             relayFetchMode: relayFetchMode
         )
-        .filter { $0.kind == 1 }
+        .filter { event in
+            guard event.kind == 1 else { return false }
+            if let since, event.createdAt < since {
+                return false
+            }
+            if let until, event.createdAt > until {
+                return false
+            }
+            return true
+        }
         let visibleEvents = filterVisibleEvents(fetchedEvents, moderationSnapshot: moderationSnapshot)
         let timelineEvents = Array(
             deduplicateEvents(visibleEvents)
@@ -428,5 +441,11 @@ struct NostrDiscoveryFeedResolver: Sendable {
         relayURLs.contains { relayURL in
             relayURL.host?.lowercased() == nostrArchivesSearchRelayURL.host?.lowercased()
         }
+    }
+
+    private func trendingRelayURL(at index: Int) -> URL? {
+        guard !trendingRelayURLs.isEmpty else { return nil }
+        guard index >= 0, index < trendingRelayURLs.count else { return nil }
+        return trendingRelayURLs[index]
     }
 }

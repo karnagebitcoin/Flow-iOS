@@ -577,10 +577,10 @@ final class HomeFeedViewModelTests: XCTestCase {
     }
 
     @MainActor
-    func testTrendingPaginationDoesNotTraverseHistoricalWindows() {
+    func testTrendingPaginationTraversesArchiveWindows() {
         XCTAssertEqual(
             HomeFeedViewModel.trendingWindowTraversalLimitForTesting(isInitialPage: false),
-            1
+            NostrFeedService.nostrArchivesTrendingBackfillRelayURLs.count
         )
     }
 
@@ -1158,6 +1158,45 @@ final class HomeFeedLoadingRegressionTests: XCTestCase {
 
         XCTAssertEqual(harness.viewModel.feedSource, .trending)
         XCTAssertEqual(harness.viewModel.visibleItems.map(\.id), [trendingNote.id])
+    }
+
+    @MainActor
+    func testTrendingPaginationBackfillsFromBroaderArchiveWindow() async throws {
+        let todayNote = makeEvent(
+            id: hex("5"),
+            pubkey: hex("6"),
+            kind: FeedKindFilters.shortTextNote,
+            tags: [],
+            content: "Today trending note",
+            createdAt: 1_700_000_530
+        )
+        let previousWindowNote = makeEvent(
+            id: hex("7"),
+            pubkey: hex("8"),
+            kind: FeedKindFilters.shortTextNote,
+            tags: [],
+            content: "Earlier trending note",
+            createdAt: todayNote.createdAt - 86_400
+        )
+        let harness = try HomeFeedViewModelHarness(
+            initialRelayEvents: [
+                NostrFeedService.nostrArchivesTrendingRelayURL: [todayNote],
+                NostrFeedService.nostrArchivesTrendingSevenDayRelayURL: [todayNote, previousWindowNote]
+            ]
+        )
+
+        harness.viewModel.selectFeedSource(.trending)
+        try await harness.waitUntilIdle(timeout: 4)
+
+        XCTAssertEqual(harness.viewModel.visibleItems.map(\.id), [todayNote.id])
+
+        let currentItem = try XCTUnwrap(harness.viewModel.visibleItems.last)
+        await harness.viewModel.loadMoreIfNeeded(currentItem: currentItem)
+
+        XCTAssertEqual(
+            harness.viewModel.visibleItems.map(\.id),
+            [todayNote.id, previousWindowNote.id]
+        )
     }
 
     @MainActor

@@ -186,6 +186,48 @@ final class NostrFeedServiceTests: XCTestCase {
         XCTAssertEqual(fetchCount, 2)
     }
 
+    func testTrendingFetchAppliesUntilCursorLocallyWhenArchiveRelayIgnoresIt() async throws {
+        let rootURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("FlowTrendingLocalUntil-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: rootURL, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: rootURL) }
+
+        let fileManager = TestFileManager(rootURL: rootURL)
+        let nostrDatabase = FlowNostrDB(fileManager: fileManager)
+        let newerTrendingNote = makeEvent(
+            id: hex("c"),
+            pubkey: hex("d"),
+            kind: 1,
+            tags: [],
+            content: "Newer archive item",
+            createdAt: 1_700_000_500
+        )
+        let olderTrendingNote = makeEvent(
+            id: hex("e"),
+            pubkey: hex("f"),
+            kind: 1,
+            tags: [],
+            content: "Older archive item",
+            createdAt: 1_699_914_100
+        )
+        let relayClient = SequencedRelayClient(responses: [[newerTrendingNote, olderTrendingNote]])
+        let service = makeFeedService(
+            relayClient: relayClient,
+            fileManager: fileManager,
+            nostrDatabase: nostrDatabase
+        )
+
+        let items = try await service.fetchTrendingNotes(
+            limit: 10,
+            until: newerTrendingNote.createdAt - 1,
+            archiveRangeIndex: 1,
+            hydrationMode: .cachedProfilesOnly,
+            fetchTimeout: 0.1
+        )
+
+        XCTAssertEqual(items.map(\.id), [olderTrendingNote.id])
+    }
+
     func testProfileEventServicePersistsFetchedMetadataSnapshotsLocally() async throws {
         let rootURL = FileManager.default.temporaryDirectory
             .appendingPathComponent("FlowProfileEventService-\(UUID().uuidString)", isDirectory: true)

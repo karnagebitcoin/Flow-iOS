@@ -12,7 +12,18 @@ struct NostrFeedService: Sendable {
     private let relayTimelineFetcher: RelayTimelineFetcher
     nonisolated static let nostrArchivesSearchRelayURL = URL(string: "wss://search.nostrarchives.com")!
     nonisolated static let nostrArchivesTrendingRelayURL = URL(string: "wss://feeds.nostrarchives.com/notes/trending/reactions/today")!
-    private static let trendingRelayURL = nostrArchivesTrendingRelayURL
+    nonisolated static let nostrArchivesTrendingSevenDayRelayURL = URL(string: "wss://feeds.nostrarchives.com/notes/trending/reactions/7d")!
+    nonisolated static let nostrArchivesTrendingThirtyDayRelayURL = URL(string: "wss://feeds.nostrarchives.com/notes/trending/reactions/30d")!
+    nonisolated static let nostrArchivesTrendingOneYearRelayURL = URL(string: "wss://feeds.nostrarchives.com/notes/trending/reactions/1y")!
+    nonisolated static let nostrArchivesTrendingAllRelayURL = URL(string: "wss://feeds.nostrarchives.com/notes/trending/reactions/all")!
+    nonisolated static let nostrArchivesTrendingBackfillRelayURLs: [URL] = [
+        nostrArchivesTrendingRelayURL,
+        nostrArchivesTrendingSevenDayRelayURL,
+        nostrArchivesTrendingThirtyDayRelayURL,
+        nostrArchivesTrendingOneYearRelayURL,
+        nostrArchivesTrendingAllRelayURL
+    ]
+    private static let trendingRelayURLs = nostrArchivesTrendingBackfillRelayURLs
     private static let followListFreshCacheAge: TimeInterval = 60 * 5
     private static let profileBackfillBatchSize = 24
     // Ordered by observed kind-0 (profile metadata) coverage, strongest first.
@@ -119,7 +130,7 @@ struct NostrFeedService: Sendable {
         NostrDiscoveryFeedResolver(
             relayTimelineFetcher: relayTimelineFetcher,
             nostrArchivesSearchRelayURL: Self.nostrArchivesSearchRelayURL,
-            trendingRelayURL: Self.trendingRelayURL,
+            trendingRelayURLs: Self.trendingRelayURLs,
             metadataFallbackRelayURLs: Self.metadataFallbackRelayURLs,
             buildFeedItems: { relayURLs, events, hydrationMode, moderationSnapshot in
                 await self.buildFeedItems(
@@ -980,6 +991,7 @@ struct NostrFeedService: Sendable {
         limit: Int = 100,
         since: Int? = nil,
         until: Int? = nil,
+        archiveRangeIndex: Int = 0,
         hydrationRelayURLs: [URL]? = nil,
         hydrationMode: FeedItemHydrationMode = .full,
         fetchTimeout: TimeInterval = 12,
@@ -990,6 +1002,7 @@ struct NostrFeedService: Sendable {
             limit: limit,
             since: since,
             until: until,
+            archiveRangeIndex: archiveRangeIndex,
             hydrationRelayURLs: hydrationRelayURLs,
             hydrationMode: hydrationMode,
             fetchTimeout: fetchTimeout,
