@@ -7,15 +7,15 @@ final class LiveReactsCoordinator: ObservableObject {
     func emit(_ reaction: ActivityReaction) {
         let emission = LiveReactionEmission(
             reaction: reaction,
-            horizontalDrift: CGFloat.random(in: -26...24),
-            travelHeight: CGFloat.random(in: 124...198),
-            sway: CGFloat.random(in: -18...18),
-            rotation: Double.random(in: -20...20),
-            startScale: CGFloat.random(in: 0.84...0.98),
-            endScale: CGFloat.random(in: 1.14...1.46),
-            size: CGFloat.random(in: 34...46),
-            duration: Double.random(in: 1.2...1.8),
-            opacity: Double.random(in: 0.74...0.98)
+            horizontalDrift: CGFloat.random(in: 0.28...0.48) * (Bool.random() ? -1 : 1),
+            sway: CGFloat.random(in: -0.1...0.1),
+            rotation: Double.random(in: -28...28),
+            startScale: CGFloat.random(in: 0.9...1.08),
+            middleScaleMultiplier: CGFloat.random(in: 1.02...1.16),
+            endScaleMultiplier: CGFloat.random(in: 1.36...1.7),
+            size: CGFloat.random(in: 58...76),
+            duration: Double.random(in: 2.05...2.8),
+            opacity: Double.random(in: 0.78...0.98)
         )
         emissions.append(emission)
         AppHaptics.liveReactionTick()
@@ -311,11 +311,11 @@ struct LiveReactionEmission: Identifiable, Equatable {
     let id = UUID()
     let reaction: ActivityReaction
     let horizontalDrift: CGFloat
-    let travelHeight: CGFloat
     let sway: CGFloat
     let rotation: Double
     let startScale: CGFloat
-    let endScale: CGFloat
+    let middleScaleMultiplier: CGFloat
+    let endScaleMultiplier: CGFloat
     let size: CGFloat
     let duration: Double
     let opacity: Double
@@ -325,10 +325,16 @@ struct LiveReactsOverlayHost: View {
     @ObservedObject var coordinator: LiveReactsCoordinator
 
     var body: some View {
-        ZStack(alignment: .bottom) {
-            ForEach(coordinator.emissions) { emission in
-                LiveReactionParticleView(emission: emission)
+        GeometryReader { geometry in
+            ZStack(alignment: .bottom) {
+                ForEach(coordinator.emissions) { emission in
+                    LiveReactionParticleView(
+                        emission: emission,
+                        containerSize: geometry.size
+                    )
+                }
             }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
         .allowsHitTesting(false)
@@ -338,23 +344,22 @@ struct LiveReactsOverlayHost: View {
 
 private struct LiveReactionParticleView: View {
     let emission: LiveReactionEmission
+    let containerSize: CGSize
 
-    @State private var isAnimating = false
+    @State private var progress: CGFloat = 0
 
     var body: some View {
         particle
-            .opacity(isAnimating ? 0 : emission.opacity)
-            .scaleEffect(isAnimating ? emission.endScale : emission.startScale)
-            .offset(
-                x: isAnimating ? emission.horizontalDrift : 0,
-                y: isAnimating ? -emission.travelHeight : 0
+            .modifier(
+                LiveReactionFountainModifier(
+                    progress: progress,
+                    emission: emission,
+                    containerSize: containerSize
+                )
             )
-            .rotationEffect(.degrees(isAnimating ? emission.rotation : emission.rotation * 0.18))
-            .modifier(LiveReactionSwayModifier(isAnimating: isAnimating, sway: emission.sway))
-            .blur(radius: isAnimating ? 0.6 : 0)
             .onAppear {
                 withAnimation(.easeOut(duration: emission.duration)) {
-                    isAnimating = true
+                    progress = 1
                 }
             }
     }
@@ -398,12 +403,51 @@ private struct LiveReactionParticleView: View {
     }
 }
 
-private struct LiveReactionSwayModifier: ViewModifier {
-    let isAnimating: Bool
-    let sway: CGFloat
+private struct LiveReactionFountainModifier: ViewModifier {
+    let progress: CGFloat
+    let emission: LiveReactionEmission
+    let containerSize: CGSize
 
     func body(content: Content) -> some View {
+        let transform = fountainTransform
+
         content
-            .offset(x: isAnimating ? sway : 0)
+            .opacity(transform.opacity)
+            .scaleEffect(transform.scale)
+            .offset(x: transform.x, y: transform.y)
+            .rotationEffect(.degrees(transform.rotation))
+            .blur(radius: transform.blur)
+    }
+
+    private var fountainTransform: (x: CGFloat, y: CGFloat, scale: CGFloat, opacity: Double, rotation: Double, blur: CGFloat) {
+        let clampedProgress = min(max(progress, 0), 1)
+        let fullWidthScale = max(emission.startScale, containerSize.width / max(emission.size, 1))
+        let middleScale = fullWidthScale * emission.middleScaleMultiplier
+        let endScale = fullWidthScale * emission.endScaleMultiplier
+        let finalFootprint = emission.size * endScale
+        let travelDistance = containerSize.height + finalFootprint * 0.6 + 48
+        let middleProgress = min(max((containerSize.height * 0.5) / max(travelDistance, 1), 0.18), 0.44)
+
+        let scale: CGFloat
+        if clampedProgress <= middleProgress {
+            let phaseProgress = clampedProgress / max(middleProgress, 0.001)
+            scale = emission.startScale + (middleScale - emission.startScale) * phaseProgress
+        } else {
+            let phaseProgress = (clampedProgress - middleProgress) / max(1 - middleProgress, 0.001)
+            scale = middleScale + (endScale - middleScale) * phaseProgress
+        }
+
+        let drift = containerSize.width * emission.horizontalDrift
+        let sway = sin(clampedProgress * .pi * 2.6) * containerSize.width * emission.sway
+        let fadeOutProgress = max(0, (clampedProgress - 0.76) / 0.24)
+
+        return (
+            x: drift * clampedProgress + sway,
+            y: -travelDistance * clampedProgress,
+            scale: scale,
+            opacity: emission.opacity * Double(1 - fadeOutProgress),
+            rotation: emission.rotation * Double(clampedProgress),
+            blur: clampedProgress > 0.86 ? (clampedProgress - 0.86) * 6 : 0
+        )
     }
 }
